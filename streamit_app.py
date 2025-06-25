@@ -107,7 +107,263 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Initialize session state
+
+def initialize_session_state():
+    """Initialize session state variables"""
+    if 'coordinator' not in st.session_state:
+        st.session_state.coordinator = None
+    if 'initialization_status' not in st.session_state:
+        st.session_state.initialization_status = "pending"
+    if 'chat_history' not in st.session_state:
+        st.session_state.chat_history = []
+    if 'current_analysis' not in st.session_state:
+        st.session_state.current_analysis = None
+    if 'processing_history' not in st.session_state:
+        st.session_state.processing_history = []
+    if 'field_lineage_result' not in st.session_state:
+        st.session_state.field_lineage_result = None
+    if 'system_stats' not in st.session_state:
+        st.session_state.system_stats = {}
+
+
+async def init_coordinator():
+    """Initialize the coordinator asynchronously"""
+    if st.session_state.coordinator is None:
+        try:
+            st.session_state.coordinator = await initialize_system()
+            st.session_state.initialization_status = "completed"
+            return True
+        except Exception as e:
+            st.session_state.initialization_status = f"error: {str(e)}"
+            return False
+    return True
+
+
+# Helper function to run async functions in Streamlit
+def run_async(coro):
+    """Helper to run async functions in Streamlit"""
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    return loop.run_until_complete(coro)
+
+
+# Error handling decorator
+def handle_errors(func):
+    """Decorator for error handling"""
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            st.error(f"An error occurred: {str(e)}")
+            st.exception(e)
+    return wrapper
+
+
+# Performance monitoring decorator
+def monitor_performance(func):
+    """Decorator for performance monitoring"""
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        
+        # Log performance if it takes more than 1 second
+        if end_time - start_time > 1.0:
+            st.info(f"⏱️ Operation completed in {end_time - start_time:.2f} seconds")
+        
+        return result
+    return wrapper
+
+
+# Add loading spinner for async operations
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_cached_statistics():
+    """Get cached statistics to improve performance"""
+    if st.session_state.coordinator:
+        return st.session_state.coordinator.get_statistics()
+    return {}
+
+
+def process_chat_query(query: str) -> str:
+    """Process chat query and return response"""
+    if not st.session_state.coordinator:
+        return "❌ System not initialized. Please check system health."
+    
+    try:
+        # Determine query type and route to appropriate agent
+        query_lower = query.lower()
+        
+        if any(word in query_lower for word in ['lifecycle', 'lineage', 'trace', 'impact']):
+            # Extract component name from query
+            component_name = extract_component_name(query)
+            if component_name:
+                result = asyncio.run(
+                    st.session_state.coordinator.analyze_component(component_name)
+                )
+                return format_analysis_response(result)
+            else:
+                return "Could you please specify which component (file, table, program, or field) you'd like me to analyze?"
+        
+        elif any(word in query_lower for word in ['compare', 'difference', 'db2']):
+            return "For data comparison, please use the DB2 Comparison tab to select specific components."
+        
+        elif any(word in query_lower for word in ['search', 'find', 'pattern']):
+            # Use semantic search
+            if st.session_state.coordinator.agents.get("vector_index"):
+                results = asyncio.run(
+                    st.session_state.coordinator.agents["vector_index"].search_code_by_pattern(query)
+                )
+                return format_search_results(results)
+            else:
+                return "Search functionality is not available. Please check if files have been processed."
+        
+        else:
+            # General query - try to provide helpful guidance
+            return generate_general_response(query)
+    
+    except Exception as e:
+        return f"❌ Error processing query: {str(e)}"
+
+
+def extract_component_name(query: str) -> str:
+    """Extract component name from natural language query"""
+    words = query.split()
+    
+    # Look for patterns like "analyze COMPONENT_NAME" or "trace FIELD_NAME"
+    trigger_words = ['analyze', 'trace', 'lifecycle', 'lineage', 'impact', 'of', 'for']
+    
+    for i, word in enumerate(words):
+        if word.lower() in trigger_words and i + 1 < len(words):
+            potential_component = words[i + 1].strip('.,!?')
+            if len(potential_component) > 2:  # Basic validation
+                return potential_component
+    
+    # Look for uppercase words (likely component names)
+    for word in words:
+        if word.isupper() and len(word) > 2:
+            return word
+    
+    return ""
+
+
+def format_analysis_response(result: dict) -> str:
+    """Format analysis result for chat display"""
+    if "error" in result:
+        return f"❌ Analysis failed: {result['error']}"
+    
+    component_name = result.get("component_name", "Unknown")
+    component_type = result.get("component_type", "unknown")
+    
+    response = f"## 📊 Analysis of {component_type.title()}: {component_name}\n\n"
+    
+    if "lineage" in result:
+        lineage = result["lineage"]
+        usage_stats = lineage.get("usage_analysis", {}).get("statistics", {})
+        response += f"**Usage Summary:**\n"
+        response += f"- Total references: {usage_stats.get('total_references', 0)}\n"
+        response += f"- Programs using: {len(usage_stats.get('programs_using', []))}\n\n"
+    
+    response += "💡 For detailed analysis, please check the Component Analysis tab."
+    
+    return response
+
+
+def format_search_results(results: list) -> str:
+    """Format search results for chat display"""
+    if not results:
+        return "🔍 No matching code patterns found. Try refining your search terms."
+    
+    response = f"## 🔍 Found {len(results)} Matching Code Patterns\n\n"
+    
+    for i, result in enumerate(results[:3], 1):  # Show top 3 results
+        metadata = result.get("metadata", {})
+        response += f"**{i}. {metadata.get('program_name', 'Unknown Program')}**\n"
+        response += f"- Type: {metadata.get('chunk_type', 'code')}\n"
+        response += f"- Similarity: {result.get('similarity_score', 0):.2f}\n"
+        response += f"- Content preview: {result.get('content', '')[:100]}...\n\n"
+    
+    if len(results) > 3:
+        response += f"💡 And {len(results) - 3} more results. Use the Component Analysis tab for detailed exploration."
+    
+    return response
+
+
+def generate_general_response(query: str) -> str:
+    """Generate general helpful response"""
+    return f"""
+I'm Opulence, your deep research mainframe agent! I can help you with:
+
+🔍 **Component Analysis**: Analyze the lifecycle and usage of files, tables, programs, or fields
+📊 **Field Lineage**: Trace data flow and transformations for specific fields  
+🔄 **DB2 Comparison**: Compare data between DB2 tables and loaded files
+📋 **Documentation**: Generate technical documentation and reports
+
+**Examples of what you can ask:**
+- "Analyze the lifecycle of TRADE_DATE field"
+- "Trace the lineage of TRANSACTION_FILE"
+- "Find programs that use security settlement logic"
+- "Show me the impact of changing ACCOUNT_ID"
+
+Your query: "{query}"
+
+Would you like me to help you with any specific analysis?
+    """
+
+
+def show_example_queries():
+    """Show example queries in sidebar"""
+    st.markdown("### 💡 Example Queries")
+    
+    examples = [
+        "Analyze the lifecycle of TRADE_DATE field",
+        "Trace lineage of TRANSACTION_HISTORY_FILE", 
+        "Find programs using security settlement logic",
+        "Show impact of changing ACCOUNT_ID field",
+        "Compare data between CUSTOMER_TABLE and customer.csv",
+        "Generate documentation for BKPG_TRD001 program"
+    ]
+    
+    for i, example in enumerate(examples):
+        if st.button(f"💬 {example[:30]}...", key=f"example_{i}"):
+            # Add example to chat history
+            st.session_state.chat_history.append({
+                "role": "user",
+                "content": example,
+                "timestamp": datetime.now().isoformat()
+            })
+            # Process the example query
+            response = process_chat_query(example)
+            st.session_state.chat_history.append({
+                "role": "assistant", 
+                "content": response,
+                "timestamp": datetime.now().isoformat()
+            })
+
+
+def show_footer():
+    """Show footer with system information"""
+    st.markdown("---")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("**🧠 Opulence Deep Research Agent**")
+        st.markdown("Powered by vLLM, FAISS, and ChromaDB")
+    
+    with col2:
+        st.markdown("**📊 Current Session**")
+        st.markdown(f"Chat Messages: {len(st.session_state.chat_history)}")
+        st.markdown(f"Files Processed: {len(st.session_state.processing_history)}")
+    
+    with col3:
+        st.markdown("**🕐 System Time**")
+        st.markdown(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+
 def show_db2_comparison():
     """Show DB2 comparison interface"""
     st.markdown('<div class="sub-header">🔄 DB2 Data Comparison</div>', unsafe_allow_html=True)
@@ -128,6 +384,7 @@ def show_db2_comparison():
     if st.button("🔄 Compare Data") and sqlite_component and db2_component:
         compare_data_sources(sqlite_component, db2_component)
 
+
 def compare_data_sources(sqlite_comp: str, db2_comp: str):
     """Compare data between SQLite and DB2"""
     if not st.session_state.coordinator:
@@ -144,6 +401,7 @@ def compare_data_sources(sqlite_comp: str, db2_comp: str):
             
         except Exception as e:
             st.error(f"Comparison failed: {str(e)}")
+
 
 def display_comparison_results(result: dict):
     """Display data comparison results"""
@@ -172,6 +430,7 @@ def display_comparison_results(result: dict):
         with col4:
             st.metric("Differences Found", data_comp.get("mismatched_rows", 0))
 
+
 def show_documentation():
     """Show documentation generation interface"""
     st.markdown('<div class="sub-header">📋 Documentation Generation</div>', unsafe_allow_html=True)
@@ -191,6 +450,7 @@ def show_documentation():
     
     if st.button("📋 Generate Documentation"):
         generate_documentation(doc_type, component_name, include_diagrams, include_sample_data)
+
 
 def generate_documentation(doc_type: str, component_name: str, include_diagrams: bool, include_sample_data: bool):
     """Generate documentation"""
@@ -215,6 +475,7 @@ def generate_documentation(doc_type: str, component_name: str, include_diagrams:
         except Exception as e:
             st.error(f"Documentation generation failed: {str(e)}")
 
+
 def display_generated_documentation(result: dict):
     """Display generated documentation"""
     if "error" in result:
@@ -235,6 +496,7 @@ def display_generated_documentation(result: dict):
             file_name=f"opulence_documentation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
             mime="text/markdown"
         )
+
 
 def show_system_health():
     """Show system health and statistics"""
@@ -330,6 +592,7 @@ def show_system_health():
         if st.button("📥 Export Logs"):
             export_system_logs()
 
+
 def rebuild_indices():
     """Rebuild vector indices"""
     if not st.session_state.coordinator:
@@ -349,6 +612,7 @@ def rebuild_indices():
                 
         except Exception as e:
             st.error(f"Index rebuild failed: {str(e)}")
+
 
 def export_system_logs():
     """Export system logs"""
@@ -371,132 +635,6 @@ def export_system_logs():
     except Exception as e:
         st.error(f"Failed to export logs: {str(e)}")
 
-def show_example_queries():
-    """Show example queries in sidebar"""
-    st.markdown("### 💡 Example Queries")
-    
-    examples = [
-        "Analyze the lifecycle of TRADE_DATE field",
-        "Trace lineage of TRANSACTION_HISTORY_FILE", 
-        "Find programs using security settlement logic",
-        "Show impact of changing ACCOUNT_ID field",
-        "Compare data between CUSTOMER_TABLE and customer.csv",
-        "Generate documentation for BKPG_TRD001 program"
-    ]
-    
-    for i, example in enumerate(examples):
-        if st.button(f"💬 {example[:30]}...", key=f"example_{i}"):
-            # Add example to chat history
-            st.session_state.chat_history.append({
-                "role": "user",
-                "content": example,
-                "timestamp": datetime.now().isoformat()
-            })
-            # Process the example query
-            response = process_chat_query(example)
-            st.session_state.chat_history.append({
-                "role": "assistant", 
-                "content": response,
-                "timestamp": datetime.now().isoformat()
-            })
-
-def show_footer():
-    """Show footer with system information"""
-    st.markdown("---")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("**🧠 Opulence Deep Research Agent**")
-        st.markdown("Powered by vLLM, FAISS, and ChromaDB")
-    
-    with col2:
-        st.markdown("**📊 Current Session**")
-        st.markdown(f"Chat Messages: {len(st.session_state.chat_history)}")
-        st.markdown(f"Files Processed: {len(st.session_state.processing_history)}")
-    
-    with col3:
-        st.markdown("**🕐 System Time**")
-        st.markdown(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-# Helper function to run async functions in Streamlit
-def run_async(coro):
-    """Helper to run async functions in Streamlit"""
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    return loop.run_until_complete(coro)
-
-# Error handling decorator
-def handle_errors(func):
-    """Decorator for error handling"""
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            st.error(f"An error occurred: {str(e)}")
-            st.exception(e)
-    return wrapper
-
-# Performance monitoring decorator
-def monitor_performance(func):
-    """Decorator for performance monitoring"""
-    def wrapper(*args, **kwargs):
-        start_time = time.time()
-        result = func(*args, **kwargs)
-        end_time = time.time()
-        
-        # Log performance if it takes more than 1 second
-        if end_time - start_time > 1.0:
-            st.info(f"⏱️ Operation completed in {end_time - start_time:.2f} seconds")
-        
-        return result
-    return wrapper
-
-# Add loading spinner for async operations
-@st.cache_data(ttl=300)  # Cache for 5 minutes
-def get_cached_statistics():
-    """Get cached statistics to improve performance"""
-    if st.session_state.coordinator:
-        return st.session_state.coordinator.get_statistics()
-    return {}
-
-# Main application entry point
-if __name__ == "__main__":
-    main() initialize_session_state():
-    """Initialize session state variables"""
-    if 'coordinator' not in st.session_state:
-        st.session_state.coordinator = None
-    if 'initialization_status' not in st.session_state:
-        st.session_state.initialization_status = "pending"
-    if 'chat_history' not in st.session_state:
-        st.session_state.chat_history = []
-    if 'current_analysis' not in st.session_state:
-        st.session_state.current_analysis = None
-    if 'processing_history' not in st.session_state:
-        st.session_state.processing_history = []
-    if 'field_lineage_result' not in st.session_state:
-        st.session_state.field_lineage_result = None
-    if 'system_stats' not in st.session_state:
-        st.session_state.system_stats = {}
-
-# Call initialization
-initialize_session_state()
-
-async def init_coordinator():
-    """Initialize the coordinator asynchronously"""
-    if st.session_state.coordinator is None:
-        try:
-            st.session_state.coordinator = await initialize_system()
-            st.session_state.initialization_status = "completed"
-            return True
-        except Exception as e:
-            st.session_state.initialization_status = f"error: {str(e)}"
-            return False
-    return True
 
 def main():
     """Main application function"""
@@ -504,12 +642,17 @@ def main():
     # Header
     st.markdown('<div class="main-header">🧠 Opulence Deep Research Mainframe Agent</div>', unsafe_allow_html=True)
     
-    # Initialize system
+    # Initialize system only if needed
     if st.session_state.initialization_status == "pending":
         with st.spinner("Initializing Opulence system..."):
-            success = asyncio.run(init_coordinator())
-            if not success:
-                st.error(f"Failed to initialize system: {st.session_state.initialization_status}")
+            try:
+                success = asyncio.run(init_coordinator())
+                if not success:
+                    st.error(f"Failed to initialize system: {st.session_state.initialization_status}")
+                    return
+            except Exception as e:
+                st.error(f"Initialization error: {str(e)}")
+                st.session_state.initialization_status = f"error: {str(e)}"
                 return
     
     # Check if initialization failed
@@ -571,6 +714,7 @@ def main():
     
     # Show footer
     show_footer()
+
 
 def show_dashboard():
     """Show main dashboard"""
@@ -635,6 +779,7 @@ def show_dashboard():
     else:
         st.info("No recent activities to display")
 
+
 def show_file_upload():
     """Show file upload interface"""
     st.markdown('<div class="sub-header">File Upload & Processing</div>', unsafe_allow_html=True)
@@ -663,509 +808,3 @@ def show_file_upload():
             "Upload ZIP file containing multiple files",
             type=['zip']
         )
-        
-        if uploaded_zip:
-            if st.button("Extract and Process ZIP"):
-                process_zip_file(uploaded_zip)
-    
-    # Processing history
-    st.markdown("### Processing History")
-    if st.session_state.processing_history:
-        df_history = pd.DataFrame(st.session_state.processing_history)
-        st.dataframe(df_history, use_container_width=True)
-    else:
-        st.info("No processing history available")
-
-def process_uploaded_files(uploaded_files):
-    """Process uploaded files"""
-    if not st.session_state.coordinator:
-        st.error("System not initialized")
-        return
-    
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    results_container = st.container()
-    
-    # Save files temporarily and process
-    temp_dir = Path(tempfile.mkdtemp())
-    file_paths = []
-    
-    try:
-        for i, uploaded_file in enumerate(uploaded_files):
-            # Update progress
-            progress = (i + 1) / len(uploaded_files)
-            progress_bar.progress(progress)
-            status_text.text(f"Processing {uploaded_file.name}...")
-            
-            # Save file
-            file_path = temp_dir / uploaded_file.name
-            with open(file_path, 'wb') as f:
-                f.write(uploaded_file.getbuffer())
-            file_paths.append(file_path)
-        
-        # Process files in batch
-        status_text.text("Processing files with Opulence...")
-        result = asyncio.run(
-            st.session_state.coordinator.process_batch_files(file_paths)
-        )
-        
-        # Display results
-        with results_container:
-            if result["status"] == "success":
-                st.success(f"✅ Successfully processed {result['files_processed']} files in {result['processing_time']:.2f} seconds")
-                
-                # Show detailed results
-                for i, file_result in enumerate(result["results"]):
-                    if isinstance(file_result, dict):
-                        with st.expander(f"📄 {uploaded_files[i].name}"):
-                            st.json(file_result)
-            else:
-                st.error(f"❌ Processing failed: {result.get('error', 'Unknown error')}")
-        
-        # Update processing history
-        st.session_state.processing_history.append({
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "files_count": len(uploaded_files),
-            "status": result["status"],
-            "processing_time": result.get("processing_time", 0)
-        })
-        
-    except Exception as e:
-        st.error(f"Error processing files: {str(e)}")
-    
-    finally:
-        # Cleanup temporary files
-        for file_path in file_paths:
-            if file_path.exists():
-                file_path.unlink()
-        temp_dir.rmdir()
-        
-        progress_bar.empty()
-        status_text.empty()
-
-def process_zip_file(uploaded_zip):
-    """Process uploaded ZIP file"""
-    if not st.session_state.coordinator:
-        st.error("System not initialized")
-        return
-    
-    temp_dir = Path(tempfile.mkdtemp())
-    
-    try:
-        # Extract ZIP
-        zip_path = temp_dir / uploaded_zip.name
-        with open(zip_path, 'wb') as f:
-            f.write(uploaded_zip.getbuffer())
-        
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(temp_dir)
-        
-        # Find all processable files
-        file_extensions = ['.cbl', '.cob', '.jcl', '.csv', '.ddl', '.sql', '.dcl', '.copy', '.cpy']
-        file_paths = []
-        
-        for ext in file_extensions:
-            file_paths.extend(temp_dir.rglob(f"*{ext}"))
-        
-        if not file_paths:
-            st.warning("No processable files found in ZIP")
-            return
-        
-        st.info(f"Found {len(file_paths)} files to process")
-        
-        # Process files
-        result = asyncio.run(
-            st.session_state.coordinator.process_batch_files(file_paths)
-        )
-        
-        if result["status"] == "success":
-            st.success(f"✅ Successfully processed {result['files_processed']} files")
-        else:
-            st.error(f"❌ Processing failed: {result.get('error', 'Unknown error')}")
-    
-    except Exception as e:
-        st.error(f"Error processing ZIP file: {str(e)}")
-    
-    finally:
-        # Cleanup
-        import shutil
-        shutil.rmtree(temp_dir)
-
-def show_chat_analysis():
-    """Show chat-based analysis interface"""
-    st.markdown('<div class="sub-header">💬 Chat with Opulence</div>', unsafe_allow_html=True)
-    
-    # Display chat history
-    for message in st.session_state.chat_history:
-        if message["role"] == "user":
-            st.chat_message("user").write(message["content"])
-        else:
-            st.chat_message("assistant").write(message["content"])
-    
-    # Chat input
-    user_input = st.chat_input("Ask about your mainframe systems...")
-    
-    if user_input:
-        # Add user message to history
-        st.session_state.chat_history.append({
-            "role": "user",
-            "content": user_input,
-            "timestamp": datetime.now().isoformat()
-        })
-        
-        # Display user message
-        st.chat_message("user").write(user_input)
-        
-        # Process query and generate response
-        with st.chat_message("assistant"):
-            with st.spinner("Analyzing..."):
-                response = process_chat_query(user_input)
-                st.write(response)
-        
-        # Add assistant response to history
-        st.session_state.chat_history.append({
-            "role": "assistant",
-            "content": response,
-            "timestamp": datetime.now().isoformat()
-        })
-    
-    # Chat controls
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        if st.button("Clear Chat History"):
-            st.session_state.chat_history = []
-            st.rerun()
-    
-    with col2:
-        if st.button("Export Chat"):
-            chat_export = json.dumps(st.session_state.chat_history, indent=2)
-            st.download_button(
-                "Download Chat History",
-                chat_export,
-                file_name=f"opulence_chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                mime="application/json"
-            )
-
-def process_chat_query(query: str) -> str:
-    """Process chat query and return response"""
-    if not st.session_state.coordinator:
-        return "❌ System not initialized. Please check system health."
-    
-    try:
-        # Determine query type and route to appropriate agent
-        query_lower = query.lower()
-        
-        if any(word in query_lower for word in ['lifecycle', 'lineage', 'trace', 'impact']):
-            # Extract component name from query
-            component_name = extract_component_name(query)
-            if component_name:
-                result = asyncio.run(
-                    st.session_state.coordinator.analyze_component(component_name)
-                )
-                return format_analysis_response(result)
-            else:
-                return "Could you please specify which component (file, table, program, or field) you'd like me to analyze?"
-        
-        elif any(word in query_lower for word in ['compare', 'difference', 'db2']):
-            return "For data comparison, please use the DB2 Comparison tab to select specific components."
-        
-        elif any(word in query_lower for word in ['search', 'find', 'pattern']):
-            # Use semantic search
-            if st.session_state.coordinator.agents.get("vector_index"):
-                results = asyncio.run(
-                    st.session_state.coordinator.agents["vector_index"].search_code_by_pattern(query)
-                )
-                return format_search_results(results)
-            else:
-                return "Search functionality is not available. Please check if files have been processed."
-        
-        else:
-            # General query - try to provide helpful guidance
-            return generate_general_response(query)
-    
-    except Exception as e:
-        return f"❌ Error processing query: {str(e)}"
-
-def extract_component_name(query: str) -> str:
-    """Extract component name from natural language query"""
-    words = query.split()
-    
-    # Look for patterns like "analyze COMPONENT_NAME" or "trace FIELD_NAME"
-    trigger_words = ['analyze', 'trace', 'lifecycle', 'lineage', 'impact', 'of', 'for']
-    
-    for i, word in enumerate(words):
-        if word.lower() in trigger_words and i + 1 < len(words):
-            potential_component = words[i + 1].strip('.,!?')
-            if len(potential_component) > 2:  # Basic validation
-                return potential_component
-    
-    # Look for uppercase words (likely component names)
-    for word in words:
-        if word.isupper() and len(word) > 2:
-            return word
-    
-    return ""
-
-def format_analysis_response(result: dict) -> str:
-    """Format analysis result for chat display"""
-    if "error" in result:
-        return f"❌ Analysis failed: {result['error']}"
-    
-    component_name = result.get("component_name", "Unknown")
-    component_type = result.get("component_type", "unknown")
-    
-    response = f"## 📊 Analysis of {component_type.title()}: {component_name}\n\n"
-    
-    if "lineage" in result:
-        lineage = result["lineage"]
-        usage_stats = lineage.get("usage_analysis", {}).get("statistics", {})
-        response += f"**Usage Summary:**\n"
-        response += f"- Total references: {usage_stats.get('total_references', 0)}\n"
-        response += f"- Programs using: {len(usage_stats.get('programs_using', []))}\n\n"
-    
-    response += "💡 For detailed analysis, please check the Component Analysis tab."
-    
-    return response
-
-def format_search_results(results: list) -> str:
-    """Format search results for chat display"""
-    if not results:
-        return "🔍 No matching code patterns found. Try refining your search terms."
-    
-    response = f"## 🔍 Found {len(results)} Matching Code Patterns\n\n"
-    
-    for i, result in enumerate(results[:3], 1):  # Show top 3 results
-        metadata = result.get("metadata", {})
-        response += f"**{i}. {metadata.get('program_name', 'Unknown Program')}**\n"
-        response += f"- Type: {metadata.get('chunk_type', 'code')}\n"
-        response += f"- Similarity: {result.get('similarity_score', 0):.2f}\n"
-        response += f"- Content preview: {result.get('content', '')[:100]}...\n\n"
-    
-    if len(results) > 3:
-        response += f"💡 And {len(results) - 3} more results. Use the Component Analysis tab for detailed exploration."
-    
-    return response
-
-def generate_general_response(query: str) -> str:
-    """Generate general helpful response"""
-    return f"""
-I'm Opulence, your deep research mainframe agent! I can help you with:
-
-🔍 **Component Analysis**: Analyze the lifecycle and usage of files, tables, programs, or fields
-📊 **Field Lineage**: Trace data flow and transformations for specific fields  
-🔄 **DB2 Comparison**: Compare data between DB2 tables and loaded files
-📋 **Documentation**: Generate technical documentation and reports
-
-**Examples of what you can ask:**
-- "Analyze the lifecycle of TRADE_DATE field"
-- "Trace the lineage of TRANSACTION_FILE"
-- "Find programs that use security settlement logic"
-- "Show me the impact of changing ACCOUNT_ID"
-
-Your query: "{query}"
-
-Would you like me to help you with any specific analysis?
-    """
-
-def show_component_analysis():
-    """Show component analysis interface"""
-    st.markdown('<div class="sub-header">🔍 Component Analysis</div>', unsafe_allow_html=True)
-    
-    # Component selection
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        component_name = st.text_input("Component Name (file, table, program, field):")
-    
-    with col2:
-        component_type = st.selectbox(
-            "Component Type",
-            ["auto-detect", "file", "table", "program", "jcl", "field"]
-        )
-    
-    if st.button("🔍 Analyze Component") and component_name:
-        analyze_component(component_name, component_type)
-    
-    # Display current analysis
-    if st.session_state.current_analysis:
-        display_component_analysis(st.session_state.current_analysis)
-
-def analyze_component(component_name: str, component_type: str):
-    """Analyze a specific component"""
-    if not st.session_state.coordinator:
-        st.error("System not initialized")
-        return
-    
-    with st.spinner(f"Analyzing {component_name}..."):
-        try:
-            result = asyncio.run(
-                st.session_state.coordinator.analyze_component(
-                    component_name, 
-                    None if component_type == "auto-detect" else component_type
-                )
-            )
-            st.session_state.current_analysis = result
-            
-        except Exception as e:
-            st.error(f"Analysis failed: {str(e)}")
-
-def display_component_analysis(analysis: dict):
-    """Display component analysis results"""
-    if "error" in analysis:
-        st.error(f"Analysis error: {analysis['error']}")
-        return
-    
-    component_name = analysis.get("component_name", "Unknown")
-    component_type = analysis.get("component_type", "unknown")
-    
-    st.success(f"✅ Analysis completed for {component_type}: **{component_name}**")
-    
-    # Create tabs for different aspects of analysis
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "🔄 Lineage", "📈 Impact", "📋 Report"])
-    
-    with tab1:
-        show_analysis_overview(analysis)
-    
-    with tab2:
-        show_lineage_analysis(analysis)
-    
-    with tab3:
-        show_impact_analysis(analysis)
-    
-    with tab4:
-        show_analysis_report(analysis)
-
-def show_analysis_overview(analysis: dict):
-    """Show analysis overview"""
-    st.markdown("### Component Overview")
-    
-    # Basic information
-    col1, col2, col3 = st.columns(3)
-    
-    component_type = analysis.get("component_type", "unknown")
-    
-    with col1:
-        st.metric("Component Type", component_type.title())
-    
-    if "lineage" in analysis:
-        lineage = analysis["lineage"]
-        usage_stats = lineage.get("usage_analysis", {}).get("statistics", {})
-        
-        with col2:
-            st.metric("Total References", usage_stats.get("total_references", 0))
-        
-        with col3:
-            st.metric("Programs Using", len(usage_stats.get("programs_using", [])))
-
-def show_lineage_analysis(analysis: dict):
-    """Show lineage analysis"""
-    st.markdown("### Data Lineage Analysis")
-    
-    if "lineage" not in analysis:
-        st.info("Lineage analysis not available for this component type")
-        return
-    
-    lineage = analysis["lineage"]
-    
-    # Lineage graph visualization
-    if "lineage_graph" in lineage:
-        graph = lineage["lineage_graph"]
-        st.markdown(f"**Lineage Graph:** {len(graph.get('nodes', []))} nodes, {len(graph.get('edges', []))} relationships")
-        st.info("Interactive lineage graph visualization available!")
-
-def show_impact_analysis(analysis: dict):
-    """Show impact analysis"""
-    st.markdown("### Impact Analysis")
-    
-    if "impact_analysis" in analysis:
-        impact = analysis["impact_analysis"]
-        
-        # Impact metrics
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.metric("Affected Programs", len(impact.get("affected_programs", [])))
-        
-        with col2:
-            st.metric("Change Complexity", impact.get("change_complexity", "Unknown"))
-    
-    else:
-        st.info("Impact analysis not available for this component")
-
-def show_analysis_report(analysis: dict):
-    """Show comprehensive analysis report"""
-    st.markdown("### Comprehensive Analysis Report")
-    
-    if "comprehensive_report" in analysis:
-        st.markdown(analysis["comprehensive_report"])
-    elif "lineage" in analysis and "comprehensive_report" in analysis["lineage"]:
-        st.markdown(analysis["lineage"]["comprehensive_report"])
-    else:
-        st.info("Comprehensive report not available")
-    
-    # Download report button
-    report_content = analysis.get("comprehensive_report") or analysis.get("lineage", {}).get("comprehensive_report")
-    
-    if report_content:
-        st.download_button(
-            "📄 Download Report",
-            report_content,
-            file_name=f"opulence_analysis_{analysis.get('component_name', 'component')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
-            mime="text/markdown"
-        )
-
-def show_field_lineage():
-    """Show field lineage analysis interface"""
-    st.markdown('<div class="sub-header">📊 Field Lineage Analysis</div>', unsafe_allow_html=True)
-    
-    # Field selection
-    field_name = st.text_input("Field Name to Trace:")
-    
-    if st.button("🔍 Trace Field Lineage") and field_name:
-        trace_field_lineage(field_name)
-    
-    # Display lineage results
-    if st.session_state.field_lineage_result:
-        display_field_lineage_results(st.session_state.field_lineage_result)
-
-def trace_field_lineage(field_name: str):
-    """Trace field lineage"""
-    if not st.session_state.coordinator:
-        st.error("System not initialized")
-        return
-    
-    with st.spinner(f"Tracing lineage for {field_name}..."):
-        try:
-            result = asyncio.run(
-                st.session_state.coordinator.agents["lineage_analyzer"].analyze_field_lineage(field_name)
-            )
-            st.session_state.field_lineage_result = result
-            
-        except Exception as e:
-            st.error(f"Lineage tracing failed: {str(e)}")
-
-def display_field_lineage_results(result: dict):
-    """Display field lineage results"""
-    if "error" in result:
-        st.error(f"Lineage analysis error: {result['error']}")
-        return
-    
-    field_name = result.get("field_name", "Unknown")
-    st.success(f"✅ Lineage analysis completed for field: **{field_name}**")
-    
-    # Usage statistics
-    if "usage_analysis" in result:
-        usage = result["usage_analysis"]["statistics"]
-        
-        st.markdown("### Usage Statistics")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Total References", usage.get("total_references", 0))
-        
-        with col2:
-            st.metric("Programs Using", len(usage.get("programs_using", [])))
-        
-        with col3:
-            st.metric("Operation Types", len(usage.get("operation_types", {})))
-
