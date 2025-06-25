@@ -1,0 +1,126 @@
+# docker/docker-compose.yml
+"""
+Docker Compose configuration for Opulence system
+"""
+
+version: '3.8'
+
+services:
+  opulence-web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: opulence-web
+    ports:
+      - "8501:8501"
+    volumes:
+      - ../data:/app/data
+      - ../logs:/app/logs
+      - ../models:/app/models
+      - ../cache:/app/cache
+      - ../config:/app/config
+    environment:
+      - CUDA_VISIBLE_DEVICES=0,1,2
+      - OPULENCE_CONFIG_FILE=/app/config/opulence_config.yaml
+      - PYTHONPATH=/app
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 3
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  opulence-batch-processor:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: opulence-batch
+    volumes:
+      - ../data:/app/data
+      - ../logs:/app/logs
+      - ../models:/app/models
+      - ../cache:/app/cache
+      - ../config:/app/config
+    environment:
+      - CUDA_VISIBLE_DEVICES=0,1,2
+      - OPULENCE_CONFIG_FILE=/app/config/opulence_config.yaml
+      - PYTHONPATH=/app
+    command: ["python3", "main.py", "--mode", "batch", "--folder", "/app/data"]
+    restart: "no"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 3
+              capabilities: [gpu]
+
+  db2-database:
+    image: ibmcom/db2:11.5.8.0
+    container_name: opulence-db2
+    environment:
+      - LICENSE=accept
+      - DB2INSTANCE=db2inst1
+      - DB2INST1_PASSWORD=password
+      - DBNAME=TESTDB
+    ports:
+      - "50000:50000"
+    volumes:
+      - db2_data:/database
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "su", "-", "db2inst1", "-c", "db2 connect to TESTDB"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  redis-cache:
+    image: redis:7-alpine
+    container_name: opulence-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: opulence-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: opulence-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    restart: unless-stopped
+
+volumes:
+  db2_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  default:
+    driver: bridge
+  
