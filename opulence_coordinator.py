@@ -298,49 +298,56 @@ class DynamicOpulenceCoordinator:
             raise
     
     def _create_agent(self, agent_type: str, llm_engine: AsyncLLMEngine, gpu_id: int):
-        """Create agent instance"""
+        """Create agent instance with coordinator reference"""
         if agent_type == "code_parser":
             return CodeParserAgent(
                 llm_engine=llm_engine,
                 db_path=self.db_path,
-                gpu_id=gpu_id
+                gpu_id=gpu_id,
+                coordinator=self  # ADD coordinator reference
             )
         elif agent_type == "vector_index":
             return VectorIndexAgent(
                 llm_engine=llm_engine,
                 db_path=self.db_path,
-                gpu_id=gpu_id
+                gpu_id=gpu_id,
+                coordinator=self  # ADD coordinator reference
             )
         elif agent_type == "data_loader":
             return DataLoaderAgent(
                 llm_engine=llm_engine,
                 db_path=self.db_path,
-                gpu_id=gpu_id
+                gpu_id=gpu_id,
+                coordinator=self  # ADD coordinator reference
             )
         elif agent_type == "lineage_analyzer":
             return LineageAnalyzerAgent(
                 llm_engine=llm_engine,
                 db_path=self.db_path,
-                gpu_id=gpu_id
+                gpu_id=gpu_id,
+                coordinator=self  # ADD coordinator reference
             )
         elif agent_type == "logic_analyzer":
             return LogicAnalyzerAgent(
                 llm_engine=llm_engine,
                 db_path=self.db_path,
-                gpu_id=gpu_id
+                gpu_id=gpu_id,
+                coordinator=self  # ADD coordinator reference
             )
         elif agent_type == "documentation":
             return DocumentationAgent(
                 llm_engine=llm_engine,
                 db_path=self.db_path,
-                gpu_id=gpu_id
+                gpu_id=gpu_id,
+                coordinator=self  # ADD coordinator reference
             )
         elif agent_type == "db2_comparator":
             return DB2ComparatorAgent(
                 llm_engine=llm_engine,
                 db_path=self.db_path,
                 gpu_id=gpu_id,
-                max_rows=self.config.max_db_rows
+                max_rows=self.config.max_db_rows,
+                coordinator=self  # ADD coordinator reference
             )
         else:
             raise ValueError(f"Unknown agent type: {agent_type}")
@@ -826,8 +833,14 @@ class DynamicOpulenceCoordinator:
         except Exception as e:
             self.logger.error(f"Failed to reload configuration: {str(e)}")
             return False
+        
+
+    def shutdown(self):
         """Shutdown the coordinator and all resources"""
         try:
+            # Save configuration before shutdown
+            self.config_manager.save_config()
+            
             # Shutdown GPU manager
             self.gpu_manager.shutdown()
             
@@ -842,6 +855,21 @@ class DynamicOpulenceCoordinator:
         except Exception as e:
             self.logger.error(f"Error during shutdown: {str(e)}")
 
+    def create_standalone_agent(agent_type: str = "data_loader") -> DataLoaderAgent:
+        """Create standalone agent that will use coordinator's shared LLMs"""
+        try:
+            # Get global coordinator
+            coordinator = get_dynamic_coordinator()
+        
+            # Create agent with coordinator reference
+            if agent_type == "data_loader":
+                return DataLoaderAgent(coordinator=coordinator)
+            # Add other agent types as needed...
+        
+        except Exception as e:
+            # Fallback: create agent without coordinator
+            logging.warning(f"Creating agent without coordinator: {e}")
+            return DataLoaderAgent()
 
 # Global coordinator instance
 coordinator = None

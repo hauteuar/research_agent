@@ -21,70 +21,158 @@ import os
 
 from vllm import AsyncLLMEngine, SamplingParams
 
+# agents/data_loader_agent.py
+# ONLY CHANGE THESE PARTS - Rest of your code stays the same
+
 class DataLoaderAgent:
     """Agent for loading and mapping data files and schemas"""
     
-    def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, gpu_id: int = None):
+    def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
+                 gpu_id: int = None, coordinator=None):  # ADD coordinator parameter
         self.llm_engine = llm_engine
         self.db_path = db_path or "opulence_data.db"
         self.gpu_id = gpu_id
+        self.coordinator = coordinator  # ADD this line
         self.logger = logging.getLogger(__name__)
         
         # For dynamic creation without LLM engine
         self._engine_created = False
+        self._using_coordinator_llm = False  # ADD this line
         
         # Initialize SQLite tables for data mapping
         self._init_data_tables()
     
     async def _ensure_llm_engine(self):
-        """Ensure LLM engine is available, create if needed"""
-        if self.llm_engine is None and not self._engine_created:
+        """Ensure LLM engine is available - use coordinator first, fallback to own"""
+        if self.llm_engine is not None:
+            return  # Already have engine
+        
+        # Try to get from coordinator first
+        if self.coordinator is not None:
+            try:
+                # Get available GPU from coordinator
+                best_gpu = self.coordinator.gpu_manager.get_available_gpu()
+                if best_gpu is not None:
+                    # Get shared LLM engine from coordinator
+                    engine = await self.coordinator.get_or_create_llm_engine(best_gpu)
+                    self.llm_engine = engine
+                    self.gpu_id = best_gpu
+                    self._using_coordinator_llm = True
+                    self.logger.info(f"DataLoader using coordinator's LLM on GPU {best_gpu}")
+                    return
+            except Exception as e:
+                self.logger.warning(f"Failed to get LLM from coordinator: {e}")
+        
+        # Try to get from global coordinator
+        if not self._engine_created:
+            try:
+                from opulence_coordinator import get_dynamic_coordinator
+                global_coordinator = get_dynamic_coordinator()
+                
+                best_gpu = global_coordinator.gpu_manager.get_available_gpu()
+                if best_gpu is not None:
+                    engine = await global_coordinator.get_or_create_llm_engine(best_gpu)
+                    self.llm_engine = engine
+                    self.gpu_id = best_gpu
+                    self._using_coordinator_llm = True
+                    self.logger.info(f"DataLoader using global coordinator's LLM on GPU {best_gpu}")
+                    return
+            except Exception as e:
+                self.logger.warning(f"Failed to get LLM from global coordinator: {e}")
+        
+        # Last resort: create own engine
+        if not self._engine_created:
             await self._create_llm_engine()
     
+    # REPLACE your existing _create_llm_engine method with this smaller one:
     async def _create_llm_engine(self):
-        """Create LLM engine with GPU forcing"""
+        """Create own LLM engine as fallback (smaller memory footprint)"""
         try:
-            # Import GPU forcer
             from gpu_force_fix import GPUForcer
             
-            # Find best available GPU
-            best_gpu = GPUForcer.find_best_gpu_with_memory(2.0)
-            
+            best_gpu = GPUForcer.find_best_gpu_with_memory(1.5)  # Lower requirement
             if best_gpu is None:
-                raise RuntimeError("No suitable GPU found for LLM engine")
+                raise RuntimeError("No suitable GPU found for fallback LLM engine")
             
-            self.logger.info(f"Creating LLM engine for DataLoader on GPU {best_gpu}")
+            self.logger.warning(f"DataLoader creating fallback LLM on GPU {best_gpu}")
             
-            # Force GPU environment
             original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
             
             try:
                 GPUForcer.force_gpu_environment(best_gpu)
                 
-                # Create engine with forced GPU
-                from vllm import AsyncLLMEngine
+                # Create smaller engine to avoid conflicts
                 engine_args = GPUForcer.create_vllm_engine_args(
-                    "codellama/CodeLlama-7b-Instruct-hf",  # Default model
-                    4096
+                    "codellama/CodeLlama-7b-Instruct-hf",
+                    2048  # Smaller context
                 )
+                engine_args.gpu_memory_utilization = 0.3  # Use less memory
                 
                 self.llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
                 self.gpu_id = best_gpu
                 self._engine_created = True
+                self._using_coordinator_llm = False
                 
-                self.logger.info(f"✅ DataLoader LLM engine created on GPU {best_gpu}")
+                self.logger.info(f"✅ DataLoader fallback LLM created on GPU {best_gpu}")
                 
             finally:
-                # Restore original CUDA_VISIBLE_DEVICES
                 if original_cuda_visible is not None:
                     os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible
                 elif 'CUDA_VISIBLE_DEVICES' in os.environ:
                     del os.environ['CUDA_VISIBLE_DEVICES']
                     
         except Exception as e:
-            self.logger.error(f"Failed to create LLM engine for DataLoader: {str(e)}")
+            self.logger.error(f"Failed to create fallback LLM engine: {str(e)}")
             raise
+
+    # ADD this helper method:
+    def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Add processing information to results"""
+        if isinstance(result, dict):
+            result['gpu_used'] = self.gpu_id
+            result['agent_type'] = 'data_loader'
+            result['using_coordinator_llm'] = self._using_coordinator_llm
+        return result
     
+    # MODIFY your process_file method - just change the return statements:
+    async def process_file(self, file_path: Path) -> Dict[str, Any]:
+        """Process a data file (CSV, DDL, DCLGEN, layout) with GPU forcing"""
+        try:
+            # Ensure we have an LLM engine (tries coordinator first)
+            await self._ensure_llm_engine()
+            
+            self.logger.info(f"Processing file {file_path} with DataLoader on GPU {self.gpu_id}")
+            
+            # Your existing file processing logic stays the same...
+            file_extension = file_path.suffix.lower()
+            file_content = self._read_file_safely(file_path)
+            
+            result = {}
+            
+            if file_extension == '.csv':
+                result = await self._process_csv_file(file_path, file_content)
+            elif file_extension in ['.ddl', '.sql']:
+                result = await self._process_ddl_file(file_path, file_content)
+            elif 'dclgen' in file_path.name.lower() or file_extension == '.dcl':
+                result = await self._process_dclgen_file(file_path, file_content)
+            elif file_extension == '.json':
+                result = await self._process_layout_json(file_path, file_content)
+            elif file_extension == '.zip':
+                result = await self._process_zip_file(file_path)
+            else:
+                result = await self._auto_detect_and_process(file_path, file_content)
+            
+            # CHANGE: Use helper method instead of manual assignment
+            return self._add_processing_info(result)
+                
+        except Exception as e:
+            self.logger.error(f"Failed to process file {file_path}: {str(e)}")
+            return self._add_processing_info({
+                "status": "error",
+                "file_name": file_path.name,
+                "error": str(e)
+            })
+
     def _init_data_tables(self):
         """Initialize SQLite tables for data storage"""
         conn = sqlite3.connect(self.db_path)
@@ -140,48 +228,6 @@ class DataLoaderAgent:
         conn.commit()
         conn.close()
     
-    async def process_file(self, file_path: Path) -> Dict[str, Any]:
-        """Process a data file (CSV, DDL, DCLGEN, layout) with GPU forcing"""
-        try:
-            # Ensure we have an LLM engine
-            await self._ensure_llm_engine()
-            
-            self.logger.info(f"Processing file {file_path} with DataLoader on GPU {self.gpu_id}")
-            
-            file_extension = file_path.suffix.lower()
-            file_content = self._read_file_safely(file_path)
-            
-            result = {}
-            
-            if file_extension == '.csv':
-                result = await self._process_csv_file(file_path, file_content)
-            elif file_extension in ['.ddl', '.sql']:
-                result = await self._process_ddl_file(file_path, file_content)
-            elif 'dclgen' in file_path.name.lower() or file_extension == '.dcl':
-                result = await self._process_dclgen_file(file_path, file_content)
-            elif file_extension == '.json':
-                result = await self._process_layout_json(file_path, file_content)
-            elif file_extension == '.zip':
-                result = await self._process_zip_file(file_path)
-            else:
-                # Try to auto-detect file type
-                result = await self._auto_detect_and_process(file_path, file_content)
-            
-            # Add GPU info to result
-            result['gpu_used'] = self.gpu_id
-            result['agent_type'] = 'data_loader'
-            
-            return result
-                
-        except Exception as e:
-            self.logger.error(f"Failed to process file {file_path}: {str(e)}")
-            return {
-                "status": "error",
-                "file_name": file_path.name,
-                "error": str(e),
-                "gpu_used": self.gpu_id,
-                "agent_type": "data_loader"
-            }
     
     def _read_file_safely(self, file_path: Path) -> str:
         """Safely read file with encoding detection"""
