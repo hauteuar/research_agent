@@ -8,11 +8,13 @@ import re
 import asyncio
 import sqlite3
 import json
+import os
 from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 from dataclasses import dataclass
 import hashlib
 from datetime import datetime
+import logging
 
 import torch
 from vllm import AsyncLLMEngine, SamplingParams
@@ -31,10 +33,17 @@ class CodeChunk:
 class CodeParserAgent:
     """Agent for parsing and chunking mainframe code"""
     
-    def __init__(self, llm_engine: AsyncLLMEngine, db_path: str, gpu_id: int):
+    def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
+                 gpu_id: int = None, coordinator=None):
         self.llm_engine = llm_engine
-        self.db_path = db_path
+        self.db_path = db_path or "opulence_data.db"  # ADD default value
         self.gpu_id = gpu_id
+        self.coordinator = coordinator  # ADD this line
+        self.logger = logging.getLogger(__name__)
+        
+        # ADD these lines for coordinator integration
+        self._engine_created = False
+        self._using_coordinator_llm = False
         
         # COBOL patterns
         self.cobol_patterns = {
@@ -55,10 +64,106 @@ class CodeParserAgent:
             'proc_call': re.compile(r'EXEC\s+(\S+)', re.IGNORECASE),
             'dataset': re.compile(r'DSN=([^,\s]+)', re.IGNORECASE)
         }
+
+    # ADD this new method
+    async def _ensure_llm_engine(self):
+        """Ensure LLM engine is available - use coordinator first, fallback to own"""
+        if self.llm_engine is not None:
+            return  # Already have engine
+        
+        # Try to get from coordinator first
+        if self.coordinator is not None:
+            try:
+                # Get available GPU from coordinator
+                best_gpu = await self.coordinator.get_available_gpu_for_agent("code_parser")
+                if best_gpu is not None:
+                    # Get shared LLM engine from coordinator
+                    engine = await self.coordinator.get_or_create_llm_engine(best_gpu)
+                    self.llm_engine = engine
+                    self.gpu_id = best_gpu
+                    self._using_coordinator_llm = True
+                    self.logger.info(f"CodeParser using coordinator's LLM on GPU {best_gpu}")
+                    return
+            except Exception as e:
+                self.logger.warning(f"Failed to get LLM from coordinator: {e}")
+        
+        # Try to get from global coordinator
+        if not self._engine_created:
+            try:
+                from opulence_coordinator import get_dynamic_coordinator
+                global_coordinator = get_dynamic_coordinator()
+                
+                best_gpu = await global_coordinator.get_available_gpu_for_agent("code_parser")
+                if best_gpu is not None:
+                    engine = await global_coordinator.get_or_create_llm_engine(best_gpu)
+                    self.llm_engine = engine
+                    self.gpu_id = best_gpu
+                    self._using_coordinator_llm = True
+                    self.logger.info(f"CodeParser using global coordinator's LLM on GPU {best_gpu}")
+                    return
+            except Exception as e:
+                self.logger.warning(f"Failed to get LLM from global coordinator: {e}")
+        
+        # Last resort: create own engine
+        if not self._engine_created:
+            await self._create_llm_engine()
+    
+    # ADD this new method
+    async def _create_llm_engine(self):
+        """Create own LLM engine as fallback (smaller memory footprint)"""
+        try:
+            from gpu_force_fix import GPUForcer
+            
+            best_gpu = GPUForcer.find_best_gpu_with_memory(1.5)  # Lower requirement
+            if best_gpu is None:
+                raise RuntimeError("No suitable GPU found for fallback LLM engine")
+            
+            self.logger.warning(f"CodeParser creating fallback LLM on GPU {best_gpu}")
+            
+            original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
+            
+            try:
+                GPUForcer.force_gpu_environment(best_gpu)
+                
+                # Create smaller engine to avoid conflicts
+                engine_args = GPUForcer.create_vllm_engine_args(
+                    "codellama/CodeLlama-7b-Instruct-hf",
+                    2048  # Smaller context
+                )
+                engine_args.gpu_memory_utilization = 0.3  # Use less memory
+                
+                from vllm import AsyncLLMEngine
+                self.llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
+                self.gpu_id = best_gpu
+                self._engine_created = True
+                self._using_coordinator_llm = False
+                
+                self.logger.info(f"✅ CodeParser fallback LLM created on GPU {best_gpu}")
+                
+            finally:
+                if original_cuda_visible is not None:
+                    os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible
+                elif 'CUDA_VISIBLE_DEVICES' in os.environ:
+                    del os.environ['CUDA_VISIBLE_DEVICES']
+                    
+        except Exception as e:
+            self.logger.error(f"Failed to create fallback LLM engine: {str(e)}")
+            raise
+
+    # ADD this helper method
+    def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Add processing information to results"""
+        if isinstance(result, dict):
+            result['gpu_used'] = self.gpu_id
+            result['agent_type'] = 'code_parser'
+            result['using_coordinator_llm'] = self._using_coordinator_llm
+        return result
     
     async def process_file(self, file_path: Path) -> Dict[str, Any]:
         """Process a single code file"""
         try:
+            await self._ensure_llm_engine()  # ADD this line
+            
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
             
@@ -79,7 +184,7 @@ class CodeParserAgent:
             # Generate metadata
             metadata = await self._generate_metadata(chunks, file_type)
             
-            return {
+            result = {
                 "status": "success",
                 "file_name": file_path.name,
                 "file_type": file_type,
@@ -87,12 +192,15 @@ class CodeParserAgent:
                 "metadata": metadata
             }
             
+            # ADD: Use helper method to add processing info
+            return self._add_processing_info(result)
+            
         except Exception as e:
-            return {
+            return self._add_processing_info({
                 "status": "error",
                 "file_name": file_path.name,
                 "error": str(e)
-            }
+            })
     
     def _detect_file_type(self, content: str, suffix: str) -> str:
         """Detect the type of mainframe file"""
@@ -115,6 +223,8 @@ class CodeParserAgent:
     
     async def _extract_sql_blocks(self, content: str, program_name: str) -> List[CodeChunk]:
         """Extract SQL blocks from COBOL code"""
+        await self._ensure_llm_engine()  # ADD this line
+        
         chunks = []
         sql_matches = self.cobol_patterns['sql_block'].finditer(content)
         
@@ -140,6 +250,8 @@ class CodeParserAgent:
     
     async def _analyze_sql_with_llm(self, sql_content: str) -> Dict[str, Any]:
         """Analyze SQL block with LLM"""
+        await self._ensure_llm_engine()  # ADD this line
+        
         prompt = f"""
         Analyze this embedded SQL block:
         
@@ -184,6 +296,8 @@ class CodeParserAgent:
     
     async def _parse_jcl(self, content: str, filename: str) -> List[CodeChunk]:
         """Parse JCL into job steps"""
+        await self._ensure_llm_engine()  # ADD this line
+        
         chunks = []
         lines = content.split('\n')
         
@@ -258,6 +372,8 @@ class CodeParserAgent:
     
     async def _analyze_jcl_step_with_llm(self, content: str) -> Dict[str, Any]:
         """Analyze JCL step with LLM"""
+        await self._ensure_llm_engine()  # ADD this line
+        
         prompt = f"""
         Analyze this JCL job step:
         
@@ -302,6 +418,8 @@ class CodeParserAgent:
     
     async def _parse_copybook(self, content: str, filename: str) -> List[CodeChunk]:
         """Parse copybook into field definitions"""
+        await self._ensure_llm_engine()  # ADD this line
+        
         chunks = []
         
         # Analyze copybook structure with LLM
@@ -322,6 +440,8 @@ class CodeParserAgent:
     
     async def _analyze_copybook_with_llm(self, content: str) -> Dict[str, Any]:
         """Analyze copybook with LLM"""
+        await self._ensure_llm_engine()  # ADD this line
+        
         prompt = f"""
         Analyze this COBOL copybook:
         
@@ -378,7 +498,166 @@ class CodeParserAgent:
         )
         return [chunk]
     
-    # Helper methods for regex extraction
+    # ... [Keep all the existing helper methods like _extract_field_names, etc.] ...
+    
+    async def _parse_cobol_paragraphs(self, content: str, program_name: str, start_offset: int) -> List[CodeChunk]:
+        """Parse COBOL procedure division into paragraphs"""
+        await self._ensure_llm_engine()  # ADD this line
+        
+        chunks = []
+        lines = content.split('\n')
+        
+        current_paragraph = None
+        paragraph_start = 0
+        paragraph_content = []
+        
+        for i, line in enumerate(lines):
+            # Check if this is a paragraph header
+            if self.cobol_patterns['paragraph'].match(line.strip()):
+                # Save previous paragraph
+                if current_paragraph:
+                    chunk_content = '\n'.join(paragraph_content)
+                    metadata = await self._analyze_paragraph_with_llm(chunk_content)
+                    
+                    chunk = CodeChunk(
+                        program_name=program_name,
+                        chunk_id=f"{program_name}_{current_paragraph}",
+                        chunk_type="paragraph",
+                        content=chunk_content,
+                        metadata=metadata,
+                        line_start=start_offset + paragraph_start,
+                        line_end=start_offset + i - 1
+                    )
+                    chunks.append(chunk)
+                
+                # Start new paragraph
+                current_paragraph = line.strip().rstrip('.')
+                paragraph_start = i
+                paragraph_content = [line]
+            else:
+                if current_paragraph:
+                    paragraph_content.append(line)
+        
+        # Add final paragraph
+        if current_paragraph:
+            chunk_content = '\n'.join(paragraph_content)
+            metadata = await self._analyze_paragraph_with_llm(chunk_content)
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_{current_paragraph}",
+                chunk_type="paragraph",
+                content=chunk_content,
+                metadata=metadata,
+                line_start=start_offset + paragraph_start,
+                line_end=start_offset + len(lines) - 1
+            )
+            chunks.append(chunk)
+        
+        return chunks
+    
+    async def _analyze_paragraph_with_llm(self, content: str) -> Dict[str, Any]:
+        """Use LLM to analyze paragraph content"""
+        await self._ensure_llm_engine()  # ADD this line
+        
+        prompt = f"""
+        Analyze this COBOL paragraph and extract key information:
+        
+        {content}
+        
+        Extract:
+        1. Field names referenced
+        2. File operations (READ, WRITE, REWRITE, DELETE)
+        3. Database operations (SQL statements)
+        4. Called paragraphs (PERFORM statements)
+        5. Main purpose/operation
+        
+        Return as JSON format:
+        {{
+            "field_names": ["field1", "field2"],
+            "file_operations": ["READ FILE1", "WRITE FILE2"],
+            "sql_operations": ["SELECT", "UPDATE"],
+            "called_paragraphs": ["PARA1", "PARA2"],
+            "main_purpose": "description"
+        }}
+        """
+        
+        sampling_params = SamplingParams(
+            temperature=0.1,
+            max_tokens=500,
+            stop=["```"]
+        )
+        
+        result = await self.llm_engine.generate(prompt, sampling_params)
+        
+        try:
+            response_text = result.outputs[0].text.strip()
+            # Extract JSON from response
+            if '{' in response_text:
+                json_start = response_text.find('{')
+                json_end = response_text.rfind('}') + 1
+                json_str = response_text[json_start:json_end]
+                return json.loads(json_str)
+        except:
+            pass
+        
+        # Fallback to regex extraction
+        return {
+            "field_names": self._extract_field_names(content),
+            "file_operations": self._extract_file_operations(content),
+            "sql_operations": self._extract_sql_operations(content),
+            "called_paragraphs": self._extract_perform_statements(content),
+            "main_purpose": "Code analysis"
+        }
+
+    async def analyze_jcl(self, jcl_name: str) -> Dict[str, Any]:
+        """Analyze JCL job flow"""
+        await self._ensure_llm_engine()  # ADD this line
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT chunk_type, content, metadata FROM program_chunks 
+            WHERE program_name = ? AND chunk_type IN ('job_step', 'job_header')
+            ORDER BY chunk_id
+        """, (jcl_name,))
+        
+        chunks = cursor.fetchall()
+        conn.close()
+        
+        if not chunks:
+            return {"error": f"JCL {jcl_name} not found"}
+        
+        # Analyze job flow with LLM
+        job_content = '\n'.join([chunk[1] for chunk in chunks])
+        
+        prompt = f"""
+        Analyze this complete JCL job flow:
+        
+        {job_content}
+        
+        Provide:
+        1. Job execution sequence
+        2. Data flow between steps
+        3. Critical dependencies
+        4. Error handling steps
+        5. Overall job purpose
+        
+        Format as detailed analysis.
+        """
+        
+        sampling_params = SamplingParams(temperature=0.2, max_tokens=1000)
+        result = await self.llm_engine.generate(prompt, sampling_params)
+        
+        return {
+            "jcl_name": jcl_name,
+            "total_steps": len([c for c in chunks if c[0] == 'job_step']),
+            "analysis": result.outputs[0].text,
+            "step_details": [json.loads(chunk[2]) for chunk in chunks if chunk[2]]
+        }
+
+    # ADD all the missing helper methods that were in the original file
     def _extract_field_names(self, content: str) -> List[str]:
         """Extract field names from COBOL code"""
         fields = []
@@ -554,52 +833,7 @@ class CodeParserAgent:
             "all_operations": list(all_operations),
             "processed_timestamp": datetime.now().isoformat()
         }
-    
-    async def analyze_jcl(self, jcl_name: str) -> Dict[str, Any]:
-        """Analyze JCL job flow"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT chunk_type, content, metadata FROM program_chunks 
-            WHERE program_name = ? AND chunk_type IN ('job_step', 'job_header')
-            ORDER BY chunk_id
-        """, (jcl_name,))
-        
-        chunks = cursor.fetchall()
-        conn.close()
-        
-        if not chunks:
-            return {"error": f"JCL {jcl_name} not found"}
-        
-        # Analyze job flow with LLM
-        job_content = '\n'.join([chunk[1] for chunk in chunks])
-        
-        prompt = f"""
-        Analyze this complete JCL job flow:
-        
-        {job_content}
-        
-        Provide:
-        1. Job execution sequence
-        2. Data flow between steps
-        3. Critical dependencies
-        4. Error handling steps
-        5. Overall job purpose
-        
-        Format as detailed analysis.
-        """
-        
-        sampling_params = SamplingParams(temperature=0.2, max_tokens=1000)
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
-        return {
-            "jcl_name": jcl_name,
-            "total_steps": len([c for c in chunks if c[0] == 'job_step']),
-            "analysis": result.outputs[0].text,
-            "step_details": [json.loads(chunk[2]) for chunk in chunks if chunk[2]]
-        }
-    
+
     async def analyze_job_flow(self, jcl_name: str) -> Dict[str, Any]:
         """Analyze detailed job flow"""
         return await self.analyze_jcl(jcl_name)
@@ -608,8 +842,14 @@ class CodeParserAgent:
         """Analyze COBOL program structure and operations"""
         return await self.parse_cobol(cobol_name)
 
-    async def parse_cobol(self, content: str, filename: str) -> List[CodeChunk]:
+    async def _parse_cobol(self, content: str, filename: str) -> List[CodeChunk]:
+        """Parse COBOL program into logical chunks - main entry point"""
+        await self._ensure_llm_engine()  # ADD this line
+        
+        return await self.parse_cobol(content, filename)
         """Parse COBOL program into logical chunks"""
+        await self._ensure_llm_engine()  # ADD this line
+        
         chunks = []
         lines = content.split('\n')
         
@@ -704,115 +944,11 @@ class CodeParserAgent:
             ))
         
         return sections
-    
-    async def _parse_cobol_paragraphs(self, content: str, program_name: str, start_offset: int) -> List[CodeChunk]:
-        """Parse COBOL procedure division into paragraphs"""
-        chunks = []
-        lines = content.split('\n')
-        
-        current_paragraph = None
-        paragraph_start = 0
-        paragraph_content = []
-        
-        for i, line in enumerate(lines):
-            # Check if this is a paragraph header
-            if self.cobol_patterns['paragraph'].match(line.strip()):
-                # Save previous paragraph
-                if current_paragraph:
-                    chunk_content = '\n'.join(paragraph_content)
-                    metadata = await self._analyze_paragraph_with_llm(chunk_content)
-                    
-                    chunk = CodeChunk(
-                        program_name=program_name,
-                        chunk_id=f"{program_name}_{current_paragraph}",
-                        chunk_type="paragraph",
-                        content=chunk_content,
-                        metadata=metadata,
-                        line_start=start_offset + paragraph_start,
-                        line_end=start_offset + i - 1
-                    )
-                    chunks.append(chunk)
-                
-                # Start new paragraph
-                current_paragraph = line.strip().rstrip('.')
-                paragraph_start = i
-                paragraph_content = [line]
-            else:
-                if current_paragraph:
-                    paragraph_content.append(line)
-        
-        # Add final paragraph
-        if current_paragraph:
-            chunk_content = '\n'.join(paragraph_content)
-            metadata = await self._analyze_paragraph_with_llm(chunk_content)
-            
-            chunk = CodeChunk(
-                program_name=program_name,
-                chunk_id=f"{program_name}_{current_paragraph}",
-                chunk_type="paragraph",
-                content=chunk_content,
-                metadata=metadata,
-                line_start=start_offset + paragraph_start,
-                line_end=start_offset + len(lines) - 1
-            )
-            chunks.append(chunk)
-        
-        return chunks
-    
-    async def _analyze_paragraph_with_llm(self, content: str) -> Dict[str, Any]:
-        """Use LLM to analyze paragraph content"""
-        prompt = f"""
-        Analyze this COBOL paragraph and extract key information:
-        
-        {content}
-        
-        Extract:
-        1. Field names referenced
-        2. File operations (READ, WRITE, REWRITE, DELETE)
-        3. Database operations (SQL statements)
-        4. Called paragraphs (PERFORM statements)
-        5. Main purpose/operation
-        
-        Return as JSON format:
-        {{
-            "field_names": ["field1", "field2"],
-            "file_operations": ["READ FILE1", "WRITE FILE2"],
-            "sql_operations": ["SELECT", "UPDATE"],
-            "called_paragraphs": ["PARA1", "PARA2"],
-            "main_purpose": "description"
-        }}
-        """
-        
-        sampling_params = SamplingParams(
-            temperature=0.1,
-            max_tokens=500,
-            stop=["```"]
-        )
-        
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
-        try:
-            response_text = result.outputs[0].text.strip()
-            # Extract JSON from response
-            if '{' in response_text:
-                json_start = response_text.find('{')
-                json_end = response_text.rfind('}') + 1
-                json_str = response_text[json_start:json_end]
-                return json.loads(json_str)
-        except:
-            pass
-        
-        # Fallback to regex extraction
-        return {
-            "field_names": self._extract_field_names(content),
-            "file_operations": self._extract_file_operations(content),
-            "sql_operations": self._extract_sql_operations(content),
-            "called_paragraphs": self._extract_perform_statements(content),
-            "main_purpose": "Code analysis"
-        }
-    
+
     async def _analyze_code_with_llm(self, content: str) -> Dict[str, Any]:
         """Use LLM to analyze generic code content"""
+        await self._ensure_llm_engine()  # ADD this line
+        
         prompt = f"""
         Analyze this code snippet:
         

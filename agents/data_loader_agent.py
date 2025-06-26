@@ -9,6 +9,7 @@ import sqlite3
 import json
 import pandas as pd
 import numpy as np
+import os
 from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 import re
@@ -47,7 +48,7 @@ class DataLoaderAgent:
         if self.coordinator is not None:
             try:
                 # Get available GPU from coordinator
-                best_gpu = self.coordinator.gpu_manager.get_available_gpu()
+                best_gpu = await self.coordinator.get_available_gpu_for_agent("data_loader")
                 if best_gpu is not None:
                     # Get shared LLM engine from coordinator
                     engine = await self.coordinator.get_or_create_llm_engine(best_gpu)
@@ -65,7 +66,7 @@ class DataLoaderAgent:
                 from opulence_coordinator import get_dynamic_coordinator
                 global_coordinator = get_dynamic_coordinator()
                 
-                best_gpu = global_coordinator.gpu_manager.get_available_gpu()
+                best_gpu = await global_coordinator.get_available_gpu_for_agent("data_loader")
                 if best_gpu is not None:
                     engine = await global_coordinator.get_or_create_llm_engine(best_gpu)
                     self.llm_engine = engine
@@ -104,6 +105,7 @@ class DataLoaderAgent:
                 )
                 engine_args.gpu_memory_utilization = 0.3  # Use less memory
                 
+                from vllm import AsyncLLMEngine
                 self.llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
                 self.gpu_id = best_gpu
                 self._engine_created = True
@@ -194,29 +196,29 @@ class DataLoaderAgent:
             file_content = self._read_file_safely(file_path)
             
             if file_extension == '.csv':
-                return await self._process_csv_file(file_path, file_content)
+                result = await self._process_csv_file(file_path, file_content)
             elif file_extension in ['.ddl', '.sql']:
-                return await self._process_ddl_file(file_path, file_content)
+                result = await self._process_ddl_file(file_path, file_content)
             elif 'dclgen' in file_path.name.lower() or file_extension == '.dcl':
-                return await self._process_dclgen_file(file_path, file_content)
+                result = await self._process_dclgen_file(file_path, file_content)
             elif file_extension == '.json':
-                return await self._process_layout_json(file_path, file_content)
+                result = await self._process_layout_json(file_path, file_content)
             elif file_extension == '.zip':
-                return await self._process_zip_file(file_path)
+                result = await self._process_zip_file(file_path)
             else:
                 # Try to auto-detect file type
-                return await self._auto_detect_and_process(file_path, file_content)
+                result = await self._auto_detect_and_process(file_path, file_content)
             
             # CHANGE: Use helper method instead of direct return
             return self._add_processing_info(result)
                 
         except Exception as e:
             self.logger.error(f"Failed to process file {file_path}: {str(e)}")
-            return {
+            return self._add_processing_info({
                 "status": "error",
                 "file_name": file_path.name,
                 "error": str(e)
-            }
+            })
     
     def _read_file_safely(self, file_path: Path) -> str:
         """Safely read file with encoding detection"""
@@ -604,6 +606,7 @@ class DataLoaderAgent:
     
     async def _parse_ddl_statements(self, ddl_content: str) -> List[Dict[str, Any]]:
         """Parse DDL statements to extract table definitions"""
+        await self._ensure_llm_engine()
         tables = []
         
         # Use LLM to parse complex DDL
@@ -719,6 +722,7 @@ class DataLoaderAgent:
     
     async def _parse_dclgen_structure(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
         """Parse DCLGEN structure using LLM"""
+        await self._ensure_llm_engine()
         prompt = f"""
         Parse this DB2 DCLGEN file and extract the table structure:
         
@@ -948,6 +952,7 @@ class DataLoaderAgent:
     async def get_data_lineage_info(self, component_name: str) -> Dict[str, Any]:
         """Get data lineage information for a component"""
         try:
+            await self._ensure_llm_engine()
             component_info = await self.get_component_info(component_name)
             
             if component_info["component_type"] == "table":
