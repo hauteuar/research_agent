@@ -8,6 +8,7 @@ import asyncio
 import sqlite3
 import json
 import re
+import os
 from typing import Dict, List, Optional, Any, Tuple, Set
 from datetime import datetime, timedelta
 import logging
@@ -38,11 +39,18 @@ class LineageEdge:
 class LineageAnalyzerAgent:
     """Agent for analyzing field lineage and component lifecycle"""
     
-    def __init__(self, llm_engine: AsyncLLMEngine, db_path: str, gpu_id: int):
+    def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
+                 gpu_id: int = None, coordinator=None):
         self.llm_engine = llm_engine
-        self.db_path = db_path
+        self.db_path = db_path or "opulence_data.db"
         self.gpu_id = gpu_id
+        self.coordinator = coordinator  # ADD coordinator reference
         self.logger = logging.getLogger(__name__)
+        
+        # ADD these lines for coordinator integration
+        self._engine_lock = asyncio.Lock()
+        self._engine_created = False
+        self._using_coordinator_llm = False
         
         # Initialize lineage tracking tables
         self._init_lineage_tables()
@@ -50,8 +58,155 @@ class LineageAnalyzerAgent:
         # In-memory lineage graph
         self.lineage_graph = nx.DiGraph()
         
-        # Load existing lineage data
-        asyncio.create_task(self._load_existing_lineage())
+        # Load existing lineage data (but don't use create_task in __init__)
+        self._lineage_loaded = False
+    
+    async def _ensure_llm_engine(self):
+        """Ensure LLM engine is available - use coordinator first, fallback to own"""
+        async with self._engine_lock:
+            if self.llm_engine is not None:
+                return  # Already have engine
+            
+            # Try to get SHARED engine from coordinator first
+            if self.coordinator is not None:
+                try:
+                    # Check if coordinator already has engines we can share
+                    existing_engines = list(self.coordinator.llm_engine_pool.keys())
+                    
+                    for engine_key in existing_engines:
+                        gpu_id = int(engine_key.split('_')[1])
+                        
+                        # Check if this GPU has enough memory for sharing
+                        try:
+                            from gpu_force_fix import GPUForcer
+                            memory_info = GPUForcer.check_gpu_memory(gpu_id)
+                            free_gb = memory_info.get('free_gb', 0)
+                            
+                            if free_gb >= 1.0:  # Can share this GPU
+                                self.llm_engine = self.coordinator.llm_engine_pool[engine_key]
+                                self.gpu_id = gpu_id
+                                self._using_coordinator_llm = True
+                                self.logger.info(f"LineageAnalyzer SHARING coordinator's LLM on GPU {gpu_id}")
+                                return
+                        except Exception as e:
+                            self.logger.warning(f"Error checking GPU {gpu_id} for sharing: {e}")
+                            continue
+                    
+                    # If no engine can be shared, get a new GPU
+                    best_gpu = await self.coordinator.get_available_gpu_for_agent("lineage_analyzer")
+                    if best_gpu is not None:
+                        engine = await self.coordinator.get_or_create_llm_engine(best_gpu)
+                        self.llm_engine = engine
+                        self.gpu_id = best_gpu
+                        self._using_coordinator_llm = True
+                        self.logger.info(f"LineageAnalyzer using coordinator's NEW LLM on GPU {best_gpu}")
+                        return
+                        
+                except Exception as e:
+                    self.logger.warning(f"Failed to get LLM from coordinator: {e}")
+            
+            # Try global coordinator as fallback
+            if not self._engine_created:
+                try:
+                    from opulence_coordinator import get_dynamic_coordinator
+                    global_coordinator = get_dynamic_coordinator()
+                    
+                    # Try to share existing engines first
+                    existing_engines = list(global_coordinator.llm_engine_pool.keys())
+                    for engine_key in existing_engines:
+                        gpu_id = int(engine_key.split('_')[1])
+                        try:
+                            from gpu_force_fix import GPUForcer
+                            memory_info = GPUForcer.check_gpu_memory(gpu_id)
+                            free_gb = memory_info.get('free_gb', 0)
+                            
+                            if free_gb >= 1.0:
+                                self.llm_engine = global_coordinator.llm_engine_pool[engine_key]
+                                self.gpu_id = gpu_id
+                                self._using_coordinator_llm = True
+                                self.logger.info(f"LineageAnalyzer SHARING global coordinator's LLM on GPU {gpu_id}")
+                                return
+                        except Exception as e:
+                            continue
+                    
+                    # If no sharing possible, get new GPU
+                    best_gpu = await global_coordinator.get_available_gpu_for_agent("lineage_analyzer")
+                    if best_gpu is not None:
+                        engine = await global_coordinator.get_or_create_llm_engine(best_gpu)
+                        self.llm_engine = engine
+                        self.gpu_id = best_gpu
+                        self._using_coordinator_llm = True
+                        self.logger.info(f"LineageAnalyzer using global coordinator's NEW LLM on GPU {best_gpu}")
+                        return
+                        
+                except Exception as e:
+                    self.logger.warning(f"Failed to get LLM from global coordinator: {e}")
+            
+            # Last resort: create own engine
+            if not self._engine_created:
+                await self._create_fallback_llm_engine()
+
+    async def _create_fallback_llm_engine(self):
+        """Create own LLM engine as last resort"""
+        try:
+            from gpu_force_fix import GPUForcer
+            
+            # Find GPU with most memory
+            best_gpu = None
+            best_memory = 0
+            
+            for gpu_id in range(4):  # Check all 4 GPUs
+                try:
+                    memory_info = GPUForcer.check_gpu_memory(gpu_id)
+                    free_gb = memory_info.get('free_gb', 0)
+                    if free_gb > best_memory:
+                        best_memory = free_gb
+                        best_gpu = gpu_id
+                except:
+                    continue
+            
+            if best_gpu is None or best_memory < 0.5:
+                raise RuntimeError(f"No GPU found with sufficient memory. Best: {best_memory:.1f}GB")
+            
+            self.logger.warning(f"LineageAnalyzer creating FALLBACK LLM on GPU {best_gpu} with {best_memory:.1f}GB")
+            
+            original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
+            
+            try:
+                GPUForcer.force_gpu_environment(best_gpu)
+                
+                # Create MINIMAL engine to reduce memory usage
+                engine_args = GPUForcer.create_vllm_engine_args(
+                    "microsoft/DialoGPT-small",  # Use smaller model as fallback
+                    1024  # Smaller context
+                )
+                engine_args.gpu_memory_utilization = 0.2  # Use even less memory
+                
+                from vllm import AsyncLLMEngine
+                self.llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
+                self.gpu_id = best_gpu
+                self._engine_created = True
+                self._using_coordinator_llm = False
+                
+                self.logger.info(f"✅ LineageAnalyzer fallback LLM created on GPU {best_gpu}")
+                
+            finally:
+                if original_cuda_visible is not None:
+                    os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible
+                elif 'CUDA_VISIBLE_DEVICES' in os.environ:
+                    del os.environ['CUDA_VISIBLE_DEVICES']
+                    
+        except Exception as e:
+            self.logger.error(f"Failed to create fallback LLM engine: {str(e)}")
+            raise
+
+    def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Add processing information to results"""
+        if isinstance(result, dict):
+            result['gpu_used'] = self.gpu_id
+            result['agent_type'] = 'lineage_analyzer'
+            result['using_coordinator_llm'] = self._using_coordinator_llm
+        return result
     
     def _init_lineage_tables(self):
         """Initialize SQLite tables for lineage tracking"""
@@ -124,6 +279,9 @@ class LineageAnalyzerAgent:
     
     async def _load_existing_lineage(self):
         """Load existing lineage data into memory graph"""
+        if self._lineage_loaded:
+            return
+            
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -150,6 +308,7 @@ class LineageAnalyzerAgent:
                                           **properties)
             
             conn.close()
+            self._lineage_loaded = True
             self.logger.info(f"Loaded lineage graph with {self.lineage_graph.number_of_nodes()} nodes and {self.lineage_graph.number_of_edges()} edges")
             
         except Exception as e:
@@ -158,8 +317,18 @@ class LineageAnalyzerAgent:
     async def analyze_field_lineage(self, field_name: str) -> Dict[str, Any]:
         """Analyze complete lineage for a specific field"""
         try:
+            await self._ensure_llm_engine()  # Ensure engine is available
+            await self._load_existing_lineage()  # Load lineage data
+            
             # Find all references to this field
             field_references = await self._find_field_references(field_name)
+            
+            if not field_references:
+                return self._add_processing_info({
+                    "field_name": field_name,
+                    "error": "No references found for this field",
+                    "suggestions": "Check if field name is correct or if data has been processed"
+                })
             
             # Build lineage graph for this field
             field_lineage = await self._build_field_lineage_graph(field_name, field_references)
@@ -178,19 +347,26 @@ class LineageAnalyzerAgent:
                 field_name, field_lineage, usage_analysis, transformations, lifecycle
             )
             
-            return {
+            result = {
                 "field_name": field_name,
                 "lineage_graph": field_lineage,
                 "usage_analysis": usage_analysis,
                 "transformations": transformations,
                 "lifecycle": lifecycle,
                 "comprehensive_report": lineage_report,
-                "impact_analysis": await self._analyze_field_impact(field_name, field_references)
+                "impact_analysis": await self._analyze_field_impact(field_name, field_references),
+                "status": "success"
             }
+            
+            return self._add_processing_info(result)
             
         except Exception as e:
             self.logger.error(f"Field lineage analysis failed for {field_name}: {str(e)}")
-            return {"error": str(e)}
+            return self._add_processing_info({
+                "field_name": field_name,
+                "error": str(e),
+                "status": "error"
+            })
     
     async def _find_field_references(self, field_name: str) -> List[Dict[str, Any]]:
         """Find all references to a field across the codebase"""
@@ -199,71 +375,120 @@ class LineageAnalyzerAgent:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Search in program chunks
-        cursor.execute("""
-            SELECT program_name, chunk_id, chunk_type, content, metadata
-            FROM program_chunks
-            WHERE content LIKE ? OR metadata LIKE ?
-        """, (f"%{field_name}%", f"%{field_name}%"))
-        
-        for program_name, chunk_id, chunk_type, content, metadata_str in cursor.fetchall():
-            metadata = json.loads(metadata_str) if metadata_str else {}
+        try:
+            # Search in program chunks with more flexible patterns
+            patterns = [
+                f"%{field_name}%",
+                f"%{field_name.upper()}%",
+                f"%{field_name.lower()}%"
+            ]
             
-            # Check if field is actually referenced
-            if self._is_field_referenced(field_name, content, metadata):
-                ref_details = await self._analyze_field_reference_with_llm(
-                    field_name, content, chunk_type, program_name
-                )
+            for pattern in patterns:
+                cursor.execute("""
+                    SELECT program_name, chunk_id, chunk_type, content, metadata
+                    FROM program_chunks
+                    WHERE content LIKE ? OR metadata LIKE ?
+                    LIMIT 100
+                """, (pattern, pattern))
                 
-                references.append({
-                    "program_name": program_name,
-                    "chunk_id": chunk_id,
-                    "chunk_type": chunk_type,
-                    "content": content,
-                    "metadata": metadata,
-                    "reference_details": ref_details
-                })
+                for program_name, chunk_id, chunk_type, content, metadata_str in cursor.fetchall():
+                    # Avoid duplicates
+                    if any(ref.get('chunk_id') == chunk_id for ref in references):
+                        continue
+                        
+                    metadata = json.loads(metadata_str) if metadata_str else {}
+                    
+                    # Check if field is actually referenced
+                    if self._is_field_referenced(field_name, content, metadata):
+                        ref_details = await self._analyze_field_reference_with_llm(
+                            field_name, content, chunk_type, program_name
+                        )
+                        
+                        references.append({
+                            "program_name": program_name,
+                            "chunk_id": chunk_id,
+                            "chunk_type": chunk_type,
+                            "content": content[:500] + "..." if len(content) > 500 else content,  # Truncate for memory
+                            "metadata": metadata,
+                            "reference_details": ref_details
+                        })
+                        
+                        # Limit to prevent memory issues
+                        if len(references) >= 50:
+                            break
+                
+                if len(references) >= 50:
+                    break
+            
+            # Check for table definitions in a separate query
+            try:
+                cursor.execute("""
+                    SELECT DISTINCT table_name, 'VARCHAR' as field_type, 
+                           'Field definition' as field_description, 
+                           'Business field' as business_meaning
+                    FROM file_metadata
+                    WHERE fields LIKE ?
+                    LIMIT 10
+                """, (f"%{field_name}%",))
+                
+                for table_name, field_type, description, business_meaning in cursor.fetchall():
+                    references.append({
+                        "type": "table_definition",
+                        "table_name": table_name,
+                        "field_type": field_type,
+                        "description": description,
+                        "business_meaning": business_meaning
+                    })
+            except sqlite3.OperationalError:
+                # Table might not exist, that's ok
+                pass
         
-        # Search in field catalog
-        cursor.execute("""
-            SELECT table_name, field_type, field_description, business_meaning
-            FROM field_catalog
-            WHERE field_name = ? OR field_name LIKE ?
-        """, (field_name, f"%{field_name}%"))
+        except Exception as e:
+            self.logger.error(f"Error finding field references: {str(e)}")
         
-        for table_name, field_type, description, business_meaning in cursor.fetchall():
-            references.append({
-                "type": "table_definition",
-                "table_name": table_name,
-                "field_type": field_type,
-                "description": description,
-                "business_meaning": business_meaning
-            })
+        finally:
+            conn.close()
         
-        conn.close()
         return references
     
     def _is_field_referenced(self, field_name: str, content: str, metadata: Dict) -> bool:
         """Check if field is actually referenced in content"""
-        # Check in content with word boundaries
-        pattern = r'\b' + re.escape(field_name) + r'\b'
-        if re.search(pattern, content, re.IGNORECASE):
-            return True
+        # Check in content with word boundaries (case insensitive)
+        patterns = [
+            r'\b' + re.escape(field_name) + r'\b',
+            r'\b' + re.escape(field_name.upper()) + r'\b',
+            r'\b' + re.escape(field_name.lower()) + r'\b'
+        ]
+        
+        for pattern in patterns:
+            if re.search(pattern, content, re.IGNORECASE):
+                return True
         
         # Check in metadata field lists
-        for key in ['field_names', 'fields']:
-            if key in metadata and field_name in metadata[key]:
-                return True
+        for key in ['field_names', 'fields', 'all_fields']:
+            if key in metadata:
+                fields = metadata[key]
+                if isinstance(fields, list):
+                    if any(field_name.lower() == f.lower() for f in fields):
+                        return True
+                elif isinstance(fields, str):
+                    if field_name.lower() in fields.lower():
+                        return True
         
         return False
     
     async def _analyze_field_reference_with_llm(self, field_name: str, content: str, 
                                                chunk_type: str, program_name: str) -> Dict[str, Any]:
         """Analyze how a field is referenced using LLM"""
+        await self._ensure_llm_engine()
+        
+        # Truncate content to avoid token limits
+        content_preview = content[:600] if len(content) > 600 else content
+        
         prompt = f"""
         Analyze how the field "{field_name}" is used in this {chunk_type} from program {program_name}:
         
-        {content[:800]}...
+        {content_preview}
         
         Determine:
         1. Operation type (READ, WRITE, UPDATE, DELETE, TRANSFORM, VALIDATE)
@@ -274,19 +499,19 @@ class LineageAnalyzerAgent:
         
         Return as JSON:
         {{
-            "operation_type": "READ/WRITE/UPDATE/etc",
-            "usage_context": "description",
-            "transformations": ["transformation1", "transformation2"],
-            "business_logic": "description",
-            "data_flow": "source/target/intermediate",
+            "operation_type": "READ",
+            "usage_context": "Field is read for validation",
+            "transformations": ["uppercase conversion"],
+            "business_logic": "Field validation logic",
+            "data_flow": "source",
             "confidence": 0.9
         }}
         """
         
-        sampling_params = SamplingParams(temperature=0.2, max_tokens=500)
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
         try:
+            sampling_params = SamplingParams(temperature=0.2, max_tokens=400)
+            result = await self.llm_engine.generate(prompt, sampling_params)
+            
             response_text = result.outputs[0].text.strip()
             if '{' in response_text:
                 json_start = response_text.find('{')
@@ -311,7 +536,7 @@ class LineageAnalyzerAgent:
         field_upper = field_name.upper()
         
         # COBOL patterns
-        if f"MOVE {field_upper}" in content_upper or f"MOVE TO {field_upper}" in content_upper:
+        if f"MOVE TO {field_upper}" in content_upper or f"MOVE {field_upper}" in content_upper:
             return "WRITE"
         elif f"READ" in content_upper and field_upper in content_upper:
             return "READ"
@@ -417,7 +642,9 @@ class LineageAnalyzerAgent:
         return {
             "nodes": lineage_nodes,
             "edges": lineage_edges,
-            "field_name": field_name
+            "field_name": field_name,
+            "total_nodes": len(lineage_nodes),
+            "total_edges": len(lineage_edges)
         }
     
     async def _analyze_field_usage_patterns(self, field_name: str, references: List[Dict]) -> Dict[str, Any]:
@@ -461,11 +688,20 @@ class LineageAnalyzerAgent:
     
     async def _analyze_usage_patterns_with_llm(self, field_name: str, usage_stats: Dict) -> str:
         """Analyze usage patterns using LLM"""
+        await self._ensure_llm_engine()
+        
+        stats_summary = {
+            "total_references": usage_stats["total_references"],
+            "programs_count": len(usage_stats["programs_using"]),
+            "operation_types": usage_stats["operation_types"],
+            "chunk_types": usage_stats["chunk_types"]
+        }
+        
         prompt = f"""
         Analyze the usage patterns for field "{field_name}":
         
         Usage Statistics:
-        {json.dumps(usage_stats, indent=2)}
+        {json.dumps(stats_summary, indent=2)}
         
         Provide insights on:
         1. Primary usage patterns
@@ -474,13 +710,16 @@ class LineageAnalyzerAgent:
         4. Optimization opportunities
         5. Business importance indicators
         
-        Provide a comprehensive analysis in narrative form.
+        Provide a concise analysis in 200 words or less.
         """
         
-        sampling_params = SamplingParams(temperature=0.3, max_tokens=800)
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
-        return result.outputs[0].text.strip()
+        try:
+            sampling_params = SamplingParams(temperature=0.3, max_tokens=400)
+            result = await self.llm_engine.generate(prompt, sampling_params)
+            return result.outputs[0].text.strip()
+        except Exception as e:
+            self.logger.warning(f"Failed to generate pattern analysis: {str(e)}")
+            return f"Field {field_name} is used across {len(usage_stats['programs_using'])} programs with {usage_stats['total_references']} total references."
     
     def _calculate_usage_complexity(self, usage_stats: Dict) -> float:
         """Calculate complexity score based on usage patterns"""
@@ -526,10 +765,14 @@ class LineageAnalyzerAgent:
     
     async def _extract_mathematical_transformations(self, field_name: str, content: str, program_name: str) -> List[Dict]:
         """Extract mathematical transformations from content"""
+        await self._ensure_llm_engine()
+        
+        content_preview = content[:400] if len(content) > 400 else content
+        
         prompt = f"""
         Extract mathematical transformations involving field "{field_name}" from this code:
         
-        {content[:600]}...
+        {content_preview}
         
         Find:
         1. Arithmetic operations (ADD, SUBTRACT, MULTIPLY, DIVIDE, COMPUTE)
@@ -547,10 +790,10 @@ class LineageAnalyzerAgent:
         }}]
         """
         
-        sampling_params = SamplingParams(temperature=0.2, max_tokens=600)
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
         try:
+            sampling_params = SamplingParams(temperature=0.2, max_tokens=500)
+            result = await self.llm_engine.generate(prompt, sampling_params)
+            
             response_text = result.outputs[0].text.strip()
             if '[' in response_text:
                 json_start = response_text.find('[')
@@ -591,7 +834,7 @@ class LineageAnalyzerAgent:
                 
                 stage_mapping = {
                     "WRITE": "creation",
-                    "UPDATE": "updates",
+                    "UPDATE": "updates", 
                     "READ": "reads",
                     "TRANSFORM": "transformations",
                     "DELETE": "deletions"
@@ -616,11 +859,18 @@ class LineageAnalyzerAgent:
     
     async def _analyze_lifecycle_completeness(self, field_name: str, stages: Dict) -> str:
         """Analyze lifecycle completeness using LLM"""
+        await self._ensure_llm_engine()
+        
+        # Summarize stages for prompt
+        stage_summary = {
+            stage: len(operations) for stage, operations in stages.items()
+        }
+        
         prompt = f"""
         Analyze the lifecycle completeness for field "{field_name}":
         
-        Lifecycle Stages:
-        {json.dumps(stages, indent=2)}
+        Lifecycle Stage Counts:
+        {json.dumps(stage_summary, indent=2)}
         
         Assess:
         1. Completeness of lifecycle coverage
@@ -629,13 +879,16 @@ class LineageAnalyzerAgent:
         4. Potential data quality issues
         5. Recommendations for improvement
         
-        Provide comprehensive lifecycle analysis.
+        Provide a comprehensive but concise lifecycle analysis in 250 words or less.
         """
         
-        sampling_params = SamplingParams(temperature=0.3, max_tokens=700)
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
-        return result.outputs[0].text.strip()
+        try:
+            sampling_params = SamplingParams(temperature=0.3, max_tokens=500)
+            result = await self.llm_engine.generate(prompt, sampling_params)
+            return result.outputs[0].text.strip()
+        except Exception as e:
+            self.logger.warning(f"Failed to generate lifecycle analysis: {str(e)}")
+            return f"Field {field_name} lifecycle analysis: {sum(stage_summary.values())} total operations across {len([s for s in stage_summary.values() if s > 0])} lifecycle stages."
     
     def _calculate_lifecycle_score(self, stages: Dict) -> float:
         """Calculate lifecycle completeness score"""
@@ -700,11 +953,21 @@ class LineageAnalyzerAgent:
     
     async def _generate_impact_assessment(self, field_name: str, impact_data: Dict) -> str:
         """Generate detailed impact assessment using LLM"""
+        await self._ensure_llm_engine()
+        
+        # Summarize impact data for prompt
+        impact_summary = {
+            "affected_programs": len(impact_data["affected_programs"]),
+            "affected_tables": len(impact_data["affected_tables"]),
+            "critical_operations": len(impact_data["critical_operations"]),
+            "risk_level": impact_data["risk_level"]
+        }
+        
         prompt = f"""
         Generate a detailed impact assessment for potential changes to field "{field_name}":
         
-        Impact Data:
-        {json.dumps(impact_data, indent=2, default=str)}
+        Impact Summary:
+        {json.dumps(impact_summary, indent=2)}
         
         Provide:
         1. Risk assessment and mitigation strategies
@@ -713,30 +976,43 @@ class LineageAnalyzerAgent:
         4. Business impact analysis
         5. Technical considerations
         
-        Format as a comprehensive impact report.
+        Format as a concise but comprehensive impact report (300 words max).
         """
         
-        sampling_params = SamplingParams(temperature=0.3, max_tokens=1000)
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
-        return result.outputs[0].text.strip()
+        try:
+            sampling_params = SamplingParams(temperature=0.3, max_tokens=600)
+            result = await self.llm_engine.generate(prompt, sampling_params)
+            return result.outputs[0].text.strip()
+        except Exception as e:
+            self.logger.warning(f"Failed to generate impact assessment: {str(e)}")
+            return f"Impact assessment for {field_name}: {impact_summary['risk_level']} risk level with {impact_summary['affected_programs']} affected programs."
     
     async def _generate_field_lineage_report(self, field_name: str, lineage_graph: Dict,
                                            usage_analysis: Dict, transformations: List,
                                            lifecycle: Dict) -> str:
         """Generate comprehensive field lineage report using LLM"""
+        await self._ensure_llm_engine()
+        
+        report_data = {
+            "field_name": field_name,
+            "total_nodes": lineage_graph.get("total_nodes", 0),
+            "total_edges": lineage_graph.get("total_edges", 0),
+            "total_references": usage_analysis['statistics']['total_references'],
+            "programs_count": len(usage_analysis['statistics']['programs_using']),
+            "transformations_count": len(transformations),
+            "lifecycle_score": lifecycle['lifecycle_score'],
+            "complexity_score": usage_analysis['complexity_score']
+        }
+        
         prompt = f"""
         Generate a comprehensive data lineage report for field "{field_name}":
         
-        Lineage Graph: {len(lineage_graph['nodes'])} nodes, {len(lineage_graph['edges'])} relationships
-        Usage Analysis: {usage_analysis['statistics']['total_references']} total references across {len(usage_analysis['statistics']['programs_using'])} programs
-        Transformations: {len(transformations)} transformation operations identified
-        Lifecycle Score: {lifecycle['lifecycle_score']:.2f}
+        Report Data:
+        {json.dumps(report_data, indent=2)}
         
         Key Statistics:
         - Operation Types: {usage_analysis['statistics']['operation_types']}
         - Table Definitions: {len(usage_analysis['statistics']['table_definitions'])}
-        - Complexity Score: {usage_analysis['complexity_score']:.2f}
         
         Generate a professional report including:
         1. Executive Summary
@@ -747,32 +1023,47 @@ class LineageAnalyzerAgent:
         6. Risk Analysis
         7. Recommendations
         
-        Format as a structured report suitable for technical and business audiences.
+        Format as a structured report suitable for technical and business audiences (500 words max).
         """
         
-        sampling_params = SamplingParams(temperature=0.2, max_tokens=1500)
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
-        return result.outputs[0].text.strip()
+        try:
+            sampling_params = SamplingParams(temperature=0.2, max_tokens=1000)
+            result = await self.llm_engine.generate(prompt, sampling_params)
+            return result.outputs[0].text.strip()
+        except Exception as e:
+            self.logger.warning(f"Failed to generate lineage report: {str(e)}")
+            return f"Lineage Report for {field_name}: Field found in {report_data['programs_count']} programs with {report_data['total_references']} references."
     
     async def analyze_full_lifecycle(self, component_name: str, component_type: str) -> Dict[str, Any]:
         """Analyze complete lifecycle of a component (file, table, program)"""
         try:
+            await self._ensure_llm_engine()
+            await self._load_existing_lineage()
+            
             if component_type in ["file", "table"]:
-                return await self._analyze_data_component_lifecycle(component_name)
+                result = await self._analyze_data_component_lifecycle(component_name)
             elif component_type in ["program", "cobol"]:
-                return await self._analyze_program_lifecycle(component_name)
+                result = await self._analyze_program_lifecycle(component_name)
             elif component_type == "jcl":
-                return await self._analyze_jcl_lifecycle(component_name)
+                result = await self._analyze_jcl_lifecycle(component_name)
             else:
-                return {"error": f"Unsupported component type: {component_type}"}
+                result = {"error": f"Unsupported component type: {component_type}"}
+            
+            return self._add_processing_info(result)
                 
         except Exception as e:
-            return {"error": str(e)}
+            return self._add_processing_info({
+                "component_name": component_name,
+                "component_type": component_type,
+                "error": str(e),
+                "status": "error"
+            })
     
     async def find_dependencies(self, component_name: str) -> List[str]:
         """Find all dependencies for a component"""
         try:
+            await self._ensure_llm_engine()
+            
             dependencies = set()
             
             conn = sqlite3.connect(self.db_path)
@@ -783,6 +1074,7 @@ class LineageAnalyzerAgent:
                 SELECT program_name, content, metadata
                 FROM program_chunks
                 WHERE content LIKE ? OR metadata LIKE ?
+                LIMIT 50
             """, (f"%{component_name}%", f"%{component_name}%"))
             
             for program_name, content, metadata_str in cursor.fetchall():
@@ -793,17 +1085,19 @@ class LineageAnalyzerAgent:
                 dependencies.update(chunk_dependencies)
             
             # Find table dependencies
-            cursor.execute("""
-                SELECT field_name, table_name
-                FROM field_catalog
-                WHERE field_name = ? OR table_name = ?
-            """, (component_name, component_name))
-            
-            for field_name, table_name in cursor.fetchall():
-                if field_name != component_name:
-                    dependencies.add(f"field:{field_name}")
-                if table_name != component_name:
-                    dependencies.add(f"table:{table_name}")
+            try:
+                cursor.execute("""
+                    SELECT DISTINCT table_name
+                    FROM file_metadata
+                    WHERE fields LIKE ? OR table_name LIKE ?
+                    LIMIT 20
+                """, (f"%{component_name}%", f"%{component_name}%"))
+                
+                for (table_name,) in cursor.fetchall():
+                    if table_name != component_name:
+                        dependencies.add(f"table:{table_name}")
+            except sqlite3.OperationalError:
+                pass  # Table might not exist
             
             conn.close()
             
@@ -815,12 +1109,16 @@ class LineageAnalyzerAgent:
     
     async def _extract_dependencies_from_chunk(self, component_name: str, content: str, program_name: str) -> Set[str]:
         """Extract dependencies from a code chunk"""
+        await self._ensure_llm_engine()
+        
+        content_preview = content[:400] if len(content) > 400 else content
+        
         prompt = f"""
         Extract all dependencies for component "{component_name}" from this code:
         
         Program: {program_name}
         Content:
-        {content[:500]}...
+        {content_preview}
         
         Find dependencies including:
         1. Called programs/modules
@@ -832,10 +1130,10 @@ class LineageAnalyzerAgent:
         Return as JSON array: ["dependency1", "dependency2", ...]
         """
         
-        sampling_params = SamplingParams(temperature=0.2, max_tokens=300)
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
         try:
+            sampling_params = SamplingParams(temperature=0.2, max_tokens=200)
+            result = await self.llm_engine.generate(prompt, sampling_params)
+            
             response_text = result.outputs[0].text.strip()
             if '[' in response_text:
                 json_start = response_text.find('[')
@@ -857,6 +1155,7 @@ class LineageAnalyzerAgent:
             SELECT program_name, chunk_id, chunk_type, content, metadata
             FROM program_chunks
             WHERE content LIKE ? OR metadata LIKE ?
+            LIMIT 30
         """, (f"%{component_name}%", f"%{component_name}%"))
         
         references = cursor.fetchall()
@@ -869,7 +1168,8 @@ class LineageAnalyzerAgent:
             "update_operations": [],
             "delete_operations": [],
             "archival_points": [],
-            "data_flow": {}
+            "data_flow": {},
+            "status": "success"
         }
         
         for program_name, chunk_id, chunk_type, content, metadata_str in references:
@@ -884,7 +1184,7 @@ class LineageAnalyzerAgent:
                 "program": program_name,
                 "chunk": chunk_id,
                 "operation": operation_analysis,
-                "content_snippet": content[:200]
+                "content_snippet": content[:200] + "..." if len(content) > 200 else content
             }
             
             if op_type == "CREATE":
@@ -910,11 +1210,15 @@ class LineageAnalyzerAgent:
     async def _analyze_component_operation(self, component_name: str, content: str, 
                                          program_name: str, chunk_type: str) -> Dict[str, Any]:
         """Analyze what operation a program performs on a component"""
+        await self._ensure_llm_engine()
+        
+        content_preview = content[:400] if len(content) > 400 else content
+        
         prompt = f"""
         Analyze what operation program "{program_name}" performs on component "{component_name}":
         
         Code Context ({chunk_type}):
-        {content[:600]}...
+        {content_preview}
         
         Determine:
         1. Primary operation (CREATE, READ, UPDATE, DELETE, ARCHIVE, COPY)
@@ -925,19 +1229,19 @@ class LineageAnalyzerAgent:
         
         Return as JSON:
         {{
-            "operation_type": "CREATE/READ/UPDATE/etc",
-            "business_purpose": "description",
-            "data_transformations": ["transformation1"],
-            "timing_frequency": "daily/monthly/on-demand/etc",
-            "dependencies": ["dependency1"],
+            "operation_type": "READ",
+            "business_purpose": "Data validation",
+            "data_transformations": ["format conversion"],
+            "timing_frequency": "daily",
+            "dependencies": ["other_component"],
             "confidence": 0.9
         }}
         """
         
-        sampling_params = SamplingParams(temperature=0.2, max_tokens=400)
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
         try:
+            sampling_params = SamplingParams(temperature=0.2, max_tokens=300)
+            result = await self.llm_engine.generate(prompt, sampling_params)
+            
             response_text = result.outputs[0].text.strip()
             if '{' in response_text:
                 json_start = response_text.find('{')
@@ -958,15 +1262,22 @@ class LineageAnalyzerAgent:
     async def _generate_component_lifecycle_report(self, component_name: str, 
                                                  lifecycle_data: Dict) -> str:
         """Generate comprehensive component lifecycle report"""
+        await self._ensure_llm_engine()
+        
+        summary_data = {
+            "component_name": component_name,
+            "creation_points": len(lifecycle_data['creation_points']),
+            "read_operations": len(lifecycle_data['read_operations']),
+            "update_operations": len(lifecycle_data['update_operations']),
+            "delete_operations": len(lifecycle_data['delete_operations']),
+            "archival_points": len(lifecycle_data['archival_points'])
+        }
+        
         prompt = f"""
         Generate a comprehensive lifecycle report for component "{component_name}":
         
-        Lifecycle Analysis:
-        - Creation Points: {len(lifecycle_data['creation_points'])}
-        - Read Operations: {len(lifecycle_data['read_operations'])}
-        - Update Operations: {len(lifecycle_data['update_operations'])}
-        - Delete Operations: {len(lifecycle_data['delete_operations'])}
-        - Archival Points: {len(lifecycle_data['archival_points'])}
+        Lifecycle Summary:
+        {json.dumps(summary_data, indent=2)}
         
         Generate a detailed report covering:
         1. Component Overview and Purpose
@@ -977,13 +1288,16 @@ class LineageAnalyzerAgent:
         6. Risk Assessment
         7. Optimization Recommendations
         
-        Format as a professional technical document.
+        Format as a professional technical document (400 words max).
         """
         
-        sampling_params = SamplingParams(temperature=0.2, max_tokens=1200)
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
-        return result.outputs[0].text.strip()
+        try:
+            sampling_params = SamplingParams(temperature=0.2, max_tokens=800)
+            result = await self.llm_engine.generate(prompt, sampling_params)
+            return result.outputs[0].text.strip()
+        except Exception as e:
+            self.logger.warning(f"Failed to generate lifecycle report: {str(e)}")
+            return f"Lifecycle report for {component_name}: {sum(summary_data.values())} total operations identified."
     
     async def _analyze_program_lifecycle(self, program_name: str) -> Dict[str, Any]:
         """Analyze lifecycle of a COBOL program"""
@@ -1004,6 +1318,7 @@ class LineageAnalyzerAgent:
             SELECT program_name, chunk_id, content
             FROM program_chunks
             WHERE content LIKE ? OR content LIKE ?
+            LIMIT 20
         """, (f"%CALL {program_name}%", f"%PERFORM {program_name}%"))
         
         callers = cursor.fetchall()
@@ -1016,7 +1331,8 @@ class LineageAnalyzerAgent:
             "external_calls": [],
             "file_operations": [],
             "db_operations": [],
-            "called_by": []
+            "called_by": [],
+            "status": "success"
         }
         
         # Analyze chunks
@@ -1048,10 +1364,14 @@ class LineageAnalyzerAgent:
     
     async def _analyze_program_call(self, called_program: str, content: str, caller_program: str) -> Dict[str, Any]:
         """Analyze how a program is called"""
+        await self._ensure_llm_engine()
+        
+        content_preview = content[:300] if len(content) > 300 else content
+        
         prompt = f"""
         Analyze how program "{called_program}" is called by "{caller_program}":
         
-        {content[:400]}...
+        {content_preview}
         
         Determine:
         1. Call method (CALL, PERFORM, etc.)
@@ -1062,18 +1382,18 @@ class LineageAnalyzerAgent:
         
         Return as JSON:
         {{
-            "call_method": "CALL/PERFORM",
-            "parameters": ["param1", "param2"],
+            "call_method": "CALL",
+            "parameters": ["param1"],
             "return_values": ["return1"],
             "call_conditions": "description",
             "business_purpose": "description"
         }}
         """
         
-        sampling_params = SamplingParams(temperature=0.2, max_tokens=300)
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
         try:
+            sampling_params = SamplingParams(temperature=0.2, max_tokens=250)
+            result = await self.llm_engine.generate(prompt, sampling_params)
+            
             response_text = result.outputs[0].text.strip()
             if '{' in response_text:
                 json_start = response_text.find('{')
@@ -1095,15 +1415,22 @@ class LineageAnalyzerAgent:
     
     async def _generate_program_lifecycle_report(self, program_name: str, analysis_data: Dict) -> str:
         """Generate program lifecycle report"""
+        await self._ensure_llm_engine()
+        
+        report_summary = {
+            "program_name": program_name,
+            "total_chunks": analysis_data['total_chunks'],
+            "chunk_types": analysis_data['chunk_breakdown'],
+            "file_operations": len(analysis_data['file_operations']),
+            "db_operations": len(analysis_data['db_operations']),
+            "called_by_count": len(analysis_data['called_by'])
+        }
+        
         prompt = f"""
         Generate a lifecycle report for COBOL program "{program_name}":
         
-        Program Analysis:
-        - Total Chunks: {analysis_data['total_chunks']}
-        - Chunk Types: {analysis_data['chunk_breakdown']}
-        - File Operations: {len(analysis_data['file_operations'])}
-        - DB Operations: {len(analysis_data['db_operations'])}
-        - Called By: {len(analysis_data['called_by'])} programs
+        Program Summary:
+        {json.dumps(report_summary, indent=2)}
         
         Generate a detailed report covering:
         1. Program Purpose and Function
@@ -1114,13 +1441,16 @@ class LineageAnalyzerAgent:
         6. Maintenance Considerations
         7. Performance and Optimization Notes
         
-        Format as a technical analysis document.
+        Format as a technical analysis document (400 words max).
         """
         
-        sampling_params = SamplingParams(temperature=0.2, max_tokens=1000)
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
-        return result.outputs[0].text.strip()
+        try:
+            sampling_params = SamplingParams(temperature=0.2, max_tokens=800)
+            result = await self.llm_engine.generate(prompt, sampling_params)
+            return result.outputs[0].text.strip()
+        except Exception as e:
+            self.logger.warning(f"Failed to generate program lifecycle report: {str(e)}")
+            return f"Program lifecycle report for {program_name}: {report_summary['total_chunks']} chunks analyzed."
     
     async def _analyze_jcl_lifecycle(self, jcl_name: str) -> Dict[str, Any]:
         """Analyze lifecycle of a JCL job"""
@@ -1144,7 +1474,8 @@ class LineageAnalyzerAgent:
             "step_details": [],
             "data_flow": [],
             "dependencies": [],
-            "scheduling_info": {}
+            "scheduling_info": {},
+            "status": "success"
         }
         
         # Analyze each step
@@ -1161,12 +1492,16 @@ class LineageAnalyzerAgent:
     
     async def _analyze_jcl_step_lifecycle(self, step_content: str, step_id: str) -> Dict[str, Any]:
         """Analyze individual JCL step lifecycle"""
+        await self._ensure_llm_engine()
+        
+        content_preview = step_content[:400] if len(step_content) > 400 else step_content
+        
         prompt = f"""
         Analyze this JCL job step lifecycle:
         
         Step ID: {step_id}
         Content:
-        {step_content}
+        {content_preview}
         
         Determine:
         1. Step purpose and function
@@ -1181,8 +1516,8 @@ class LineageAnalyzerAgent:
         {{
             "step_id": "{step_id}",
             "purpose": "description",
-            "inputs": ["input1", "input2"],
-            "outputs": ["output1", "output2"],
+            "inputs": ["input1"],
+            "outputs": ["output1"],
             "programs": ["prog1"],
             "transformations": ["transform1"],
             "error_handling": "description",
@@ -1190,10 +1525,10 @@ class LineageAnalyzerAgent:
         }}
         """
         
-        sampling_params = SamplingParams(temperature=0.2, max_tokens=500)
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
         try:
+            sampling_params = SamplingParams(temperature=0.2, max_tokens=400)
+            result = await self.llm_engine.generate(prompt, sampling_params)
+            
             response_text = result.outputs[0].text.strip()
             if '{' in response_text:
                 json_start = response_text.find('{')
@@ -1215,11 +1550,19 @@ class LineageAnalyzerAgent:
     
     async def _analyze_jcl_flow(self, jcl_name: str, step_details: List[Dict]) -> str:
         """Analyze overall JCL job flow"""
+        await self._ensure_llm_engine()
+        
+        flow_summary = {
+            "jcl_name": jcl_name,
+            "total_steps": len(step_details),
+            "step_types": [step.get("purpose", "Unknown") for step in step_details]
+        }
+        
         prompt = f"""
         Analyze the complete job flow for JCL "{jcl_name}":
         
-        Job Steps:
-        {json.dumps(step_details, indent=2)}
+        Job Flow Summary:
+        {json.dumps(flow_summary, indent=2)}
         
         Provide analysis of:
         1. Overall job purpose and business function
@@ -1230,17 +1573,23 @@ class LineageAnalyzerAgent:
         6. Scheduling considerations
         7. Optimization opportunities
         
-        Format as comprehensive job flow analysis.
+        Format as comprehensive job flow analysis (300 words max).
         """
         
-        sampling_params = SamplingParams(temperature=0.3, max_tokens=1000)
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
-        return result.outputs[0].text.strip()
+        try:
+            sampling_params = SamplingParams(temperature=0.3, max_tokens=600)
+            result = await self.llm_engine.generate(prompt, sampling_params)
+            return result.outputs[0].text.strip()
+        except Exception as e:
+            self.logger.warning(f"Failed to generate JCL flow analysis: {str(e)}")
+            return f"JCL flow analysis for {jcl_name}: {len(step_details)} steps analyzed."
     
     async def generate_lineage_summary(self, component_name: str) -> Dict[str, Any]:
         """Generate a comprehensive lineage summary for any component"""
         try:
+            await self._ensure_llm_engine()
+            await self._load_existing_lineage()
+            
             # Determine component type
             component_type = await self._determine_component_type(component_name)
             
@@ -1258,41 +1607,56 @@ class LineageAnalyzerAgent:
                 component_name, component_type, analysis, dependencies
             )
             
-            return {
+            result = {
                 "component_name": component_name,
                 "component_type": component_type,
                 "executive_summary": executive_summary,
                 "detailed_analysis": analysis,
                 "dependencies": dependencies,
-                "summary_generated": datetime.now().isoformat()
+                "summary_generated": datetime.now().isoformat(),
+                "status": "success"
             }
             
+            return self._add_processing_info(result)
+            
         except Exception as e:
-            return {"error": str(e)}
+            return self._add_processing_info({
+                "component_name": component_name,
+                "error": str(e),
+                "status": "error"
+            })
     
     async def _determine_component_type(self, component_name: str) -> str:
         """Determine the type of component"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Check if it's a field
-        cursor.execute("SELECT COUNT(*) FROM field_catalog WHERE field_name = ?", (component_name,))
-        if cursor.fetchone()[0] > 0:
-            conn.close()
-            return "field"
+        try:
+            # Check if it's a field (look in file metadata fields)
+            cursor.execute("""
+                SELECT COUNT(*) FROM file_metadata 
+                WHERE fields LIKE ? OR fields LIKE ? OR fields LIKE ?
+            """, (f"%{component_name}%", f"%{component_name.upper()}%", f"%{component_name.lower()}%"))
+            
+            if cursor.fetchone()[0] > 0:
+                conn.close()
+                return "field"
+        except sqlite3.OperationalError:
+            pass  # Table might not exist
         
-        # Check if it's a table
-        cursor.execute("SELECT COUNT(*) FROM table_schemas WHERE table_name = ?", (component_name,))
-        if cursor.fetchone()[0] > 0:
-            conn.close()
-            return "table"
+        try:
+            # Check if it's a table
+            cursor.execute("SELECT COUNT(*) FROM file_metadata WHERE table_name = ?", (component_name,))
+            if cursor.fetchone()[0] > 0:
+                conn.close()
+                return "table"
+        except sqlite3.OperationalError:
+            pass
         
         # Check if it's a program
         cursor.execute("SELECT COUNT(*) FROM program_chunks WHERE program_name = ?", (component_name,))
         if cursor.fetchone()[0] > 0:
-            conn.close()
             # Further determine if it's COBOL or JCL
-            cursor = sqlite3.connect(self.db_path).cursor()
             cursor.execute("""
                 SELECT chunk_type FROM program_chunks 
                 WHERE program_name = ? 
@@ -1312,12 +1676,34 @@ class LineageAnalyzerAgent:
     async def _generate_executive_summary(self, component_name: str, component_type: str, 
                                         analysis: Dict, dependencies: List[str]) -> str:
         """Generate executive summary for lineage analysis"""
+        await self._ensure_llm_engine()
+        
+        summary_data = {
+            "component_name": component_name,
+            "component_type": component_type,
+            "dependencies_count": len(dependencies),
+            "analysis_status": analysis.get("status", "unknown")
+        }
+        
+        # Extract key metrics based on component type
+        if component_type == "field" and "usage_analysis" in analysis:
+            usage_stats = analysis["usage_analysis"].get("statistics", {})
+            summary_data.update({
+                "total_references": usage_stats.get("total_references", 0),
+                "programs_using": len(usage_stats.get("programs_using", [])),
+                "risk_level": analysis.get("impact_analysis", {}).get("risk_level", "UNKNOWN")
+            })
+        elif "total_chunks" in analysis:
+            summary_data.update({
+                "total_chunks": analysis["total_chunks"],
+                "called_by_count": len(analysis.get("called_by", []))
+            })
+        
         prompt = f"""
         Generate an executive summary for the lineage analysis of {component_type} "{component_name}":
         
-        Component Type: {component_type}
-        Dependencies Found: {len(dependencies)}
-        Analysis Results: {str(analysis)[:500]}...
+        Summary Data:
+        {json.dumps(summary_data, indent=2)}
         
         Create a concise executive summary covering:
         1. Component purpose and importance
@@ -1326,10 +1712,14 @@ class LineageAnalyzerAgent:
         4. Business impact
         5. Recommended actions
         
-        Keep it under 300 words and suitable for management review.
+        Keep it under 200 words and suitable for management review.
         """
         
-        sampling_params = SamplingParams(temperature=0.3, max_tokens=400)
-        result = await self.llm_engine.generate(prompt, sampling_params)
+        try:
+            sampling_params = SamplingParams(temperature=0.3, max_tokens=400)
+            result = await self.llm_engine.generate(prompt, sampling_params)
+            return result.outputs[0].text.strip()
+        except Exception as e:
+            self.logger.warning(f"Failed to generate executive summary: {str(e)}")
+            return f"Executive Summary: {component_type.title()} {component_name} analyzed with {len(dependencies)} dependencies found."
         
-        return result.outputs[0].text.strip()
