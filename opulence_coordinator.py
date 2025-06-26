@@ -7,6 +7,7 @@ Handles dynamic GPU distribution, agent orchestration, and parallel processing
 import asyncio
 import logging
 import time
+import os
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
@@ -187,69 +188,57 @@ class DynamicOpulenceCoordinator:
         conn.close()
     
     async def get_or_create_llm_engine(self, gpu_id: int) -> AsyncLLMEngine:
-        """Get or create LLM engine for specific GPU with proper device management"""
+        """Get or create LLM engine for specific GPU with aggressive forcing"""
         async with self.engine_lock:
             engine_key = f"gpu_{gpu_id}"
             
             if engine_key not in self.llm_engine_pool:
                 try:
-                    # Force GPU memory cleanup first
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                        torch.cuda.synchronize()
+                    # Import the GPU forcer
+                    from gpu_force_fix import GPUForcer
                     
-                    # Set CUDA device explicitly
-                    torch.cuda.set_device(gpu_id)
+                    # Check memory before attempting
+                    memory_info = GPUForcer.check_gpu_memory(gpu_id)
+                    free_gb = memory_info['free_gb']
                     
-                    # Verify we're on the correct device
-                    current_device = torch.cuda.current_device()
-                    if current_device != gpu_id:
-                        raise RuntimeError(f"Failed to set CUDA device to {gpu_id}, current device is {current_device}")
+                    if free_gb < 2.0:
+                        raise RuntimeError(f"GPU {gpu_id} has insufficient memory: {free_gb:.1f}GB free (need at least 2GB)")
                     
-                    # Get memory info for the target GPU
-                    with torch.cuda.device(gpu_id):
-                        memory_info = torch.cuda.mem_get_info()
-                        free_memory_gb = memory_info[0] / (1024**3)
-                        total_memory_gb = memory_info[1] / (1024**3)
+                    self.logger.info(f"Creating LLM engine on GPU {gpu_id} with {free_gb:.1f}GB free memory")
+                    
+                    # AGGRESSIVE GPU FORCING - This changes the entire CUDA environment
+                    original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
+                    
+                    try:
+                        # Force GPU environment - this makes CUDA only see our target GPU
+                        GPUForcer.force_gpu_environment(gpu_id)
                         
-                        self.logger.info(f"GPU {gpu_id} memory: {free_memory_gb:.1f}GB free / {total_memory_gb:.1f}GB total")
+                        # Now create engine args (device 0 now maps to our target GPU)
+                        engine_args = GPUForcer.create_vllm_engine_args(
+                            self.config.model_name, 
+                            self.config.max_tokens
+                        )
                         
-                        # Check if we have enough memory (at least 2GB)
-                        if free_memory_gb < 2.0:
-                            raise RuntimeError(f"GPU {gpu_id} has insufficient memory: {free_memory_gb:.1f}GB free (need at least 2GB)")
-                    
-                    # Create engine args with specific GPU
-                    engine_args = AsyncEngineArgs(
-                        model=self.config.model_name,
-                        tensor_parallel_size=1,
-                        max_model_len=self.config.max_tokens,
-                        gpu_memory_utilization=0.7,  # More conservative memory usage
-                        device=f"cuda:{gpu_id}",
-                        trust_remote_code=True,
-                        enforce_eager=True,  # Disable CUDA graphs for better memory management
-                        disable_log_stats=True
-                    )
-                    
-                    # Set environment variables to force device
-                    import os
-                    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-                    
-                    self.logger.info(f"Creating LLM engine on GPU {gpu_id}...")
-                    engine = AsyncLLMEngine.from_engine_args(engine_args)
-                    
-                    # Reset CUDA_VISIBLE_DEVICES
-                    if "CUDA_VISIBLE_DEVICES" in os.environ:
-                        del os.environ["CUDA_VISIBLE_DEVICES"]
-                    
-                    self.llm_engine_pool[engine_key] = engine
-                    
-                    # Verify memory usage after engine creation
-                    with torch.cuda.device(gpu_id):
-                        final_memory_info = torch.cuda.mem_get_info()
-                        final_free_gb = final_memory_info[0] / (1024**3)
-                        used_gb = free_memory_gb - final_free_gb
+                        self.logger.info(f"Creating VLLM engine with forced GPU environment...")
                         
-                        self.logger.info(f"LLM engine created on GPU {gpu_id}. Used {used_gb:.1f}GB, {final_free_gb:.1f}GB remaining")
+                        # Create the engine - it will use the GPU forced by environment
+                        engine = AsyncLLMEngine.from_engine_args(engine_args)
+                        
+                        self.llm_engine_pool[engine_key] = engine
+                        
+                        # Verify final memory usage
+                        final_memory = GPUForcer.check_gpu_memory(gpu_id)
+                        final_free_gb = final_memory['free_gb']
+                        used_gb = free_gb - final_free_gb
+                        
+                        self.logger.info(f"✅ LLM engine created on GPU {gpu_id}. Used {used_gb:.1f}GB, {final_free_gb:.1f}GB remaining")
+                        
+                    finally:
+                        # Restore original CUDA_VISIBLE_DEVICES if it existed
+                        if original_cuda_visible is not None:
+                            os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible
+                        elif 'CUDA_VISIBLE_DEVICES' in os.environ:
+                            del os.environ['CUDA_VISIBLE_DEVICES']
                     
                 except Exception as e:
                     self.logger.error(f"Failed to create LLM engine for GPU {gpu_id}: {str(e)}")
