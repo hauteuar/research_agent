@@ -154,86 +154,148 @@ class DynamicGPUManager:
             self.logger.error(f"Failed to get GPU {gpu_id} info: {str(e)}")
             raise
     
-    def get_available_gpu(self, preferred_gpu: Optional[int] = None, fallback: bool = True) -> Optional[int]:
+    def get_available_gpu(self, preferred_gpu: Optional[int] = None, fallback: bool = True, 
+                     allow_sharing: bool = True) -> Optional[int]:
         """
-        Get the best available GPU with preference system
-        
+        Get the best available GPU with preference system and sharing support
+    
         Args:
             preferred_gpu: Preferred GPU ID (0, 1, 2, 3)
             fallback: Whether to fallback to other GPUs if preferred is unavailable
-            
+            allow_sharing: Whether to allow sharing GPUs that have some memory available
+        
         Returns:
             GPU ID or None if no GPU available
         """
         with self.lock:
             # Force refresh GPU info before allocation
             self._update_all_gpu_info()
-            
-            # Check if preferred GPU is available and has enough memory
+        
+            # Check if preferred GPU is available
             if preferred_gpu is not None and preferred_gpu in self.gpu_info:
                 gpu_info = self.gpu_info[preferred_gpu]
-                # Check if GPU has at least 2GB free memory and is not heavily utilized
-                min_free_memory = 2 * (1024**3)  # 2GB
-                if (gpu_info.status == GPUStatus.AVAILABLE and 
-                    gpu_info.free_memory > min_free_memory):
-                    self.logger.info(f"Using preferred GPU {preferred_gpu} (free: {gpu_info.free_memory / (1024**3):.1f}GB)")
+            
+                if allow_sharing:
+                    # Allow sharing if GPU has at least 1GB free (reduced from 2GB)
+                    min_free_memory = 1 * (1024**3)  # 1GB for sharing
+                else:
+                    # Require 2GB for exclusive use
+                    min_free_memory = 2 * (1024**3)  # 2GB for exclusive
+            
+                if (gpu_info.status in [GPUStatus.AVAILABLE, GPUStatus.BUSY] and 
+                    gpu_info.free_memory > min_free_memory and
+                    gpu_info.utilization < 85.0):  # Increased threshold for sharing
+                    self.logger.info(f"Using preferred GPU {preferred_gpu} (free: {gpu_info.free_memory / (1024**3):.1f}GB, sharing: {allow_sharing})")
                     return preferred_gpu
                 elif not fallback:
                     self.logger.warning(f"Preferred GPU {preferred_gpu} not suitable (free: {gpu_info.free_memory / (1024**3):.1f}GB, status: {gpu_info.status.value}) and fallback disabled")
                     return None
                 else:
-                    self.logger.warning(f"Preferred GPU {preferred_gpu} not suitable (free: {gpu_info.free_memory / (1024**3):.1f}GB, status: {gpu_info.status.value}), trying alternatives")
-            
-            # Find GPUs with sufficient free memory (at least 2GB)
-            min_free_memory = 2 * (1024**3)  # 2GB
+                    self.logger.warning(f"Preferred GPU {preferred_gpu} not suitable, trying alternatives")
+        
+            # Find suitable GPUs with memory availability
+            if allow_sharing:
+                min_free_memory = 1 * (1024**3)  # 1GB for sharing
+                max_utilization = 85.0  # Allow higher utilization for sharing
+            else:
+                min_free_memory = 2 * (1024**3)  # 2GB for exclusive
+                max_utilization = 70.0  # Lower utilization for exclusive
+        
             suitable_gpus = [
                 (gpu_id, info) for gpu_id, info in self.gpu_info.items()
-                if info.free_memory > min_free_memory and info.utilization < 90.0
+                if (info.free_memory > min_free_memory and 
+                    info.utilization < max_utilization and
+                    info.status != GPUStatus.ERROR)
             ]
-            
+        
             if suitable_gpus:
                 # Sort by free memory (descending) and utilization (ascending)
                 best_gpu = max(suitable_gpus, key=lambda x: (x[1].free_memory, -x[1].utilization))
-                self.logger.info(f"Selected GPU {best_gpu[0]} (free: {best_gpu[1].free_memory / (1024**3):.1f}GB, utilization: {best_gpu[1].utilization:.1f}%)")
+                sharing_mode = "sharing" if allow_sharing else "exclusive"
+                self.logger.info(f"Selected GPU {best_gpu[0]} ({sharing_mode} mode: free: {best_gpu[1].free_memory / (1024**3):.1f}GB, utilization: {best_gpu[1].utilization:.1f}%)")
                 return best_gpu[0]
+        
+            # If no GPU meets criteria, try with lower requirements
+            if allow_sharing:
+                emergency_gpus = [
+                    (gpu_id, info) for gpu_id, info in self.gpu_info.items()
+                        if (info.free_memory > 512 * (1024**2) and  # 512MB minimum
+                        info.utilization < 95.0 and  # Very high but not maxed
+                        info.status != GPUStatus.ERROR)
+                ]
             
-            # If no GPU has enough free memory, find the one with most free memory
-            if self.gpu_info:
-                best_gpu = max(self.gpu_info.items(), key=lambda x: x[1].free_memory)
-                if best_gpu[1].free_memory > 500 * (1024**2):  # At least 500MB
-                    self.logger.warning(f"Using GPU {best_gpu[0]} with limited memory (free: {best_gpu[1].free_memory / (1024**3):.1f}GB)")
+                if emergency_gpus:
+                    best_gpu = max(emergency_gpus, key=lambda x: x[1].free_memory)
+                    self.logger.warning(f"EMERGENCY: Using GPU {best_gpu[0]} with limited memory (free: {best_gpu[1].free_memory / (1024**3):.1f}GB)")
                     return best_gpu[0]
-            
-            self.logger.error("No suitable GPUs found")
+        
+            self.logger.error(f"No suitable GPUs found (sharing: {allow_sharing})")
             return None
+
     
     def reserve_gpu_for_workload(self, workload_type: str, preferred_gpu: Optional[int] = None, 
-                                duration_estimate: int = 300) -> Optional[int]:
+                            duration_estimate: int = 300, allow_sharing: bool = True) -> Optional[int]:
         """
-        Reserve a GPU for a specific workload
-        
+        Reserve a GPU for a specific workload with sharing support
+    
         Args:
             workload_type: Type of workload (e.g., 'llm_inference', 'embedding', 'analysis')
             preferred_gpu: Preferred GPU ID
             duration_estimate: Estimated duration in seconds
-            
+            allow_sharing: Whether to allow sharing this GPU with other workloads
+        
         Returns:
             Reserved GPU ID or None
         """
-        gpu_id = self.get_available_gpu(preferred_gpu)
-        
+        # For LLM engines, prefer not to share unless necessary
+        if "llm_engine" in workload_type.lower():
+            gpu_id = self.get_available_gpu(preferred_gpu, allow_sharing=False)
+            if gpu_id is None and allow_sharing:
+                # Fallback to sharing if exclusive allocation failed
+                gpu_id = self.get_available_gpu(preferred_gpu, allow_sharing=True)
+        else:
+            # For other workloads, sharing is fine
+            gpu_id = self.get_available_gpu(preferred_gpu, allow_sharing=allow_sharing)
+    
         if gpu_id is not None:
             with self.lock:
                 self.workload_assignments[gpu_id].append({
                     "type": workload_type,
                     "start_time": time.time(),
                     "estimated_duration": duration_estimate,
-                    "status": "active"
+                    "status": "active",
+                    "allows_sharing": allow_sharing
                 })
-            
-            self.logger.info(f"Reserved GPU {gpu_id} for {workload_type} (estimated {duration_estimate}s)")
-            
+        
+            sharing_info = " (shared)" if allow_sharing else " (exclusive)"
+            self.logger.info(f"Reserved GPU {gpu_id} for {workload_type}{sharing_info} (estimated {duration_estimate}s)")
+        
         return gpu_id
+
+    def get_gpu_sharing_info(self) -> Dict[int, Dict[str, Any]]:
+        """Get detailed sharing information for all GPUs"""
+        with self.lock:
+            sharing_info = {}
+        
+            for gpu_id, info in self.gpu_info.items():
+                active_workloads = [w for w in self.workload_assignments.get(gpu_id, []) if w["status"] == "active"]
+            
+                sharing_info[gpu_id] = {
+                    "total_memory_gb": info.total_memory / (1024**3),
+                    "free_memory_gb": info.free_memory / (1024**3),
+                    "utilization_percent": info.utilization,
+                    "active_workloads": len(active_workloads),
+                    "workload_types": [w["type"] for w in active_workloads],
+                    "allows_sharing": any(w.get("allows_sharing", False) for w in active_workloads),
+                    "can_accept_more": (
+                        info.free_memory > 1 * (1024**3) and  # At least 1GB free
+                        info.utilization < 85.0 and  # Not too busy
+                        len(active_workloads) < 3  # Not too many workloads
+                    ),
+                    "status": info.status.value
+                }
+        
+            return sharing_info
     
     def release_gpu_workload(self, gpu_id: int, workload_type: str):
         """Release a GPU workload"""
