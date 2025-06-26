@@ -794,6 +794,14 @@ class DynamicOpulenceCoordinator:
         
             # FIX 3: Verify database storage - ADD THIS LINE
             await self._verify_database_storage(file_paths)
+
+            if results:  # Only if we have successful results
+                try:
+                    await self._create_vector_embeddings_for_processed_files(file_paths)
+                    self.logger.info("Vector embeddings created for processed files")
+                except Exception as e:
+                    self.logger.warning(f"Vector embedding creation failed: {str(e)}")
+                # Don't fail the entire batch if vector indexing fails
             
             # Update statistics
             processing_time = time.time() - start_time
@@ -819,6 +827,42 @@ class DynamicOpulenceCoordinator:
                 "files_processed": 0
                 }
 
+    async def _create_vector_embeddings_for_processed_files(self, file_paths: List[Path]):
+        """Create vector embeddings for all successfully processed files"""
+        try:
+            async with self.get_agent_with_gpu("vector_index") as (vector_agent, gpu_id):
+                
+                # Get all program chunks that were just created
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                # Get chunks from recently processed files
+                program_names = [fp.stem for fp in file_paths]
+                placeholders = ','.join(['?' for _ in program_names])
+                
+                cursor.execute(f"""
+                    SELECT id, program_name, chunk_id, chunk_type, content, metadata
+                    FROM program_chunks 
+                    WHERE program_name IN ({placeholders})
+                    AND created_timestamp > datetime('now', '-1 hour')
+                """, program_names)
+                
+                chunks = cursor.fetchall()
+                conn.close()
+                
+                if chunks:
+                    # Create embeddings for all chunks
+                    embedding_result = await vector_agent.create_embeddings_for_chunks(chunks)
+                    self.logger.info(f"Created embeddings for {len(chunks)} chunks from {len(file_paths)} files")
+                    return embedding_result
+                else:
+                    self.logger.warning("No chunks found for vector embedding creation")
+                    return {"status": "no_chunks"}
+                    
+        except Exception as e:
+            self.logger.error(f"Vector embedding creation failed: {str(e)}")
+            raise
+        
     async def _process_cobol_file_with_storage(self, file_path: Path) -> Dict[str, Any]:
         """Process COBOL file with guaranteed database storage"""
         try:
@@ -1108,7 +1152,15 @@ class DynamicOpulenceCoordinator:
                     db2_comparison = await db2_agent.compare_data(component_name)
                     analysis_result["db2_comparison"] = db2_comparison
                     analysis_result["db2_gpu_used"] = gpu_id
-            
+            try:
+                async with self.get_agent_with_gpu("vector_index", preferred_gpu) as (vector_agent, gpu_id):
+                    semantic_results = await vector_agent.search_similar_components(component_name)
+                    analysis_result["semantic_search"] = semantic_results
+                    analysis_result["vector_gpu_used"] = gpu_id
+            except Exception as e:
+                self.logger.warning(f"Semantic search failed for {component_name}: {str(e)}")
+                analysis_result["semantic_search"] = {"error": str(e)}
+
             # Cache the result
             self.cache_manager.set(cache_key, analysis_result)
             
@@ -1120,6 +1172,95 @@ class DynamicOpulenceCoordinator:
         except Exception as e:
             self.logger.error(f"Component analysis failed: {str(e)}")
             return {"status": "error", "error": str(e)}
+    
+    async def search_code_patterns(self, query: str, limit: int = 10) -> Dict[str, Any]:
+        """Search code patterns using vector similarity"""
+        try:
+            async with self.get_agent_with_gpu("vector_index") as (vector_agent, gpu_id):
+                results = await vector_agent.search_code_by_pattern(query, limit=limit)
+                
+                return {
+                    "status": "success",
+                    "query": query,
+                    "results": results,
+                    "total_found": len(results),
+                    "gpu_used": gpu_id
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Code pattern search failed: {str(e)}")
+            return {
+                "status": "error", 
+                "error": str(e),
+                "query": query
+            }
+
+    # 5. NEW METHOD: Rebuild vector index
+    async def rebuild_vector_index(self) -> Dict[str, Any]:
+        """Rebuild the entire vector index from stored chunks"""
+        try:
+            async with self.get_agent_with_gpu("vector_index") as (vector_agent, gpu_id):
+                
+                # Get all chunks from database
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT id, program_name, chunk_id, chunk_type, content, metadata
+                    FROM program_chunks 
+                    ORDER BY created_timestamp DESC
+                """)
+                
+                all_chunks = cursor.fetchall()
+                conn.close()
+                
+                if not all_chunks:
+                    return {"status": "error", "error": "No chunks found in database"}
+                
+                # Rebuild index
+                result = await vector_agent.rebuild_index_from_chunks(all_chunks)
+                
+                return {
+                    "status": "success",
+                    "chunks_processed": len(all_chunks),
+                    "rebuild_result": result,
+                    "gpu_used": gpu_id
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Vector index rebuild failed: {str(e)}")
+            return {"status": "error", "error": str(e)}
+    
+    async def process_chat_query_with_vector_search(self, query: str) -> str:
+        """Process chat query with vector search enhancement"""
+        try:
+            # Check if this is a search query
+            if any(word in query.lower() for word in ['search', 'find', 'pattern', 'similar', 'like']):
+                
+                # Use vector search
+                search_results = await self.search_code_patterns(query, limit=5)
+                
+                if search_results.get("status") == "success" and search_results.get("results"):
+                    response = f"## 🔍 Found {len(search_results['results'])} Similar Code Patterns\n\n"
+                    
+                    for i, result in enumerate(search_results["results"][:3], 1):
+                        metadata = result.get("metadata", {})
+                        response += f"**{i}. {metadata.get('program_name', 'Unknown Program')}**\n"
+                        response += f"- Chunk: {metadata.get('chunk_id', 'unknown')}\n"
+                        response += f"- Type: {metadata.get('chunk_type', 'code')}\n"
+                        response += f"- Similarity: {result.get('similarity_score', 0):.2f}\n"
+                        response += f"- Preview: {result.get('content', '')[:100]}...\n\n"
+                    
+                    return response
+                else:
+                    return "🔍 No similar code patterns found. Try refining your search terms."
+            
+            # Fall back to regular query processing
+            return await self.process_regular_chat_query(query)
+            
+        except Exception as e:
+            return f"❌ Search failed: {str(e)}"
+        
     
     async def _determine_component_type(self, component_name: str, preferred_gpu: Optional[int] = None) -> str:
         """Use LLM to determine component type with dynamic GPU allocation"""

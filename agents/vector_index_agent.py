@@ -26,13 +26,13 @@ class VectorIndexAgent:
     """Agent for building and managing vector indices"""
     
     def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
-                 gpu_id: int = None, coordinator=None):
+             gpu_id: int = None, coordinator=None):
         self.llm_engine = llm_engine
         self.db_path = db_path or "opulence_data.db"  # ADD default value
         self.gpu_id = gpu_id
         self.coordinator = coordinator  # ADD this line
         self.logger = logging.getLogger(__name__)
-        
+        self._initialized = False
         # ADD these lines for coordinator integration
         self._engine_created = False
         self._using_coordinator_llm = False
@@ -54,6 +54,12 @@ class VectorIndexAgent:
         
         # Initialize components
         asyncio.create_task(self._initialize_components())
+
+    async def _ensure_initialized(self):
+        """Ensure components are initialized before use"""
+        if not self._initialized:
+            await self._initialize_components()
+            self._initialized = True
 
     # ADD this new method
     async def _ensure_llm_engine(self):
@@ -139,6 +145,162 @@ class VectorIndexAgent:
         except Exception as e:
             self.logger.error(f"Failed to create fallback LLM engine: {str(e)}")
             raise
+    async def create_embeddings_for_chunks(self, chunks: List[tuple]) -> Dict[str, Any]:
+        """Create embeddings for a list of chunks - MISSING METHOD"""
+        try:
+            await self._ensure_initialized()
+            
+            embeddings_created = 0
+            
+            for chunk_data in chunks:
+                chunk_id, program_name, chunk_id_str, chunk_type, content, metadata_str = chunk_data
+                
+                try:
+                    metadata = json.loads(metadata_str) if metadata_str else {}
+                    
+                    # Generate embedding
+                    embedding = await self.embed_code_chunk(content, metadata)
+                    
+                    # Store in FAISS
+                    faiss_id = self.faiss_index.ntotal
+                    self.faiss_index.add(embedding.reshape(1, -1).astype('float32'))
+                    
+                    # Store in ChromaDB
+                    self.collection.add(
+                        embeddings=[embedding.tolist()],
+                        documents=[content],
+                        metadatas=[{
+                            "program_name": program_name,
+                            "chunk_id": chunk_id_str,
+                            "chunk_type": chunk_type,
+                            "faiss_id": faiss_id,
+                            **metadata
+                        }],
+                        ids=[f"{program_name}_{chunk_id_str}"]
+                    )
+                    
+                    # Store embedding reference in SQLite
+                    embedding_id = f"{program_name}_{chunk_id_str}_embed"
+                    await self._store_embedding_reference(
+                        chunk_id, embedding_id, faiss_id, embedding.tolist()
+                    )
+                    
+                    embeddings_created += 1
+                    
+                except Exception as e:
+                    self.logger.error(f"Failed to process chunk {chunk_id_str}: {str(e)}")
+                    continue
+            
+            # Save FAISS index
+            await self._save_faiss_index()
+            
+            result = {
+                "status": "success",
+                "embeddings_created": embeddings_created,
+                "total_chunks": len(chunks)
+            }
+            
+            return self._add_processing_info(result)
+            
+        except Exception as e:
+            self.logger.error(f"Chunk embedding creation failed: {str(e)}")
+            return self._add_processing_info({"status": "error", "error": str(e)})
+
+    # FIX 4: Add missing search_similar_components method
+    async def search_similar_components(self, component_name: str, top_k: int = 5) -> Dict[str, Any]:
+        """Search for components similar to the given component name - MISSING METHOD"""
+        try:
+            await self._ensure_initialized()
+            
+            # Create search query based on component name
+            search_query = f"component {component_name} similar functionality"
+            
+            # Perform semantic search
+            results = await self.semantic_search(search_query, top_k)
+            
+            # Filter and enhance results
+            similar_components = []
+            for result in results:
+                metadata = result.get('metadata', {})
+                
+                # Skip exact matches
+                if metadata.get('program_name') == component_name:
+                    continue
+                    
+                similar_components.append({
+                    "component_name": metadata.get('program_name', 'Unknown'),
+                    "chunk_id": metadata.get('chunk_id', 'Unknown'),
+                    "chunk_type": metadata.get('chunk_type', 'Unknown'),
+                    "similarity_score": result.get('similarity_score', 0),
+                    "content_preview": result.get('content', '')[:200] + "...",
+                    "shared_elements": self._find_shared_elements(component_name, metadata)
+                })
+            
+            search_result = {
+                "status": "success",
+                "component_name": component_name,
+                "similar_components": similar_components,
+                "total_found": len(similar_components)
+            }
+            
+            return self._add_processing_info(search_result)
+            
+        except Exception as e:
+            self.logger.error(f"Similar component search failed: {str(e)}")
+            return self._add_processing_info({"status": "error", "error": str(e)})
+
+    # FIX 5: Add missing rebuild_index_from_chunks method
+    async def rebuild_index_from_chunks(self, chunks: List[tuple]) -> Dict[str, Any]:
+        """Rebuild index from provided chunks - MISSING METHOD"""
+        try:
+            await self._ensure_initialized()
+            
+            # Clear existing indices
+            self.faiss_index = faiss.IndexFlatIP(self.vector_dim)
+            
+            # Clear ChromaDB collection
+            try:
+                self.chroma_client.delete_collection(self.collection_name)
+            except:
+                pass
+            
+            self.collection = self.chroma_client.create_collection(
+                name=self.collection_name,
+                metadata={"description": "Opulence mainframe code chunks - rebuilt"}
+            )
+            
+            # Process all chunks
+            result = await self.create_embeddings_for_chunks(chunks)
+            
+            rebuild_result = {
+                "status": "success",
+                "message": "Index rebuilt from chunks",
+                "chunks_processed": len(chunks),
+                **result
+            }
+            
+            return self._add_processing_info(rebuild_result)
+            
+        except Exception as e:
+            self.logger.error(f"Index rebuild from chunks failed: {str(e)}")
+            return self._add_processing_info({"status": "error", "error": str(e)})
+
+    # FIX 6: Add helper method for shared elements
+    def _find_shared_elements(self, component_name: str, metadata: Dict[str, Any]) -> List[str]:
+        """Find shared elements between components"""
+        shared = []
+        
+        # This is a simple implementation - you could enhance it
+        if 'field_names' in metadata:
+            shared.append(f"Fields: {', '.join(metadata['field_names'][:3])}")
+        
+        if 'operations' in metadata:
+            shared.append(f"Operations: {', '.join(metadata['operations'][:3])}")
+        
+        if 'file_operations' in metadata:
+            shared.append(f"File ops: {', '.join(metadata['file_operations'][:2])}")
+        
+        return shared
 
     # ADD this helper method
     def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
@@ -242,6 +404,7 @@ class VectorIndexAgent:
     async def process_batch_embeddings(self, limit: int = None) -> Dict[str, Any]:
         """Process all unembedded chunks in batch"""
         try:
+            await self._ensure_initialized()
             # Get chunks that need embedding
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -332,6 +495,7 @@ class VectorIndexAgent:
     async def _store_embedding_reference(self, chunk_id: int, embedding_id: str, 
                                        faiss_id: int, embedding_vector: List[float]):
         """Store embedding reference in SQLite"""
+        await self._ensure_initialized()
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -369,6 +533,7 @@ class VectorIndexAgent:
                             filter_metadata: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """Perform semantic search on code chunks"""
         try:
+            await self._ensure_initialized()
             # Generate query embedding
             query_embedding = await self.embed_code_chunk(query, {})
             
@@ -427,6 +592,7 @@ class VectorIndexAgent:
     async def find_similar_code_patterns(self, reference_chunk_id: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """Find similar code patterns to a reference chunk"""
         try:
+            await self._ensure_initialized()
             # Get reference chunk embedding
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -491,6 +657,7 @@ class VectorIndexAgent:
     async def _analyze_pattern_similarity(self, ref_code: str, similar_code: str) -> str:
         """Analyze what makes two code patterns similar"""
         await self._ensure_llm_engine()  # ADD this line
+        await self._ensure_initialized()
         
         prompt = f"""
         Compare these two code patterns and identify the similarity type:
@@ -516,6 +683,7 @@ class VectorIndexAgent:
         """Search for code using natural language pattern description"""
         try:
             await self._ensure_llm_engine()  # ADD this line
+            await self._ensure_initialized()
             
             # Use LLM to enhance the search query
             enhanced_query = await self._enhance_search_query(pattern_description)
@@ -535,6 +703,7 @@ class VectorIndexAgent:
     async def _enhance_search_query(self, pattern_description: str) -> str:
         """Use LLM to enhance search query"""
         await self._ensure_llm_engine()  # ADD this line
+        await self._ensure_initialized()
         
         prompt = f"""
         Convert this natural language pattern description into a technical search query for mainframe COBOL/JCL code:
@@ -557,6 +726,7 @@ class VectorIndexAgent:
     async def _rank_search_results(self, original_query: str, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Use LLM to rank search results by relevance"""
         await self._ensure_llm_engine()  # ADD this line
+        await self._ensure_initialized()
         
         if not results:
             return results
@@ -577,6 +747,7 @@ class VectorIndexAgent:
     
     async def _calculate_relevance_score(self, query: str, content: str, metadata: Dict) -> float:
         """Calculate relevance score using LLM"""
+        await self._ensure_initialized()
         await self._ensure_llm_engine()  # ADD this line
         
         prompt = f"""
@@ -609,6 +780,7 @@ class VectorIndexAgent:
     async def build_code_knowledge_graph(self) -> Dict[str, Any]:
         """Build a knowledge graph of code relationships"""
         try:
+            await self._ensure_initialized()
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
@@ -771,6 +943,7 @@ class VectorIndexAgent:
     async def get_embedding_statistics(self) -> Dict[str, Any]:
         """Get statistics about the embedding index"""
         try:
+            await self._ensure_initialized()
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
@@ -819,6 +992,7 @@ class VectorIndexAgent:
     async def rebuild_index(self) -> Dict[str, Any]:
         """Rebuild the entire vector index from scratch"""
         try:
+            await self._ensure_initialized()
             # Clear existing indices
             self.faiss_index = faiss.IndexFlatIP(self.vector_dim)
             
