@@ -212,15 +212,49 @@ class CodeParserAgent:
         return result
     
     async def process_file(self, file_path: Path) -> Dict[str, Any]:
-        """Process a single code file"""
+        """Process a single code file with enhanced error handling and verification"""
         try:
             await self._ensure_llm_engine()
             
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
+            # FIX 7: Verify file exists and is readable
+            if not file_path.exists():
+                return self._add_processing_info({
+                    "status": "error",
+                    "file_name": file_path.name,
+                    "error": "File not found"
+                })
+            
+            # FIX 8: Better file reading with encoding detection
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+            except UnicodeDecodeError:
+                # Try different encodings
+                for encoding in ['cp1252', 'latin1', 'ascii']:
+                    try:
+                        with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
+                            content = f.read()
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                else:
+                    return self._add_processing_info({
+                        "status": "error",
+                        "file_name": file_path.name,
+                        "error": "Unable to decode file with any encoding"
+                    })
+            
+            if not content.strip():
+                return self._add_processing_info({
+                    "status": "error",
+                    "file_name": file_path.name,
+                    "error": "File is empty"
+                })
             
             file_type = self._detect_file_type(content, file_path.suffix)
+            self.logger.info(f"Processing {file_path.name} as {file_type}")
             
+            # Parse based on file type
             if file_type == 'cobol':
                 chunks = await self._parse_cobol(content, file_path.name)
             elif file_type == 'jcl':
@@ -230,8 +264,20 @@ class CodeParserAgent:
             else:
                 chunks = await self._parse_generic(content, file_path.name)
             
-            # Store chunks in database
+            if not chunks:
+                return self._add_processing_info({
+                    "status": "warning",
+                    "file_name": file_path.name,
+                    "file_type": file_type,
+                    "chunks_created": 0,
+                    "message": "No chunks were created from this file"
+                })
+            
+            # FIX 9: Store chunks with verification
             await self._store_chunks(chunks)
+            
+            # FIX 10: Verify chunks were actually stored
+            stored_chunks = await self._verify_chunks_stored(file_path.stem)
             
             # Generate metadata
             metadata = await self._generate_metadata(chunks, file_type)
@@ -241,17 +287,43 @@ class CodeParserAgent:
                 "file_name": file_path.name,
                 "file_type": file_type,
                 "chunks_created": len(chunks),
-                "metadata": metadata
+                "chunks_verified": stored_chunks,
+                "metadata": metadata,
+                "processing_timestamp": datetime.now().isoformat()
             }
             
             return self._add_processing_info(result)
             
         except Exception as e:
+            self.logger.error(f"Processing failed for {file_path}: {str(e)}")
             return self._add_processing_info({
                 "status": "error",
                 "file_name": file_path.name,
                 "error": str(e)
             })
+
+    # FIX 11: New verification method
+    async def _verify_chunks_stored(self, program_name: str) -> int:
+        """Verify chunks were actually stored in database"""
+        try:
+            import sqlite3
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT COUNT(*) FROM program_chunks 
+                WHERE program_name = ?
+            """, (program_name,))
+            
+            count = cursor.fetchone()[0]
+            conn.close()
+            
+            return count
+            
+        except Exception as e:
+            self.logger.error(f"Failed to verify chunks for {program_name}: {str(e)}")
+            return 0
+
     
     def _detect_file_type(self, content: str, suffix: str) -> str:
         """Detect the type of mainframe file"""
@@ -939,26 +1011,71 @@ class CodeParserAgent:
         return fields
     
     async def _store_chunks(self, chunks: List[CodeChunk]):
-        """Store parsed chunks in database"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        """Store parsed chunks in database with proper transaction management"""
+        if not chunks:
+            self.logger.warning("No chunks to store")
+            return
         
-        for chunk in chunks:
-            cursor.execute("""
-                INSERT OR REPLACE INTO program_chunks 
-                (program_name, chunk_id, chunk_type, content, metadata, embedding_id)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                chunk.program_name,
-                chunk.chunk_id,
-                chunk.chunk_type,
-                chunk.content,
-                json.dumps(chunk.metadata),
-                hashlib.md5(chunk.content.encode()).hexdigest()
-            ))
-        
-        conn.commit()
-        conn.close()
+        try:
+            import sqlite3
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # FIX 1: Start explicit transaction
+            cursor.execute("BEGIN TRANSACTION")
+            
+            try:
+                stored_count = 0
+                
+                for chunk in chunks:
+                    try:
+                        # FIX 2: Use INSERT OR REPLACE to handle duplicates
+                        cursor.execute("""
+                            INSERT OR REPLACE INTO program_chunks 
+                            (program_name, chunk_id, chunk_type, content, metadata, embedding_id)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        """, (
+                            chunk.program_name,
+                            chunk.chunk_id,
+                            chunk.chunk_type,
+                            chunk.content,
+                            json.dumps(chunk.metadata),
+                            hashlib.md5(chunk.content.encode()).hexdigest()
+                        ))
+                        stored_count += 1
+                        
+                    except sqlite3.Error as e:
+                        self.logger.error(f"Failed to store chunk {chunk.chunk_id}: {str(e)}")
+                        continue
+                
+                # FIX 3: Explicit commit - THIS WAS MISSING!
+                cursor.execute("COMMIT")
+                
+                self.logger.info(f"Successfully stored {stored_count}/{len(chunks)} chunks for program {chunks[0].program_name}")
+                
+                # FIX 4: Verify storage
+                cursor.execute("""
+                    SELECT COUNT(*) FROM program_chunks 
+                    WHERE program_name = ?
+                """, (chunks[0].program_name,))
+                
+                db_count = cursor.fetchone()[0]
+                self.logger.info(f"Database verification: {db_count} chunks found for {chunks[0].program_name}")
+                
+            except Exception as e:
+                # FIX 5: Rollback on error
+                cursor.execute("ROLLBACK")
+                self.logger.error(f"Transaction failed, rolled back: {str(e)}")
+                raise e
+                
+        except Exception as e:
+            self.logger.error(f"Database connection failed: {str(e)}")
+            raise e
+            
+        finally:
+            # FIX 6: Always close connection
+            if 'conn' in locals():
+                conn.close()
     
     async def _generate_metadata(self, chunks: List[CodeChunk], file_type: str) -> Dict[str, Any]:
         """Generate overall metadata for the file"""

@@ -122,71 +122,107 @@ class DynamicOpulenceCoordinator:
         )
         return logging.getLogger(__name__)
     
+    # FIX 12: Enhanced database initialization in coordinator
     def _init_database(self):
-        """Initialize SQLite database with required tables"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Create tables for metadata storage
-        cursor.executescript("""
-            CREATE TABLE IF NOT EXISTS file_metadata (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                file_name TEXT UNIQUE,
-                file_type TEXT,
-                table_name TEXT,
-                fields TEXT,
-                source_type TEXT,
-                last_modified TIMESTAMP,
-                processing_status TEXT DEFAULT 'pending'
-            );
+        """Initialize SQLite database with required tables and proper configuration"""
+        try:
+            import sqlite3
+            conn = sqlite3.connect(self.db_path)
             
-            CREATE TABLE IF NOT EXISTS field_lineage (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                field_name TEXT,
-                program_name TEXT,
-                paragraph TEXT,
-                operation TEXT,
-                source_file TEXT,
-                last_used TIMESTAMP,
-                read_in TEXT,
-                updated_in TEXT,
-                purged_in TEXT
-            );
+            # FIX 13: Set proper SQLite configuration for async use
+            conn.execute("PRAGMA journal_mode=WAL")  # Better for concurrent access
+            conn.execute("PRAGMA synchronous=NORMAL")  # Balance between safety and performance
+            conn.execute("PRAGMA cache_size=10000")  # Larger cache
+            conn.execute("PRAGMA temp_store=memory")  # Use memory for temp storage
             
-            CREATE TABLE IF NOT EXISTS program_chunks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                program_name TEXT,
-                chunk_id TEXT,
-                chunk_type TEXT,
-                content TEXT,
-                metadata TEXT,
-                embedding_id TEXT
-            );
+            cursor = conn.cursor()
             
-            CREATE TABLE IF NOT EXISTS processing_stats (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                operation TEXT,
-                duration REAL,
-                gpu_used INTEGER,
-                status TEXT
-            );
+            # Create tables with proper indexes
+            cursor.executescript("""
+                CREATE TABLE IF NOT EXISTS file_metadata (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_name TEXT UNIQUE NOT NULL,
+                    file_type TEXT,
+                    table_name TEXT,
+                    fields TEXT,
+                    source_type TEXT,
+                    last_modified TIMESTAMP,
+                    processing_status TEXT DEFAULT 'pending',
+                    created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                
+                CREATE INDEX IF NOT EXISTS idx_file_metadata_name ON file_metadata(file_name);
+                CREATE INDEX IF NOT EXISTS idx_file_metadata_type ON file_metadata(file_type);
+                
+                CREATE TABLE IF NOT EXISTS field_lineage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    field_name TEXT NOT NULL,
+                    program_name TEXT,
+                    paragraph TEXT,
+                    operation TEXT,
+                    source_file TEXT,
+                    last_used TIMESTAMP,
+                    read_in TEXT,
+                    updated_in TEXT,
+                    purged_in TEXT,
+                    created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                
+                CREATE INDEX IF NOT EXISTS idx_field_lineage_field ON field_lineage(field_name);
+                CREATE INDEX IF NOT EXISTS idx_field_lineage_program ON field_lineage(program_name);
+                
+                CREATE TABLE IF NOT EXISTS program_chunks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    program_name TEXT NOT NULL,
+                    chunk_id TEXT NOT NULL,
+                    chunk_type TEXT,
+                    content TEXT,
+                    metadata TEXT,
+                    embedding_id TEXT,
+                    created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(program_name, chunk_id)
+                );
+                
+                CREATE INDEX IF NOT EXISTS idx_program_chunks_name ON program_chunks(program_name);
+                CREATE INDEX IF NOT EXISTS idx_program_chunks_type ON program_chunks(chunk_type);
+                CREATE INDEX IF NOT EXISTS idx_program_chunks_id ON program_chunks(chunk_id);
+                
+                CREATE TABLE IF NOT EXISTS processing_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    operation TEXT,
+                    duration REAL,
+                    gpu_used INTEGER,
+                    status TEXT,
+                    details TEXT
+                );
+                
+                CREATE INDEX IF NOT EXISTS idx_processing_stats_timestamp ON processing_stats(timestamp);
+                
+                CREATE TABLE IF NOT EXISTS gpu_allocations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    agent_type TEXT,
+                    gpu_id INTEGER,
+                    preferred_gpu INTEGER,
+                    allocation_success BOOLEAN,
+                    duration REAL,
+                    workload_type TEXT
+                );
+                
+                CREATE INDEX IF NOT EXISTS idx_gpu_allocations_timestamp ON gpu_allocations(timestamp);
+            """)
             
-            CREATE TABLE IF NOT EXISTS gpu_allocations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                agent_type TEXT,
-                gpu_id INTEGER,
-                preferred_gpu INTEGER,
-                allocation_success BOOLEAN,
-                duration REAL,
-                workload_type TEXT
-            );
-        """)
-        
-        conn.commit()
-        conn.close()
-    
+            # FIX 14: Explicit commit for table creation
+            conn.commit()
+            conn.close()
+            
+            self.logger.info("Database initialized successfully with proper configuration")
+            
+        except Exception as e:
+            self.logger.error(f"Database initialization failed: {str(e)}")
+            raise
+
     async def get_or_create_llm_engine(self, gpu_id: int, force_reload: bool = False) -> AsyncLLMEngine:
         """Get or create LLM engine for specific GPU with availability check and reload capability"""
         async with self.engine_lock:
@@ -627,18 +663,22 @@ class DynamicOpulenceCoordinator:
             self.logger.error(f"Failed to log GPU allocation: {str(e)}")
     
     # Fix 1: Update process_batch_files in opulence_coordinator.py
-
     async def process_batch_files(self, file_paths: List[Path], file_type: str = "auto") -> Dict[str, Any]:
-        """Process multiple files with SHARED GPU allocation"""
+        """Process multiple files with PROPER batch processing and database storage"""
         start_time = time.time()
     
         try:
-            if time.time() - start_time > self.config.max_processing_time:
-                raise TimeoutError("Processing time limit exceeded")
+        # CHECK: Ensure database is initialized
+            await self._ensure_database_initialized()
+        
+        # FIX 1: Import and use the BatchProcessor
+            from utils.batch_processor import BatchProcessor
+            batch_processor = BatchProcessor(max_workers=4, gpu_count=self.config.total_gpu_count)
         
             results = []
-
-            # Group files by type to use same agent
+            total_files = len(file_paths)
+        
+        # Group files by type for efficient processing
             file_groups = {
                 'cobol': [],
                 'jcl': [],
@@ -656,64 +696,66 @@ class DynamicOpulenceCoordinator:
                 else:
                     file_groups['auto'].append(file_path)
         
-            # Process each group with ONE agent instance
+        # FIX 2: Process each group using BatchProcessor with proper GPU distribution
             for group_type, group_files in file_groups.items():
                 if not group_files:
                     continue
                 
-                if group_type == 'cobol':
-                    # Use SINGLE agent for all COBOL files
-                    async with self.get_agent_with_gpu("code_parser") as (agent, gpu_id):
-                        for file_path in group_files:
-                            try:
-                                result = await agent.process_file(file_path)
-                                results.append(result)
-                            except Exception as e:
-                                self.logger.error(f"Failed to process {file_path}: {str(e)}")
-                                results.append({"status": "error", "file": str(file_path), "error": str(e)})
+                self.logger.info(f"Processing {len(group_files)} {group_type} files")
             
+                if group_type == 'cobol':
+                    # Use batch processor with GPU distribution
+                    group_results = await batch_processor.process_files_batch(
+                        group_files,
+                        self._process_cobol_file_with_storage,  # NEW method with proper storage
+                        batch_size=8,
+                        use_gpu_distribution=True
+                    )
+                    results.extend(group_results)
+                
                 elif group_type == 'jcl':
-                    # Use SINGLE agent for all JCL files
-                    async with self.get_agent_with_gpu("code_parser") as (agent, gpu_id):
-                        for file_path in group_files:
-                            try:
-                                result = await agent.process_file(file_path)
-                                results.append(result)
-                            except Exception as e:
-                                self.logger.error(f"Failed to process {file_path}: {str(e)}")
-                                results.append({"status": "error", "file": str(file_path), "error": str(e)})
-
+                    group_results = await batch_processor.process_files_batch(
+                        group_files,
+                        self._process_jcl_file_with_storage,   # NEW method with proper storage
+                        batch_size=8,
+                        use_gpu_distribution=True
+                    )
+                    results.extend(group_results)
+                
                 elif group_type == 'csv':
-                    # Use SINGLE agent for all CSV files
-                    async with self.get_agent_with_gpu("data_loader") as (agent, gpu_id):
-                        for file_path in group_files:
-                            try:
-                                result = await agent.process_file(file_path)
-                                results.append(result)
-                            except Exception as e:
-                                self.logger.error(f"Failed to process {file_path}: {str(e)}")
-                                results.append({"status": "error", "file": str(file_path), "error": str(e)})
-
+                    group_results = await batch_processor.process_files_batch(
+                        group_files,
+                        self._process_csv_file_with_storage,   # NEW method with proper storage
+                        batch_size=6,
+                        use_gpu_distribution=True
+                    )
+                    results.extend(group_results)
+                
                 else:
                     # Auto-detect and process
-                    for file_path in group_files:
-                        try:
-                            result = await self._auto_detect_and_process(file_path)
-                            results.append(result)
-                        except Exception as e:
-                            self.logger.error(f"Failed to process {file_path}: {str(e)}")
-                            results.append({"status": "error", "file": str(file_path), "error": str(e)})
+                    group_results = await batch_processor.process_files_batch(
+                        group_files,
+                        self._auto_detect_and_process_with_storage,  # NEW method with proper storage
+                        batch_size=8,
+                        use_gpu_distribution=True
+                    )
+                    results.extend(group_results)
+            await self._verify_database_storage(file_paths)
         
-            # Update statistics
+        # Update statistics
             processing_time = time.time() - start_time
-            self.stats["total_files_processed"] += len(file_paths)
+            self.stats["total_files_processed"] += total_files
             self._update_processing_stats("batch_processing", processing_time)
+        
+            # Cleanup batch processor
+            batch_processor.shutdown()
         
             return {
                 "status": "success",
-                "files_processed": len(file_paths),
+                "files_processed": total_files,
                 "processing_time": processing_time,
-                "results": results
+                "results": results,
+                "database_verification": await self._get_database_stats()
             }
         
         except Exception as e:
@@ -722,8 +764,227 @@ class DynamicOpulenceCoordinator:
                 "status": "error",
                 "error": str(e),
                 "files_processed": 0
-            }
+                }
 
+    async def _process_cobol_file_with_storage(self, file_path: Path) -> Dict[str, Any]:
+        """Process COBOL file with guaranteed database storage"""
+        try:
+            async with self.get_agent_with_gpu("code_parser") as (agent, gpu_id):
+                # Process the file
+                result = await agent.process_file(file_path)
+            
+                # FIX: Ensure database storage is completed
+                if result.get("status") == "success":
+                    await self._ensure_file_stored_in_db(file_path, result, "cobol")
+            
+                result["gpu_used"] = gpu_id
+                return result
+            
+        except Exception as e:
+            self.logger.error(f"Failed to process COBOL file {file_path}: {str(e)}")
+            return {"status": "error", "file": str(file_path), "error": str(e)}
+
+    async def _process_jcl_file_with_storage(self, file_path: Path) -> Dict[str, Any]:
+        """Process JCL file with guaranteed database storage"""
+        try:
+            async with self.get_agent_with_gpu("code_parser") as (agent, gpu_id):
+                result = await agent.process_file(file_path)
+            
+                if result.get("status") == "success":
+                    await self._ensure_file_stored_in_db(file_path, result, "jcl")
+            
+                result["gpu_used"] = gpu_id
+                return result
+            
+        except Exception as e:
+            self.logger.error(f"Failed to process JCL file {file_path}: {str(e)}")
+            return {"status": "error", "file": str(file_path), "error": str(e)}
+
+    async def _process_csv_file_with_storage(self, file_path: Path) -> Dict[str, Any]:
+        """Process CSV file with guaranteed database storage"""
+        try:
+            async with self.get_agent_with_gpu("data_loader") as (agent, gpu_id):
+                result = await agent.process_file(file_path)
+            
+                if result.get("status") == "success":
+                    await self._ensure_file_stored_in_db(file_path, result, "csv")
+            
+                result["gpu_used"] = gpu_id
+                return result
+            
+        except Exception as e:
+            self.logger.error(f"Failed to process CSV file {file_path}: {str(e)}")
+            return {"status": "error", "file": str(file_path), "error": str(e)}
+
+    async def _auto_detect_and_process_with_storage(self, file_path: Path) -> Dict[str, Any]:
+        """Auto-detect and process file with guaranteed database storage"""
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read(1000)
+        
+            if 'IDENTIFICATION DIVISION' in content or 'PROGRAM-ID' in content:
+                return await self._process_cobol_file_with_storage(file_path)
+            elif content.startswith('//') and 'JOB' in content:
+                return await self._process_jcl_file_with_storage(file_path)
+            elif ',' in content and '\n' in content:
+                return await self._process_csv_file_with_storage(file_path)
+            else:
+                return {"status": "unknown_file_type", "file": str(file_path)}
+            
+        except Exception as e:
+            return {"status": "error", "error": str(e), "file": str(file_path)}
+
+    # FIX 5: Database verification and storage methods
+    async def _ensure_database_initialized(self):
+        """Ensure database is properly initialized"""
+        try:
+            import sqlite3
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+        
+        # Verify tables exist
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = cursor.fetchall()
+        
+            required_tables = ['program_chunks', 'file_metadata', 'field_lineage']
+            existing_tables = [table[0] for table in tables]
+        
+            for required_table in required_tables:
+                if required_table not in existing_tables:
+                    self.logger.warning(f"Table {required_table} not found, reinitializing database")
+                    conn.close()
+                    self._init_database()  # Reinitialize
+                    break
+            else:
+                conn.close()
+            
+        except Exception as e:
+            self.logger.error(f"Database initialization check failed: {str(e)}")
+            self._init_database()  # Force reinitialize
+
+    async def _ensure_file_stored_in_db(self, file_path: Path, result: Dict, file_type: str):
+        """Ensure file processing result is stored in database with proper commit"""
+        try:
+            import sqlite3
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+        
+            # FIX: Add explicit transaction management
+            cursor.execute("BEGIN TRANSACTION")
+        
+            try:
+                # Store file metadata
+                cursor.execute("""
+                    INSERT OR REPLACE INTO file_metadata 
+                    (file_name, file_type, processing_status, last_modified)
+                    VALUES (?, ?, ?, ?)
+                """, (
+                    file_path.name,
+                    file_type,
+                    result.get("status", "processed"),
+                    datetime.now().isoformat()
+                ))
+            
+                # Verify chunks were stored
+                if "chunks_created" in result and result["chunks_created"] > 0:
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM program_chunks 
+                        WHERE program_name = ?
+                    """, (file_path.stem,))
+                
+                    chunk_count = cursor.fetchone()[0]
+                
+                    if chunk_count != result["chunks_created"]:
+                        self.logger.warning(
+                            f"Chunk count mismatch for {file_path.name}: "
+                            f"expected {result['chunks_created']}, found {chunk_count}"
+                        )
+            
+                # FIX: Explicit commit
+                cursor.execute("COMMIT")
+                self.logger.debug(f"Successfully stored {file_path.name} in database")
+            
+            except Exception as e:
+                cursor.execute("ROLLBACK")
+                raise e
+            
+            finally:
+                conn.close()
+        except Exception as e:
+            self.logger.error(f"Failed to verify database storage for {file_path}: {str(e)}")
+
+    async def _verify_database_storage(self, file_paths: List[Path]) -> Dict[str, Any]:
+        """Verify all files were properly stored in database"""
+        try:
+            import sqlite3
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Count total chunks
+            cursor.execute("SELECT COUNT(*) FROM program_chunks")
+            total_chunks = cursor.fetchone()[0]
+            
+            # Count total files
+            cursor.execute("SELECT COUNT(*) FROM file_metadata")
+            total_files_in_db = cursor.fetchone()[0]
+            
+            # Count by file type
+            cursor.execute("""
+                SELECT file_type, COUNT(*) 
+                FROM file_metadata 
+                GROUP BY file_type
+            """)
+            file_type_counts = dict(cursor.fetchall())
+            
+            conn.close()
+            
+            verification_result = {
+                "files_processed": len(file_paths),
+                "files_in_database": total_files_in_db,
+                "total_chunks": total_chunks,
+                "file_type_breakdown": file_type_counts,
+                "storage_success_rate": (total_files_in_db / len(file_paths)) * 100 if file_paths else 0
+            }
+            
+            self.logger.info(f"Database verification: {verification_result}")
+            return verification_result
+            
+        except Exception as e:
+            self.logger.error(f"Database verification failed: {str(e)}")
+            return {"error": str(e)}
+
+    async def _get_database_stats(self) -> Dict[str, Any]:
+        """Get current database statistics"""
+        try:
+            import sqlite3
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            stats = {}
+            
+            # Get table sizes
+            tables = ['program_chunks', 'file_metadata', 'field_lineage', 'lineage_nodes', 'lineage_edges']
+            
+            for table in tables:
+                try:
+                    cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                    stats[f"{table}_count"] = cursor.fetchone()[0]
+                except sqlite3.OperationalError:
+                    stats[f"{table}_count"] = 0  # Table doesn't exist
+            
+            # Get database file size
+            import os
+            if os.path.exists(self.db_path):
+                stats["database_size_bytes"] = os.path.getsize(self.db_path)
+            else:
+                stats["database_size_bytes"] = 0
+            
+            conn.close()
+            return stats
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get database stats: {str(e)}")
+            return {"error": str(e)}
     
     async def analyze_component(self, component_name: str, component_type: str = None, 
                                preferred_gpu: Optional[int] = None) -> Dict[str, Any]:
