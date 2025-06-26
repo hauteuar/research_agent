@@ -398,67 +398,55 @@ class DynamicOpulenceCoordinator:
 
     async def get_available_gpu_for_agent(self, agent_type: str, preferred_gpu: Optional[int] = None) -> Optional[int]:
         """Get best available GPU for agent with smart allocation using GPU manager"""
-        
+    
         # Force refresh GPU status first
         self.gpu_manager.force_refresh()
-        
+    
+        # Check if we already have an LLM engine that can be shared
+        existing_engines = list(self.llm_engine_pool.keys())
+        if existing_engines:
+            # Try to reuse existing engine if memory allows
+            for engine_key in existing_engines:
+                gpu_id = int(engine_key.split('_')[1])
+                try:
+                    from gpu_force_fix import GPUForcer
+                    memory_info = GPUForcer.check_gpu_memory(gpu_id)
+                    free_gb = memory_info.get('free_gb', 0)
+                
+                # If GPU has enough free memory for another workload
+                    if free_gb >= 1.0:  # Reduced threshold for sharing
+                        self.logger.info(f"Reusing existing LLM engine on GPU {gpu_id} for {agent_type}")
+                        return gpu_id
+                except Exception as e:
+                    self.logger.warning(f"Error checking GPU {gpu_id} for reuse: {e}")
+                    continue
+    
         # Use GPU manager's built-in allocation logic
         best_gpu = self.gpu_manager.get_available_gpu(
             preferred_gpu=preferred_gpu, 
             fallback=True
         )
-        
+    
         if best_gpu is not None:
             self.logger.info(f"GPU manager selected GPU {best_gpu} for {agent_type}")
             return best_gpu
-        
-        # Fallback: check manually if GPU manager didn't find anything
-        available_gpus = []
-        for gpu_id in range(self.config.total_gpu_count):
-            if self._is_gpu_available(gpu_id):
-                available_gpus.append(gpu_id)
-        
-        if not available_gpus:
-            self.logger.warning("No GPUs currently available")
-            return None
-        
-        self.logger.info(f"Manual check found available GPUs: {available_gpus}")
-        
-        # If preferred GPU is available, use it
-        if preferred_gpu is not None and preferred_gpu in available_gpus:
-            self.logger.info(f"Using preferred GPU {preferred_gpu} for {agent_type}")
-            return preferred_gpu
-        
-        # Get agent-specific preferred GPU from config
-        agent_config = self.config_manager.get_agent_config(agent_type)
-        config_preferred = agent_config.get("preferred_gpu")
-        
-        if config_preferred is not None and config_preferred in available_gpus:
-            self.logger.info(f"Using config preferred GPU {config_preferred} for {agent_type}")
-            return config_preferred
-        
-        # Choose GPU with most free memory using GPUForcer
-        best_gpu = None
-        best_free_memory = 0
-        
-        for gpu_id in available_gpus:
-            try:
-                from gpu_force_fix import GPUForcer
-                memory_info = GPUForcer.check_gpu_memory(gpu_id)
-                free_gb = memory_info.get('free_gb', 0)
-                
-                if free_gb > best_free_memory:
-                    best_free_memory = free_gb
-                    best_gpu = gpu_id
-                    
-            except Exception as e:
-                self.logger.warning(f"Error checking memory for GPU {gpu_id}: {e}")
-                continue
-        
+    
+        # If no GPU available, check if we can wait and retry
+        await asyncio.sleep(2)  # Wait 2 seconds
+        self.gpu_manager.force_refresh()
+    
+        best_gpu = self.gpu_manager.get_available_gpu(
+            preferred_gpu=preferred_gpu, 
+            fallback=True
+        )
+    
         if best_gpu is not None:
-            self.logger.info(f"Selected GPU {best_gpu} for {agent_type} (most free memory: {best_free_memory:.1f}GB)")
-        
-        return best_gpu
+            self.logger.info(f"GPU manager selected GPU {best_gpu} for {agent_type} (after retry)")
+            return best_gpu
+    
+        self.logger.warning("No GPUs currently available even after retry")
+        return None
+
 
     async def _cleanup_gpu_engine(self, gpu_id: int):
         """Clean up existing LLM engine on GPU using GPUForcer"""
@@ -638,56 +626,96 @@ class DynamicOpulenceCoordinator:
         except Exception as e:
             self.logger.error(f"Failed to log GPU allocation: {str(e)}")
     
+    # Fix 1: Update process_batch_files in opulence_coordinator.py
+
     async def process_batch_files(self, file_paths: List[Path], file_type: str = "auto") -> Dict[str, Any]:
-        """Process multiple files with dynamic GPU allocation"""
+        """Process multiple files with SHARED GPU allocation"""
         start_time = time.time()
-        
+    
         try:
-            # Check processing time limit
             if time.time() - start_time > self.config.max_processing_time:
                 raise TimeoutError("Processing time limit exceeded")
-            
+        
             results = []
-            
-            # Process files concurrently with dynamic GPU allocation
+
+            # Group files by type to use same agent
+            file_groups = {
+                'cobol': [],
+                'jcl': [],
+                'csv': [],
+                'auto': []
+            }
+        
             for file_path in file_paths:
-                try:
-                    if file_type == "cobol" or file_path.suffix.lower() in ['.cbl', '.cob']:
-                        async with self.get_agent_with_gpu("code_parser") as (agent, gpu_id):
-                            result = await agent.process_file(file_path)
-                            results.append(result)
-                            
-                    elif file_type == "jcl" or file_path.suffix.lower() == '.jcl':
-                        async with self.get_agent_with_gpu("code_parser") as (agent, gpu_id):
-                            result = await agent.process_file(file_path)
-                            results.append(result)
-                            
-                    elif file_type == "csv" or file_path.suffix.lower() == '.csv':
-                        async with self.get_agent_with_gpu("data_loader") as (agent, gpu_id):
-                            result = await agent.process_file(file_path)
-                            results.append(result)
-                            
-                    else:
-                        # Auto-detect file type
-                        result = await self._auto_detect_and_process(file_path)
-                        results.append(result)
-                        
-                except Exception as e:
-                    self.logger.error(f"Failed to process {file_path}: {str(e)}")
-                    results.append({"status": "error", "file": str(file_path), "error": str(e)})
+                if file_type == "cobol" or file_path.suffix.lower() in ['.cbl', '.cob']:
+                    file_groups['cobol'].append(file_path)
+                elif file_type == "jcl" or file_path.suffix.lower() == '.jcl':
+                    file_groups['jcl'].append(file_path)
+                elif file_type == "csv" or file_path.suffix.lower() == '.csv':
+                    file_groups['csv'].append(file_path)
+                else:
+                    file_groups['auto'].append(file_path)
+        
+            # Process each group with ONE agent instance
+            for group_type, group_files in file_groups.items():
+                if not group_files:
+                    continue
+                
+                if group_type == 'cobol':
+                    # Use SINGLE agent for all COBOL files
+                    async with self.get_agent_with_gpu("code_parser") as (agent, gpu_id):
+                        for file_path in group_files:
+                            try:
+                                result = await agent.process_file(file_path)
+                                results.append(result)
+                            except Exception as e:
+                                self.logger.error(f"Failed to process {file_path}: {str(e)}")
+                                results.append({"status": "error", "file": str(file_path), "error": str(e)})
             
+                elif group_type == 'jcl':
+                    # Use SINGLE agent for all JCL files
+                    async with self.get_agent_with_gpu("code_parser") as (agent, gpu_id):
+                        for file_path in group_files:
+                            try:
+                                result = await agent.process_file(file_path)
+                                results.append(result)
+                            except Exception as e:
+                                self.logger.error(f"Failed to process {file_path}: {str(e)}")
+                                results.append({"status": "error", "file": str(file_path), "error": str(e)})
+
+                elif group_type == 'csv':
+                    # Use SINGLE agent for all CSV files
+                    async with self.get_agent_with_gpu("data_loader") as (agent, gpu_id):
+                        for file_path in group_files:
+                            try:
+                                result = await agent.process_file(file_path)
+                                results.append(result)
+                            except Exception as e:
+                                self.logger.error(f"Failed to process {file_path}: {str(e)}")
+                                results.append({"status": "error", "file": str(file_path), "error": str(e)})
+
+                else:
+                    # Auto-detect and process
+                    for file_path in group_files:
+                        try:
+                            result = await self._auto_detect_and_process(file_path)
+                            results.append(result)
+                        except Exception as e:
+                            self.logger.error(f"Failed to process {file_path}: {str(e)}")
+                            results.append({"status": "error", "file": str(file_path), "error": str(e)})
+        
             # Update statistics
             processing_time = time.time() - start_time
             self.stats["total_files_processed"] += len(file_paths)
             self._update_processing_stats("batch_processing", processing_time)
-            
+        
             return {
                 "status": "success",
                 "files_processed": len(file_paths),
                 "processing_time": processing_time,
                 "results": results
             }
-            
+        
         except Exception as e:
             self.logger.error(f"Batch processing failed: {str(e)}")
             return {
@@ -695,6 +723,7 @@ class DynamicOpulenceCoordinator:
                 "error": str(e),
                 "files_processed": 0
             }
+
     
     async def analyze_component(self, component_name: str, component_type: str = None, 
                                preferred_gpu: Optional[int] = None) -> Dict[str, Any]:
