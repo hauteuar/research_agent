@@ -1,4 +1,4 @@
-# agents/code_parser_agent.py
+# agents/code_parser_agent.py - FIXED VERSION
 """
 Agent 1: Batch Code Parser & Chunker
 Handles COBOL, JCL, CICS, and Copybook parsing with intelligent chunking
@@ -44,7 +44,25 @@ class CodeParserAgent:
         self._engine_created = False
         self._using_coordinator_llm = False
         
-        # COBOL patterns... (keep existing)
+        # INITIALIZE COBOL PATTERNS - THIS WAS MISSING!
+        self.cobol_patterns = {
+            'program_id': re.compile(r'PROGRAM-ID\s+(\S+)', re.IGNORECASE),
+            'paragraph': re.compile(r'^([A-Z0-9][A-Z0-9-]*)\s*\.\s*$', re.MULTILINE),
+            'perform': re.compile(r'PERFORM\s+([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_block': re.compile(r'EXEC\s+SQL(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
+            'file_control': re.compile(r'SELECT\s+(\S+)\s+ASSIGN\s+TO\s+(\S+)', re.IGNORECASE),
+            'working_storage': re.compile(r'WORKING-STORAGE\s+SECTION', re.IGNORECASE),
+            'procedure_division': re.compile(r'PROCEDURE\s+DIVISION', re.IGNORECASE)
+        }
+        
+        # INITIALIZE JCL PATTERNS - THIS WAS MISSING!
+        self.jcl_patterns = {
+            'job_card': re.compile(r'^//(\S+)\s+JOB\s+', re.MULTILINE),
+            'job_step': re.compile(r'^//(\S+)\s+EXEC\s+', re.MULTILINE),
+            'dd_statement': re.compile(r'^//(\S+)\s+DD\s+', re.MULTILINE),
+            'proc_call': re.compile(r'EXEC\s+(\S+)', re.IGNORECASE),
+            'dataset': re.compile(r'DSN=([^,\s]+)', re.IGNORECASE)
+        }
 
     async def _ensure_llm_engine(self):
         """Ensure LLM engine is available with thread safety"""
@@ -185,7 +203,6 @@ class CodeParserAgent:
             self.logger.error(f"Failed to create fallback LLM engine: {str(e)}")
             raise
         
-    # ADD this helper method
     def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Add processing information to results"""
         if isinstance(result, dict):
@@ -197,7 +214,7 @@ class CodeParserAgent:
     async def process_file(self, file_path: Path) -> Dict[str, Any]:
         """Process a single code file"""
         try:
-            await self._ensure_llm_engine()  # ADD this line
+            await self._ensure_llm_engine()
             
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
@@ -227,7 +244,6 @@ class CodeParserAgent:
                 "metadata": metadata
             }
             
-            # ADD: Use helper method to add processing info
             return self._add_processing_info(result)
             
         except Exception as e:
@@ -255,10 +271,110 @@ class CodeParserAgent:
             return 'copybook'
         else:
             return 'unknown'
+
+    # FIX: Correct _parse_cobol method
+    async def _parse_cobol(self, content: str, filename: str) -> List[CodeChunk]:
+        """Parse COBOL program into logical chunks - FIXED VERSION"""
+        await self._ensure_llm_engine()
+        
+        chunks = []
+        lines = content.split('\n')
+        
+        # Extract program name
+        program_match = self.cobol_patterns['program_id'].search(content)
+        program_name = program_match.group(1) if program_match else filename
+        
+        # Find major sections
+        sections = self._find_cobol_sections(content)
+        
+        # Parse each section
+        for section_name, section_content, start_line, end_line in sections:
+            if section_name == 'PROCEDURE DIVISION':
+                # Further chunk by paragraphs
+                paragraph_chunks = await self._parse_cobol_paragraphs(
+                    section_content, program_name, start_line
+                )
+                chunks.extend(paragraph_chunks)
+            else:
+                # Create chunk for entire section
+                chunk = CodeChunk(
+                    program_name=program_name,
+                    chunk_id=f"{program_name}_{section_name.replace(' ', '_')}",
+                    chunk_type="section",
+                    content=section_content,
+                    metadata={
+                        "section": section_name,
+                        "field_names": self._extract_field_names(section_content),
+                        "files": self._extract_file_references(section_content),
+                        "operations": self._extract_operations(section_content)
+                    },
+                    line_start=start_line,
+                    line_end=end_line
+                )
+                chunks.append(chunk)
+        
+        # Extract SQL blocks separately
+        sql_chunks = await self._extract_sql_blocks(content, program_name)
+        chunks.extend(sql_chunks)
+        
+        return chunks
     
+    def _find_cobol_sections(self, content: str) -> List[Tuple[str, str, int, int]]:
+        """Find major COBOL sections"""
+        sections = []
+        lines = content.split('\n')
+        
+        section_markers = [
+            'IDENTIFICATION DIVISION',
+            'ENVIRONMENT DIVISION',
+            'DATA DIVISION',
+            'WORKING-STORAGE SECTION',
+            'FILE SECTION',
+            'PROCEDURE DIVISION'
+        ]
+        
+        current_section = None
+        section_start = 0
+        section_content = []
+        
+        for i, line in enumerate(lines):
+            line_upper = line.strip().upper()
+            
+            # Check if this line starts a new section
+            for marker in section_markers:
+                if line_upper.startswith(marker):
+                    # Save previous section
+                    if current_section:
+                        sections.append((
+                            current_section,
+                            '\n'.join(section_content),
+                            section_start,
+                            i - 1
+                        ))
+                    
+                    # Start new section
+                    current_section = marker
+                    section_start = i
+                    section_content = [line]
+                    break
+            else:
+                if current_section:
+                    section_content.append(line)
+        
+        # Add final section
+        if current_section:
+            sections.append((
+                current_section,
+                '\n'.join(section_content),
+                section_start,
+                len(lines) - 1
+            ))
+        
+        return sections
+
     async def _extract_sql_blocks(self, content: str, program_name: str) -> List[CodeChunk]:
         """Extract SQL blocks from COBOL code"""
-        await self._ensure_llm_engine()  # ADD this line
+        await self._ensure_llm_engine()
         
         chunks = []
         sql_matches = self.cobol_patterns['sql_block'].finditer(content)
@@ -285,7 +401,7 @@ class CodeParserAgent:
     
     async def _analyze_sql_with_llm(self, sql_content: str) -> Dict[str, Any]:
         """Analyze SQL block with LLM"""
-        await self._ensure_llm_engine()  # ADD this line
+        await self._ensure_llm_engine()
         
         prompt = f"""
         Analyze this embedded SQL block:
@@ -331,7 +447,7 @@ class CodeParserAgent:
     
     async def _parse_jcl(self, content: str, filename: str) -> List[CodeChunk]:
         """Parse JCL into job steps"""
-        await self._ensure_llm_engine()  # ADD this line
+        await self._ensure_llm_engine()
         
         chunks = []
         lines = content.split('\n')
@@ -407,7 +523,7 @@ class CodeParserAgent:
     
     async def _analyze_jcl_step_with_llm(self, content: str) -> Dict[str, Any]:
         """Analyze JCL step with LLM"""
-        await self._ensure_llm_engine()  # ADD this line
+        await self._ensure_llm_engine()
         
         prompt = f"""
         Analyze this JCL job step:
@@ -453,7 +569,7 @@ class CodeParserAgent:
     
     async def _parse_copybook(self, content: str, filename: str) -> List[CodeChunk]:
         """Parse copybook into field definitions"""
-        await self._ensure_llm_engine()  # ADD this line
+        await self._ensure_llm_engine()
         
         chunks = []
         
@@ -475,7 +591,7 @@ class CodeParserAgent:
     
     async def _analyze_copybook_with_llm(self, content: str) -> Dict[str, Any]:
         """Analyze copybook with LLM"""
-        await self._ensure_llm_engine()  # ADD this line
+        await self._ensure_llm_engine()
         
         prompt = f"""
         Analyze this COBOL copybook:
@@ -533,11 +649,9 @@ class CodeParserAgent:
         )
         return [chunk]
     
-    # ... [Keep all the existing helper methods like _extract_field_names, etc.] ...
-    
     async def _parse_cobol_paragraphs(self, content: str, program_name: str, start_offset: int) -> List[CodeChunk]:
         """Parse COBOL procedure division into paragraphs"""
-        await self._ensure_llm_engine()  # ADD this line
+        await self._ensure_llm_engine()
         
         chunks = []
         lines = content.split('\n')
@@ -593,7 +707,7 @@ class CodeParserAgent:
     
     async def _analyze_paragraph_with_llm(self, content: str) -> Dict[str, Any]:
         """Use LLM to analyze paragraph content"""
-        await self._ensure_llm_engine()  # ADD this line
+        await self._ensure_llm_engine()
         
         prompt = f"""
         Analyze this COBOL paragraph and extract key information:
@@ -647,7 +761,7 @@ class CodeParserAgent:
 
     async def analyze_jcl(self, jcl_name: str) -> Dict[str, Any]:
         """Analyze JCL job flow"""
-        await self._ensure_llm_engine()  # ADD this line
+        await self._ensure_llm_engine()
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -692,7 +806,7 @@ class CodeParserAgent:
             "step_details": [json.loads(chunk[2]) for chunk in chunks if chunk[2]]
         }
 
-    # ADD all the missing helper methods that were in the original file
+    # Helper methods for extraction
     def _extract_field_names(self, content: str) -> List[str]:
         """Extract field names from COBOL code"""
         fields = []
@@ -875,114 +989,58 @@ class CodeParserAgent:
     
     async def analyze_cobol(self, cobol_name: str) -> Dict[str, Any]:
         """Analyze COBOL program structure and operations"""
-        return await self.parse_cobol(cobol_name)
-
-    async def _parse_cobol(self, content: str, filename: str) -> List[CodeChunk]:
-        """Parse COBOL program into logical chunks - main entry point"""
-        await self._ensure_llm_engine()  # ADD this line
+        await self._ensure_llm_engine()
         
-        return await self.parse_cobol(content, filename)
-        """Parse COBOL program into logical chunks"""
-        await self._ensure_llm_engine()  # ADD this line
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
         
-        chunks = []
-        lines = content.split('\n')
+        cursor.execute("""
+            SELECT chunk_type, content, metadata FROM program_chunks 
+            WHERE program_name = ? AND chunk_type IN ('section', 'paragraph', 'sql_block')
+            ORDER BY chunk_id
+        """, (cobol_name,))
         
-        # Extract program name
-        program_match = self.cobol_patterns['program_id'].search(content)
-        program_name = program_match.group(1) if program_match else filename
+        chunks = cursor.fetchall()
+        conn.close()
         
-        # Find major sections
-        sections = self._find_cobol_sections(content)
+        if not chunks:
+            return {"error": f"COBOL program {cobol_name} not found"}
         
-        # Parse each section
-        for section_name, section_content, start_line, end_line in sections:
-            if section_name == 'PROCEDURE DIVISION':
-                # Further chunk by paragraphs
-                paragraph_chunks = await self._parse_cobol_paragraphs(
-                    section_content, program_name, start_line
-                )
-                chunks.extend(paragraph_chunks)
-            else:
-                # Create chunk for entire section
-                chunk = CodeChunk(
-                    program_name=program_name,
-                    chunk_id=f"{program_name}_{section_name}",
-                    chunk_type="section",
-                    content=section_content,
-                    metadata={
-                        "section": section_name,
-                        "field_names": self._extract_field_names(section_content),
-                        "files": self._extract_file_references(section_content),
-                        "operations": self._extract_operations(section_content)
-                    },
-                    line_start=start_line,
-                    line_end=end_line
-                )
-                chunks.append(chunk)
+        # Analyze program structure with LLM
+        program_content = '\n'.join([chunk[1] for chunk in chunks])
         
-        # Extract SQL blocks separately
-        sql_chunks = await self._extract_sql_blocks(content, program_name)
-        chunks.extend(sql_chunks)
+        prompt = f"""
+        Analyze this complete COBOL program:
         
-        return chunks
-    
-    def _find_cobol_sections(self, content: str) -> List[Tuple[str, str, int, int]]:
-        """Find major COBOL sections"""
-        sections = []
-        lines = content.split('\n')
+        {program_content}
         
-        section_markers = [
-            'IDENTIFICATION DIVISION',
-            'ENVIRONMENT DIVISION',
-            'DATA DIVISION',
-            'WORKING-STORAGE SECTION',
-            'FILE SECTION',
-            'PROCEDURE DIVISION'
-        ]
+        Provide:
+        1. Program structure and organization
+        2. Main business logic flow
+        3. Data file operations
+        4. SQL operations if any
+        5. Key fields and data structures
+        6. Overall program purpose
         
-        current_section = None
-        section_start = 0
-        section_content = []
+        Format as detailed analysis.
+        """
         
-        for i, line in enumerate(lines):
-            line_upper = line.strip().upper()
-            
-            # Check if this line starts a new section
-            for marker in section_markers:
-                if line_upper.startswith(marker):
-                    # Save previous section
-                    if current_section:
-                        sections.append((
-                            current_section,
-                            '\n'.join(section_content),
-                            section_start,
-                            i - 1
-                        ))
-                    
-                    # Start new section
-                    current_section = marker
-                    section_start = i
-                    section_content = [line]
-                    break
-            else:
-                if current_section:
-                    section_content.append(line)
+        sampling_params = SamplingParams(temperature=0.2, max_tokens=1000)
+        result = await self.llm_engine.generate(prompt, sampling_params)
         
-        # Add final section
-        if current_section:
-            sections.append((
-                current_section,
-                '\n'.join(section_content),
-                section_start,
-                len(lines) - 1
-            ))
-        
-        return sections
+        return {
+            "cobol_name": cobol_name,
+            "total_chunks": len(chunks),
+            "sections": len([c for c in chunks if c[0] == 'section']),
+            "paragraphs": len([c for c in chunks if c[0] == 'paragraph']),
+            "sql_blocks": len([c for c in chunks if c[0] == 'sql_block']),
+            "analysis": result.outputs[0].text,
+            "chunk_details": [json.loads(chunk[2]) for chunk in chunks if chunk[2]]
+        }
 
     async def _analyze_code_with_llm(self, content: str) -> Dict[str, Any]:
         """Use LLM to analyze generic code content"""
-        await self._ensure_llm_engine()  # ADD this line
+        await self._ensure_llm_engine()
         
         prompt = f"""
         Analyze this code snippet:
