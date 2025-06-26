@@ -8,6 +8,7 @@ import asyncio
 import sqlite3
 import json
 import re
+import os
 from typing import Dict, List, Optional, Any, AsyncGenerator
 from pathlib import Path
 from dataclasses import dataclass
@@ -41,11 +42,17 @@ class BusinessRule:
 class LogicAnalyzerAgent:
     """Agent for analyzing program logic and business rules"""
     
-    def __init__(self, llm_engine: AsyncLLMEngine, db_path: str, gpu_id: int):
+    def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
+                 gpu_id: int = None, coordinator=None):
         self.llm_engine = llm_engine
-        self.db_path = db_path
+        self.db_path = db_path or "opulence_data.db"  # ADD default value
         self.gpu_id = gpu_id
+        self.coordinator = coordinator  # ADD this line
         self.logger = logging.getLogger(__name__)
+        
+        # ADD these lines for coordinator integration
+        self._engine_created = False
+        self._using_coordinator_llm = False
         
         # Logic patterns to detect
         self.logic_patterns = {
@@ -64,15 +71,111 @@ class LogicAnalyzerAgent:
             'transformation_rules': re.compile(r'MOVE.*?TO.*', re.IGNORECASE),
             'approval_rules': re.compile(r'IF.*?(APPROVE|REJECT|PENDING)', re.IGNORECASE)
         }
+
+    # ADD this new method
+    async def _ensure_llm_engine(self):
+        """Ensure LLM engine is available - use coordinator first, fallback to own"""
+        if self.llm_engine is not None:
+            return  # Already have engine
+        
+        # Try to get from coordinator first
+        if self.coordinator is not None:
+            try:
+                # Get available GPU from coordinator
+                best_gpu = await self.coordinator.get_available_gpu_for_agent("logic_analyzer")
+                if best_gpu is not None:
+                    # Get shared LLM engine from coordinator
+                    engine = await self.coordinator.get_or_create_llm_engine(best_gpu)
+                    self.llm_engine = engine
+                    self.gpu_id = best_gpu
+                    self._using_coordinator_llm = True
+                    self.logger.info(f"LogicAnalyzer using coordinator's LLM on GPU {best_gpu}")
+                    return
+            except Exception as e:
+                self.logger.warning(f"Failed to get LLM from coordinator: {e}")
+        
+        # Try to get from global coordinator
+        if not self._engine_created:
+            try:
+                from opulence_coordinator import get_dynamic_coordinator
+                global_coordinator = get_dynamic_coordinator()
+                
+                best_gpu = await global_coordinator.get_available_gpu_for_agent("logic_analyzer")
+                if best_gpu is not None:
+                    engine = await global_coordinator.get_or_create_llm_engine(best_gpu)
+                    self.llm_engine = engine
+                    self.gpu_id = best_gpu
+                    self._using_coordinator_llm = True
+                    self.logger.info(f"LogicAnalyzer using global coordinator's LLM on GPU {best_gpu}")
+                    return
+            except Exception as e:
+                self.logger.warning(f"Failed to get LLM from global coordinator: {e}")
+        
+        # Last resort: create own engine
+        if not self._engine_created:
+            await self._create_llm_engine()
+    
+    # ADD this new method
+    async def _create_llm_engine(self):
+        """Create own LLM engine as fallback (smaller memory footprint)"""
+        try:
+            from gpu_force_fix import GPUForcer
+            
+            best_gpu = GPUForcer.find_best_gpu_with_memory(1.5)  # Lower requirement
+            if best_gpu is None:
+                raise RuntimeError("No suitable GPU found for fallback LLM engine")
+            
+            self.logger.warning(f"LogicAnalyzer creating fallback LLM on GPU {best_gpu}")
+            
+            original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
+            
+            try:
+                GPUForcer.force_gpu_environment(best_gpu)
+                
+                # Create smaller engine to avoid conflicts
+                engine_args = GPUForcer.create_vllm_engine_args(
+                    "codellama/CodeLlama-7b-Instruct-hf",
+                    2048  # Smaller context
+                )
+                engine_args.gpu_memory_utilization = 0.3  # Use less memory
+                
+                from vllm import AsyncLLMEngine
+                self.llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
+                self.gpu_id = best_gpu
+                self._engine_created = True
+                self._using_coordinator_llm = False
+                
+                self.logger.info(f"✅ LogicAnalyzer fallback LLM created on GPU {best_gpu}")
+                
+            finally:
+                if original_cuda_visible is not None:
+                    os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible
+                elif 'CUDA_VISIBLE_DEVICES' in os.environ:
+                    del os.environ['CUDA_VISIBLE_DEVICES']
+                    
+        except Exception as e:
+            self.logger.error(f"Failed to create fallback LLM engine: {str(e)}")
+            raise
+
+    # ADD this helper method
+    def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Add processing information to results"""
+        if isinstance(result, dict):
+            result['gpu_used'] = self.gpu_id
+            result['agent_type'] = 'logic_analyzer'
+            result['using_coordinator_llm'] = self._using_coordinator_llm
+        return result
     
     async def analyze_program(self, program_name: str) -> Dict[str, Any]:
         """Comprehensive analysis of a program's logic"""
         try:
+            await self._ensure_llm_engine()  # ADD this line
+            
             # Get program chunks from database
             chunks = await self._get_program_chunks(program_name)
             
             if not chunks:
-                return {"error": f"Program {program_name} not found"}
+                return self._add_processing_info({"error": f"Program {program_name} not found"})
             
             # Analyze each chunk
             chunk_analyses = []
@@ -95,7 +198,7 @@ class LogicAnalyzerAgent:
             # Calculate overall metrics
             metrics = self._calculate_program_metrics(chunk_analyses, logic_patterns)
             
-            return {
+            result = {
                 "program_name": program_name,
                 "total_chunks": len(chunks),
                 "complexity_score": total_complexity / len(chunks) if chunks else 0,
@@ -107,26 +210,30 @@ class LogicAnalyzerAgent:
                 "analysis_timestamp": datetime.now().isoformat()
             }
             
+            return self._add_processing_info(result)
+            
         except Exception as e:
             self.logger.error(f"Program analysis failed for {program_name}: {str(e)}")
-            return {"error": str(e)}
+            return self._add_processing_info({"error": str(e)})
     
     async def stream_logic_analysis(self, program_name: str) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream logic analysis results as they're processed"""
         try:
+            await self._ensure_llm_engine()  # ADD this line
+            
             chunks = await self._get_program_chunks(program_name)
             
             if not chunks:
-                yield {"error": f"Program {program_name} not found"}
+                yield self._add_processing_info({"error": f"Program {program_name} not found"})
                 return
             
             # Yield initial status
-            yield {
+            yield self._add_processing_info({
                 "status": "started",
                 "program_name": program_name,
                 "total_chunks": len(chunks),
                 "progress": 0
-            }
+            })
             
             chunk_analyses = []
             
@@ -138,12 +245,12 @@ class LogicAnalyzerAgent:
                 
                 # Yield progress update
                 progress = ((i + 1) / len(chunks)) * 100
-                yield {
+                yield self._add_processing_info({
                     "status": "processing",
                     "progress": progress,
                     "current_chunk": chunk[2],  # chunk_id
                     "chunk_analysis": chunk_analysis
-                }
+                })
             
             # Final analysis
             business_rules = await self._extract_business_rules(chunks)
@@ -152,17 +259,17 @@ class LogicAnalyzerAgent:
             metrics = self._calculate_program_metrics(chunk_analyses, logic_patterns)
             
             # Yield final results
-            yield {
+            yield self._add_processing_info({
                 "status": "completed",
                 "progress": 100,
                 "business_rules": [rule.__dict__ for rule in business_rules],
                 "logic_patterns": [pattern.__dict__ for pattern in logic_patterns],
                 "recommendations": recommendations,
                 "metrics": metrics
-            }
+            })
             
         except Exception as e:
-            yield {"status": "error", "error": str(e)}
+            yield self._add_processing_info({"status": "error", "error": str(e)})
     
     async def _get_program_chunks(self, program_name: str) -> List[tuple]:
         """Get all chunks for a program from database"""
@@ -211,6 +318,8 @@ class LogicAnalyzerAgent:
     
     async def _llm_analyze_logic(self, content: str, chunk_type: str) -> Dict[str, Any]:
         """Use LLM to analyze logic in code chunk"""
+        await self._ensure_llm_engine()  # ADD this line
+        
         prompt = f"""
         Analyze the logic in this {chunk_type} code chunk:
         
@@ -357,6 +466,8 @@ class LogicAnalyzerAgent:
     async def _analyze_business_rule(self, rule_id: str, rule_type: str, 
                                    rule_code: str, context: str) -> Optional[BusinessRule]:
         """Analyze a specific business rule using LLM"""
+        await self._ensure_llm_engine()  # ADD this line
+        
         prompt = f"""
         Analyze this business rule from COBOL code:
         
@@ -432,6 +543,8 @@ class LogicAnalyzerAgent:
     
     async def _llm_identify_patterns(self, content: str, chunk_type: str) -> List[Dict[str, Any]]:
         """Use LLM to identify logic patterns"""
+        await self._ensure_llm_engine()  # ADD this line
+        
         prompt = f"""
         Identify common logic patterns in this {chunk_type} code:
         
@@ -618,26 +731,32 @@ class LogicAnalyzerAgent:
     async def analyze_business_logic(self, program_name: str) -> Dict[str, Any]:
         """Specialized analysis focused on business logic"""
         try:
+            await self._ensure_llm_engine()  # ADD this line
+            
             chunks = await self._get_program_chunks(program_name)
             
             if not chunks:
-                return {"error": f"Program {program_name} not found"}
+                return self._add_processing_info({"error": f"Program {program_name} not found"})
             
             # Focus on business logic extraction
             business_logic = await self._extract_comprehensive_business_logic(chunks)
             
-            return {
+            result = {
                 "program_name": program_name,
                 "business_logic": business_logic,
                 "analysis_type": "business_logic_focused"
             }
             
+            return self._add_processing_info(result)
+            
         except Exception as e:
             self.logger.error(f"Business logic analysis failed: {str(e)}")
-            return {"error": str(e)}
+            return self._add_processing_info({"error": str(e)})
     
     async def _extract_comprehensive_business_logic(self, chunks: List[tuple]) -> Dict[str, Any]:
         """Extract comprehensive business logic from all chunks"""
+        await self._ensure_llm_engine()  # ADD this line
+        
         all_content = '\n'.join([chunk[4] for chunk in chunks])
         
         prompt = f"""
@@ -663,3 +782,155 @@ class LogicAnalyzerAgent:
             "extraction_method": "llm_analysis",
             "confidence": "high"
         }
+
+    # ADD new methods for enhanced functionality
+    async def analyze_full_lifecycle(self, component_name: str, component_type: str) -> Dict[str, Any]:
+        """Analyze full lifecycle of a component"""
+        try:
+            await self._ensure_llm_engine()
+            
+            # Get all chunks related to this component
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            if component_type == "field":
+                # Search for field usage across all programs
+                cursor.execute("""
+                    SELECT pc.program_name, pc.chunk_id, pc.content, pc.metadata
+                    FROM program_chunks pc
+                    WHERE pc.content LIKE ? OR pc.metadata LIKE ?
+                """, (f"%{component_name}%", f"%{component_name}%"))
+            else:
+                # Search for program/file references
+                cursor.execute("""
+                    SELECT pc.program_name, pc.chunk_id, pc.content, pc.metadata
+                    FROM program_chunks pc
+                    WHERE pc.program_name = ?
+                """, (component_name,))
+            
+            related_chunks = cursor.fetchall()
+            conn.close()
+            
+            if not related_chunks:
+                return self._add_processing_info({
+                    "component_name": component_name,
+                    "component_type": component_type,
+                    "lifecycle_analysis": "No usage found",
+                    "usage_count": 0
+                })
+            
+            # Analyze lifecycle patterns
+            lifecycle_analysis = await self._analyze_lifecycle_patterns(related_chunks, component_name)
+            
+            result = {
+                "component_name": component_name,
+                "component_type": component_type,
+                "usage_count": len(related_chunks),
+                "lifecycle_analysis": lifecycle_analysis,
+                "programs_involved": list(set(chunk[0] for chunk in related_chunks))
+            }
+            
+            return self._add_processing_info(result)
+            
+        except Exception as e:
+            self.logger.error(f"Lifecycle analysis failed: {str(e)}")
+            return self._add_processing_info({"error": str(e)})
+    
+    async def _analyze_lifecycle_patterns(self, chunks: List[tuple], component_name: str) -> Dict[str, Any]:
+        """Analyze lifecycle patterns for a component"""
+        await self._ensure_llm_engine()
+        
+        # Combine relevant content
+        all_content = '\n'.join([chunk[2] for chunk in chunks])
+        
+        prompt = f"""
+        Analyze the lifecycle of component '{component_name}' based on this code:
+        
+        {all_content[:1500]}...
+        
+        Determine:
+        1. Where this component is created/initialized
+        2. How it's used throughout the programs
+        3. Where it's modified or updated
+        4. Any cleanup or finalization
+        5. Dependencies and relationships
+        
+        Return as JSON:
+        {{
+            "creation_points": ["location1", "location2"],
+            "usage_patterns": ["pattern1", "pattern2"],
+            "modification_points": ["mod1", "mod2"],
+            "dependencies": ["dep1", "dep2"],
+            "lifecycle_summary": "summary text"
+        }}
+        """
+        
+        sampling_params = SamplingParams(temperature=0.1, max_tokens=600)
+        result = await self.llm_engine.generate(prompt, sampling_params)
+        
+        try:
+            response_text = result.outputs[0].text.strip()
+            if '{' in response_text:
+                json_start = response_text.find('{')
+                json_end = response_text.rfind('}') + 1
+                return json.loads(response_text[json_start:json_end])
+        except:
+            pass
+        
+        return {
+            "creation_points": [],
+            "usage_patterns": [],
+            "modification_points": [],
+            "dependencies": [],
+            "lifecycle_summary": "Analysis could not be completed"
+        }
+    
+    async def find_dependencies(self, component_name: str) -> List[str]:
+        """Find all dependencies for a component"""
+        try:
+            await self._ensure_llm_engine()
+            
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Search for component references
+            cursor.execute("""
+                SELECT DISTINCT pc.program_name, pc.metadata
+                FROM program_chunks pc
+                WHERE pc.content LIKE ? OR pc.metadata LIKE ?
+            """, (f"%{component_name}%", f"%{component_name}%"))
+            
+            results = cursor.fetchall()
+            conn.close()
+            
+            dependencies = set()
+            
+            for program_name, metadata_str in results:
+                if metadata_str:
+                    try:
+                        metadata = json.loads(metadata_str)
+                        
+                        # Extract various types of dependencies
+                        if 'field_names' in metadata:
+                            dependencies.update(metadata['field_names'])
+                        if 'files' in metadata:
+                            dependencies.update(metadata['files'])
+                        if 'called_paragraphs' in metadata:
+                            dependencies.update(metadata['called_paragraphs'])
+                        if 'tables' in metadata:
+                            dependencies.update(metadata['tables'])
+                            
+                    except json.JSONDecodeError:
+                        continue
+                
+                # Add the program itself as a dependency
+                dependencies.add(program_name)
+            
+            # Remove the component itself from dependencies
+            dependencies.discard(component_name)
+            
+            return list(dependencies)
+            
+        except Exception as e:
+            self.logger.error(f"Dependency analysis failed: {str(e)}")
+            return []
