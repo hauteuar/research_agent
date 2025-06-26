@@ -8,6 +8,7 @@ import asyncio
 import sqlite3
 import json
 import numpy as np
+import os
 from typing import Dict, List, Optional, Any, Tuple
 import logging
 from pathlib import Path
@@ -24,11 +25,17 @@ from vllm import AsyncLLMEngine, SamplingParams
 class VectorIndexAgent:
     """Agent for building and managing vector indices"""
     
-    def __init__(self, llm_engine: AsyncLLMEngine, db_path: str, gpu_id: int):
+    def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
+                 gpu_id: int = None, coordinator=None):
         self.llm_engine = llm_engine
-        self.db_path = db_path
+        self.db_path = db_path or "opulence_data.db"  # ADD default value
         self.gpu_id = gpu_id
+        self.coordinator = coordinator  # ADD this line
         self.logger = logging.getLogger(__name__)
+        
+        # ADD these lines for coordinator integration
+        self._engine_created = False
+        self._using_coordinator_llm = False
         
         # Initialize embedding model
         self.embedding_model_name = "microsoft/codebert-base"
@@ -47,12 +54,109 @@ class VectorIndexAgent:
         
         # Initialize components
         asyncio.create_task(self._initialize_components())
+
+    # ADD this new method
+    async def _ensure_llm_engine(self):
+        """Ensure LLM engine is available - use coordinator first, fallback to own"""
+        if self.llm_engine is not None:
+            return  # Already have engine
+        
+        # Try to get from coordinator first
+        if self.coordinator is not None:
+            try:
+                # Get available GPU from coordinator
+                best_gpu = await self.coordinator.get_available_gpu_for_agent("vector_index")
+                if best_gpu is not None:
+                    # Get shared LLM engine from coordinator
+                    engine = await self.coordinator.get_or_create_llm_engine(best_gpu)
+                    self.llm_engine = engine
+                    self.gpu_id = best_gpu
+                    self._using_coordinator_llm = True
+                    self.logger.info(f"VectorIndex using coordinator's LLM on GPU {best_gpu}")
+                    return
+            except Exception as e:
+                self.logger.warning(f"Failed to get LLM from coordinator: {e}")
+        
+        # Try to get from global coordinator
+        if not self._engine_created:
+            try:
+                from opulence_coordinator import get_dynamic_coordinator
+                global_coordinator = get_dynamic_coordinator()
+                
+                best_gpu = await global_coordinator.get_available_gpu_for_agent("vector_index")
+                if best_gpu is not None:
+                    engine = await global_coordinator.get_or_create_llm_engine(best_gpu)
+                    self.llm_engine = engine
+                    self.gpu_id = best_gpu
+                    self._using_coordinator_llm = True
+                    self.logger.info(f"VectorIndex using global coordinator's LLM on GPU {best_gpu}")
+                    return
+            except Exception as e:
+                self.logger.warning(f"Failed to get LLM from global coordinator: {e}")
+        
+        # Last resort: create own engine
+        if not self._engine_created:
+            await self._create_llm_engine()
+    
+    # ADD this new method
+    async def _create_llm_engine(self):
+        """Create own LLM engine as fallback (smaller memory footprint)"""
+        try:
+            from gpu_force_fix import GPUForcer
+            
+            best_gpu = GPUForcer.find_best_gpu_with_memory(1.5)  # Lower requirement
+            if best_gpu is None:
+                raise RuntimeError("No suitable GPU found for fallback LLM engine")
+            
+            self.logger.warning(f"VectorIndex creating fallback LLM on GPU {best_gpu}")
+            
+            original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
+            
+            try:
+                GPUForcer.force_gpu_environment(best_gpu)
+                
+                # Create smaller engine to avoid conflicts
+                engine_args = GPUForcer.create_vllm_engine_args(
+                    "codellama/CodeLlama-7b-Instruct-hf",
+                    2048  # Smaller context
+                )
+                engine_args.gpu_memory_utilization = 0.3  # Use less memory
+                
+                from vllm import AsyncLLMEngine
+                self.llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
+                self.gpu_id = best_gpu
+                self._engine_created = True
+                self._using_coordinator_llm = False
+                
+                self.logger.info(f"✅ VectorIndex fallback LLM created on GPU {best_gpu}")
+                
+            finally:
+                if original_cuda_visible is not None:
+                    os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible
+                elif 'CUDA_VISIBLE_DEVICES' in os.environ:
+                    del os.environ['CUDA_VISIBLE_DEVICES']
+                    
+        except Exception as e:
+            self.logger.error(f"Failed to create fallback LLM engine: {str(e)}")
+            raise
+
+    # ADD this helper method
+    def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Add processing information to results"""
+        if isinstance(result, dict):
+            result['gpu_used'] = self.gpu_id
+            result['agent_type'] = 'vector_index'
+            result['using_coordinator_llm'] = self._using_coordinator_llm
+        return result
     
     async def _initialize_components(self):
         """Initialize embedding model and vector databases"""
         try:
+            # Wait a bit to allow coordinator initialization
+            await asyncio.sleep(1)
+            
             # Set device for embedding model
-            device = f"cuda:{self.gpu_id}" if torch.cuda.is_available() else "cpu"
+            device = f"cuda:{self.gpu_id}" if self.gpu_id is not None and torch.cuda.is_available() else "cpu"
             
             # Load embedding model
             self.tokenizer = AutoTokenizer.from_pretrained(self.embedding_model_name)
@@ -90,7 +194,7 @@ class VectorIndexAgent:
             text_to_embed = self._prepare_text_for_embedding(chunk_content, chunk_metadata)
             
             # Tokenize
-            device = f"cuda:{self.gpu_id}" if torch.cuda.is_available() else "cpu"
+            device = f"cuda:{self.gpu_id}" if self.gpu_id is not None and torch.cuda.is_available() else "cpu"
             inputs = self.tokenizer(
                 text_to_embed,
                 return_tensors="pt",
@@ -158,7 +262,7 @@ class VectorIndexAgent:
             conn.close()
             
             if not chunks:
-                return {"status": "no_chunks_to_process", "processed": 0}
+                return self._add_processing_info({"status": "no_chunks_to_process", "processed": 0})
             
             embeddings_created = 0
             batch_size = 10  # Process in batches to avoid memory issues
@@ -212,16 +316,18 @@ class VectorIndexAgent:
             # Final save
             await self._save_faiss_index()
             
-            return {
+            result = {
                 "status": "success",
                 "total_chunks": len(chunks),
                 "embeddings_created": embeddings_created,
                 "faiss_index_size": self.faiss_index.ntotal
             }
             
+            return self._add_processing_info(result)
+            
         except Exception as e:
             self.logger.error(f"Batch embedding processing failed: {str(e)}")
-            return {"status": "error", "error": str(e)}
+            return self._add_processing_info({"status": "error", "error": str(e)})
     
     async def _store_embedding_reference(self, chunk_id: int, embedding_id: str, 
                                        faiss_id: int, embedding_vector: List[float]):
@@ -384,6 +490,8 @@ class VectorIndexAgent:
     
     async def _analyze_pattern_similarity(self, ref_code: str, similar_code: str) -> str:
         """Analyze what makes two code patterns similar"""
+        await self._ensure_llm_engine()  # ADD this line
+        
         prompt = f"""
         Compare these two code patterns and identify the similarity type:
         
@@ -404,6 +512,100 @@ class VectorIndexAgent:
         
         return result.outputs[0].text.strip()
     
+    async def search_code_by_pattern(self, pattern_description: str, top_k: int = 10) -> List[Dict[str, Any]]:
+        """Search for code using natural language pattern description"""
+        try:
+            await self._ensure_llm_engine()  # ADD this line
+            
+            # Use LLM to enhance the search query
+            enhanced_query = await self._enhance_search_query(pattern_description)
+            
+            # Perform semantic search
+            results = await self.semantic_search(enhanced_query, top_k)
+            
+            # Rank results using LLM
+            ranked_results = await self._rank_search_results(pattern_description, results)
+            
+            return ranked_results
+            
+        except Exception as e:
+            self.logger.error(f"Pattern search failed: {str(e)}")
+            return []
+    
+    async def _enhance_search_query(self, pattern_description: str) -> str:
+        """Use LLM to enhance search query"""
+        await self._ensure_llm_engine()  # ADD this line
+        
+        prompt = f"""
+        Convert this natural language pattern description into a technical search query for mainframe COBOL/JCL code:
+        
+        Pattern: "{pattern_description}"
+        
+        Generate a technical query that includes:
+        1. Relevant COBOL/JCL keywords
+        2. Common field names or operations
+        3. Technical terms that would appear in the code
+        
+        Return only the enhanced query text.
+        """
+        
+        sampling_params = SamplingParams(temperature=0.2, max_tokens=200)
+        result = await self.llm_engine.generate(prompt, sampling_params)
+        
+        return result.outputs[0].text.strip()
+    
+    async def _rank_search_results(self, original_query: str, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Use LLM to rank search results by relevance"""
+        await self._ensure_llm_engine()  # ADD this line
+        
+        if not results:
+            return results
+        
+        # For each result, get relevance score
+        for result in results:
+            relevance_score = await self._calculate_relevance_score(
+                original_query, result['content'], result['metadata']
+            )
+            result['relevance_score'] = relevance_score
+        
+        # Sort by combined similarity and relevance
+        def combined_score(r):
+            return 0.6 * r['similarity_score'] + 0.4 * r.get('relevance_score', 0)
+        
+        results.sort(key=combined_score, reverse=True)
+        return results
+    
+    async def _calculate_relevance_score(self, query: str, content: str, metadata: Dict) -> float:
+        """Calculate relevance score using LLM"""
+        await self._ensure_llm_engine()  # ADD this line
+        
+        prompt = f"""
+        Rate the relevance of this code chunk to the query on a scale of 0.0 to 1.0:
+        
+        Query: "{query}"
+        
+        Code: {content[:300]}...
+        
+        Metadata: {json.dumps(metadata, indent=2)[:200]}...
+        
+        Consider:
+        1. How well the code matches the query intent
+        2. Whether the functionality aligns with what's requested
+        3. Code quality and completeness
+        
+        Return only a decimal number between 0.0 and 1.0.
+        """
+        
+        sampling_params = SamplingParams(temperature=0.1, max_tokens=50)
+        result = await self.llm_engine.generate(prompt, sampling_params)
+        
+        try:
+            score_text = result.outputs[0].text.strip()
+            score = float(score_text)
+            return max(0.0, min(1.0, score))
+        except:
+            return 0.5  # Default score
+
     async def build_code_knowledge_graph(self) -> Dict[str, Any]:
         """Build a knowledge graph of code relationships"""
         try:
@@ -599,7 +801,7 @@ class VectorIndexAgent:
             # ChromaDB collection stats
             collection_count = self.collection.count()
             
-            return {
+            result = {
                 "total_embeddings": self.faiss_index.ntotal if self.faiss_index else 0,
                 "embeddings_by_type": type_counts,
                 "top_programs": program_counts,
@@ -608,9 +810,11 @@ class VectorIndexAgent:
                 "index_file_exists": Path(self.faiss_index_path).exists()
             }
             
+            return self._add_processing_info(result)
+            
         except Exception as e:
             self.logger.error(f"Failed to get embedding statistics: {str(e)}")
-            return {}
+            return self._add_processing_info({})
     
     async def rebuild_index(self) -> Dict[str, Any]:
         """Rebuild the entire vector index from scratch"""
@@ -642,98 +846,14 @@ class VectorIndexAgent:
             # Save index
             await self._save_faiss_index()
             
-            return {
+            final_result = {
                 "status": "success",
                 "message": "Index rebuilt successfully",
                 **result
             }
             
+            return self._add_processing_info(final_result)
+            
         except Exception as e:
             self.logger.error(f"Index rebuild failed: {str(e)}")
-            return {"status": "error", "error": str(e)}
-    
-    async def search_code_by_pattern(self, pattern_description: str, top_k: int = 10) -> List[Dict[str, Any]]:
-        """Search for code using natural language pattern description"""
-        try:
-            # Use LLM to enhance the search query
-            enhanced_query = await self._enhance_search_query(pattern_description)
-            
-            # Perform semantic search
-            results = await self.semantic_search(enhanced_query, top_k)
-            
-            # Rank results using LLM
-            ranked_results = await self._rank_search_results(pattern_description, results)
-            
-            return ranked_results
-            
-        except Exception as e:
-            self.logger.error(f"Pattern search failed: {str(e)}")
-            return []
-    
-    async def _enhance_search_query(self, pattern_description: str) -> str:
-        """Use LLM to enhance search query"""
-        prompt = f"""
-        Convert this natural language pattern description into a technical search query for mainframe COBOL/JCL code:
-        
-        Pattern: "{pattern_description}"
-        
-        Generate a technical query that includes:
-        1. Relevant COBOL/JCL keywords
-        2. Common field names or operations
-        3. Technical terms that would appear in the code
-        
-        Return only the enhanced query text.
-        """
-        
-        sampling_params = SamplingParams(temperature=0.2, max_tokens=200)
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
-        return result.outputs[0].text.strip()
-    
-    async def _rank_search_results(self, original_query: str, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Use LLM to rank search results by relevance"""
-        if not results:
-            return results
-        
-        # For each result, get relevance score
-        for result in results:
-            relevance_score = await self._calculate_relevance_score(
-                original_query, result['content'], result['metadata']
-            )
-            result['relevance_score'] = relevance_score
-        
-        # Sort by combined similarity and relevance
-        def combined_score(r):
-            return 0.6 * r['similarity_score'] + 0.4 * r.get('relevance_score', 0)
-        
-        results.sort(key=combined_score, reverse=True)
-        return results
-    
-    async def _calculate_relevance_score(self, query: str, content: str, metadata: Dict) -> float:
-        """Calculate relevance score using LLM"""
-        prompt = f"""
-        Rate the relevance of this code chunk to the query on a scale of 0.0 to 1.0:
-        
-        Query: "{query}"
-        
-        Code: {content[:300]}...
-        
-        Metadata: {json.dumps(metadata, indent=2)[:200]}...
-        
-        Consider:
-        1. How well the code matches the query intent
-        2. Whether the functionality aligns with what's requested
-        3. Code quality and completeness
-        
-        Return only a decimal number between 0.0 and 1.0.
-        """
-        
-        sampling_params = SamplingParams(temperature=0.1, max_tokens=50)
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
-        try:
-            score_text = result.outputs[0].text.strip()
-            score = float(score_text)
-            return max(0.0, min(1.0, score))
-        except:
-            return 0.5  # Default score
+            return self._add_processing_info({"status": "error", "error": str(e)})
