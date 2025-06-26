@@ -588,6 +588,57 @@ class DynamicOpulenceCoordinator:
         
         return status
     
+        # Add this method to DynamicOpulenceCoordinator class in opulence_coordinator.py
+
+    async def get_statistics(self) -> Dict[str, Any]:
+        """Get comprehensive system statistics"""
+        try:
+            # Get processing statistics from database
+            conn = sqlite3.connect(self.db_path)
+            
+            # Processing stats
+            processing_stats = pd.read_sql_query("""
+                SELECT 
+                    operation,
+                    COUNT(*) as count,
+                    AVG(duration) as avg_duration,
+                    MIN(duration) as min_duration,
+                    MAX(duration) as max_duration
+                FROM processing_stats
+                WHERE timestamp > datetime('now', '-24 hours')
+                GROUP BY operation
+            """, conn)
+            
+            # File stats
+            file_stats = pd.read_sql_query("""
+                SELECT 
+                    file_type,
+                    COUNT(*) as count,
+                    processing_status
+                FROM file_metadata
+                GROUP BY file_type, processing_status
+            """, conn)
+            
+            conn.close()
+            
+            return {
+                "system_stats": self.stats,
+                "processing_stats": processing_stats.to_dict('records') if not processing_stats.empty else [],
+                "file_stats": file_stats.to_dict('records') if not file_stats.empty else [],
+                "gpu_stats": self.get_gpu_utilization_stats(),
+                "database_stats": await self._get_database_stats(),
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get statistics: {str(e)}")
+            return {
+                "system_stats": self.stats,
+                "processing_stats": [],
+                "file_stats": [],
+                "error": str(e)
+            }
+    
     def _create_agent(self, agent_type: str, llm_engine: AsyncLLMEngine, gpu_id: int):
         """Create agent instance with coordinator reference"""
         if agent_type == "code_parser":
@@ -740,13 +791,15 @@ class DynamicOpulenceCoordinator:
                         use_gpu_distribution=True
                     )
                     results.extend(group_results)
-            await self._verify_database_storage(file_paths)
         
-        # Update statistics
+            # FIX 3: Verify database storage - ADD THIS LINE
+            await self._verify_database_storage(file_paths)
+            
+            # Update statistics
             processing_time = time.time() - start_time
             self.stats["total_files_processed"] += total_files
             self._update_processing_stats("batch_processing", processing_time)
-        
+            
             # Cleanup batch processor
             batch_processor.shutdown()
         
