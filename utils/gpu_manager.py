@@ -166,46 +166,45 @@ class DynamicGPUManager:
             GPU ID or None if no GPU available
         """
         with self.lock:
-            # Check if preferred GPU is available
+            # Force refresh GPU info before allocation
+            self._update_all_gpu_info()
+            
+            # Check if preferred GPU is available and has enough memory
             if preferred_gpu is not None and preferred_gpu in self.gpu_info:
                 gpu_info = self.gpu_info[preferred_gpu]
-                if gpu_info.status == GPUStatus.AVAILABLE:
-                    self.logger.info(f"Using preferred GPU {preferred_gpu}")
+                # Check if GPU has at least 2GB free memory and is not heavily utilized
+                min_free_memory = 2 * (1024**3)  # 2GB
+                if (gpu_info.status == GPUStatus.AVAILABLE and 
+                    gpu_info.free_memory > min_free_memory):
+                    self.logger.info(f"Using preferred GPU {preferred_gpu} (free: {gpu_info.free_memory / (1024**3):.1f}GB)")
                     return preferred_gpu
                 elif not fallback:
-                    self.logger.warning(f"Preferred GPU {preferred_gpu} not available and fallback disabled")
+                    self.logger.warning(f"Preferred GPU {preferred_gpu} not suitable (free: {gpu_info.free_memory / (1024**3):.1f}GB, status: {gpu_info.status.value}) and fallback disabled")
                     return None
+                else:
+                    self.logger.warning(f"Preferred GPU {preferred_gpu} not suitable (free: {gpu_info.free_memory / (1024**3):.1f}GB, status: {gpu_info.status.value}), trying alternatives")
             
-            # Find best available GPU
-            available_gpus = [
+            # Find GPUs with sufficient free memory (at least 2GB)
+            min_free_memory = 2 * (1024**3)  # 2GB
+            suitable_gpus = [
                 (gpu_id, info) for gpu_id, info in self.gpu_info.items()
-                if info.status == GPUStatus.AVAILABLE
+                if info.free_memory > min_free_memory and info.utilization < 90.0
             ]
             
-            if available_gpus:
-                # Sort by free memory (descending)
-                best_gpu = max(available_gpus, key=lambda x: x[1].free_memory)
-                self.logger.info(f"Selected GPU {best_gpu[0]} (free memory: {best_gpu[1].free_memory / (1024**3):.1f}GB)")
+            if suitable_gpus:
+                # Sort by free memory (descending) and utilization (ascending)
+                best_gpu = max(suitable_gpus, key=lambda x: (x[1].free_memory, -x[1].utilization))
+                self.logger.info(f"Selected GPU {best_gpu[0]} (free: {best_gpu[1].free_memory / (1024**3):.1f}GB, utilization: {best_gpu[1].utilization:.1f}%)")
                 return best_gpu[0]
             
-            # If no fully available GPU, try busy but usable GPUs
-            busy_gpus = [
-                (gpu_id, info) for gpu_id, info in self.gpu_info.items()
-                if info.status == GPUStatus.BUSY and info.utilization < self.utilization_threshold
-            ]
-            
-            if busy_gpus:
-                best_gpu = min(busy_gpus, key=lambda x: x[1].utilization)
-                self.logger.warning(f"Using busy GPU {best_gpu[0]} (utilization: {best_gpu[1].utilization:.1f}%)")
-                return best_gpu[0]
-            
-            # Last resort: use least utilized GPU
+            # If no GPU has enough free memory, find the one with most free memory
             if self.gpu_info:
-                last_resort = min(self.gpu_info.items(), key=lambda x: x[1].utilization)
-                self.logger.warning(f"Using last resort GPU {last_resort[0]} (utilization: {last_resort[1].utilization:.1f}%)")
-                return last_resort[0]
+                best_gpu = max(self.gpu_info.items(), key=lambda x: x[1].free_memory)
+                if best_gpu[1].free_memory > 500 * (1024**2):  # At least 500MB
+                    self.logger.warning(f"Using GPU {best_gpu[0]} with limited memory (free: {best_gpu[1].free_memory / (1024**3):.1f}GB)")
+                    return best_gpu[0]
             
-            self.logger.error("No GPUs available")
+            self.logger.error("No suitable GPUs found")
             return None
     
     def reserve_gpu_for_workload(self, workload_type: str, preferred_gpu: Optional[int] = None, 

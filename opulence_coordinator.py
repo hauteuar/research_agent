@@ -32,7 +32,7 @@ from agents.lineage_analyzer_agent import LineageAnalyzerAgent
 from agents.logic_analyzer_agent import LogicAnalyzerAgent
 from agents.documentation_agent import DocumentationAgent
 from agents.db2_comparator_agent import DB2ComparatorAgent
-from utils.gpu_manager import DynamicGPUManager, GPUContext
+from utils.enhanced_gpu_manager import DynamicGPUManager, GPUContext
 from utils.dynamic_config_manager import DynamicConfigManager, get_dynamic_config, GPUConfig
 from utils.health_monitor import HealthMonitor
 from utils.cache_manager import CacheManager
@@ -187,30 +187,81 @@ class DynamicOpulenceCoordinator:
         conn.close()
     
     async def get_or_create_llm_engine(self, gpu_id: int) -> AsyncLLMEngine:
-        """Get or create LLM engine for specific GPU"""
+        """Get or create LLM engine for specific GPU with proper device management"""
         async with self.engine_lock:
             engine_key = f"gpu_{gpu_id}"
             
             if engine_key not in self.llm_engine_pool:
                 try:
-                    # Set CUDA device
+                    # Force GPU memory cleanup first
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                    
+                    # Set CUDA device explicitly
                     torch.cuda.set_device(gpu_id)
                     
+                    # Verify we're on the correct device
+                    current_device = torch.cuda.current_device()
+                    if current_device != gpu_id:
+                        raise RuntimeError(f"Failed to set CUDA device to {gpu_id}, current device is {current_device}")
+                    
+                    # Get memory info for the target GPU
+                    with torch.cuda.device(gpu_id):
+                        memory_info = torch.cuda.mem_get_info()
+                        free_memory_gb = memory_info[0] / (1024**3)
+                        total_memory_gb = memory_info[1] / (1024**3)
+                        
+                        self.logger.info(f"GPU {gpu_id} memory: {free_memory_gb:.1f}GB free / {total_memory_gb:.1f}GB total")
+                        
+                        # Check if we have enough memory (at least 2GB)
+                        if free_memory_gb < 2.0:
+                            raise RuntimeError(f"GPU {gpu_id} has insufficient memory: {free_memory_gb:.1f}GB free (need at least 2GB)")
+                    
+                    # Create engine args with specific GPU
                     engine_args = AsyncEngineArgs(
                         model=self.config.model_name,
                         tensor_parallel_size=1,
                         max_model_len=self.config.max_tokens,
-                        gpu_memory_utilization=0.8,
-                        device=f"cuda:{gpu_id}"
+                        gpu_memory_utilization=0.7,  # More conservative memory usage
+                        device=f"cuda:{gpu_id}",
+                        trust_remote_code=True,
+                        enforce_eager=True,  # Disable CUDA graphs for better memory management
+                        disable_log_stats=True
                     )
                     
+                    # Set environment variables to force device
+                    import os
+                    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+                    
+                    self.logger.info(f"Creating LLM engine on GPU {gpu_id}...")
                     engine = AsyncLLMEngine.from_engine_args(engine_args)
+                    
+                    # Reset CUDA_VISIBLE_DEVICES
+                    if "CUDA_VISIBLE_DEVICES" in os.environ:
+                        del os.environ["CUDA_VISIBLE_DEVICES"]
+                    
                     self.llm_engine_pool[engine_key] = engine
                     
-                    self.logger.info(f"Created LLM engine for GPU {gpu_id}")
+                    # Verify memory usage after engine creation
+                    with torch.cuda.device(gpu_id):
+                        final_memory_info = torch.cuda.mem_get_info()
+                        final_free_gb = final_memory_info[0] / (1024**3)
+                        used_gb = free_memory_gb - final_free_gb
+                        
+                        self.logger.info(f"LLM engine created on GPU {gpu_id}. Used {used_gb:.1f}GB, {final_free_gb:.1f}GB remaining")
                     
                 except Exception as e:
                     self.logger.error(f"Failed to create LLM engine for GPU {gpu_id}: {str(e)}")
+                    
+                    # Clean up on failure
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    
+                    # Remove from pool if it was partially created
+                    if engine_key in self.llm_engine_pool:
+                        del self.llm_engine_pool[engine_key]
+                    
                     raise
             
             return self.llm_engine_pool[engine_key]
