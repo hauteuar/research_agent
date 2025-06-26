@@ -2,7 +2,6 @@
 """
 Agent 3: Batch Data Loader & Table Mapper
 Handles DB2 DDL, DCLGEN files, CSV layouts, and data ingestion
-Updated with dynamic GPU allocation support
 """
 
 import asyncio
@@ -17,31 +16,28 @@ import logging
 from datetime import datetime
 import zipfile
 import hashlib
-import os
 
 from vllm import AsyncLLMEngine, SamplingParams
-
-# agents/data_loader_agent.py
-# ONLY CHANGE THESE PARTS - Rest of your code stays the same
 
 class DataLoaderAgent:
     """Agent for loading and mapping data files and schemas"""
     
     def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
-                 gpu_id: int = None, coordinator=None):  # ADD coordinator parameter
+                 gpu_id: int = None, coordinator=None):
         self.llm_engine = llm_engine
-        self.db_path = db_path or "opulence_data.db"
+        self.db_path = db_path or "opulence_data.db"  # ADD default value
         self.gpu_id = gpu_id
         self.coordinator = coordinator  # ADD this line
         self.logger = logging.getLogger(__name__)
         
-        # For dynamic creation without LLM engine
+        # ADD these lines for coordinator integration
         self._engine_created = False
-        self._using_coordinator_llm = False  # ADD this line
+        self._using_coordinator_llm = False
         
         # Initialize SQLite tables for data mapping
         self._init_data_tables()
     
+    # ADD this new method
     async def _ensure_llm_engine(self):
         """Ensure LLM engine is available - use coordinator first, fallback to own"""
         if self.llm_engine is not None:
@@ -84,7 +80,7 @@ class DataLoaderAgent:
         if not self._engine_created:
             await self._create_llm_engine()
     
-    # REPLACE your existing _create_llm_engine method with this smaller one:
+    # ADD this new method
     async def _create_llm_engine(self):
         """Create own LLM engine as fallback (smaller memory footprint)"""
         try:
@@ -125,7 +121,7 @@ class DataLoaderAgent:
             self.logger.error(f"Failed to create fallback LLM engine: {str(e)}")
             raise
 
-    # ADD this helper method:
+    # ADD this helper method
     def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Add processing information to results"""
         if isinstance(result, dict):
@@ -134,45 +130,7 @@ class DataLoaderAgent:
             result['using_coordinator_llm'] = self._using_coordinator_llm
         return result
     
-    # MODIFY your process_file method - just change the return statements:
-    async def process_file(self, file_path: Path) -> Dict[str, Any]:
-        """Process a data file (CSV, DDL, DCLGEN, layout) with GPU forcing"""
-        try:
-            # Ensure we have an LLM engine (tries coordinator first)
-            await self._ensure_llm_engine()
-            
-            self.logger.info(f"Processing file {file_path} with DataLoader on GPU {self.gpu_id}")
-            
-            # Your existing file processing logic stays the same...
-            file_extension = file_path.suffix.lower()
-            file_content = self._read_file_safely(file_path)
-            
-            result = {}
-            
-            if file_extension == '.csv':
-                result = await self._process_csv_file(file_path, file_content)
-            elif file_extension in ['.ddl', '.sql']:
-                result = await self._process_ddl_file(file_path, file_content)
-            elif 'dclgen' in file_path.name.lower() or file_extension == '.dcl':
-                result = await self._process_dclgen_file(file_path, file_content)
-            elif file_extension == '.json':
-                result = await self._process_layout_json(file_path, file_content)
-            elif file_extension == '.zip':
-                result = await self._process_zip_file(file_path)
-            else:
-                result = await self._auto_detect_and_process(file_path, file_content)
-            
-            # CHANGE: Use helper method instead of manual assignment
-            return self._add_processing_info(result)
-                
-        except Exception as e:
-            self.logger.error(f"Failed to process file {file_path}: {str(e)}")
-            return self._add_processing_info({
-                "status": "error",
-                "file_name": file_path.name,
-                "error": str(e)
-            })
-
+    
     def _init_data_tables(self):
         """Initialize SQLite tables for data storage"""
         conn = sqlite3.connect(self.db_path)
@@ -228,6 +186,37 @@ class DataLoaderAgent:
         conn.commit()
         conn.close()
     
+    async def process_file(self, file_path: Path) -> Dict[str, Any]:
+        """Process a data file (CSV, DDL, DCLGEN, layout)"""
+        try:
+            await self._ensure_llm_engine()
+            file_extension = file_path.suffix.lower()
+            file_content = self._read_file_safely(file_path)
+            
+            if file_extension == '.csv':
+                return await self._process_csv_file(file_path, file_content)
+            elif file_extension in ['.ddl', '.sql']:
+                return await self._process_ddl_file(file_path, file_content)
+            elif 'dclgen' in file_path.name.lower() or file_extension == '.dcl':
+                return await self._process_dclgen_file(file_path, file_content)
+            elif file_extension == '.json':
+                return await self._process_layout_json(file_path, file_content)
+            elif file_extension == '.zip':
+                return await self._process_zip_file(file_path)
+            else:
+                # Try to auto-detect file type
+                return await self._auto_detect_and_process(file_path, file_content)
+            
+            # CHANGE: Use helper method instead of direct return
+            return self._add_processing_info(result)
+                
+        except Exception as e:
+            self.logger.error(f"Failed to process file {file_path}: {str(e)}")
+            return {
+                "status": "error",
+                "file_name": file_path.name,
+                "error": str(e)
+            }
     
     def _read_file_safely(self, file_path: Path) -> str:
         """Safely read file with encoding detection"""
@@ -247,9 +236,7 @@ class DataLoaderAgent:
     async def _process_csv_file(self, file_path: Path, content: str) -> Dict[str, Any]:
         """Process CSV file and create corresponding table"""
         try:
-            # Ensure LLM engine is ready
             await self._ensure_llm_engine()
-            
             # Detect delimiter and structure
             delimiter = self._detect_csv_delimiter(content)
             
@@ -372,114 +359,46 @@ class DataLoaderAgent:
     
     async def _enhance_schema_with_llm(self, schema: List[Dict], filename: str) -> List[Dict[str, Any]]:
         """Use LLM to enhance schema with business context"""
-        try:
-            await self._ensure_llm_engine()
-            
-            prompt = f"""
-            Analyze this database schema for file "{filename}" and enhance it with business context:
-            
-            Schema:
-            {json.dumps(schema, indent=2)}
-            
-            For each field, provide:
-            1. Business meaning/purpose
-            2. Data classification (PII, Financial, Operational, Reference, etc.)
-            3. Potential data quality issues
-            4. Suggested improvements to field definition
-            
-            Return enhanced schema as JSON with additional fields:
-            - business_meaning
-            - data_classification  
-            - quality_concerns
-            - recommended_type (if different from current)
-            """
-            
-            sampling_params = SamplingParams(temperature=0.2, max_tokens=1500)
-            result = await self.llm_engine.generate(prompt, sampling_params)
-            
-            try:
-                response_text = result.outputs[0].text.strip()
-                if '{' in response_text:
-                    json_start = response_text.find('[') if '[' in response_text else response_text.find('{')
-                    json_end = response_text.rfind(']') + 1 if ']' in response_text else response_text.rfind('}') + 1
-                    enhanced_data = json.loads(response_text[json_start:json_end])
-                    
-                    # Merge enhanced data with original schema
-                    if isinstance(enhanced_data, list) and len(enhanced_data) == len(schema):
-                        for i, enhancement in enumerate(enhanced_data):
-                            if isinstance(enhancement, dict):
-                                schema[i].update(enhancement)
-                    
-            except Exception as e:
-                self.logger.warning(f"Failed to parse LLM schema enhancement: {str(e)}")
-            
-            return schema
-            
-        except Exception as e:
-            self.logger.error(f"Schema enhancement failed: {str(e)}")
-            return schema  # Return original schema on failure
-    
-    # ... (rest of the methods remain the same, but ensure they call await self._ensure_llm_engine() before using self.llm_engine)
-    
-    async def _generate_field_descriptions(self, columns: List[str], sample_df: pd.DataFrame) -> Dict[str, str]:
-        """Generate field descriptions using LLM"""
-        descriptions = {}
+        await self._ensure_llm_engine()
+        prompt = f"""
+        Analyze this database schema for file "{filename}" and enhance it with business context:
+        
+        Schema:
+        {json.dumps(schema, indent=2)}
+        
+        For each field, provide:
+        1. Business meaning/purpose
+        2. Data classification (PII, Financial, Operational, Reference, etc.)
+        3. Potential data quality issues
+        4. Suggested improvements to field definition
+        
+        Return enhanced schema as JSON with additional fields:
+        - business_meaning
+        - data_classification  
+        - quality_concerns
+        - recommended_type (if different from current)
+        """
+        
+        sampling_params = SamplingParams(temperature=0.2, max_tokens=1500)
+        result = await self.llm_engine.generate(prompt, sampling_params)
         
         try:
-            await self._ensure_llm_engine()
-            
-            # Process columns in batches
-            batch_size = 10
-            for i in range(0, len(columns), batch_size):
-                batch_columns = columns[i:i + batch_size]
+            response_text = result.outputs[0].text.strip()
+            if '{' in response_text:
+                json_start = response_text.find('[') if '[' in response_text else response_text.find('{')
+                json_end = response_text.rfind(']') + 1 if ']' in response_text else response_text.rfind('}') + 1
+                enhanced_data = json.loads(response_text[json_start:json_end])
                 
-                # Prepare sample data for this batch
-                batch_samples = {}
-                for col in batch_columns:
-                    if col in sample_df.columns:
-                        sample_values = sample_df[col].dropna().head(5).tolist()
-                        batch_samples[col] = sample_values
+                # Merge enhanced data with original schema
+                if isinstance(enhanced_data, list) and len(enhanced_data) == len(schema):
+                    for i, enhancement in enumerate(enhanced_data):
+                        if isinstance(enhancement, dict):
+                            schema[i].update(enhancement)
                 
-                prompt = f"""
-                Analyze these database fields and provide business descriptions:
-                
-                Fields with sample data:
-                {json.dumps(batch_samples, indent=2, default=str)}
-                
-                For each field, provide a concise business description (1-2 sentences) that explains:
-                1. What the field represents
-                2. Its likely business purpose
-                3. Data format if apparent
-                
-                Return as JSON: {{"field_name": "description", ...}}
-                """
-                
-                sampling_params = SamplingParams(temperature=0.3, max_tokens=800)
-                result = await self.llm_engine.generate(prompt, sampling_params)
-                
-                try:
-                    response_text = result.outputs[0].text.strip()
-                    if '{' in response_text:
-                        json_start = response_text.find('{')
-                        json_end = response_text.rfind('}') + 1
-                        batch_descriptions = json.loads(response_text[json_start:json_end])
-                        descriptions.update(batch_descriptions)
-                except Exception as e:
-                    self.logger.warning(f"Failed to parse field descriptions: {str(e)}")
-                    # Fallback descriptions
-                    for col in batch_columns:
-                        descriptions[col] = f"Data field: {col}"
-        
         except Exception as e:
-            self.logger.error(f"Field description generation failed: {str(e)}")
-            # Fallback descriptions
-            for col in columns:
-                descriptions[col] = f"Data field: {col}"
+            self.logger.warning(f"Failed to parse LLM schema enhancement: {str(e)}")
         
-        return descriptions
-    
-    # Add all the remaining methods from the original class, ensuring they call await self._ensure_llm_engine()
-    # before using self.llm_engine...
+        return schema
     
     def _generate_table_name(self, filename: str) -> str:
         """Generate SQLite table name from filename"""
@@ -600,6 +519,351 @@ class DataLoaderAgent:
             self.logger.error(f"Data quality analysis failed: {str(e)}")
             return 0.5  # Default score
     
+    async def _generate_field_descriptions(self, columns: List[str], sample_df: pd.DataFrame) -> Dict[str, str]:
+        """Generate field descriptions using LLM"""
+        await self._ensure_llm_engine()
+        descriptions = {}
+        
+        # Process columns in batches
+        batch_size = 10
+        for i in range(0, len(columns), batch_size):
+            batch_columns = columns[i:i + batch_size]
+            
+            # Prepare sample data for this batch
+            batch_samples = {}
+            for col in batch_columns:
+                if col in sample_df.columns:
+                    sample_values = sample_df[col].dropna().head(5).tolist()
+                    batch_samples[col] = sample_values
+            
+            prompt = f"""
+            Analyze these database fields and provide business descriptions:
+            
+            Fields with sample data:
+            {json.dumps(batch_samples, indent=2, default=str)}
+            
+            For each field, provide a concise business description (1-2 sentences) that explains:
+            1. What the field represents
+            2. Its likely business purpose
+            3. Data format if apparent
+            
+            Return as JSON: {{"field_name": "description", ...}}
+            """
+            
+            sampling_params = SamplingParams(temperature=0.3, max_tokens=800)
+            result = await self.llm_engine.generate(prompt, sampling_params)
+            
+            try:
+                response_text = result.outputs[0].text.strip()
+                if '{' in response_text:
+                    json_start = response_text.find('{')
+                    json_end = response_text.rfind('}') + 1
+                    batch_descriptions = json.loads(response_text[json_start:json_end])
+                    descriptions.update(batch_descriptions)
+            except Exception as e:
+                self.logger.warning(f"Failed to parse field descriptions: {str(e)}")
+                # Fallback descriptions
+                for col in batch_columns:
+                    descriptions[col] = f"Data field: {col}"
+        
+        return descriptions
+    
+    async def _process_ddl_file(self, file_path: Path, content: str) -> Dict[str, Any]:
+        """Process DB2 DDL file"""
+        try:
+            # Parse DDL statements
+            tables = await self._parse_ddl_statements(content)
+            
+            results = []
+            for table_info in tables:
+                table_name = table_info['table_name']
+                schema = table_info['columns']
+                
+                # Create SQLite table
+                await self._create_sqlite_table(table_name, schema)
+                
+                # Store schema metadata
+                await self._store_table_schema(table_name, 'db2_ddl', schema, file_path.name)
+                
+                results.append({
+                    "table_name": table_name,
+                    "column_count": len(schema),
+                    "ddl_type": table_info.get('ddl_type', 'CREATE TABLE')
+                })
+            
+            return {
+                "status": "success",
+                "file_name": file_path.name,
+                "tables_created": len(tables),
+                "table_details": results
+            }
+            
+        except Exception as e:
+            self.logger.error(f"DDL processing failed: {str(e)}")
+            return {"status": "error", "error": str(e)}
+    
+    async def _parse_ddl_statements(self, ddl_content: str) -> List[Dict[str, Any]]:
+        """Parse DDL statements to extract table definitions"""
+        tables = []
+        
+        # Use LLM to parse complex DDL
+        prompt = f"""
+        Parse this DB2 DDL and extract table definitions:
+        
+        {ddl_content}
+        
+        For each CREATE TABLE statement, extract:
+        1. Table name
+        2. Column definitions with types and constraints
+        3. Primary keys
+        4. Foreign keys
+        
+        Return as JSON array:
+        [{{
+            "table_name": "TABLE_NAME",
+            "ddl_type": "CREATE TABLE",
+            "columns": [
+                {{"name": "COLUMN1", "type": "VARCHAR(50)", "nullable": true, "primary_key": false}},
+                {{"name": "COLUMN2", "type": "INTEGER", "nullable": false, "primary_key": true}}
+            ],
+            "primary_keys": ["COLUMN2"],
+            "foreign_keys": []
+        }}]
+        """
+        
+        sampling_params = SamplingParams(temperature=0.1, max_tokens=2000)
+        result = await self.llm_engine.generate(prompt, sampling_params)
+        
+        try:
+            response_text = result.outputs[0].text.strip()
+            if '[' in response_text:
+                json_start = response_text.find('[')
+                json_end = response_text.rfind(']') + 1
+                tables = json.loads(response_text[json_start:json_end])
+        except Exception as e:
+            self.logger.warning(f"LLM DDL parsing failed, using regex fallback: {str(e)}")
+            tables = self._parse_ddl_with_regex(ddl_content)
+        
+        return tables
+    
+    def _parse_ddl_with_regex(self, ddl_content: str) -> List[Dict[str, Any]]:
+        """Fallback DDL parsing using regex"""
+        tables = []
+        
+        # Simple regex patterns for basic DDL parsing
+        table_pattern = re.compile(r'CREATE\s+TABLE\s+(\w+)\s*\((.*?)\)', re.DOTALL | re.IGNORECASE)
+        
+        for match in table_pattern.finditer(ddl_content):
+            table_name = match.group(1)
+            columns_text = match.group(2)
+            
+            columns = []
+            # Parse column definitions
+            column_lines = [line.strip() for line in columns_text.split(',') if line.strip()]
+            
+            for line in column_lines:
+                # Basic column parsing
+                parts = line.split()
+                if len(parts) >= 2:
+                    col_name = parts[0]
+                    col_type = parts[1]
+                    nullable = 'NOT NULL' not in line.upper()
+                    
+                    columns.append({
+                        "name": col_name,
+                        "type": col_type,
+                        "nullable": nullable,
+                        "primary_key": False
+                    })
+            
+            if columns:
+                tables.append({
+                    "table_name": table_name,
+                    "ddl_type": "CREATE TABLE",
+                    "columns": columns,
+                    "primary_keys": [],
+                    "foreign_keys": []
+                })
+        
+        return tables
+    
+    async def _process_dclgen_file(self, file_path: Path, content: str) -> Dict[str, Any]:
+        """Process DCLGEN file"""
+        try:
+            # Parse DCLGEN structure
+            dclgen_info = await self._parse_dclgen_structure(content, file_path.name)
+            
+            if dclgen_info:
+                table_name = dclgen_info['table_name']
+                schema = dclgen_info['columns']
+                
+                # Create SQLite table
+                await self._create_sqlite_table(table_name, schema)
+                
+                # Store schema metadata
+                await self._store_table_schema(table_name, 'dclgen', schema, file_path.name)
+                
+                return {
+                    "status": "success",
+                    "file_name": file_path.name,
+                    "table_name": table_name,
+                    "column_count": len(schema),
+                    "host_variables": dclgen_info.get('host_variables', [])
+                }
+            else:
+                return {"status": "error", "error": "Could not parse DCLGEN structure"}
+                
+        except Exception as e:
+            self.logger.error(f"DCLGEN processing failed: {str(e)}")
+            return {"status": "error", "error": str(e)}
+    
+    async def _parse_dclgen_structure(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
+        """Parse DCLGEN structure using LLM"""
+        prompt = f"""
+        Parse this DB2 DCLGEN file and extract the table structure:
+        
+        {content}
+        
+        Extract:
+        1. Table name (from DECLARE statement)
+        2. Host variable definitions
+        3. Corresponding column information
+        
+        Return as JSON:
+        {{
+            "table_name": "TABLE_NAME",
+            "columns": [
+                {{"name": "COLUMN1", "type": "VARCHAR(50)", "nullable": true, "cobol_definition": "01 HOST-VAR1 PIC X(50)."}},
+                {{"name": "COLUMN2", "type": "INTEGER", "nullable": false, "cobol_definition": "01 HOST-VAR2 PIC S9(9) COMP."}}
+            ],
+            "host_variables": ["HOST-VAR1", "HOST-VAR2"]
+        }}
+        """
+        
+        sampling_params = SamplingParams(temperature=0.1, max_tokens=1500)
+        result = await self.llm_engine.generate(prompt, sampling_params)
+        
+        try:
+            response_text = result.outputs[0].text.strip()
+            if '{' in response_text:
+                json_start = response_text.find('{')
+                json_end = response_text.rfind('}') + 1
+                return json.loads(response_text[json_start:json_end])
+        except Exception as e:
+            self.logger.warning(f"DCLGEN parsing failed: {str(e)}")
+        
+        return None
+    
+    async def _process_layout_json(self, file_path: Path, content: str) -> Dict[str, Any]:
+        """Process JSON layout file"""
+        try:
+            layout_data = json.loads(content)
+            
+            if 'record_layouts' in layout_data:
+                return await self._process_record_layouts(layout_data, file_path.name)
+            elif 'table_schema' in layout_data:
+                return await self._process_table_schema_json(layout_data, file_path.name)
+            else:
+                return {"status": "error", "error": "Unknown JSON layout format"}
+                
+        except json.JSONDecodeError as e:
+            return {"status": "error", "error": f"Invalid JSON: {str(e)}"}
+    
+    async def _process_record_layouts(self, layout_data: Dict, filename: str) -> Dict[str, Any]:
+        """Process record layout definitions"""
+        try:
+            layouts_processed = []
+            
+            for layout in layout_data['record_layouts']:
+                layout_name = layout['name']
+                record_types = layout.get('record_types', [])
+                
+                # Store record layout
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    INSERT OR REPLACE INTO record_layouts 
+                    (layout_name, record_types, layout_description, source_file)
+                    VALUES (?, ?, ?, ?)
+                """, (
+                    layout_name,
+                    json.dumps(record_types),
+                    layout.get('description', ''),
+                    filename
+                ))
+                
+                conn.commit()
+                conn.close()
+                
+                layouts_processed.append({
+                    "layout_name": layout_name,
+                    "record_type_count": len(record_types)
+                })
+            
+            return {
+                "status": "success",
+                "file_name": filename,
+                "layouts_processed": len(layouts_processed),
+                "layout_details": layouts_processed
+            }
+            
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+    
+    async def _process_zip_file(self, file_path: Path) -> Dict[str, Any]:
+        """Process ZIP file containing multiple data files"""
+        try:
+            results = []
+            
+            with zipfile.ZipFile(file_path, 'r') as zip_file:
+                for file_info in zip_file.filelist:
+                    if not file_info.is_dir():
+                        # Extract and process each file
+                        extracted_content = zip_file.read(file_info.filename)
+                        
+                        # Create temporary file path
+                        temp_path = Path(file_info.filename)
+                        
+                        # Write content to process
+                        try:
+                            content = extracted_content.decode('utf-8')
+                        except UnicodeDecodeError:
+                            content = extracted_content.decode('latin-1')
+                        
+                        # Process the extracted file
+                        result = await self._auto_detect_and_process(temp_path, content)
+                        result['source_zip'] = file_path.name
+                        results.append(result)
+            
+            return {
+                "status": "success",
+                "zip_file": file_path.name,
+                "files_processed": len(results),
+                "results": results
+            }
+            
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+    
+    async def _auto_detect_and_process(self, file_path: Path, content: str) -> Dict[str, Any]:
+        """Auto-detect file type and process accordingly"""
+        content_upper = content.upper()
+        
+        if 'CREATE TABLE' in content_upper:
+            return await self._process_ddl_file(file_path, content)
+        elif 'DECLARE' in content_upper and 'TABLE' in content_upper:
+            return await self._process_dclgen_file(file_path, content)
+        elif ',' in content and '\n' in content:
+            # Likely CSV
+            return await self._process_csv_file(file_path, content)
+        else:
+            return {
+                "status": "unknown_format",
+                "file_name": file_path.name,
+                "message": "Could not determine file format"
+            }
+    
     async def get_component_info(self, component_name: str) -> Dict[str, Any]:
         """Get detailed information about a data component"""
         try:
@@ -655,7 +919,22 @@ class DataLoaderAgent:
                     "sample_data": sample_data[:10]  # First 10 records
                 }
             
+            # Check if it's a record layout
+            cursor.execute("""
+                SELECT * FROM record_layouts WHERE layout_name = ? OR layout_name LIKE ?
+            """, (component_name, f"%{component_name}%"))
+            
+            layout_info = cursor.fetchone()
             conn.close()
+            
+            if layout_info:
+                return {
+                    "component_type": "record_layout",
+                    "layout_name": layout_info[1],
+                    "record_types": json.loads(layout_info[2]) if layout_info[2] else [],
+                    "description": layout_info[3],
+                    "source_file": layout_info[4]
+                }
             
             return {
                 "component_type": "not_found",
@@ -665,9 +944,6 @@ class DataLoaderAgent:
         except Exception as e:
             self.logger.error(f"Failed to get component info: {str(e)}")
             return {"component_type": "error", "error": str(e)}
-    
-    # Continue with remaining methods, ensuring each one that uses self.llm_engine 
-    # calls await self._ensure_llm_engine() first...
     
     async def get_data_lineage_info(self, component_name: str) -> Dict[str, Any]:
         """Get data lineage information for a component"""
