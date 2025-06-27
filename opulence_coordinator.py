@@ -211,6 +211,19 @@ class DynamicOpulenceCoordinator:
                 );
                 
                 CREATE INDEX IF NOT EXISTS idx_gpu_allocations_timestamp ON gpu_allocations(timestamp);
+                
+                CREATE TABLE IF NOT EXISTS vector_embeddings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chunk_id INTEGER,
+                    embedding_id TEXT,
+                    faiss_id INTEGER,
+                    embedding_vector TEXT,
+                    created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (chunk_id) REFERENCES program_chunks (id)
+                );
+                
+                CREATE INDEX IF NOT EXISTS idx_vector_embeddings_chunk ON vector_embeddings(chunk_id);
+                CREATE INDEX IF NOT EXISTS idx_vector_embeddings_faiss ON vector_embeddings(faiss_id);
             """)
             
             # FIX 14: Explicit commit for table creation
@@ -713,23 +726,24 @@ class DynamicOpulenceCoordinator:
         except Exception as e:
             self.logger.error(f"Failed to log GPU allocation: {str(e)}")
     
-    # Fix 1: Update process_batch_files in opulence_coordinator.py
+    # REPLACE the process_batch_files method with proper indentation:
+
     async def process_batch_files(self, file_paths: List[Path], file_type: str = "auto") -> Dict[str, Any]:
         """Process multiple files with PROPER batch processing and database storage"""
         start_time = time.time()
-    
+
         try:
-        # CHECK: Ensure database is initialized
+            # CHECK: Ensure database is initialized
             await self._ensure_database_initialized()
         
-        # FIX 1: Import and use the BatchProcessor
+            # FIX 1: Import and use the BatchProcessor
             from utils.batch_processor import BatchProcessor
             batch_processor = BatchProcessor(max_workers=4, gpu_count=self.config.total_gpu_count)
         
             results = []
             total_files = len(file_paths)
         
-        # Group files by type for efficient processing
+            # Group files by type for efficient processing
             file_groups = {
                 'cobol': [],
                 'jcl': [],
@@ -747,7 +761,7 @@ class DynamicOpulenceCoordinator:
                 else:
                     file_groups['auto'].append(file_path)
         
-        # FIX 2: Process each group using BatchProcessor with proper GPU distribution
+            # FIX 2: Process each group using BatchProcessor with proper GPU distribution
             for group_type, group_files in file_groups.items():
                 if not group_files:
                     continue
@@ -792,16 +806,17 @@ class DynamicOpulenceCoordinator:
                     )
                     results.extend(group_results)
         
-            # FIX 3: Verify database storage - ADD THIS LINE
+            # FIX 3: Verify database storage
             await self._verify_database_storage(file_paths)
 
+            # Vector embedding creation (only if successful results)
             if results:  # Only if we have successful results
                 try:
                     await self._create_vector_embeddings_for_processed_files(file_paths)
                     self.logger.info("Vector embeddings created for processed files")
                 except Exception as e:
                     self.logger.warning(f"Vector embedding creation failed: {str(e)}")
-                # Don't fail the entire batch if vector indexing fails
+                    # Don't fail the entire batch if vector indexing fails
             
             # Update statistics
             processing_time = time.time() - start_time
@@ -816,7 +831,8 @@ class DynamicOpulenceCoordinator:
                 "files_processed": total_files,
                 "processing_time": processing_time,
                 "results": results,
-                "database_verification": await self._get_database_stats()
+                "database_verification": await self._get_database_stats(),
+                "vector_indexing": "completed" if results else "skipped"
             }
         
         except Exception as e:
@@ -825,7 +841,8 @@ class DynamicOpulenceCoordinator:
                 "status": "error",
                 "error": str(e),
                 "files_processed": 0
-                }
+            }
+    # REPLACE the _create_vector_embeddings_for_processed_files method:
 
     async def _create_vector_embeddings_for_processed_files(self, file_paths: List[Path]):
         """Create vector embeddings for all successfully processed files"""
@@ -861,7 +878,8 @@ class DynamicOpulenceCoordinator:
                     
         except Exception as e:
             self.logger.error(f"Vector embedding creation failed: {str(e)}")
-            raise
+            # REMOVED: raise - Don't propagate the error, just log it
+            return {"status": "error", "error": str(e)}
         
     async def _process_cobol_file_with_storage(self, file_path: Path) -> Dict[str, Any]:
         """Process COBOL file with guaranteed database storage"""
@@ -1082,9 +1100,105 @@ class DynamicOpulenceCoordinator:
         except Exception as e:
             self.logger.error(f"Failed to get database stats: {str(e)}")
             return {"error": str(e)}
-    
+    async def process_regular_chat_query(self, query: str) -> str:
+        """Process regular chat query without vector search"""
+        try:
+            # Determine query type and route to appropriate agent
+            query_lower = query.lower()
+            
+            if any(word in query_lower for word in ['lifecycle', 'lineage', 'trace', 'impact']):
+                # Extract component name from query
+                component_name = self._extract_component_name(query)
+                if component_name:
+                    result = await self.analyze_component(component_name)
+                    return self._format_analysis_response(result)
+                else:
+                    return "Could you please specify which component (file, table, program, or field) you'd like me to analyze?"
+            
+            elif any(word in query_lower for word in ['compare', 'difference', 'db2']):
+                return "For data comparison, please use the DB2 Comparison tab to select specific components."
+            
+            else:
+                # General query - provide helpful guidance
+                return self._generate_general_response(query)
+        
+        except Exception as e:
+            return f"❌ Error processing query: {str(e)}"
+
+    def _extract_component_name(self, query: str) -> str:
+        """Extract component name from natural language query"""
+        words = query.split()
+        
+        # Look for patterns like "analyze COMPONENT_NAME" or "trace FIELD_NAME"
+        trigger_words = ['analyze', 'trace', 'lifecycle', 'lineage', 'impact', 'of', 'for']
+        
+        for i, word in enumerate(words):
+            if word.lower() in trigger_words and i + 1 < len(words):
+                potential_component = words[i + 1].strip('.,!?')
+                if len(potential_component) > 2:  # Basic validation
+                    return potential_component
+        
+        # Look for uppercase words (likely component names)
+        for word in words:
+            if word.isupper() and len(word) > 2:
+                return word
+        
+        return ""
+
+    def _format_analysis_response(self, result: dict) -> str:
+        """Format analysis result for chat display"""
+        if isinstance(result, dict) and "error" in result:
+            return f"❌ Analysis failed: {result['error']}"
+        
+        if not isinstance(result, dict):
+            return f"❌ Unexpected result format: {type(result)}"
+        
+        component_name = result.get("component_name", "Unknown")
+        component_type = result.get("component_type", "unknown")
+        
+        response = f"## 📊 Analysis of {component_type.title()}: {component_name}\n\n"
+        
+        if "lineage" in result:
+            lineage = result["lineage"]
+            if isinstance(lineage, dict):
+                usage_stats = lineage.get("usage_analysis", {}).get("statistics", {})
+                response += f"**Usage Summary:**\n"
+                response += f"- Total references: {usage_stats.get('total_references', 0)}\n"
+                response += f"- Programs using: {len(usage_stats.get('programs_using', []))}\n\n"
+        
+        if "logic_analysis" in result:
+            response += f"**Logic Analysis:** Available\n\n"
+        
+        if "jcl_analysis" in result:
+            response += f"**JCL Analysis:** Available\n\n"
+        
+        response += "💡 For detailed analysis, please check the Component Analysis tab."
+        
+        return response
+
+    def _generate_general_response(self, query: str) -> str:
+        """Generate general helpful response"""
+        return f"""
+    I'm Opulence, your deep research mainframe agent! I can help you with:
+
+    🔍 **Component Analysis**: Analyze the lifecycle and usage of files, tables, programs, or fields
+    📊 **Field Lineage**: Trace data flow and transformations for specific fields  
+    🔄 **DB2 Comparison**: Compare data between DB2 tables and loaded files
+    📋 **Documentation**: Generate technical documentation and reports
+
+    **Examples of what you can ask:**
+    - "Analyze the lifecycle of TRADE_DATE field"
+    - "Trace the lineage of TRANSACTION_FILE"
+    - "Find programs that use security settlement logic"
+    - "Show me the impact of changing ACCOUNT_ID"
+
+    Your query: "{query}"
+
+    Would you like me to help you with any specific analysis?
+        """
+
     async def analyze_component(self, component_name: str, component_type: str = None, 
-                               preferred_gpu: Optional[int] = None) -> Dict[str, Any]:
+                            preferred_gpu: Optional[int] = None) -> Dict[str, Any]:
         """Deep analysis of a component with dynamic GPU allocation"""
         start_time = time.time()
         
@@ -1096,62 +1210,19 @@ class DynamicOpulenceCoordinator:
                 self.stats["cache_hit_rate"] += 1
                 return cached_result
             
+            # Track cache miss
+            self.stats["cache_miss_rate"] = self.stats.get("cache_miss_rate", 0) + 1
+            
             # If component type not specified, determine it
             if not component_type:
                 component_type = await self._determine_component_type(component_name, preferred_gpu)
             
-            analysis_result = {}
+            analysis_result = {
+                "component_name": component_name,
+                "component_type": component_type,
+            }
             
-            if component_type in ["file", "table"]:
-                # Analyze file/table lifecycle with dynamic GPU allocation
-                async with self.get_agent_with_gpu("lineage_analyzer", preferred_gpu) as (lineage_agent, gpu1):
-                    async with self.get_agent_with_gpu("data_loader", preferred_gpu) as (data_agent, gpu2):
-                        lineage_result = await lineage_agent.analyze_field_lineage(component_name)
-                        data_result = await data_agent.get_component_info(component_name)
-                
-                analysis_result = {
-                    "component_name": component_name,
-                    "component_type": component_type,
-                    "lineage": lineage_result,
-                    "data_info": data_result,
-                    "lifecycle": await self._analyze_lifecycle(component_name, component_type, preferred_gpu),
-                    "gpus_used": [gpu1, gpu2]
-                }
-                
-            elif component_type in ["program", "cobol"]:
-                # Analyze program logic with dynamic GPU allocation
-                async with self.get_agent_with_gpu("logic_analyzer", preferred_gpu) as (logic_agent, gpu_id):
-                    logic_result = await logic_agent.analyze_program(component_name)
-                    dependencies = await self._find_dependencies(component_name, preferred_gpu)
-                    
-                analysis_result = {
-                    "component_name": component_name,
-                    "component_type": component_type,
-                    "logic_analysis": logic_result,
-                    "dependencies": dependencies,
-                    "gpu_used": gpu_id
-                }
-                
-            elif component_type == "jcl":
-                # Analyze JCL job flow with dynamic GPU allocation
-                async with self.get_agent_with_gpu("code_parser", preferred_gpu) as (parser_agent, gpu_id):
-                    jcl_result = await parser_agent.analyze_jcl(component_name)
-                    job_flow = await self._analyze_job_flow(component_name, preferred_gpu)
-                    
-                analysis_result = {
-                    "component_name": component_name,
-                    "component_type": component_type,
-                    "jcl_analysis": jcl_result,
-                    "job_flow": job_flow,
-                    "gpu_used": gpu_id
-                }
-            
-            # Add comparison with DB2 if applicable
-            if component_type in ["file", "table"]:
-                async with self.get_agent_with_gpu("db2_comparator", preferred_gpu) as (db2_agent, gpu_id):
-                    db2_comparison = await db2_agent.compare_data(component_name)
-                    analysis_result["db2_comparison"] = db2_comparison
-                    analysis_result["db2_gpu_used"] = gpu_id
+            # Add semantic search results FIRST (before other analysis)
             try:
                 async with self.get_agent_with_gpu("vector_index", preferred_gpu) as (vector_agent, gpu_id):
                     semantic_results = await vector_agent.search_similar_components(component_name)
@@ -1160,7 +1231,57 @@ class DynamicOpulenceCoordinator:
             except Exception as e:
                 self.logger.warning(f"Semantic search failed for {component_name}: {str(e)}")
                 analysis_result["semantic_search"] = {"error": str(e)}
-
+            
+            # Component-specific analysis
+            if component_type in ["file", "table"]:
+                # Analyze file/table lifecycle with dynamic GPU allocation
+                async with self.get_agent_with_gpu("lineage_analyzer", preferred_gpu) as (lineage_agent, gpu1):
+                    async with self.get_agent_with_gpu("data_loader", preferred_gpu) as (data_agent, gpu2):
+                        lineage_result = await lineage_agent.analyze_field_lineage(component_name)
+                        data_result = await data_agent.get_component_info(component_name)
+                
+                analysis_result.update({
+                    "lineage": lineage_result,
+                    "data_info": data_result,
+                    "lifecycle": await self._analyze_lifecycle(component_name, component_type, preferred_gpu),
+                    "gpus_used": [gpu1, gpu2]
+                })
+                
+            elif component_type in ["program", "cobol"]:
+                # Analyze program logic with dynamic GPU allocation
+                async with self.get_agent_with_gpu("logic_analyzer", preferred_gpu) as (logic_agent, gpu_id):
+                    logic_result = await logic_agent.analyze_program(component_name)
+                    dependencies = await self._find_dependencies(component_name, preferred_gpu)
+                    
+                analysis_result.update({
+                    "logic_analysis": logic_result,
+                    "dependencies": dependencies,
+                    "gpu_used": gpu_id
+                })
+                
+            elif component_type == "jcl":
+                # Analyze JCL job flow with dynamic GPU allocation
+                async with self.get_agent_with_gpu("code_parser", preferred_gpu) as (parser_agent, gpu_id):
+                    jcl_result = await parser_agent.analyze_jcl(component_name)
+                    job_flow = await self._analyze_job_flow(component_name, preferred_gpu)
+                    
+                analysis_result.update({
+                    "jcl_analysis": jcl_result,
+                    "job_flow": job_flow,
+                    "gpu_used": gpu_id
+                })
+            
+            # Add comparison with DB2 if applicable
+            if component_type in ["file", "table"]:
+                try:
+                    async with self.get_agent_with_gpu("db2_comparator", preferred_gpu) as (db2_agent, gpu_id):
+                        db2_comparison = await db2_agent.compare_data(component_name)
+                        analysis_result["db2_comparison"] = db2_comparison
+                        analysis_result["db2_gpu_used"] = gpu_id
+                except Exception as e:
+                    self.logger.warning(f"DB2 comparison failed for {component_name}: {str(e)}")
+                    analysis_result["db2_comparison"] = {"error": str(e)}
+            
             # Cache the result
             self.cache_manager.set(cache_key, analysis_result)
             
