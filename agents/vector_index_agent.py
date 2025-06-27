@@ -19,10 +19,15 @@ from datetime import datetime
 import uuid
 import torch
 from transformers import AutoTokenizer, AutoModel
+from typing import Dict, List, Optional, Any, Tuple, Union
 import faiss
 import chromadb
 from chromadb.api.types import EmbeddingFunction, Embeddings, Documents
 from vllm import AsyncLLMEngine, SamplingParams
+import os
+# Disable external connections for airgap environment
+os.environ['DISABLE_TELEMETRY'] = '1'
+os.environ['NO_PROXY'] = '*'
 
 class LocalCodeBERTEmbeddingFunction(EmbeddingFunction):
     """Custom embedding function using local CodeBERT model for ChromaDB"""
@@ -356,7 +361,7 @@ class VectorIndexAgent:
         
         return " | ".join(text_parts)
 
-    async def create_embeddings_for_chunks(self, chunks: List[tuple]) -> Dict[str, Any]:
+    async def create_embeddings_for_chunks(self, chunks: List[Union[tuple, CodeChunk]]) -> Dict[str, Any]:
         """Create embeddings for a list of chunks"""
         try:
             await self._ensure_initialized()
@@ -364,7 +369,15 @@ class VectorIndexAgent:
             embeddings_created = 0
             
             for chunk_data in chunks:
-                chunk_id, program_name, chunk_id_str, chunk_type, content, metadata_str = chunk_data
+                if isinstance(chunk_data, tuple):
+                    chunk_id, program_name, chunk_id_str, chunk_type, content, metadata_str = chunk_data
+                else:  # It's a CodeChunk object
+                    chunk_id = chunk_data.chunk_id
+                    program_name = chunk_data.program_name
+                    chunk_id_str = chunk_data.chunk_id
+                    chunk_type = chunk_data.chunk_type
+                    content = chunk_data.content
+                    metadata_str = json.dumps(chunk_data.metadata)
                 
                 try:
                     metadata = json.loads(metadata_str) if metadata_str else {}

@@ -18,6 +18,10 @@ import logging
 
 import torch
 from vllm import AsyncLLMEngine, SamplingParams
+import os
+# Disable external connections for airgap environment
+os.environ['DISABLE_TELEMETRY'] = '1'
+os.environ['NO_PROXY'] = '*'
 
 @dataclass
 class CodeChunk:
@@ -564,9 +568,22 @@ class CompleteEnhancedCodeParserAgent:
             file_hash = self._generate_file_hash(content, file_path)
             for chunk in chunks:
                 chunk.metadata['file_hash'] = file_hash
-            
-            # Store chunks with verification
-            await self._store_chunks_enhanced(chunks, file_hash)
+            # After generating chunks, before storing:
+# Convert CodeChunk objects to tuples for vector agent compatibility
+                chunk_tuples = []
+                for chunk in chunks:
+                    chunk_tuple = (
+                        0,  # chunk_id (will be auto-generated)
+                        chunk.program_name,
+                        chunk.chunk_id,
+                        chunk.chunk_type,
+                        chunk.content,
+                        json.dumps(chunk.metadata)
+                    )
+                    chunk_tuples.append(chunk_tuple)
+
+                # Store chunks with verification
+                await self._store_chunks_enhanced(chunks, file_hash)
             
             # Verify chunks were stored
             stored_chunks = await self._verify_chunks_stored(self._extract_program_name(content, file_path))
@@ -3428,10 +3445,15 @@ class CompleteEnhancedCodeParserAgent:
         lineage_records = []
         
         for chunk in chunks:
-            content = chunk.get('content', '')
-            metadata = chunk.get('metadata', {})
-            chunk_id = chunk.get('chunk_id', '')
-            
+            if isinstance(chunk, CodeChunk):
+                content = chunk.content
+                metadata = chunk.metadata
+                chunk_id = chunk.chunk_id
+            else:  # It's a dictionary
+                content = chunk.get('content', '')
+                metadata = chunk.get('metadata', {})
+                chunk_id = chunk.get('chunk_id', '')
+                    
             # Extract field operations from content
             field_operations = self._extract_field_operations(content)
             
