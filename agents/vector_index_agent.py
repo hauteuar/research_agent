@@ -1,7 +1,8 @@
 # agents/vector_index_agent.py
 """
-Agent 2: Vector Index Builder
+Agent 2: Vector Index Builder - Modified for Airgap Environment
 Creates and manages vector embeddings for code chunks using FAISS and ChromaDB
+Uses local CodeBERT model with custom embedding function for ChromaDB
 """
 
 import asyncio
@@ -20,34 +21,105 @@ import torch
 from transformers import AutoTokenizer, AutoModel
 import faiss
 import chromadb
+from chromadb.api.types import EmbeddingFunction, Embeddings, Documents
 from vllm import AsyncLLMEngine, SamplingParams
 
+class LocalCodeBERTEmbeddingFunction(EmbeddingFunction):
+    """Custom embedding function using local CodeBERT model for ChromaDB"""
+    
+    def __init__(self, model_path: str, tokenizer_path: str = None, device: str = "cpu"):
+        """
+        Initialize with local model paths
+        
+        Args:
+            model_path: Path to local CodeBERT model directory
+            tokenizer_path: Path to tokenizer (if different from model_path)
+            device: Device to run model on (cpu or cuda:N)
+        """
+        self.model_path = model_path
+        self.tokenizer_path = tokenizer_path or model_path
+        self.device = device
+        self.tokenizer = None
+        self.model = None
+        self._load_model()
+    
+    def _load_model(self):
+        """Load the local CodeBERT model and tokenizer"""
+        try:
+            # Load from local directory
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.tokenizer_path,
+                local_files_only=True  # Prevent any external calls
+            )
+            self.model = AutoModel.from_pretrained(
+                self.model_path,
+                local_files_only=True  # Prevent any external calls
+            )
+            self.model.to(self.device)
+            self.model.eval()
+            print(f"✅ Loaded local CodeBERT model from {self.model_path}")
+        except Exception as e:
+            raise RuntimeError(f"Failed to load local CodeBERT model: {e}")
+    
+    def __call__(self, input: Documents) -> Embeddings:
+        """Generate embeddings for input documents"""
+        try:
+            embeddings = []
+            
+            for text in input:
+                # Tokenize
+                inputs = self.tokenizer(
+                    text,
+                    return_tensors="pt",
+                    padding=True,
+                    truncation=True,
+                    max_length=512
+                ).to(self.device)
+                
+                # Generate embedding
+                with torch.no_grad():
+                    outputs = self.model(**inputs)
+                    # Use CLS token embedding
+                    embedding = outputs.last_hidden_state[:, 0, :].cpu().numpy()
+                    
+                    # Normalize for cosine similarity
+                    embedding = embedding / np.linalg.norm(embedding)
+                    embeddings.append(embedding.flatten().tolist())
+            
+            return embeddings
+            
+        except Exception as e:
+            raise RuntimeError(f"Embedding generation failed: {e}")
+
 class VectorIndexAgent:
-    """Agent for building and managing vector indices"""
+    """Agent for building and managing vector indices - Airgap compatible"""
     
     def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
-             gpu_id: int = None, coordinator=None):
+                 gpu_id: int = None, coordinator=None, local_model_path: str = None):
         self.llm_engine = llm_engine
-        self.db_path = db_path or "opulence_data.db"  # ADD default value
+        self.db_path = db_path or "opulence_data.db"
         self.gpu_id = gpu_id
-        self.coordinator = coordinator  # ADD this line
+        self.coordinator = coordinator
         self.logger = logging.getLogger(__name__)
         self._initialized = False
-        # ADD these lines for coordinator integration
         self._engine_created = False
         self._using_coordinator_llm = False
         
-        # Initialize embedding model
-        self.embedding_model_name = "microsoft/codebert-base"
+        # Local model configuration
+        self.local_model_path = local_model_path or "./models/microsoft-codebert-base"
+        self.embedding_model_name = "microsoft/codebert-base"  # For reference only
         self.tokenizer = None
         self.embedding_model = None
         self.vector_dim = 768
+        
+        # Custom embedding function for ChromaDB
+        self.chroma_embedding_function = None
         
         # FAISS index
         self.faiss_index = None
         self.faiss_index_path = "opulence_faiss.index"
         
-        # ChromaDB client
+        # ChromaDB client with custom embedding function
         self.chroma_client = chromadb.PersistentClient(path="./chroma_db")
         self.collection_name = "opulence_code_chunks"
         self.collection = None
@@ -61,7 +133,6 @@ class VectorIndexAgent:
             await self._initialize_components()
             self._initialized = True
 
-    # ADD this new method
     async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
         """Generate text with LLM - handles both old and new vLLM API"""
         try:
@@ -122,7 +193,6 @@ class VectorIndexAgent:
         if not self._engine_created:
             await self._create_llm_engine()
     
-    # ADD this new method
     async def _create_llm_engine(self):
         """Create own LLM engine as fallback (smaller memory footprint)"""
         try:
@@ -163,170 +233,15 @@ class VectorIndexAgent:
         except Exception as e:
             self.logger.error(f"Failed to create fallback LLM engine: {str(e)}")
             raise
-    async def create_embeddings_for_chunks(self, chunks: List[tuple]) -> Dict[str, Any]:
-        """Create embeddings for a list of chunks - MISSING METHOD"""
-        try:
-            await self._ensure_initialized()
-            
-            embeddings_created = 0
-            
-            for chunk_data in chunks:
-                chunk_id, program_name, chunk_id_str, chunk_type, content, metadata_str = chunk_data
-                
-                try:
-                    metadata = json.loads(metadata_str) if metadata_str else {}
-                    
-                    # Generate embedding
-                    embedding = await self.embed_code_chunk(content, metadata)
-                    
-                    # Store in FAISS
-                    faiss_id = self.faiss_index.ntotal
-                    self.faiss_index.add(embedding.reshape(1, -1).astype('float32'))
-                    
-                    # Store in ChromaDB
-                    self.collection.add(
-                        embeddings=[embedding.tolist()],
-                        documents=[content],
-                        metadatas=[{
-                            "program_name": program_name,
-                            "chunk_id": chunk_id_str,
-                            "chunk_type": chunk_type,
-                            "faiss_id": faiss_id,
-                            **metadata
-                        }],
-                        ids=[f"{program_name}_{chunk_id_str}"]
-                    )
-                    
-                    # Store embedding reference in SQLite
-                    embedding_id = f"{program_name}_{chunk_id_str}_embed"
-                    await self._store_embedding_reference(
-                        chunk_id, embedding_id, faiss_id, embedding.tolist()
-                    )
-                    
-                    embeddings_created += 1
-                    
-                except Exception as e:
-                    self.logger.error(f"Failed to process chunk {chunk_id_str}: {str(e)}")
-                    continue
-            
-            # Save FAISS index
-            await self._save_faiss_index()
-            
-            result = {
-                "status": "success",
-                "embeddings_created": embeddings_created,
-                "total_chunks": len(chunks)
-            }
-            
-            return self._add_processing_info(result)
-            
-        except Exception as e:
-            self.logger.error(f"Chunk embedding creation failed: {str(e)}")
-            return self._add_processing_info({"status": "error", "error": str(e)})
 
-    # FIX 4: Add missing search_similar_components method
-    async def search_similar_components(self, component_name: str, top_k: int = 5) -> Dict[str, Any]:
-        """Search for components similar to the given component name - MISSING METHOD"""
-        try:
-            await self._ensure_initialized()
-            
-            # Create search query based on component name
-            search_query = f"component {component_name} similar functionality"
-            
-            # Perform semantic search
-            results = await self.semantic_search(search_query, top_k)
-            
-            # Filter and enhance results
-            similar_components = []
-            for result in results:
-                metadata = result.get('metadata', {})
-                
-                # Skip exact matches
-                if metadata.get('program_name') == component_name:
-                    continue
-                    
-                similar_components.append({
-                    "component_name": metadata.get('program_name', 'Unknown'),
-                    "chunk_id": metadata.get('chunk_id', 'Unknown'),
-                    "chunk_type": metadata.get('chunk_type', 'Unknown'),
-                    "similarity_score": result.get('similarity_score', 0),
-                    "content_preview": result.get('content', '')[:200] + "...",
-                    "shared_elements": self._find_shared_elements(component_name, metadata)
-                })
-            
-            search_result = {
-                "status": "success",
-                "component_name": component_name,
-                "similar_components": similar_components,
-                "total_found": len(similar_components)
-            }
-            
-            return self._add_processing_info(search_result)
-            
-        except Exception as e:
-            self.logger.error(f"Similar component search failed: {str(e)}")
-            return self._add_processing_info({"status": "error", "error": str(e)})
-
-    # FIX 5: Add missing rebuild_index_from_chunks method
-    async def rebuild_index_from_chunks(self, chunks: List[tuple]) -> Dict[str, Any]:
-        """Rebuild index from provided chunks - MISSING METHOD"""
-        try:
-            await self._ensure_initialized()
-            
-            # Clear existing indices
-            self.faiss_index = faiss.IndexFlatIP(self.vector_dim)
-            
-            # Clear ChromaDB collection
-            try:
-                self.chroma_client.delete_collection(self.collection_name)
-            except:
-                pass
-            
-            self.collection = self.chroma_client.create_collection(
-                name=self.collection_name,
-                metadata={"description": "Opulence mainframe code chunks - rebuilt"}
-            )
-            
-            # Process all chunks
-            result = await self.create_embeddings_for_chunks(chunks)
-            
-            rebuild_result = {
-                "status": "success",
-                "message": "Index rebuilt from chunks",
-                "chunks_processed": len(chunks),
-                **result
-            }
-            
-            return self._add_processing_info(rebuild_result)
-            
-        except Exception as e:
-            self.logger.error(f"Index rebuild from chunks failed: {str(e)}")
-            return self._add_processing_info({"status": "error", "error": str(e)})
-
-    # FIX 6: Add helper method for shared elements
-    def _find_shared_elements(self, component_name: str, metadata: Dict[str, Any]) -> List[str]:
-        """Find shared elements between components"""
-        shared = []
-        
-        # This is a simple implementation - you could enhance it
-        if 'field_names' in metadata:
-            shared.append(f"Fields: {', '.join(metadata['field_names'][:3])}")
-        
-        if 'operations' in metadata:
-            shared.append(f"Operations: {', '.join(metadata['operations'][:3])}")
-        
-        if 'file_operations' in metadata:
-            shared.append(f"File ops: {', '.join(metadata['file_operations'][:2])}")
-        
-        return shared
-
-    # ADD this helper method
     def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Add processing information to results"""
         if isinstance(result, dict):
             result['gpu_used'] = self.gpu_id
             result['agent_type'] = 'vector_index'
             result['using_coordinator_llm'] = self._using_coordinator_llm
+            result['using_local_model'] = True
+            result['model_path'] = self.local_model_path
         return result
     
     async def _initialize_components(self):
@@ -338,11 +253,29 @@ class VectorIndexAgent:
             # Set device for embedding model
             device = f"cuda:{self.gpu_id}" if self.gpu_id is not None and torch.cuda.is_available() else "cpu"
             
-            # Load embedding model
-            self.tokenizer = AutoTokenizer.from_pretrained(self.embedding_model_name)
-            self.embedding_model = AutoModel.from_pretrained(self.embedding_model_name)
+            # Validate local model path exists
+            if not Path(self.local_model_path).exists():
+                raise FileNotFoundError(f"Local model not found at: {self.local_model_path}")
+            
+            # Load embedding model from local directory
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.local_model_path,
+                local_files_only=True  # Prevent any external calls
+            )
+            self.embedding_model = AutoModel.from_pretrained(
+                self.local_model_path,
+                local_files_only=True  # Prevent any external calls
+            )
             self.embedding_model.to(device)
             self.embedding_model.eval()
+            
+            self.logger.info(f"✅ Loaded local CodeBERT model from {self.local_model_path}")
+            
+            # Create custom embedding function for ChromaDB
+            self.chroma_embedding_function = LocalCodeBERTEmbeddingFunction(
+                model_path=self.local_model_path,
+                device=device
+            )
             
             # Initialize FAISS index
             if Path(self.faiss_index_path).exists():
@@ -352,23 +285,27 @@ class VectorIndexAgent:
                 self.faiss_index = faiss.IndexFlatIP(self.vector_dim)  # Inner product for cosine similarity
                 self.logger.info("Created new FAISS index")
             
-            # Initialize ChromaDB collection
+            # Initialize ChromaDB collection with custom embedding function
             try:
-                self.collection = self.chroma_client.get_collection(self.collection_name)
-                self.logger.info(f"Loaded existing ChromaDB collection")
+                self.collection = self.chroma_client.get_collection(
+                    name=self.collection_name,
+                    embedding_function=self.chroma_embedding_function  # Use custom function
+                )
+                self.logger.info(f"Loaded existing ChromaDB collection with local embeddings")
             except:
                 self.collection = self.chroma_client.create_collection(
                     name=self.collection_name,
-                    metadata={"description": "Opulence mainframe code chunks"}
+                    embedding_function=self.chroma_embedding_function,  # Use custom function
+                    metadata={"description": "Opulence mainframe code chunks - local embeddings"}
                 )
-                self.logger.info("Created new ChromaDB collection")
+                self.logger.info("Created new ChromaDB collection with local embeddings")
             
         except Exception as e:
             self.logger.error(f"Failed to initialize vector components: {str(e)}")
             raise
     
     async def embed_code_chunk(self, chunk_content: str, chunk_metadata: Dict[str, Any]) -> np.ndarray:
-        """Generate embedding for a code chunk"""
+        """Generate embedding for a code chunk using local model"""
         try:
             # Prepare text for embedding
             text_to_embed = self._prepare_text_for_embedding(chunk_content, chunk_metadata)
@@ -418,6 +355,160 @@ class VectorIndexAgent:
             text_parts.append(f"File ops: {', '.join(metadata['file_operations'][:5])}")
         
         return " | ".join(text_parts)
+
+    async def create_embeddings_for_chunks(self, chunks: List[tuple]) -> Dict[str, Any]:
+        """Create embeddings for a list of chunks"""
+        try:
+            await self._ensure_initialized()
+            
+            embeddings_created = 0
+            
+            for chunk_data in chunks:
+                chunk_id, program_name, chunk_id_str, chunk_type, content, metadata_str = chunk_data
+                
+                try:
+                    metadata = json.loads(metadata_str) if metadata_str else {}
+                    
+                    # Generate embedding using local model
+                    embedding = await self.embed_code_chunk(content, metadata)
+                    
+                    # Store in FAISS
+                    faiss_id = self.faiss_index.ntotal
+                    self.faiss_index.add(embedding.reshape(1, -1).astype('float32'))
+                    
+                    # Store in ChromaDB (will use local embedding function automatically)
+                    self.collection.add(
+                        documents=[content],  # ChromaDB will embed using our local function
+                        metadatas=[{
+                            "program_name": program_name,
+                            "chunk_id": chunk_id_str,
+                            "chunk_type": chunk_type,
+                            "faiss_id": faiss_id,
+                            **metadata
+                        }],
+                        ids=[f"{program_name}_{chunk_id_str}"]
+                    )
+                    
+                    # Store embedding reference in SQLite
+                    embedding_id = f"{program_name}_{chunk_id_str}_embed"
+                    await self._store_embedding_reference(
+                        chunk_id, embedding_id, faiss_id, embedding.tolist()
+                    )
+                    
+                    embeddings_created += 1
+                    
+                except Exception as e:
+                    self.logger.error(f"Failed to process chunk {chunk_id_str}: {str(e)}")
+                    continue
+            
+            # Save FAISS index
+            await self._save_faiss_index()
+            
+            result = {
+                "status": "success",
+                "embeddings_created": embeddings_created,
+                "total_chunks": len(chunks)
+            }
+            
+            return self._add_processing_info(result)
+            
+        except Exception as e:
+            self.logger.error(f"Chunk embedding creation failed: {str(e)}")
+            return self._add_processing_info({"status": "error", "error": str(e)})
+
+    async def search_similar_components(self, component_name: str, top_k: int = 5) -> Dict[str, Any]:
+        """Search for components similar to the given component name"""
+        try:
+            await self._ensure_initialized()
+            
+            # Create search query based on component name
+            search_query = f"component {component_name} similar functionality"
+            
+            # Perform semantic search
+            results = await self.semantic_search(search_query, top_k)
+            
+            # Filter and enhance results
+            similar_components = []
+            for result in results:
+                metadata = result.get('metadata', {})
+                
+                # Skip exact matches
+                if metadata.get('program_name') == component_name:
+                    continue
+                    
+                similar_components.append({
+                    "component_name": metadata.get('program_name', 'Unknown'),
+                    "chunk_id": metadata.get('chunk_id', 'Unknown'),
+                    "chunk_type": metadata.get('chunk_type', 'Unknown'),
+                    "similarity_score": result.get('similarity_score', 0),
+                    "content_preview": result.get('content', '')[:200] + "...",
+                    "shared_elements": self._find_shared_elements(component_name, metadata)
+                })
+            
+            search_result = {
+                "status": "success",
+                "component_name": component_name,
+                "similar_components": similar_components,
+                "total_found": len(similar_components)
+            }
+            
+            return self._add_processing_info(search_result)
+            
+        except Exception as e:
+            self.logger.error(f"Similar component search failed: {str(e)}")
+            return self._add_processing_info({"status": "error", "error": str(e)})
+
+    async def rebuild_index_from_chunks(self, chunks: List[tuple]) -> Dict[str, Any]:
+        """Rebuild index from provided chunks"""
+        try:
+            await self._ensure_initialized()
+            
+            # Clear existing indices
+            self.faiss_index = faiss.IndexFlatIP(self.vector_dim)
+            
+            # Clear ChromaDB collection
+            try:
+                self.chroma_client.delete_collection(self.collection_name)
+            except:
+                pass
+            
+            self.collection = self.chroma_client.create_collection(
+                name=self.collection_name,
+                embedding_function=self.chroma_embedding_function,  # Use local function
+                metadata={"description": "Opulence mainframe code chunks - rebuilt"}
+            )
+            
+            # Process all chunks
+            result = await self.create_embeddings_for_chunks(chunks)
+            
+            rebuild_result = {
+                "status": "success",
+                "message": "Index rebuilt from chunks",
+                "chunks_processed": len(chunks),
+                **result
+            }
+            
+            return self._add_processing_info(rebuild_result)
+            
+        except Exception as e:
+            self.logger.error(f"Index rebuild from chunks failed: {str(e)}")
+            return self._add_processing_info({"status": "error", "error": str(e)})
+
+    def _find_shared_elements(self, component_name: str, metadata: Dict[str, Any]) -> List[str]:
+        """Find shared elements between components"""
+        shared = []
+        
+        # This is a simple implementation - you could enhance it
+        if 'field_names' in metadata:
+            shared.append(f"Fields: {', '.join(metadata['field_names'][:3])}")
+        
+        if 'operations' in metadata:
+            shared.append(f"Operations: {', '.join(metadata['operations'][:3])}")
+        
+        if 'file_operations' in metadata:
+            shared.append(f"File ops: {', '.join(metadata['file_operations'][:2])}")
+        
+        return shared
     
     async def process_batch_embeddings(self, limit: int = None) -> Dict[str, Any]:
         """Process all unembedded chunks in batch"""
@@ -458,16 +549,15 @@ class VectorIndexAgent:
                     try:
                         metadata = json.loads(metadata_str) if metadata_str else {}
                         
-                        # Generate embedding
+                        # Generate embedding using local model
                         embedding = await self.embed_code_chunk(content, metadata)
                         
                         # Store in FAISS
                         faiss_id = self.faiss_index.ntotal
                         self.faiss_index.add(embedding.reshape(1, -1).astype('float32'))
                         
-                        # Store in ChromaDB
+                        # Store in ChromaDB (uses local embedding function)
                         self.collection.add(
-                            embeddings=[embedding.tolist()],
                             documents=[content],
                             metadatas=[{
                                 "program_name": program_name,
@@ -549,10 +639,11 @@ class VectorIndexAgent:
     
     async def semantic_search(self, query: str, top_k: int = 10, 
                             filter_metadata: Dict[str, Any] = None) -> List[Dict[str, Any]]:
-        """Perform semantic search on code chunks"""
+        """Perform semantic search on code chunks using local embeddings"""
         try:
             await self._ensure_initialized()
-            # Generate query embedding
+            
+            # Generate query embedding using local model
             query_embedding = await self.embed_code_chunk(query, {})
             
             # Search in FAISS
@@ -568,17 +659,17 @@ class VectorIndexAgent:
                     continue
                 
                 try:
-                    # Query ChromaDB for metadata
+                    # Query ChromaDB using local embeddings
                     chroma_results = self.collection.query(
-                        query_embeddings=[query_embedding.tolist()],
-                        where={"faiss_id": int(idx)},
+                        query_texts=[query],  # Will use local embedding function
+                        where={"faiss_id": int(idx)} if filter_metadata is None else {**filter_metadata, "faiss_id": int(idx)},
                         n_results=1
                     )
                     
                     if chroma_results['documents']:
                         metadata = chroma_results['metadatas'][0][0]
                         
-                        # Apply filters if specified
+                        # Apply additional filters if specified
                         if filter_metadata:
                             skip = False
                             for key, value in filter_metadata.items():
@@ -643,9 +734,9 @@ class VectorIndexAgent:
                 if idx == -1:
                     continue
                 
-                # Get chunk data
+                # Get chunk data using local embeddings
                 chroma_results = self.collection.query(
-                    query_embeddings=[ref_embedding.tolist()],
+                    query_texts=[ref_content],  # Use local embedding function
                     where={"faiss_id": int(idx)},
                     n_results=1
                 )
@@ -673,7 +764,7 @@ class VectorIndexAgent:
             return []
     
     async def _analyze_pattern_similarity(self, ref_code: str, similar_code: str) -> str:
-        """Analyze what makes two code patterns similar - FIXED"""
+        """Analyze what makes two code patterns similar"""
         await self._ensure_llm_engine()
         await self._ensure_initialized()
         
@@ -702,7 +793,7 @@ class VectorIndexAgent:
             return "structural"  # Default fallback
 
     async def _enhance_search_query(self, pattern_description: str) -> str:
-        """Use LLM to enhance search query - FIXED"""
+        """Use LLM to enhance search query"""
         await self._ensure_llm_engine()
         await self._ensure_initialized()
         
@@ -729,7 +820,7 @@ class VectorIndexAgent:
             return pattern_description  # Fallback to original
 
     async def _rank_search_results(self, original_query: str, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Use LLM to rank search results by relevance - FIXED"""
+        """Use LLM to rank search results by relevance"""
         await self._ensure_llm_engine()
         await self._ensure_initialized()
         
@@ -751,7 +842,7 @@ class VectorIndexAgent:
         return results
 
     async def _calculate_relevance_score(self, query: str, content: str, metadata: Dict) -> float:
-        """Calculate relevance score using LLM - FIXED"""
+        """Calculate relevance score using LLM"""
         await self._ensure_initialized()
         await self._ensure_llm_engine()
         
@@ -781,8 +872,6 @@ class VectorIndexAgent:
         except Exception as e:
             self.logger.error(f"Relevance calculation failed: {str(e)}")
             return 0.5  # Default score
-
-    
 
     async def build_code_knowledge_graph(self) -> Dict[str, Any]:
         """Build a knowledge graph of code relationships"""
@@ -987,7 +1076,9 @@ class VectorIndexAgent:
                 "top_programs": program_counts,
                 "chroma_collection_count": collection_count,
                 "vector_dimension": self.vector_dim,
-                "index_file_exists": Path(self.faiss_index_path).exists()
+                "index_file_exists": Path(self.faiss_index_path).exists(),
+                "local_model_path": self.local_model_path,
+                "airgap_compatible": True
             }
             
             return self._add_processing_info(result)
@@ -1011,6 +1102,7 @@ class VectorIndexAgent:
             
             self.collection = self.chroma_client.create_collection(
                 name=self.collection_name,
+                embedding_function=self.chroma_embedding_function,  # Use local function
                 metadata={"description": "Opulence mainframe code chunks - rebuilt"}
             )
             
@@ -1038,3 +1130,233 @@ class VectorIndexAgent:
         except Exception as e:
             self.logger.error(f"Index rebuild failed: {str(e)}")
             return self._add_processing_info({"status": "error", "error": str(e)})
+
+    async def advanced_semantic_search(self, query: str, top_k: int = 10, 
+                                     use_reranking: bool = True,
+                                     enhance_query: bool = True) -> List[Dict[str, Any]]:
+        """Advanced semantic search with query enhancement and result reranking"""
+        try:
+            await self._ensure_initialized()
+            
+            # Enhance query if requested
+            search_query = query
+            if enhance_query:
+                search_query = await self._enhance_search_query(query)
+                self.logger.info(f"Enhanced query: '{query}' -> '{search_query}'")
+            
+            # Perform initial semantic search
+            initial_results = await self.semantic_search(search_query, top_k * 2)
+            
+            # Rerank results if requested
+            if use_reranking and initial_results:
+                final_results = await self._rank_search_results(query, initial_results)
+            else:
+                final_results = initial_results
+            
+            return final_results[:top_k]
+            
+        except Exception as e:
+            self.logger.error(f"Advanced semantic search failed: {str(e)}")
+            return []
+
+    async def find_code_dependencies(self, program_name: str) -> Dict[str, Any]:
+        """Find code dependencies for a given program using embeddings"""
+        try:
+            await self._ensure_initialized()
+            
+            # Search for chunks related to this program
+            program_chunks = await self.semantic_search(
+                f"program {program_name} dependencies imports calls",
+                top_k=20,
+                filter_metadata={"program_name": program_name}
+            )
+            
+            dependencies = {
+                "direct_calls": [],
+                "file_dependencies": [],
+                "data_dependencies": [],
+                "similar_programs": []
+            }
+            
+            for chunk in program_chunks:
+                metadata = chunk.get('metadata', {})
+                
+                # Extract direct calls
+                if 'called_paragraphs' in metadata:
+                    dependencies["direct_calls"].extend(metadata['called_paragraphs'])
+                
+                # Extract file dependencies
+                if 'files' in metadata:
+                    dependencies["file_dependencies"].extend(metadata['files'])
+                
+                # Extract data dependencies
+                if 'field_names' in metadata:
+                    dependencies["data_dependencies"].extend(metadata['field_names'])
+            
+            # Find similar programs
+            similar_programs = await self.search_similar_components(program_name, top_k=5)
+            dependencies["similar_programs"] = similar_programs.get('similar_components', [])
+            
+            # Remove duplicates
+            for key in ["direct_calls", "file_dependencies", "data_dependencies"]:
+                dependencies[key] = list(set(dependencies[key]))
+            
+            result = {
+                "status": "success",
+                "program_name": program_name,
+                "dependencies": dependencies,
+                "total_chunks_analyzed": len(program_chunks)
+            }
+            
+            return self._add_processing_info(result)
+            
+        except Exception as e:
+            self.logger.error(f"Dependency analysis failed: {str(e)}")
+            return self._add_processing_info({"status": "error", "error": str(e)})
+
+    async def search_by_functionality(self, functionality_description: str, 
+                                    top_k: int = 10) -> List[Dict[str, Any]]:
+        """Search for code chunks by functionality description"""
+        try:
+            await self._ensure_initialized()
+            
+            # Create multiple search variations
+            search_queries = [
+                functionality_description,
+                f"code that {functionality_description}",
+                f"function {functionality_description}",
+                f"program {functionality_description}"
+            ]
+            
+            all_results = []
+            seen_ids = set()
+            
+            for query in search_queries:
+                results = await self.semantic_search(query, top_k=5)
+                
+                for result in results:
+                    chunk_id = result.get('metadata', {}).get('chunk_id')
+                    if chunk_id not in seen_ids:
+                        seen_ids.add(chunk_id)
+                        all_results.append(result)
+            
+            # Sort by similarity score and return top results
+            all_results.sort(key=lambda x: x['similarity_score'], reverse=True)
+            
+            return all_results[:top_k]
+            
+        except Exception as e:
+            self.logger.error(f"Functionality search failed: {str(e)}")
+            return []
+
+    async def export_embeddings(self, output_path: str) -> Dict[str, Any]:
+        """Export embeddings and metadata to file"""
+        try:
+            await self._ensure_initialized()
+            
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Get all embeddings with metadata
+            cursor.execute("""
+                SELECT pc.program_name, pc.chunk_id, pc.chunk_type, 
+                       pc.content, pc.metadata, ve.embedding_vector
+                FROM program_chunks pc
+                JOIN vector_embeddings ve ON pc.id = ve.chunk_id
+            """)
+            
+            export_data = {
+                "embeddings": [],
+                "metadata": {
+                    "total_count": 0,
+                    "vector_dimension": self.vector_dim,
+                    "model_path": self.local_model_path,
+                    "export_timestamp": datetime.now().isoformat()
+                }
+            }
+            
+            for row in cursor.fetchall():
+                program_name, chunk_id, chunk_type, content, metadata_str, embedding_str = row
+                
+                export_data["embeddings"].append({
+                    "program_name": program_name,
+                    "chunk_id": chunk_id,
+                    "chunk_type": chunk_type,
+                    "content": content,
+                    "metadata": json.loads(metadata_str) if metadata_str else {},
+                    "embedding": json.loads(embedding_str)
+                })
+            
+            export_data["metadata"]["total_count"] = len(export_data["embeddings"])
+            
+            conn.close()
+            
+            # Save to file
+            with open(output_path, 'w') as f:
+                json.dump(export_data, f, indent=2)
+            
+            result = {
+                "status": "success",
+                "output_path": output_path,
+                "total_exported": export_data["metadata"]["total_count"],
+                "file_size_mb": Path(output_path).stat().st_size / (1024 * 1024)
+            }
+            
+            return self._add_processing_info(result)
+            
+        except Exception as e:
+            self.logger.error(f"Export failed: {str(e)}")
+            return self._add_processing_info({"status": "error", "error": str(e)})
+
+    async def import_embeddings(self, input_path: str) -> Dict[str, Any]:
+        """Import embeddings from file"""
+        try:
+            await self._ensure_initialized()
+            
+            with open(input_path, 'r') as f:
+                import_data = json.load(f)
+            
+            imported_count = 0
+            
+            for embedding_data in import_data["embeddings"]:
+                try:
+                    # Add to FAISS
+                    embedding_vector = np.array(embedding_data["embedding"])
+                    faiss_id = self.faiss_index.ntotal
+                    self.faiss_index.add(embedding_vector.reshape(1, -1).astype('float32'))
+                    
+                    # Add to ChromaDB
+                    self.collection.add(
+                        documents=[embedding_data["content"]],
+                        metadatas=[{
+                            "program_name": embedding_data["program_name"],
+                            "chunk_id": embedding_data["chunk_id"],
+                            "chunk_type": embedding_data["chunk_type"],
+                            "faiss_id": faiss_id,
+                            **embedding_data["metadata"]
+                        }],
+                        ids=[f"{embedding_data['program_name']}_{embedding_data['chunk_id']}"]
+                    )
+                    
+                    imported_count += 1
+                    
+                except Exception as e:
+                    self.logger.error(f"Failed to import embedding: {str(e)}")
+                    continue
+            
+            # Save FAISS index
+            await self._save_faiss_index()
+            
+            result = {
+                "status": "success",
+                "input_path": input_path,
+                "total_imported": imported_count,
+                "total_in_file": len(import_data["embeddings"])
+            }
+            
+            return self._add_processing_info(result)
+            
+        except Exception as e:
+            self.logger.error(f"Import failed: {str(e)}")
+            return self._add_processing_info({"status": "error", "error": str(e)})
+
