@@ -16,6 +16,7 @@ import re
 import logging
 from datetime import datetime
 import zipfile
+import uuid
 import hashlib
 
 from vllm import AsyncLLMEngine, SamplingParams

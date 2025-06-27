@@ -8,6 +8,7 @@ import asyncio
 import sqlite3
 import json
 import re
+import uuid
 import os
 from typing import Dict, List, Optional, Any, AsyncGenerator
 from pathlib import Path
@@ -345,7 +346,8 @@ class LogicAnalyzerAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.1, max_tokens=800)
-        result = await self.llm_engine.generate(prompt, sampling_params)
+        request_id = str(uuid.uuid4())
+        result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
         
         try:
             response_text = result.outputs[0].text.strip()
@@ -493,7 +495,8 @@ class LogicAnalyzerAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.1, max_tokens=400)
-        result = await self.llm_engine.generate(prompt, sampling_params)
+        request_id = str(uuid.uuid4())
+        result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
         
         try:
             response_text = result.outputs[0].text.strip()
@@ -570,7 +573,8 @@ class LogicAnalyzerAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.2, max_tokens=600)
-        result = await self.llm_engine.generate(prompt, sampling_params)
+        request_id = str(uuid.uuid4())
+        result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
         
         try:
             response_text = result.outputs[0].text.strip()
@@ -775,7 +779,8 @@ class LogicAnalyzerAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.2, max_tokens=1000)
-        result = await self.llm_engine.generate(prompt, sampling_params)
+        request_id = str(uuid.uuid4())
+        result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
         
         return {
             "summary": result.outputs[0].text.strip(),
@@ -866,7 +871,8 @@ class LogicAnalyzerAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.1, max_tokens=600)
-        result = await self.llm_engine.generate(prompt, sampling_params)
+        request_id = str(uuid.uuid4())
+        result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
         
         try:
             response_text = result.outputs[0].text.strip()

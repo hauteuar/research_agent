@@ -7,6 +7,7 @@ Tracks field usage, data flow, and component lifecycle across the mainframe syst
 import asyncio
 import sqlite3
 import json
+import uuid
 import re
 import os
 from typing import Dict, List, Optional, Any, Tuple, Set
@@ -510,7 +511,8 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.2, max_tokens=400)
-            result = await self.llm_engine.generate(prompt, sampling_params)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
             
             response_text = result.outputs[0].text.strip()
             if '{' in response_text:
@@ -715,7 +717,8 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.3, max_tokens=400)
-            result = await self.llm_engine.generate(prompt, sampling_params)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
             return result.outputs[0].text.strip()
         except Exception as e:
             self.logger.warning(f"Failed to generate pattern analysis: {str(e)}")
@@ -792,7 +795,8 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.2, max_tokens=500)
-            result = await self.llm_engine.generate(prompt, sampling_params)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
             
             response_text = result.outputs[0].text.strip()
             if '[' in response_text:
@@ -884,7 +888,8 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.3, max_tokens=500)
-            result = await self.llm_engine.generate(prompt, sampling_params)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
             return result.outputs[0].text.strip()
         except Exception as e:
             self.logger.warning(f"Failed to generate lifecycle analysis: {str(e)}")
@@ -981,7 +986,8 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.3, max_tokens=600)
-            result = await self.llm_engine.generate(prompt, sampling_params)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
             return result.outputs[0].text.strip()
         except Exception as e:
             self.logger.warning(f"Failed to generate impact assessment: {str(e)}")
@@ -1028,7 +1034,8 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.2, max_tokens=1000)
-            result = await self.llm_engine.generate(prompt, sampling_params)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
             return result.outputs[0].text.strip()
         except Exception as e:
             self.logger.warning(f"Failed to generate lineage report: {str(e)}")
@@ -1132,7 +1139,8 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.2, max_tokens=200)
-            result = await self.llm_engine.generate(prompt, sampling_params)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
             
             response_text = result.outputs[0].text.strip()
             if '[' in response_text:
@@ -1240,7 +1248,8 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.2, max_tokens=300)
-            result = await self.llm_engine.generate(prompt, sampling_params)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
             
             response_text = result.outputs[0].text.strip()
             if '{' in response_text:
@@ -1293,7 +1302,8 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.2, max_tokens=800)
-            result = await self.llm_engine.generate(prompt, sampling_params)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
             return result.outputs[0].text.strip()
         except Exception as e:
             self.logger.warning(f"Failed to generate lifecycle report: {str(e)}")
@@ -1392,7 +1402,8 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.2, max_tokens=250)
-            result = await self.llm_engine.generate(prompt, sampling_params)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
             
             response_text = result.outputs[0].text.strip()
             if '{' in response_text:
@@ -1446,7 +1457,8 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.2, max_tokens=800)
-            result = await self.llm_engine.generate(prompt, sampling_params)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params,  request_id = request_id)
             return result.outputs[0].text.strip()
         except Exception as e:
             self.logger.warning(f"Failed to generate program lifecycle report: {str(e)}")
@@ -1527,7 +1539,8 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.2, max_tokens=400)
-            result = await self.llm_engine.generate(prompt, sampling_params)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
             
             response_text = result.outputs[0].text.strip()
             if '{' in response_text:
@@ -1578,7 +1591,8 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.3, max_tokens=600)
-            result = await self.llm_engine.generate(prompt, sampling_params)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
             return result.outputs[0].text.strip()
         except Exception as e:
             self.logger.warning(f"Failed to generate JCL flow analysis: {str(e)}")
@@ -1717,7 +1731,8 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.3, max_tokens=400)
-            result = await self.llm_engine.generate(prompt, sampling_params)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
             return result.outputs[0].text.strip()
         except Exception as e:
             self.logger.warning(f"Failed to generate executive summary: {str(e)}")

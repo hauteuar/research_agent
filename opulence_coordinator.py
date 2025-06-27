@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 import multiprocessing as mp
 from pathlib import Path
 import json
+import uuid
 import sqlite3
 from datetime import datetime
 from contextlib import asynccontextmanager
@@ -446,56 +447,37 @@ class DynamicOpulenceCoordinator:
             return False
 
     async def get_available_gpu_for_agent(self, agent_type: str, preferred_gpu: Optional[int] = None) -> Optional[int]:
-        """Get best available GPU for agent with smart allocation using GPU manager"""
-    
-        # Force refresh GPU status first
-        self.gpu_manager.force_refresh()
-    
-        # Check if we already have an LLM engine that can be shared
-        existing_engines = list(self.llm_engine_pool.keys())
-        if existing_engines:
-            # Try to reuse existing engine if memory allows
-            for engine_key in existing_engines:
-                gpu_id = int(engine_key.split('_')[1])
+        """Enhanced GPU allocation with better error handling"""
+        try:
+            # Force refresh GPU status first
+            self.gpu_manager.force_refresh()
+            
+            # Check existing engines for sharing opportunities
+            for engine_key in list(self.llm_engine_pool.keys()):
                 try:
+                    gpu_id = int(engine_key.split('_')[1])
                     from gpu_force_fix import GPUForcer
                     memory_info = GPUForcer.check_gpu_memory(gpu_id)
                     free_gb = memory_info.get('free_gb', 0)
-                
-                # If GPU has enough free memory for another workload
-                    if free_gb >= 1.0:  # Reduced threshold for sharing
-                        self.logger.info(f"Reusing existing LLM engine on GPU {gpu_id} for {agent_type}")
+                    
+                    if free_gb >= 1.0:  # Can share this GPU
+                        self.logger.info(f"Sharing existing engine on GPU {gpu_id} for {agent_type}")
                         return gpu_id
                 except Exception as e:
-                    self.logger.warning(f"Error checking GPU {gpu_id} for reuse: {e}")
+                    self.logger.warning(f"Error checking GPU {gpu_id}: {e}")
                     continue
-    
-        # Use GPU manager's built-in allocation logic
-        best_gpu = self.gpu_manager.get_available_gpu(
-            preferred_gpu=preferred_gpu, 
-            fallback=True
-        )
-    
-        if best_gpu is not None:
-            self.logger.info(f"GPU manager selected GPU {best_gpu} for {agent_type}")
-            return best_gpu
-    
-        # If no GPU available, check if we can wait and retry
-        await asyncio.sleep(2)  # Wait 2 seconds
-        self.gpu_manager.force_refresh()
-    
-        best_gpu = self.gpu_manager.get_available_gpu(
-            preferred_gpu=preferred_gpu, 
-            fallback=True
-        )
-    
-        if best_gpu is not None:
-            self.logger.info(f"GPU manager selected GPU {best_gpu} for {agent_type} (after retry)")
-            return best_gpu
-    
-        self.logger.warning("No GPUs currently available even after retry")
-        return None
-
+            
+            # Find new GPU
+            best_gpu = self.gpu_manager.get_available_gpu(preferred_gpu, fallback=True, allow_sharing=True)
+            if best_gpu is not None:
+                return best_gpu
+                
+            self.logger.error("No GPUs available")
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"GPU allocation failed: {e}")
+            return None
 
     async def _cleanup_gpu_engine(self, gpu_id: int):
         """Clean up existing LLM engine on GPU using GPUForcer"""
@@ -1198,101 +1180,145 @@ class DynamicOpulenceCoordinator:
         """
 
     async def analyze_component(self, component_name: str, component_type: str = None, 
-                            preferred_gpu: Optional[int] = None) -> Dict[str, Any]:
-        """Deep analysis of a component with dynamic GPU allocation"""
+                          preferred_gpu: Optional[int] = None) -> Dict[str, Any]:
+        """Enhanced component analysis with better error handling"""
         start_time = time.time()
         
         try:
+            self.logger.info(f"Starting analysis for component: {component_name}, type: {component_type}")
+            
             # Check cache first
             cache_key = f"analyze_{component_name}_{component_type}"
             cached_result = self.cache_manager.get(cache_key)
             if cached_result:
-                self.stats["cache_hit_rate"] += 1
+                self.logger.info(f"Returning cached result for {component_name}")
                 return cached_result
             
-            # Track cache miss
-            self.stats["cache_miss_rate"] = self.stats.get("cache_miss_rate", 0) + 1
-            
-            # If component type not specified, determine it
+            # Determine component type if not specified
             if not component_type:
                 component_type = await self._determine_component_type(component_name, preferred_gpu)
+                self.logger.info(f"Determined component type: {component_type}")
             
             analysis_result = {
                 "component_name": component_name,
                 "component_type": component_type,
+                "status": "processing"
             }
             
-            # Add semantic search results FIRST (before other analysis)
             try:
+                # Semantic search with better error handling
                 async with self.get_agent_with_gpu("vector_index", preferred_gpu) as (vector_agent, gpu_id):
-                    semantic_results = await vector_agent.search_similar_components(component_name)
-                    analysis_result["semantic_search"] = semantic_results
-                    analysis_result["vector_gpu_used"] = gpu_id
+                    try:
+                        semantic_results = await vector_agent.search_similar_components(component_name)
+                        analysis_result["semantic_search"] = semantic_results
+                        analysis_result["vector_gpu_used"] = gpu_id
+                        self.logger.info(f"Semantic search completed for {component_name}")
+                    except Exception as e:
+                        self.logger.error(f"Semantic search failed: {e}")
+                        analysis_result["semantic_search"] = {"error": str(e)}
             except Exception as e:
-                self.logger.warning(f"Semantic search failed for {component_name}: {str(e)}")
-                analysis_result["semantic_search"] = {"error": str(e)}
+                self.logger.error(f"Vector agent allocation failed: {e}")
+                analysis_result["semantic_search"] = {"error": "Vector agent unavailable"}
             
-            # Component-specific analysis
-            if component_type in ["file", "table"]:
-                # Analyze file/table lifecycle with dynamic GPU allocation
-                async with self.get_agent_with_gpu("lineage_analyzer", preferred_gpu) as (lineage_agent, gpu1):
-                    async with self.get_agent_with_gpu("data_loader", preferred_gpu) as (data_agent, gpu2):
-                        lineage_result = await lineage_agent.analyze_field_lineage(component_name)
-                        data_result = await data_agent.get_component_info(component_name)
-                
-                analysis_result.update({
-                    "lineage": lineage_result,
-                    "data_info": data_result,
-                    "lifecycle": await self._analyze_lifecycle(component_name, component_type, preferred_gpu),
-                    "gpus_used": [gpu1, gpu2]
-                })
-                
-            elif component_type in ["program", "cobol"]:
-                # Analyze program logic with dynamic GPU allocation
-                async with self.get_agent_with_gpu("logic_analyzer", preferred_gpu) as (logic_agent, gpu_id):
-                    logic_result = await logic_agent.analyze_program(component_name)
-                    dependencies = await self._find_dependencies(component_name, preferred_gpu)
-                    
-                analysis_result.update({
-                    "logic_analysis": logic_result,
-                    "dependencies": dependencies,
-                    "gpu_used": gpu_id
-                })
-                
-            elif component_type == "jcl":
-                # Analyze JCL job flow with dynamic GPU allocation
-                async with self.get_agent_with_gpu("code_parser", preferred_gpu) as (parser_agent, gpu_id):
-                    jcl_result = await parser_agent.analyze_jcl(component_name)
-                    job_flow = await self._analyze_job_flow(component_name, preferred_gpu)
-                    
-                analysis_result.update({
-                    "jcl_analysis": jcl_result,
-                    "job_flow": job_flow,
-                    "gpu_used": gpu_id
-                })
-            
-            # Add comparison with DB2 if applicable
+            # Component-specific analysis with fallbacks
             if component_type in ["file", "table"]:
                 try:
-                    async with self.get_agent_with_gpu("db2_comparator", preferred_gpu) as (db2_agent, gpu_id):
-                        db2_comparison = await db2_agent.compare_data(component_name)
-                        analysis_result["db2_comparison"] = db2_comparison
-                        analysis_result["db2_gpu_used"] = gpu_id
+                    async with self.get_agent_with_gpu("lineage_analyzer", preferred_gpu) as (lineage_agent, gpu1):
+                        lineage_result = await lineage_agent.analyze_field_lineage(component_name)
+                        analysis_result["lineage"] = lineage_result
+                        self.logger.info(f"Lineage analysis completed for {component_name}")
                 except Exception as e:
-                    self.logger.warning(f"DB2 comparison failed for {component_name}: {str(e)}")
-                    analysis_result["db2_comparison"] = {"error": str(e)}
+                    self.logger.error(f"Lineage analysis failed: {e}")
+                    analysis_result["lineage"] = {"error": str(e)}
+                
+                try:
+                    async with self.get_agent_with_gpu("data_loader", preferred_gpu) as (data_agent, gpu2):
+                        data_result = await data_agent.get_component_info(component_name)
+                        analysis_result["data_info"] = data_result
+                        self.logger.info(f"Data info completed for {component_name}")
+                except Exception as e:
+                    self.logger.error(f"Data info failed: {e}")
+                    analysis_result["data_info"] = {"error": str(e)}
+            
+            elif component_type in ["program", "cobol"]:
+                try:
+                    async with self.get_agent_with_gpu("logic_analyzer", preferred_gpu) as (logic_agent, gpu_id):
+                        logic_result = await logic_agent.analyze_program(component_name)
+                        analysis_result["logic_analysis"] = logic_result
+                        self.logger.info(f"Logic analysis completed for {component_name}")
+                except Exception as e:
+                    self.logger.error(f"Logic analysis failed: {e}")
+                    analysis_result["logic_analysis"] = {"error": str(e)}
+            
+            # Always try to provide some basic info from database
+            if not any(key in analysis_result for key in ["lineage", "data_info", "logic_analysis"]):
+                try:
+                    basic_info = await self._get_basic_component_info(component_name)
+                    analysis_result["basic_info"] = basic_info
+                    self.logger.info(f"Basic info retrieved for {component_name}")
+                except Exception as e:
+                    self.logger.error(f"Basic info failed: {e}")
+                    analysis_result["basic_info"] = {"error": str(e)}
+            
+            analysis_result["status"] = "completed"
             
             # Cache the result
             self.cache_manager.set(cache_key, analysis_result)
             
             processing_time = time.time() - start_time
-            self._update_processing_stats("component_analysis", processing_time)
+            self.logger.info(f"Component analysis completed for {component_name} in {processing_time:.2f}s")
             
             return analysis_result
             
         except Exception as e:
-            self.logger.error(f"Component analysis failed: {str(e)}")
-            return {"status": "error", "error": str(e)}
+            self.logger.error(f"Component analysis failed for {component_name}: {str(e)}")
+            return {
+                "component_name": component_name,
+                "component_type": component_type or "unknown",
+                "status": "error",
+                "error": str(e)
+            }
+
+    async def _get_basic_component_info(self, component_name: str) -> Dict[str, Any]:
+        """Get basic component info directly from database"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Check program_chunks
+            cursor.execute("""
+                SELECT COUNT(*), chunk_type, program_name 
+                FROM program_chunks 
+                WHERE program_name = ? OR program_name LIKE ?
+                GROUP BY chunk_type, program_name
+            """, (component_name, f"%{component_name}%"))
+            
+            chunk_info = cursor.fetchall()
+            
+            # Check file_metadata if available
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*), file_type, table_name 
+                    FROM file_metadata 
+                    WHERE table_name = ? OR table_name LIKE ?
+                """, (component_name, f"%{component_name}%"))
+                
+                file_info = cursor.fetchall()
+            except:
+                file_info = []
+            
+            conn.close()
+            
+            return {
+                "chunk_info": chunk_info,
+                "file_info": file_info,
+                "found_in_chunks": len(chunk_info) > 0,
+                "found_in_files": len(file_info) > 0
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Basic component info failed: {e}")
+            return {"error": str(e)}
     
     async def search_code_patterns(self, query: str, limit: int = 10) -> Dict[str, Any]:
         """Search code patterns using vector similarity"""

@@ -5,6 +5,7 @@ Generates comprehensive technical documentation for mainframe systems
 """
 
 import asyncio
+import uuid
 import sqlite3
 import json
 import re
@@ -364,7 +365,8 @@ class DocumentationAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.2, max_tokens=600)
-        result = await self.llm_engine.generate(prompt, sampling_params)
+        request_id = str(uuid.uuid4())
+        result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
         
         return result.outputs[0].text.strip()
     
@@ -389,7 +391,8 @@ class DocumentationAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.2, max_tokens=700)
-        result = await self.llm_engine.generate(prompt, sampling_params)
+        request_id = str(uuid.uuid4())
+        result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
         
         return result.outputs[0].text.strip()
     
@@ -414,7 +417,8 @@ class DocumentationAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.2, max_tokens=800)
-        result = await self.llm_engine.generate(prompt, sampling_params)
+        request_id = str(uuid.uuid4())
+        result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
         
         return result.outputs[0].text.strip()
     
@@ -456,7 +460,8 @@ class DocumentationAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.2, max_tokens=700)
-        result = await self.llm_engine.generate(prompt, sampling_params)
+        request_id = str(uuid.uuid4())
+        result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
         
         return result.outputs[0].text.strip()
     
@@ -552,7 +557,8 @@ class DocumentationAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.2, max_tokens=600)
-        result = await self.llm_engine.generate(prompt, sampling_params)
+        request_id = str(uuid.uuid4())
+        result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
         
         return result.outputs[0].text.strip()
     
@@ -579,7 +585,8 @@ class DocumentationAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.2, max_tokens=600)
-        result = await self.llm_engine.generate(prompt, sampling_params)
+        request_id = str(uuid.uuid4())
+        result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
         
         return result.outputs[0].text.strip()
     
@@ -608,7 +615,8 @@ class DocumentationAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.2, max_tokens=500)
-        result = await self.llm_engine.generate(prompt, sampling_params)
+        request_id = str(uuid.uuid4())
+        result = await self.llm_engine.generate(prompt, sampling_params, request_id = str(uuid.uuid4()))
         
         return result.outputs[0].text.strip()
     

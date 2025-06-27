@@ -121,52 +121,28 @@ class GPUForcer:
     
     @staticmethod
     def cleanup_gpu_memory(gpu_id: int, force: bool = False) -> bool:
-        """Clean up GPU memory more aggressively"""
+        """Enhanced GPU cleanup"""
         try:
-            logger.info(f"Cleaning up GPU {gpu_id} memory (force: {force})")
+            import gc
+            import torch
             
-            # Set environment to target specific GPU
-            original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
-            os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
+            # Clear Python garbage first
+            gc.collect()
             
-            try:
-                if torch.cuda.is_available():
-                    # Force cleanup
+            if torch.cuda.is_available():
+                with torch.cuda.device(gpu_id):
                     torch.cuda.empty_cache()
                     torch.cuda.synchronize()
                     
                     if force:
                         # More aggressive cleanup
-                        gc.collect()
-                        torch.cuda.empty_cache()
-                        
-                        # Try to reset memory stats
-                        try:
-                            torch.cuda.reset_peak_memory_stats(0)
-                            torch.cuda.reset_accumulated_memory_stats(0)
-                        except:
-                            pass
-                
-                # Wait for cleanup to take effect
-                time.sleep(2)
-                
-                # Verify cleanup worked
-                memory_info = GPUForcer.check_gpu_memory(gpu_id)
-                logger.info(f"After cleanup - GPU {gpu_id}: {memory_info['free_gb']:.1f}GB free")
-                
-                return memory_info['free_gb'] > 1.0  # At least 1GB should be free
-                
-            finally:
-                # Restore environment
-                if original_cuda_visible is not None:
-                    os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible
-                elif 'CUDA_VISIBLE_DEVICES' in os.environ:
-                    del os.environ['CUDA_VISIBLE_DEVICES']
-                    
+                        torch.cuda.reset_peak_memory_stats(gpu_id)
+                        torch.cuda.reset_accumulated_memory_stats(gpu_id)
+            
+            return True
         except Exception as e:
-            logger.error(f"Error cleaning up GPU {gpu_id}: {e}")
-            return False
-    
+            print(f"GPU cleanup failed: {e}")
+            return False    
     @staticmethod
     def force_gpu_environment(gpu_id: int, cleanup_first: bool = True):
         """Aggressively force GPU environment with optional cleanup"""

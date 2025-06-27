@@ -9,6 +9,8 @@ import sqlite3
 import pandas as pd
 import logging
 import os
+import uuid
+import re
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 import json
@@ -558,7 +560,8 @@ class DB2ComparatorAgent:
             """
             
             sampling_params = SamplingParams(temperature=0.3, max_tokens=800)
-            result = await self.llm_engine.generate(prompt, sampling_params)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
             
             return result.outputs[0].text.strip()
             
@@ -853,7 +856,8 @@ class DB2ComparatorAgent:
             """
             
             sampling_params = SamplingParams(temperature=0.3, max_tokens=1000)
-            result = await self.llm_engine.generate(prompt, sampling_params)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
             
             return result.outputs[0].text.strip()
             
@@ -937,7 +941,8 @@ class DB2ComparatorAgent:
             """
             
             sampling_params = SamplingParams(temperature=0.3, max_tokens=1200)
-            result = await self.llm_engine.generate(prompt, sampling_params)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
             
             return result.outputs[0].text.strip()
             
