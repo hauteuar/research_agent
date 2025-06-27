@@ -3133,78 +3133,79 @@ class CompleteEnhancedCodeParserAgent:
             return
         
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            import sqlite3
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
             
-                # Start transaction
-                cursor.execute("BEGIN TRANSACTION")
+            # Start transaction
+            cursor.execute("BEGIN TRANSACTION")
             
-                try:
-                    stored_count = 0
-                    skipped_count = 0
+            try:
+                stored_count = 0
+                skipped_count = 0
                 
-                    for chunk in chunks:
-                        try:
-                            # Check for existing chunk with same ID
-                            cursor.execute("""
+                for chunk in chunks:
+                    try:
+                        # Check for existing chunk with same ID
+                        cursor.execute("""
                             SELECT id FROM program_chunks 
                             WHERE program_name = ? AND chunk_id = ?
-                            """, (chunk.program_name, chunk.chunk_id))
+                        """, (chunk.program_name, chunk.chunk_id))
                         
-                            existing = cursor.fetchone()
+                        existing = cursor.fetchone()
                         
-                            if existing:
-                                # Update existing chunk
-                                cursor.execute("""
-                                    UPDATE program_chunks 
-                                    SET content = ?, metadata = ?, file_hash = ?, 
+                        if existing:
+                            # Update existing chunk
+                            cursor.execute("""
+                                UPDATE program_chunks 
+                                SET content = ?, metadata = ?, file_hash = ?, 
                                     line_start = ?, line_end = ?, created_timestamp = CURRENT_TIMESTAMP
-                                    WHERE id = ?
-                                """, (
-                                    chunk.content,
-                                    json.dumps(chunk.metadata),
-                                    file_hash,
-                                    chunk.line_start,
-                                    chunk.line_end,
-                                    existing[0]
-                                ))
-                                self.logger.debug(f"Updated existing chunk: {chunk.chunk_id}")
-                            else:
+                                WHERE id = ?
+                            """, (
+                                chunk.content,
+                                json.dumps(chunk.metadata),
+                                file_hash,
+                                chunk.line_start,
+                                chunk.line_end,
+                                existing[0]
+                            ))
+                            self.logger.debug(f"Updated existing chunk: {chunk.chunk_id}")
+                        else:
                             # Insert new chunk
-                                cursor.execute("""
-                                    INSERT INTO program_chunks 
-                                    (program_name, chunk_id, chunk_type, content, metadata, 
-                                     embedding_id, file_hash, line_start, line_end)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (
-                                    chunk.program_name,
-                                    chunk.chunk_id,
-                                    chunk.chunk_type,
-                                    chunk.content,
-                                    json.dumps(chunk.metadata),
-                                    hashlib.md5(chunk.content.encode()).hexdigest(),
-                                    file_hash,
-                                    chunk.line_start,
-                                    chunk.line_end
-                                ))
-                                self.logger.debug(f"Inserted new chunk: {chunk.chunk_id}")
+                            cursor.execute("""
+                                INSERT INTO program_chunks 
+                                (program_name, chunk_id, chunk_type, content, metadata, 
+                                 embedding_id, file_hash, line_start, line_end)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                chunk.program_name,
+                                chunk.chunk_id,
+                                chunk.chunk_type,
+                                chunk.content,
+                                json.dumps(chunk.metadata),
+                                hashlib.md5(chunk.content.encode()).hexdigest(),
+                                file_hash,
+                                chunk.line_start,
+                                chunk.line_end
+                            ))
+                            self.logger.debug(f"Inserted new chunk: {chunk.chunk_id}")
                         
-                            stored_count += 1
+                        stored_count += 1
                         
-                        except sqlite3.Error as e:
-                            self.logger.error(f"Failed to store chunk {chunk.chunk_id}: {str(e)}")
-                            skipped_count += 1
-                            continue
+                    except sqlite3.Error as e:
+                        self.logger.error(f"Failed to store chunk {chunk.chunk_id}: {str(e)}")
+                        skipped_count += 1
+                        continue
                 
                 # Commit transaction
-                    cursor.execute("COMMIT")
+                cursor.execute("COMMIT")
                 
-                    self.logger.info(f"Successfully stored {stored_count}/{len(chunks)} chunks, skipped {skipped_count}")
+                self.logger.info(f"Successfully stored {stored_count}/{len(chunks)} chunks, skipped {skipped_count}")
                 
-                except Exception as e:
-                    cursor.execute("ROLLBACK")
-                    self.logger.error(f"Transaction failed, rolled back: {str(e)}")
-                    raise e
+            except Exception as e:
+                cursor.execute("ROLLBACK")
+                self.logger.error(f"Transaction failed, rolled back: {str(e)}")
+                raise e
                 
         except Exception as e:
             self.logger.error(f"Database operation failed: {str(e)}")
