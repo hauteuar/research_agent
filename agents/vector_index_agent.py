@@ -28,6 +28,18 @@ import os
 # Disable external connections for airgap environment
 os.environ['DISABLE_TELEMETRY'] = '1'
 os.environ['NO_PROXY'] = '*'
+from dataclasses import dataclass
+
+@dataclass
+class CodeChunk:
+    """Represents a parsed code chunk"""
+    program_name: str
+    chunk_id: str
+    chunk_type: str
+    content: str
+    metadata: Dict[str, Any]
+    line_start: int
+    line_end: int
 
 class LocalCodeBERTEmbeddingFunction(EmbeddingFunction):
     """Custom embedding function using local CodeBERT model for ChromaDB"""

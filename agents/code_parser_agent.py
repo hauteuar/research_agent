@@ -570,8 +570,8 @@ class CompleteEnhancedCodeParserAgent:
                 chunk.metadata['file_hash'] = file_hash
             # After generating chunks, before storing:
 # Convert CodeChunk objects to tuples for vector agent compatibility
-                chunk_tuples = []
-                for chunk in chunks:
+            chunk_tuples = []
+            for chunk in chunks:
                     chunk_tuple = (
                         0,  # chunk_id (will be auto-generated)
                         chunk.program_name,
@@ -583,7 +583,7 @@ class CompleteEnhancedCodeParserAgent:
                     chunk_tuples.append(chunk_tuple)
 
                 # Store chunks with verification
-                await self._store_chunks_enhanced(chunks, file_hash)
+            await self._store_chunks_enhanced(chunks, file_hash)
             
             # Verify chunks were stored
             stored_chunks = await self._verify_chunks_stored(self._extract_program_name(content, file_path))
