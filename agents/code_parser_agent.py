@@ -573,6 +573,9 @@ class CompleteEnhancedCodeParserAgent:
             
             # Generate metadata
             metadata = await self._generate_metadata_enhanced(chunks, file_type)
+
+            lineage_records = await self._generate_field_lineage(file_path.stem, chunks)
+            await self._store_field_lineage(lineage_records)
             
             result = {
                 "status": "success",
@@ -3372,7 +3375,7 @@ class CompleteEnhancedCodeParserAgent:
             "complexity_score": self._calculate_complexity_score(chunks),
             "recommendations": self._generate_recommendations(chunks)
         }
-
+     
     async def _analyze_jcl_program(self, program_name: str, chunks: List[Tuple]) -> Dict[str, Any]:
         """Analyze JCL program"""
         return {
@@ -3419,6 +3422,103 @@ class CompleteEnhancedCodeParserAgent:
                 score += 1
         
         return min(score, 100)  # Cap at 100
+    
+    async def _generate_field_lineage(self, program_name: str, chunks: List[Dict]) -> List[Dict]:
+        """Generate field lineage data from parsed chunks"""
+        lineage_records = []
+        
+        for chunk in chunks:
+            content = chunk.get('content', '')
+            metadata = chunk.get('metadata', {})
+            chunk_id = chunk.get('chunk_id', '')
+            
+            # Extract field operations from content
+            field_operations = self._extract_field_operations(content)
+            
+            for field_op in field_operations:
+                lineage_record = {
+                    'field_name': field_op['field_name'],
+                    'program_name': program_name,
+                    'paragraph': chunk_id,
+                    'operation': field_op['operation'],
+                    'source_file': field_op.get('source_file', ''),
+                    'last_used': datetime.now().isoformat(),
+                    'read_in': program_name if field_op['operation'] == 'READ' else '',
+                    'updated_in': program_name if field_op['operation'] in ['WRITE', 'UPDATE'] else '',
+                    'purged_in': program_name if field_op['operation'] == 'DELETE' else ''
+                }
+                lineage_records.append(lineage_record)
+        
+        return lineage_records
+
+    def _extract_field_operations(self, content: str) -> List[Dict]:
+        """Extract field operations from COBOL content"""
+        operations = []
+        
+        # Common COBOL field operation patterns
+        patterns = {
+            'READ': [r'READ\s+(\w+)', r'INTO\s+(\w+)'],
+            'WRITE': [r'WRITE\s+(\w+)', r'MOVE\s+.+\s+TO\s+(\w+)'],
+            'UPDATE': [r'REWRITE\s+(\w+)', r'ADD\s+.+\s+TO\s+(\w+)'],
+            'DELETE': [r'DELETE\s+(\w+)']
+        }
+        
+        for operation, pattern_list in patterns.items():
+            for pattern in pattern_list:
+                matches = re.findall(pattern, content, re.IGNORECASE)
+                for match in matches:
+                    field_name = match if isinstance(match, str) else match[0]
+                    operations.append({
+                        'field_name': field_name,
+                        'operation': operation,
+                        'source_file': ''  # Could be enhanced to detect file names
+                    })
+        
+        return operations
+
+    # Add this method to store lineage data
+    async def _store_field_lineage(self, lineage_records: List[Dict]):
+        """Store field lineage records in database"""
+        if not lineage_records:
+            return
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Ensure field_lineage table exists
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS field_lineage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                field_name TEXT NOT NULL,
+                program_name TEXT,
+                paragraph TEXT,
+                operation TEXT,
+                source_file TEXT,
+                last_used TIMESTAMP,
+                read_in TEXT,
+                updated_in TEXT,
+                purged_in TEXT,
+                created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Insert lineage records
+        for record in lineage_records:
+            cursor.execute("""
+                INSERT INTO field_lineage 
+                (field_name, program_name, paragraph, operation, source_file, 
+                last_used, read_in, updated_in, purged_in)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                record['field_name'], record['program_name'], record['paragraph'],
+                record['operation'], record['source_file'], record['last_used'],
+                record['read_in'], record['updated_in'], record['purged_in']
+            ))
+        
+        conn.commit()
+        conn.close()
+        
+        self.logger.info(f"Stored {len(lineage_records)} field lineage records")
 
     def _generate_recommendations(self, chunks: List[Tuple]) -> List[str]:
         """Generate improvement recommendations"""
