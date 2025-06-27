@@ -80,6 +80,24 @@ class DataLoaderAgent:
         # Last resort: create own engine
         if not self._engine_created:
             await self._create_llm_engine()
+
+    async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
+        """Generate text with LLM - handles both old and new vLLM API"""
+        try:
+            # Try new API first (with request_id)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
+            return result.outputs[0].text.strip()
+        except TypeError as e:
+            if "request_id" in str(e):
+                # Fallback to old API (without request_id)
+                result = await self.llm_engine.generate(prompt, sampling_params)
+                return result.outputs[0].text.strip()
+            else:
+                raise e
+        except Exception as e:
+            self.logger.error(f"LLM generation failed: {str(e)}")
+            return ""
     
     # ADD this new method
     async def _create_llm_engine(self):
@@ -360,7 +378,7 @@ class DataLoaderAgent:
         return enhanced_schema
     
     async def _enhance_schema_with_llm(self, schema: List[Dict], filename: str) -> List[Dict[str, Any]]:
-        """Use LLM to enhance schema with business context"""
+        """Use LLM to enhance schema with business context - FIXED"""
         await self._ensure_llm_engine()
         prompt = f"""
         Analyze this database schema for file "{filename}" and enhance it with business context:
@@ -382,10 +400,9 @@ class DataLoaderAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.2, max_tokens=1500)
-        result = await self.llm_engine.generate(prompt, sampling_params)
         
         try:
-            response_text = result.outputs[0].text.strip()
+            response_text = await self._generate_with_llm(prompt, sampling_params)
             if '{' in response_text:
                 json_start = response_text.find('[') if '[' in response_text else response_text.find('{')
                 json_end = response_text.rfind(']') + 1 if ']' in response_text else response_text.rfind('}') + 1
@@ -401,6 +418,53 @@ class DataLoaderAgent:
             self.logger.warning(f"Failed to parse LLM schema enhancement: {str(e)}")
         
         return schema
+
+    
+    async def _parse_ddl_statements(self, ddl_content: str) -> List[Dict[str, Any]]:
+        """Parse DDL statements to extract table definitions - FIXED"""
+        await self._ensure_llm_engine()
+        tables = []
+        
+        # Use LLM to parse complex DDL
+        prompt = f"""
+        Parse this DB2 DDL and extract table definitions:
+        
+        {ddl_content}
+        
+        For each CREATE TABLE statement, extract:
+        1. Table name
+        2. Column definitions with types and constraints
+        3. Primary keys
+        4. Foreign keys
+        
+        Return as JSON array:
+        [{{
+            "table_name": "TABLE_NAME",
+            "ddl_type": "CREATE TABLE",
+            "columns": [
+                {{"name": "COLUMN1", "type": "VARCHAR(50)", "nullable": true, "primary_key": false}},
+                {{"name": "COLUMN2", "type": "INTEGER", "nullable": false, "primary_key": true}}
+            ],
+            "primary_keys": ["COLUMN2"],
+            "foreign_keys": []
+        }}]
+        """
+        
+        sampling_params = SamplingParams(temperature=0.1, max_tokens=2000)
+        
+        try:
+            response_text = await self._generate_with_llm(prompt, sampling_params)
+            if '[' in response_text:
+                json_start = response_text.find('[')
+                json_end = response_text.rfind(']') + 1
+                tables = json.loads(response_text[json_start:json_end])
+        except Exception as e:
+            self.logger.warning(f"LLM DDL parsing failed, using regex fallback: {str(e)}")
+            tables = self._parse_ddl_with_regex(ddl_content)
+        
+        return tables
+
+    
     
     def _generate_table_name(self, filename: str) -> str:
         """Generate SQLite table name from filename"""
@@ -522,7 +586,7 @@ class DataLoaderAgent:
             return 0.5  # Default score
     
     async def _generate_field_descriptions(self, columns: List[str], sample_df: pd.DataFrame) -> Dict[str, str]:
-        """Generate field descriptions using LLM"""
+        """Generate field descriptions using LLM - FIXED"""
         await self._ensure_llm_engine()
         descriptions = {}
         
@@ -553,10 +617,9 @@ class DataLoaderAgent:
             """
             
             sampling_params = SamplingParams(temperature=0.3, max_tokens=800)
-            result = await self.llm_engine.generate(prompt, sampling_params)
             
             try:
-                response_text = result.outputs[0].text.strip()
+                response_text = await self._generate_with_llm(prompt, sampling_params)
                 if '{' in response_text:
                     json_start = response_text.find('{')
                     json_end = response_text.rfind('}') + 1
@@ -569,7 +632,7 @@ class DataLoaderAgent:
                     descriptions[col] = f"Data field: {col}"
         
         return descriptions
-    
+
     async def _process_ddl_file(self, file_path: Path, content: str) -> Dict[str, Any]:
         """Process DB2 DDL file"""
         try:
@@ -721,7 +784,7 @@ class DataLoaderAgent:
             return {"status": "error", "error": str(e)}
     
     async def _parse_dclgen_structure(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
-        """Parse DCLGEN structure using LLM"""
+        """Parse DCLGEN structure using LLM - FIXED"""
         await self._ensure_llm_engine()
         prompt = f"""
         Parse this DB2 DCLGEN file and extract the table structure:
@@ -745,10 +808,9 @@ class DataLoaderAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.1, max_tokens=1500)
-        result = await self.llm_engine.generate(prompt, sampling_params)
         
         try:
-            response_text = result.outputs[0].text.strip()
+            response_text = await self._generate_with_llm(prompt, sampling_params)
             if '{' in response_text:
                 json_start = response_text.find('{')
                 json_end = response_text.rfind('}') + 1
@@ -757,6 +819,7 @@ class DataLoaderAgent:
             self.logger.warning(f"DCLGEN parsing failed: {str(e)}")
         
         return None
+
     
     async def _process_layout_json(self, file_path: Path, content: str) -> Dict[str, Any]:
         """Process JSON layout file"""
@@ -950,7 +1013,7 @@ class DataLoaderAgent:
             return {"component_type": "error", "error": str(e)}
     
     async def get_data_lineage_info(self, component_name: str) -> Dict[str, Any]:
-        """Get data lineage information for a component"""
+        """Get data lineage information for a component - FIXED"""
         try:
             await self._ensure_llm_engine()
             component_info = await self.get_component_info(component_name)
@@ -974,11 +1037,15 @@ class DataLoaderAgent:
                 """
                 
                 sampling_params = SamplingParams(temperature=0.3, max_tokens=800)
-                result = await self.llm_engine.generate(prompt, sampling_params)
+                
+                try:
+                    result_text = await self._generate_with_llm(prompt, sampling_params)
+                except Exception as e:
+                    result_text = f"Analysis failed: {str(e)}"
                 
                 return {
                     "component_name": component_name,
-                    "lineage_analysis": result.outputs[0].text,
+                    "lineage_analysis": result_text,
                     "component_details": component_info
                 }
             
@@ -990,7 +1057,7 @@ class DataLoaderAgent:
             
         except Exception as e:
             return {"error": str(e)}
-    
+
     async def compare_table_structures(self, table1: str, table2: str) -> Dict[str, Any]:
         """Compare two table structures"""
         try:

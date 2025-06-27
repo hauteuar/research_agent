@@ -15,7 +15,7 @@ from pathlib import Path
 import pickle
 import hashlib
 from datetime import datetime
-
+import uuid
 import torch
 from transformers import AutoTokenizer, AutoModel
 import faiss
@@ -62,6 +62,24 @@ class VectorIndexAgent:
             self._initialized = True
 
     # ADD this new method
+    async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
+        """Generate text with LLM - handles both old and new vLLM API"""
+        try:
+            # Try new API first (with request_id)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
+            return result.outputs[0].text.strip()
+        except TypeError as e:
+            if "request_id" in str(e):
+                # Fallback to old API (without request_id)
+                result = await self.llm_engine.generate(prompt, sampling_params)
+                return result.outputs[0].text.strip()
+            else:
+                raise e
+        except Exception as e:
+            self.logger.error(f"LLM generation failed: {str(e)}")
+            return ""
+
     async def _ensure_llm_engine(self):
         """Ensure LLM engine is available - use coordinator first, fallback to own"""
         if self.llm_engine is not None:
@@ -655,8 +673,8 @@ class VectorIndexAgent:
             return []
     
     async def _analyze_pattern_similarity(self, ref_code: str, similar_code: str) -> str:
-        """Analyze what makes two code patterns similar"""
-        await self._ensure_llm_engine()  # ADD this line
+        """Analyze what makes two code patterns similar - FIXED"""
+        await self._ensure_llm_engine()
         await self._ensure_initialized()
         
         prompt = f"""
@@ -675,34 +693,17 @@ class VectorIndexAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.1, max_tokens=50)
-        result = await self.llm_engine.generate(prompt, sampling_params)
         
-        return result.outputs[0].text.strip()
-    
-    async def search_code_by_pattern(self, pattern_description: str, top_k: int = 10) -> List[Dict[str, Any]]:
-        """Search for code using natural language pattern description"""
         try:
-            await self._ensure_llm_engine()  # ADD this line
-            await self._ensure_initialized()
-            
-            # Use LLM to enhance the search query
-            enhanced_query = await self._enhance_search_query(pattern_description)
-            
-            # Perform semantic search
-            results = await self.semantic_search(enhanced_query, top_k)
-            
-            # Rank results using LLM
-            ranked_results = await self._rank_search_results(pattern_description, results)
-            
-            return ranked_results
-            
+            result = await self._generate_with_llm(prompt, sampling_params)
+            return result
         except Exception as e:
-            self.logger.error(f"Pattern search failed: {str(e)}")
-            return []
-    
+            self.logger.error(f"Pattern similarity analysis failed: {str(e)}")
+            return "structural"  # Default fallback
+
     async def _enhance_search_query(self, pattern_description: str) -> str:
-        """Use LLM to enhance search query"""
-        await self._ensure_llm_engine()  # ADD this line
+        """Use LLM to enhance search query - FIXED"""
+        await self._ensure_llm_engine()
         await self._ensure_initialized()
         
         prompt = f"""
@@ -719,13 +720,17 @@ class VectorIndexAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.2, max_tokens=200)
-        result = await self.llm_engine.generate(prompt, sampling_params)
         
-        return result.outputs[0].text.strip()
-    
+        try:
+            result = await self._generate_with_llm(prompt, sampling_params)
+            return result
+        except Exception as e:
+            self.logger.error(f"Query enhancement failed: {str(e)}")
+            return pattern_description  # Fallback to original
+
     async def _rank_search_results(self, original_query: str, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Use LLM to rank search results by relevance"""
-        await self._ensure_llm_engine()  # ADD this line
+        """Use LLM to rank search results by relevance - FIXED"""
+        await self._ensure_llm_engine()
         await self._ensure_initialized()
         
         if not results:
@@ -744,11 +749,11 @@ class VectorIndexAgent:
         
         results.sort(key=combined_score, reverse=True)
         return results
-    
+
     async def _calculate_relevance_score(self, query: str, content: str, metadata: Dict) -> float:
-        """Calculate relevance score using LLM"""
+        """Calculate relevance score using LLM - FIXED"""
         await self._ensure_initialized()
-        await self._ensure_llm_engine()  # ADD this line
+        await self._ensure_llm_engine()
         
         prompt = f"""
         Rate the relevance of this code chunk to the query on a scale of 0.0 to 1.0:
@@ -768,14 +773,16 @@ class VectorIndexAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.1, max_tokens=50)
-        result = await self.llm_engine.generate(prompt, sampling_params)
         
         try:
-            score_text = result.outputs[0].text.strip()
+            score_text = await self._generate_with_llm(prompt, sampling_params)
             score = float(score_text)
             return max(0.0, min(1.0, score))
-        except:
+        except Exception as e:
+            self.logger.error(f"Relevance calculation failed: {str(e)}")
             return 0.5  # Default score
+
+    
 
     async def build_code_knowledge_graph(self) -> Dict[str, Any]:
         """Build a knowledge graph of code relationships"""

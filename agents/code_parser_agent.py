@@ -1,6 +1,6 @@
-# agents/code_parser_agent.py - FIXED VERSION
+# Updated agents/code_parser_agent.py with fixes
 """
-Agent 1: Batch Code Parser & Chunker
+Agent 1: Batch Code Parser & Chunker - FIXED VERSION
 Handles COBOL, JCL, CICS, and Copybook parsing with intelligent chunking
 """
 
@@ -9,6 +9,7 @@ import asyncio
 import sqlite3
 import json
 import os
+import uuid
 from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 from dataclasses import dataclass
@@ -44,7 +45,7 @@ class CodeParserAgent:
         self._engine_created = False
         self._using_coordinator_llm = False
         
-        # INITIALIZE COBOL PATTERNS - THIS WAS MISSING!
+        # INITIALIZE COBOL PATTERNS
         self.cobol_patterns = {
             'program_id': re.compile(r'PROGRAM-ID\s+(\S+)', re.IGNORECASE),
             'paragraph': re.compile(r'^([A-Z0-9][A-Z0-9-]*)\s*\.\s*$', re.MULTILINE),
@@ -55,7 +56,7 @@ class CodeParserAgent:
             'procedure_division': re.compile(r'PROCEDURE\s+DIVISION', re.IGNORECASE)
         }
         
-        # INITIALIZE JCL PATTERNS - THIS WAS MISSING!
+        # INITIALIZE JCL PATTERNS
         self.jcl_patterns = {
             'job_card': re.compile(r'^//(\S+)\s+JOB\s+', re.MULTILINE),
             'job_step': re.compile(r'^//(\S+)\s+EXEC\s+', re.MULTILINE),
@@ -66,26 +67,24 @@ class CodeParserAgent:
 
     async def _ensure_llm_engine(self):
         """Ensure LLM engine is available with thread safety"""
-        async with self._engine_lock:  # Prevent race conditions
+        async with self._engine_lock:
             if self.llm_engine is not None:
-                return  # Already have engine
+                return
             
-            # Try to get SHARED engine from coordinator first
+            # Try coordinator first
             if self.coordinator is not None:
                 try:
-                    # Check if coordinator already has engines we can share
                     existing_engines = list(self.coordinator.llm_engine_pool.keys())
                     
                     for engine_key in existing_engines:
                         gpu_id = int(engine_key.split('_')[1])
                         
-                        # Check if this GPU has enough memory for sharing
                         try:
                             from gpu_force_fix import GPUForcer
                             memory_info = GPUForcer.check_gpu_memory(gpu_id)
                             free_gb = memory_info.get('free_gb', 0)
                             
-                            if free_gb >= 1.0:  # Can share this GPU
+                            if free_gb >= 1.0:
                                 self.llm_engine = self.coordinator.llm_engine_pool[engine_key]
                                 self.gpu_id = gpu_id
                                 self._using_coordinator_llm = True
@@ -95,7 +94,6 @@ class CodeParserAgent:
                             self.logger.warning(f"Error checking GPU {gpu_id} for sharing: {e}")
                             continue
                     
-                    # If no engine can be shared, get a new GPU
                     best_gpu = await self.coordinator.get_available_gpu_for_agent("code_parser")
                     if best_gpu is not None:
                         engine = await self.coordinator.get_or_create_llm_engine(best_gpu)
@@ -114,7 +112,6 @@ class CodeParserAgent:
                     from opulence_coordinator import get_dynamic_coordinator
                     global_coordinator = get_dynamic_coordinator()
                     
-                    # Try to share existing engines first
                     existing_engines = list(global_coordinator.llm_engine_pool.keys())
                     for engine_key in existing_engines:
                         gpu_id = int(engine_key.split('_')[1])
@@ -132,7 +129,6 @@ class CodeParserAgent:
                         except Exception as e:
                             continue
                     
-                    # If no sharing possible, get new GPU
                     best_gpu = await global_coordinator.get_available_gpu_for_agent("code_parser")
                     if best_gpu is not None:
                         engine = await global_coordinator.get_or_create_llm_engine(best_gpu)
@@ -145,7 +141,6 @@ class CodeParserAgent:
                 except Exception as e:
                     self.logger.warning(f"Failed to get LLM from global coordinator: {e}")
             
-            # Last resort: create own engine (should rarely happen)
             if not self._engine_created:
                 await self._create_fallback_llm_engine()
 
@@ -154,11 +149,10 @@ class CodeParserAgent:
         try:
             from gpu_force_fix import GPUForcer
             
-            # Find GPU with most memory
             best_gpu = None
             best_memory = 0
             
-            for gpu_id in range(4):  # Check all 4 GPUs
+            for gpu_id in range(4):
                 try:
                     memory_info = GPUForcer.check_gpu_memory(gpu_id)
                     free_gb = memory_info.get('free_gb', 0)
@@ -178,12 +172,11 @@ class CodeParserAgent:
             try:
                 GPUForcer.force_gpu_environment(best_gpu)
                 
-                # Create MINIMAL engine to reduce memory usage
                 engine_args = GPUForcer.create_vllm_engine_args(
-                    "microsoft/DialoGPT-small",  # Use smaller model as fallback
-                    1024  # Smaller context
+                    "microsoft/DialoGPT-small",
+                    1024
                 )
-                engine_args.gpu_memory_utilization = 0.2  # Use even less memory
+                engine_args.gpu_memory_utilization = 0.2
                 
                 from vllm import AsyncLLMEngine
                 self.llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
@@ -202,6 +195,55 @@ class CodeParserAgent:
         except Exception as e:
             self.logger.error(f"Failed to create fallback LLM engine: {str(e)}")
             raise
+
+    # FIX: Add LLM wrapper method
+    async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
+        """Generate text with LLM - handles both old and new vLLM API"""
+        try:
+            # Try new API first (with request_id)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
+            return result.outputs[0].text.strip()
+        except TypeError as e:
+            if "request_id" in str(e):
+                # Fallback to old API (without request_id)
+                result = await self.llm_engine.generate(prompt, sampling_params)
+                return result.outputs[0].text.strip()
+            else:
+                raise e
+        except Exception as e:
+            self.logger.error(f"LLM generation failed: {str(e)}")
+            return ""
+
+    # FIX: Add program name extraction method
+    def _extract_program_name(self, content: str, file_path: Path) -> str:
+        """Extract program name more robustly from content or filename"""
+        try:
+            # For COBOL files, try PROGRAM-ID first
+            program_match = self.cobol_patterns['program_id'].search(content)
+            if program_match:
+                return program_match.group(1).strip()
+            
+            # For JCL files, try JOB name
+            job_match = self.jcl_patterns['job_card'].search(content)
+            if job_match:
+                return job_match.group(1).strip()
+            
+            # Fallback to filename
+            filename = file_path.name
+            
+            # Remove common extensions
+            for ext in ['.cbl', '.cob', '.jcl', '.copy', '.cpy']:
+                if filename.lower().endswith(ext):
+                    return filename[:-len(ext)]
+            
+            # Remove any temp directory prefixes and just use the base name
+            return file_path.stem
+            
+        except Exception as e:
+            self.logger.error(f"Error extracting program name: {str(e)}")
+            # Ultimate fallback
+            return file_path.stem or "UNKNOWN_PROGRAM"
         
     def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Add processing information to results"""
@@ -216,7 +258,10 @@ class CodeParserAgent:
         try:
             await self._ensure_llm_engine()
             
-            # FIX 7: Verify file exists and is readable
+            # Debug logging
+            self.logger.info(f"Processing file: {file_path}")
+            self.logger.info(f"File exists: {file_path.exists()}")
+            
             if not file_path.exists():
                 return self._add_processing_info({
                     "status": "error",
@@ -224,12 +269,12 @@ class CodeParserAgent:
                     "error": "File not found"
                 })
             
-            # FIX 8: Better file reading with encoding detection
+            # Enhanced file reading
             try:
                 with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                     content = f.read()
+                self.logger.info(f"File content read: {len(content)} characters")
             except UnicodeDecodeError:
-                # Try different encodings
                 for encoding in ['cp1252', 'latin1', 'ascii']:
                     try:
                         with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
@@ -252,7 +297,7 @@ class CodeParserAgent:
                 })
             
             file_type = self._detect_file_type(content, file_path.suffix)
-            self.logger.info(f"Processing {file_path.name} as {file_type}")
+            self.logger.info(f"Detected file type: {file_type}")
             
             # Parse based on file type
             if file_type == 'cobol':
@@ -264,6 +309,8 @@ class CodeParserAgent:
             else:
                 chunks = await self._parse_generic(content, file_path.name)
             
+            self.logger.info(f"Generated {len(chunks)} chunks")
+            
             if not chunks:
                 return self._add_processing_info({
                     "status": "warning",
@@ -273,11 +320,11 @@ class CodeParserAgent:
                     "message": "No chunks were created from this file"
                 })
             
-            # FIX 9: Store chunks with verification
+            # Store chunks with verification
             await self._store_chunks(chunks)
             
-            # FIX 10: Verify chunks were actually stored
-            stored_chunks = await self._verify_chunks_stored(file_path.stem)
+            # Verify chunks were stored
+            stored_chunks = await self._verify_chunks_stored(self._extract_program_name(content, file_path))
             
             # Generate metadata
             metadata = await self._generate_metadata(chunks, file_type)
@@ -302,7 +349,6 @@ class CodeParserAgent:
                 "error": str(e)
             })
 
-    # FIX 11: New verification method
     async def _verify_chunks_stored(self, program_name: str) -> int:
         """Verify chunks were actually stored in database"""
         try:
@@ -323,7 +369,6 @@ class CodeParserAgent:
         except Exception as e:
             self.logger.error(f"Failed to verify chunks for {program_name}: {str(e)}")
             return 0
-
     
     def _detect_file_type(self, content: str, suffix: str) -> str:
         """Detect the type of mainframe file"""
@@ -344,7 +389,7 @@ class CodeParserAgent:
         else:
             return 'unknown'
 
-    # FIX: Correct _parse_cobol method
+    # FIX: Updated _parse_cobol with better program name handling
     async def _parse_cobol(self, content: str, filename: str) -> List[CodeChunk]:
         """Parse COBOL program into logical chunks - FIXED VERSION"""
         await self._ensure_llm_engine()
@@ -352,9 +397,9 @@ class CodeParserAgent:
         chunks = []
         lines = content.split('\n')
         
-        # Extract program name
-        program_match = self.cobol_patterns['program_id'].search(content)
-        program_name = program_match.group(1) if program_match else filename
+        # Extract program name using improved method
+        program_name = self._extract_program_name(content, Path(filename))
+        self.logger.info(f"Extracted program name: '{program_name}' from file: '{filename}'")
         
         # Find major sections
         sections = self._find_cobol_sections(content)
@@ -472,7 +517,7 @@ class CodeParserAgent:
         return chunks
     
     async def _analyze_sql_with_llm(self, sql_content: str) -> Dict[str, Any]:
-        """Analyze SQL block with LLM"""
+        """Analyze SQL block with LLM - FIXED VERSION"""
         await self._ensure_llm_engine()
         
         prompt = f"""
@@ -498,16 +543,15 @@ class CodeParserAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.1, max_tokens=300)
-        result = await self.llm_engine.generate(prompt, sampling_params)
         
         try:
-            response_text = result.outputs[0].text.strip()
+            response_text = await self._generate_with_llm(prompt, sampling_params)
             if '{' in response_text:
                 json_start = response_text.find('{')
                 json_end = response_text.rfind('}') + 1
                 return json.loads(response_text[json_start:json_end])
-        except:
-            pass
+        except Exception as e:
+            self.logger.warning(f"SQL analysis failed: {str(e)}")
         
         return {
             "operation_type": self._extract_sql_type(sql_content),
@@ -524,9 +568,8 @@ class CodeParserAgent:
         chunks = []
         lines = content.split('\n')
         
-        # Extract job name
-        job_match = self.jcl_patterns['job_card'].search(content)
-        job_name = job_match.group(1) if job_match else filename
+        # Extract job name using improved method
+        job_name = self._extract_program_name(content, Path(filename))
         
         current_step = None
         step_start = 0
@@ -594,7 +637,7 @@ class CodeParserAgent:
         return chunks
     
     async def _analyze_jcl_step_with_llm(self, content: str) -> Dict[str, Any]:
-        """Analyze JCL step with LLM"""
+        """Analyze JCL step with LLM - FIXED VERSION"""
         await self._ensure_llm_engine()
         
         prompt = f"""
@@ -620,16 +663,15 @@ class CodeParserAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.1, max_tokens=400)
-        result = await self.llm_engine.generate(prompt, sampling_params)
         
         try:
-            response_text = result.outputs[0].text.strip()
+            response_text = await self._generate_with_llm(prompt, sampling_params)
             if '{' in response_text:
                 json_start = response_text.find('{')
                 json_end = response_text.rfind('}') + 1
                 return json.loads(response_text[json_start:json_end])
-        except:
-            pass
+        except Exception as e:
+            self.logger.warning(f"JCL analysis failed: {str(e)}")
         
         return {
             "program": self._extract_exec_program(content),
@@ -645,12 +687,15 @@ class CodeParserAgent:
         
         chunks = []
         
+        # Extract copybook name
+        copybook_name = self._extract_program_name(content, Path(filename))
+        
         # Analyze copybook structure with LLM
         metadata = await self._analyze_copybook_with_llm(content)
         
         chunk = CodeChunk(
-            program_name=filename,
-            chunk_id=f"{filename}_COPYBOOK",
+            program_name=copybook_name,
+            chunk_id=f"{copybook_name}_COPYBOOK",
             chunk_type="copybook",
             content=content,
             metadata=metadata,
@@ -662,7 +707,7 @@ class CodeParserAgent:
         return chunks
     
     async def _analyze_copybook_with_llm(self, content: str) -> Dict[str, Any]:
-        """Analyze copybook with LLM"""
+        """Analyze copybook with LLM - FIXED VERSION"""
         await self._ensure_llm_engine()
         
         prompt = f"""
@@ -690,16 +735,15 @@ class CodeParserAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.1, max_tokens=800)
-        result = await self.llm_engine.generate(prompt, sampling_params)
         
         try:
-            response_text = result.outputs[0].text.strip()
+            response_text = await self._generate_with_llm(prompt, sampling_params)
             if '{' in response_text:
                 json_start = response_text.find('{')
                 json_end = response_text.rfind('}') + 1
                 return json.loads(response_text[json_start:json_end])
-        except:
-            pass
+        except Exception as e:
+            self.logger.warning(f"Copybook analysis failed: {str(e)}")
         
         return {
             "fields": self._extract_copybook_fields(content),
@@ -710,9 +754,11 @@ class CodeParserAgent:
     
     async def _parse_generic(self, content: str, filename: str) -> List[CodeChunk]:
         """Parse unknown file type generically"""
+        program_name = self._extract_program_name(content, Path(filename))
+        
         chunk = CodeChunk(
-            program_name=filename,
-            chunk_id=f"{filename}_GENERIC",
+            program_name=program_name,
+            chunk_id=f"{program_name}_GENERIC",
             chunk_type="generic",
             content=content,
             metadata={"file_type": "unknown"},
@@ -778,7 +824,7 @@ class CodeParserAgent:
         return chunks
     
     async def _analyze_paragraph_with_llm(self, content: str) -> Dict[str, Any]:
-        """Use LLM to analyze paragraph content"""
+        """Use LLM to analyze paragraph content - FIXED VERSION"""
         await self._ensure_llm_engine()
         
         prompt = f"""
@@ -809,18 +855,17 @@ class CodeParserAgent:
             stop=["```"]
         )
         
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
         try:
-            response_text = result.outputs[0].text.strip()
+            response_text = await self._generate_with_llm(prompt, sampling_params)
+            
             # Extract JSON from response
             if '{' in response_text:
                 json_start = response_text.find('{')
                 json_end = response_text.rfind('}') + 1
                 json_str = response_text[json_start:json_end]
                 return json.loads(json_str)
-        except:
-            pass
+        except Exception as e:
+            self.logger.warning(f"Paragraph analysis failed: {str(e)}")
         
         # Fallback to regex extraction
         return {
@@ -869,12 +914,16 @@ class CodeParserAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.2, max_tokens=1000)
-        result = await self.llm_engine.generate(prompt, sampling_params)
+        
+        try:
+            result_text = await self._generate_with_llm(prompt, sampling_params)
+        except Exception as e:
+            result_text = f"Analysis failed: {str(e)}"
         
         return {
             "jcl_name": jcl_name,
             "total_steps": len([c for c in chunks if c[0] == 'job_step']),
-            "analysis": result.outputs[0].text,
+            "analysis": result_text,
             "step_details": [json.loads(chunk[2]) for chunk in chunks if chunk[2]]
         }
 
@@ -1021,7 +1070,7 @@ class CodeParserAgent:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # FIX 1: Start explicit transaction
+            # Start explicit transaction
             cursor.execute("BEGIN TRANSACTION")
             
             try:
@@ -1029,7 +1078,7 @@ class CodeParserAgent:
                 
                 for chunk in chunks:
                     try:
-                        # FIX 2: Use INSERT OR REPLACE to handle duplicates
+                        # Use INSERT OR REPLACE to handle duplicates
                         cursor.execute("""
                             INSERT OR REPLACE INTO program_chunks 
                             (program_name, chunk_id, chunk_type, content, metadata, embedding_id)
@@ -1048,12 +1097,12 @@ class CodeParserAgent:
                         self.logger.error(f"Failed to store chunk {chunk.chunk_id}: {str(e)}")
                         continue
                 
-                # FIX 3: Explicit commit - THIS WAS MISSING!
+                # Explicit commit
                 cursor.execute("COMMIT")
                 
                 self.logger.info(f"Successfully stored {stored_count}/{len(chunks)} chunks for program {chunks[0].program_name}")
                 
-                # FIX 4: Verify storage
+                # Verify storage
                 cursor.execute("""
                     SELECT COUNT(*) FROM program_chunks 
                     WHERE program_name = ?
@@ -1063,7 +1112,7 @@ class CodeParserAgent:
                 self.logger.info(f"Database verification: {db_count} chunks found for {chunks[0].program_name}")
                 
             except Exception as e:
-                # FIX 5: Rollback on error
+                # Rollback on error
                 cursor.execute("ROLLBACK")
                 self.logger.error(f"Transaction failed, rolled back: {str(e)}")
                 raise e
@@ -1073,7 +1122,7 @@ class CodeParserAgent:
             raise e
             
         finally:
-            # FIX 6: Always close connection
+            # Always close connection
             if 'conn' in locals():
                 conn.close()
     
@@ -1143,7 +1192,11 @@ class CodeParserAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.2, max_tokens=1000)
-        result = await self.llm_engine.generate(prompt, sampling_params)
+        
+        try:
+            result_text = await self._generate_with_llm(prompt, sampling_params)
+        except Exception as e:
+            result_text = f"Analysis failed: {str(e)}"
         
         return {
             "cobol_name": cobol_name,
@@ -1151,7 +1204,7 @@ class CodeParserAgent:
             "sections": len([c for c in chunks if c[0] == 'section']),
             "paragraphs": len([c for c in chunks if c[0] == 'paragraph']),
             "sql_blocks": len([c for c in chunks if c[0] == 'sql_block']),
-            "analysis": result.outputs[0].text,
+            "analysis": result_text,
             "chunk_details": [json.loads(chunk[2]) for chunk in chunks if chunk[2]]
         }
 
@@ -1180,16 +1233,15 @@ class CodeParserAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.1, max_tokens=500)
-        result = await self.llm_engine.generate(prompt, sampling_params)
         
         try:
-            response_text = result.outputs[0].text.strip()
+            response_text = await self._generate_with_llm(prompt, sampling_params)
             if '{' in response_text:
                 json_start = response_text.find('{')
                 json_end = response_text.rfind('}') + 1
                 return json.loads(response_text[json_start:json_end])
-        except:
-            pass
+        except Exception as e:
+            self.logger.warning(f"Code analysis failed: {str(e)}")
         
         return {
             "functions": [],
