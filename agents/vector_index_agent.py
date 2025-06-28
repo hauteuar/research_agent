@@ -32,6 +32,33 @@ import os
 # Disable external connections for airgap environment
 os.environ['DISABLE_TELEMETRY'] = '1'
 os.environ['NO_PROXY'] = '*'
+def _ensure_airgap_environment(self):
+    """Ensure no external connections are possible"""
+    import os
+    
+    # Set environment variables to disable external connections
+    os.environ.update({
+        'NO_PROXY': '*',
+        'DISABLE_TELEMETRY': '1',
+        'TOKENIZERS_PARALLELISM': 'false',
+        'TRANSFORMERS_OFFLINE': '1',
+        'HF_HUB_OFFLINE': '1',
+        'REQUESTS_CA_BUNDLE': '',
+        'CURL_CA_BUNDLE': ''
+    })
+    
+    # Disable requests library
+    try:
+        import requests
+        def blocked_request(*args, **kwargs):
+            raise requests.exceptions.ConnectionError("External connections disabled")
+        
+        requests.get = blocked_request
+        requests.post = blocked_request
+        requests.request = blocked_request
+    except ImportError:
+        pass
+    
 from dataclasses import dataclass
 
 @dataclass
@@ -702,59 +729,65 @@ class VectorIndexAgent:
             self.logger.error(f"Failed to save FAISS index: {str(e)}")
     
     async def semantic_search(self, query: str, top_k: int = 10, 
-                            filter_metadata: Dict[str, Any] = None) -> List[Dict[str, Any]]:
-        """Perform semantic search on code chunks using local embeddings"""
+                        filter_metadata: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         try:
             await self._ensure_initialized()
             
-            # Generate query embedding using local model
+            if self.faiss_index.ntotal == 0:
+                return []
+            
+            # Generate query embedding
             query_embedding = await self.embed_code_chunk(query, {})
             
-            # Search in FAISS
+            # Safe search with bounds checking
+            search_k = min(top_k * 2, self.faiss_index.ntotal)
+            if search_k <= 0:
+                return []
+                
             scores, indices = self.faiss_index.search(
                 query_embedding.reshape(1, -1).astype('float32'), 
-                min(top_k * 2, self.faiss_index.ntotal)  # Get more results for filtering
+                search_k
             )
             
-            # Get metadata from ChromaDB
             results = []
-            for score, idx in zip(scores[0], indices[0]):
-                if idx == -1:  # Invalid index
-                    continue
-                
-                try:
-                    # Query ChromaDB using local embeddings
-                    chroma_results = self.collection.query(
-                        query_texts=[query],  # Will use local embedding function
-                        where={"faiss_id": int(idx)} if filter_metadata is None else {**filter_metadata, "faiss_id": int(idx)},
-                        n_results=1
-                    )
+            # Safe iteration with bounds checking
+            if len(scores) > 0 and len(indices) > 0:
+                for score, idx in zip(scores[0], indices[0]):
+                    if idx == -1 or idx < 0:
+                        continue
                     
-                    if chroma_results['documents']:
-                        metadata = chroma_results['metadatas'][0][0]
+                    try:
+                        # Safe ChromaDB query
+                        chroma_results = self.collection.query(
+                            query_texts=[query],
+                            where={"faiss_id": int(idx)},
+                            n_results=1
+                        )
                         
-                        # Apply additional filters if specified
-                        if filter_metadata:
-                            skip = False
-                            for key, value in filter_metadata.items():
-                                if key in metadata and metadata[key] != value:
-                                    skip = True
-                                    break
-                            if skip:
-                                continue
-                        
-                        results.append({
-                            "content": chroma_results['documents'][0][0],
-                            "metadata": metadata,
-                            "similarity_score": float(score),
-                            "faiss_id": idx
-                        })
-                        
-                except Exception as e:
-                    self.logger.error(f"Error retrieving result {idx}: {str(e)}")
-                    continue
+                        # Safe result extraction
+                        if (chroma_results and 
+                            'documents' in chroma_results and 
+                            len(chroma_results['documents']) > 0 and
+                            len(chroma_results['documents'][0]) > 0):
+                            
+                            # Safe metadata extraction
+                            metadata = {}
+                            if ('metadatas' in chroma_results and 
+                                len(chroma_results['metadatas']) > 0 and
+                                len(chroma_results['metadatas'][0]) > 0):
+                                metadata = chroma_results['metadatas'][0][0]
+                            
+                            results.append({
+                                "content": chroma_results['documents'][0][0],
+                                "metadata": metadata,
+                                "similarity_score": float(score),
+                                "faiss_id": int(idx)
+                            })
+                            
+                    except Exception as e:
+                        self.logger.error(f"Error retrieving result {idx}: {str(e)}")
+                        continue
             
-            # Sort by similarity and return top_k
             results.sort(key=lambda x: x['similarity_score'], reverse=True)
             return results[:top_k]
             

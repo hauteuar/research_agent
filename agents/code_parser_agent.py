@@ -19,6 +19,33 @@ import logging
 import torch
 from vllm import AsyncLLMEngine, SamplingParams
 
+def _ensure_airgap_environment(self):
+    """Ensure no external connections are possible"""
+    import os
+    
+    # Set environment variables to disable external connections
+    os.environ.update({
+        'NO_PROXY': '*',
+        'DISABLE_TELEMETRY': '1',
+        'TOKENIZERS_PARALLELISM': 'false',
+        'TRANSFORMERS_OFFLINE': '1',
+        'HF_HUB_OFFLINE': '1',
+        'REQUESTS_CA_BUNDLE': '',
+        'CURL_CA_BUNDLE': ''
+    })
+    
+    # Disable requests library
+    try:
+        import requests
+        def blocked_request(*args, **kwargs):
+            raise requests.exceptions.ConnectionError("External connections disabled")
+        
+        requests.get = blocked_request
+        requests.post = blocked_request
+        requests.request = blocked_request
+    except ImportError:
+        pass
+
 
 @dataclass
 class CodeChunk:
@@ -428,29 +455,40 @@ class CompleteEnhancedCodeParserAgent:
             raise
 
     async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
-        """Generate text with LLM - handles both old and new vLLM API"""
+        """Generate text with LLM - handles async generator properly"""
         try:
-            # Try new API first (with request_id)
+            if self.llm_engine is None:
+                return ""
+            
             request_id = str(uuid.uuid4())
-            async_generator = self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
-            async for result in async_generator:
-                return result.outputs[0].text.strip()
-            #result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
-            #return result.outputs[0].text.strip()
-        except TypeError as e:
-            if "request_id" in str(e):
-                # Fallback to old API (without request_id)
-                async_generator = self.llm_engine.generate(prompt, sampling_params)
-                async for result in async_generator:
-                    return result.outputs[0].text.strip()
-                #result = await self.llm_engine.generate(prompt, sampling_params)
-                #return result.outputs[0].text.strip()
-            else:
-                raise e
+            
+            try:
+                # Get async generator from vLLM
+                result_generator = self.llm_engine.generate(
+                    prompt, sampling_params, request_id=request_id
+                )
+                
+                # Properly iterate through async generator
+                async for result in result_generator:
+                    if result and hasattr(result, 'outputs') and len(result.outputs) > 0:
+                        return result.outputs[0].text.strip()
+                    break  # Take first result
+                    
+            except TypeError as e:
+                if "request_id" in str(e):
+                    # Fallback to old API
+                    result_generator = self.llm_engine.generate(prompt, sampling_params)
+                    async for result in result_generator:
+                        if result and hasattr(result, 'outputs') and len(result.outputs) > 0:
+                            return result.outputs[0].text.strip()
+                        break
+                        
+            return ""
+            
         except Exception as e:
             self.logger.error(f"LLM generation failed: {str(e)}")
             return ""
-
+        
     def _extract_program_name(self, content: str, file_path: Path) -> str:
         """Extract program name more robustly from content or filename"""
         try:

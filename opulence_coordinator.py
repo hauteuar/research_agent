@@ -39,6 +39,33 @@ from utils.dynamic_config_manager import DynamicConfigManager, get_dynamic_confi
 from utils.health_monitor import HealthMonitor
 from utils.cache_manager import CacheManager
 
+def _ensure_airgap_environment(self):
+    """Ensure no external connections are possible"""
+    import os
+    
+    # Set environment variables to disable external connections
+    os.environ.update({
+        'NO_PROXY': '*',
+        'DISABLE_TELEMETRY': '1',
+        'TOKENIZERS_PARALLELISM': 'false',
+        'TRANSFORMERS_OFFLINE': '1',
+        'HF_HUB_OFFLINE': '1',
+        'REQUESTS_CA_BUNDLE': '',
+        'CURL_CA_BUNDLE': ''
+    })
+    
+    # Disable requests library
+    try:
+        import requests
+        def blocked_request(*args, **kwargs):
+            raise requests.exceptions.ConnectionError("External connections disabled")
+        
+        requests.get = blocked_request
+        requests.post = blocked_request
+        requests.request = blocked_request
+    except ImportError:
+        pass
+
 @dataclass
 class OpulenceConfig:
     """Configuration for Opulence system"""
