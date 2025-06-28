@@ -829,28 +829,87 @@ def show_analysis_debug(analysis: dict):
                     st.json(result)
             else:
                 st.write(result)
+
 def show_analysis_overview(analysis: dict):
-    """Show analysis overview"""
-    st.markdown("### Component Overview")
+    """Fixed analysis overview to show actual data"""
+    st.markdown("### 📊 Component Overview")
     
     # Basic information
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     component_type = analysis.get("component_type", "unknown")
     
     with col1:
         st.metric("Component Type", component_type.title())
     
-    if "lineage" in analysis:
-        lineage = analysis["lineage"]
-        if isinstance(lineage, dict):
-            usage_stats = lineage.get("usage_analysis", {}).get("statistics", {})
+    with col2:
+        chunks_found = analysis.get("chunks_found", 0)
+        st.metric("Chunks Found", chunks_found)
+    
+    with col3:
+        processing_time = analysis.get("processing_time", 0)
+        st.metric("Processing Time", f"{processing_time:.2f}s")
+    
+    with col4:
+        status = analysis.get("status", "unknown")
+        st.metric("Analysis Status", status.title())
+    
+    # Show logic analysis results if available
+    if "logic_analysis" in analysis:
+        logic_data = analysis["logic_analysis"]
+        if isinstance(logic_data, dict) and "error" not in logic_data:
+            st.markdown("### 🧠 Logic Analysis Summary")
             
-            with col2:
-                st.metric("Total References", usage_stats.get("total_references", 0))
+            # Show key metrics from logic analysis
+            if "total_chunks" in logic_data:
+                st.info(f"📊 Analyzed {logic_data['total_chunks']} code chunks")
             
-            with col3:
-                st.metric("Programs Using", len(usage_stats.get("programs_using", [])))
+            if "complexity_score" in logic_data:
+                complexity = logic_data["complexity_score"]
+                st.info(f"🎯 Average complexity score: {complexity:.2f}")
+            
+            if "metrics" in logic_data:
+                metrics = logic_data["metrics"]
+                if "total_patterns" in metrics:
+                    st.info(f"🔍 Found {metrics['total_patterns']} logic patterns")
+                
+                if "maintainability_score" in metrics:
+                    maintainability = metrics["maintainability_score"]
+                    st.info(f"🔧 Maintainability score: {maintainability:.1f}/10")
+            
+            # Show business rules if available
+            if "business_rules" in logic_data and logic_data["business_rules"]:
+                st.markdown("#### 📋 Business Rules Found")
+                rules_count = len(logic_data["business_rules"])
+                st.write(f"Extracted {rules_count} business rules from the program")
+                
+                # Show first few rules
+                for i, rule in enumerate(logic_data["business_rules"][:3], 1):
+                    if isinstance(rule, dict):
+                        rule_type = rule.get("rule_type", "unknown")
+                        condition = rule.get("condition", "No condition")
+                        st.write(f"**Rule {i}** ({rule_type}): {condition}")
+            
+            # Show recommendations if available
+            if "recommendations" in logic_data and logic_data["recommendations"]:
+                st.markdown("#### 💡 Recommendations")
+                for rec in logic_data["recommendations"][:3]:
+                    st.write(f"• {rec}")
+    
+    # Basic info section
+    if "basic_info" in analysis and isinstance(analysis["basic_info"], dict):
+        basic_info = analysis["basic_info"]
+        
+        if "chunk_summary" in basic_info and basic_info["chunk_summary"]:
+            st.markdown("### 📋 Code Structure Breakdown")
+            chunk_summary = basic_info["chunk_summary"]
+            
+            for chunk_type, count in chunk_summary.items():
+                st.write(f"• **{chunk_type.replace('_', ' ').title()}**: {count} chunks")
+        
+        if "total_content_length" in basic_info:
+            content_length = basic_info["total_content_length"]
+            st.write(f"📄 **Total content**: {content_length:,} characters")
 
 def debug_database_content():
     """Debug function to check database content"""
@@ -913,64 +972,187 @@ def debug_database_content():
         st.error(f"Database debug failed: {str(e)}")
 
 def show_lineage_analysis(analysis: dict):
-    """Show lineage analysis"""
-    st.markdown("### Data Lineage Analysis")
+    """Fixed lineage analysis display"""
+    st.markdown("### 📈 Data Lineage Analysis")
     
     if "lineage" not in analysis:
-        st.info("Lineage analysis not available for this component type")
+        st.info("💡 Lineage analysis is available for fields and data components. This is a program component.")
+        st.write("**For program analysis, check the Logic tab for:**")
+        st.write("• Code structure and complexity")
+        st.write("• Business rules extraction") 
+        st.write("• Logic patterns and recommendations")
         return
     
     lineage = analysis["lineage"]
     
-    # Lineage graph visualization
-    if isinstance(lineage, dict) and "lineage_graph" in lineage:
-        graph = lineage["lineage_graph"]
-        st.markdown(f"**Lineage Graph:** {len(graph.get('nodes', []))} nodes, {len(graph.get('edges', []))} relationships")
-        st.info("Interactive lineage graph visualization available!")
+    if isinstance(lineage, dict) and "error" not in lineage:
+        # Show lineage summary
+        if "usage_analysis" in lineage:
+            usage_stats = lineage["usage_analysis"].get("statistics", {})
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total References", usage_stats.get("total_references", 0))
+            with col2:
+                st.metric("Programs Using", len(usage_stats.get("programs_using", [])))
+            with col3:
+                st.metric("Operation Types", len(usage_stats.get("operation_types", {})))
+        
+        # Show lineage graph info
+        if "lineage_graph" in lineage:
+            graph = lineage["lineage_graph"]
+            st.write(f"**Lineage Graph**: {graph.get('total_nodes', 0)} nodes, {graph.get('total_edges', 0)} relationships")
+    else:
+        st.warning("Lineage analysis not available or failed for this component")
 
 
 def show_impact_analysis(analysis: dict):
-    """Show impact analysis"""
-    st.markdown("### Impact Analysis")
+    """Fixed impact analysis display"""
+    st.markdown("### 📈 Impact Analysis")
     
-    if "impact_analysis" in analysis:
+    # Check if we have logic analysis (which contains impact info for programs)
+    if "logic_analysis" in analysis:
+        logic_data = analysis["logic_analysis"]
+        if isinstance(logic_data, dict) and "error" not in logic_data:
+            
+            # Show program impact metrics
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if "total_chunks" in logic_data:
+                    st.metric("Code Chunks", logic_data["total_chunks"])
+                if "metrics" in logic_data and "total_lines" in logic_data["metrics"]:
+                    st.metric("Total Lines", logic_data["metrics"]["total_lines"])
+            
+            with col2:
+                if "complexity_score" in logic_data:
+                    complexity = logic_data["complexity_score"]
+                    if complexity > 7:
+                        risk_level = "HIGH"
+                        risk_color = "🔴"
+                    elif complexity > 4:
+                        risk_level = "MEDIUM" 
+                        risk_color = "🟡"
+                    else:
+                        risk_level = "LOW"
+                        risk_color = "🟢"
+                    st.metric("Change Risk", f"{risk_color} {risk_level}")
+                
+                if "metrics" in logic_data and "maintainability_score" in logic_data["metrics"]:
+                    maintainability = logic_data["metrics"]["maintainability_score"]
+                    st.metric("Maintainability", f"{maintainability:.1f}/10")
+            
+            # Impact recommendations
+            st.markdown("#### 🎯 Change Impact Considerations")
+            
+            if "recommendations" in logic_data and logic_data["recommendations"]:
+                st.write("**Before modifying this program:**")
+                for rec in logic_data["recommendations"]:
+                    st.write(f"• {rec}")
+            else:
+                st.write("• Review code complexity before making changes")
+                st.write("• Test thoroughly due to business logic complexity")
+                st.write("• Consider impact on dependent systems")
+    
+    elif "impact_analysis" in analysis:
+        # Handle other component types
         impact = analysis["impact_analysis"]
         
-        # Impact metrics
         col1, col2 = st.columns(2)
         
         with col1:
             st.metric("Affected Programs", len(impact.get("affected_programs", [])))
         
         with col2:
-            st.metric("Change Complexity", impact.get("change_complexity", "Unknown"))
+            st.metric("Risk Level", impact.get("risk_level", "Unknown"))
     
     else:
-        st.info("Impact analysis not available for this component")
-
+        st.info("💡 Impact analysis shows how changes to this component might affect the system.")
+        st.write("For programs, this includes:")
+        st.write("• Code complexity assessment")
+        st.write("• Maintainability evaluation") 
+        st.write("• Change risk factors")
 
 def show_analysis_report(analysis: dict):
-    """Show comprehensive analysis report"""
-    st.markdown("### Comprehensive Analysis Report")
+    """Fixed comprehensive analysis report"""
+    st.markdown("### 📋 Comprehensive Analysis Report")
     
-    if "comprehensive_report" in analysis:
-        st.markdown(analysis["comprehensive_report"])
-    elif "lineage" in analysis and isinstance(analysis["lineage"], dict) and "comprehensive_report" in analysis["lineage"]:
-        st.markdown(analysis["lineage"]["comprehensive_report"])
-    else:
-        st.info("Comprehensive report not available")
+    component_name = analysis.get("component_name", "Unknown")
+    component_type = analysis.get("component_type", "unknown")
     
-    # Download report button
-    report_content = analysis.get("comprehensive_report") or (analysis.get("lineage", {}).get("comprehensive_report") if isinstance(analysis.get("lineage"), dict) else None)
+    # Generate report based on available analysis
+    report_sections = []
     
+    # Executive Summary
+    report_sections.append("## Executive Summary")
+    report_sections.append(f"**Component**: {component_name}")
+    report_sections.append(f"**Type**: {component_type.title()}")
+    report_sections.append(f"**Analysis Status**: {analysis.get('status', 'unknown').title()}")
+    
+    if analysis.get("chunks_found", 0) > 0:
+        report_sections.append(f"**Code Size**: {analysis['chunks_found']} chunks analyzed")
+    
+    # Logic Analysis Section
+    if "logic_analysis" in analysis:
+        logic_data = analysis["logic_analysis"]
+        if isinstance(logic_data, dict) and "error" not in logic_data:
+            report_sections.append("\n## Program Analysis")
+            
+            if "complexity_score" in logic_data:
+                complexity = logic_data["complexity_score"]
+                report_sections.append(f"**Average Complexity**: {complexity:.2f}")
+            
+            if "metrics" in logic_data:
+                metrics = logic_data["metrics"]
+                if "maintainability_score" in metrics:
+                    maintainability = metrics["maintainability_score"]
+                    report_sections.append(f"**Maintainability Score**: {maintainability:.1f}/10")
+                
+                if "total_patterns" in metrics:
+                    report_sections.append(f"**Logic Patterns Found**: {metrics['total_patterns']}")
+            
+            # Business Rules
+            if "business_rules" in logic_data and logic_data["business_rules"]:
+                report_sections.append(f"\n**Business Rules**: {len(logic_data['business_rules'])} rules extracted")
+            
+            # Recommendations
+            if "recommendations" in logic_data and logic_data["recommendations"]:
+                report_sections.append("\n## Recommendations")
+                for rec in logic_data["recommendations"]:
+                    report_sections.append(f"• {rec}")
+        if "basic_info" in analysis:
+            basic_info = analysis["basic_info"]
+        if isinstance(basic_info, dict) and "chunk_summary" in basic_info:
+            report_sections.append("\n## Technical Structure")
+            for chunk_type, count in basic_info["chunk_summary"].items():
+                report_sections.append(f"• **{chunk_type.replace('_', ' ').title()}**: {count} chunks")
+    
+    # Processing Information
+    if "processing_time" in analysis:
+        processing_time = analysis["processing_time"]
+        report_sections.append(f"\n**Analysis completed in**: {processing_time:.2f} seconds")
+    
+    # Display the report
+    report_content = "\n".join(report_sections)
+    st.markdown(report_content)
+    
+    # Download button
     if report_content:
         st.download_button(
             "📄 Download Report",
             report_content,
-            file_name=f"opulence_analysis_{analysis.get('component_name', 'component')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+            file_name=f"opulence_analysis_{component_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
             mime="text/markdown"
         )
-
+    
+    # Show comprehensive report if available
+    if "comprehensive_report" in analysis:
+        st.markdown("### 📊 Detailed Analysis Report")
+        st.markdown(analysis["comprehensive_report"])
+    elif "lineage" in analysis and isinstance(analysis["lineage"], dict) and "comprehensive_report" in analysis["lineage"]:
+        st.markdown("### 📊 Detailed Lineage Report")
+        st.markdown(analysis["lineage"]["comprehensive_report"])
+    
 
 def show_field_lineage():
     """Show field lineage analysis interface"""
