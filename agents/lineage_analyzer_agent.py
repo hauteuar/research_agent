@@ -370,17 +370,22 @@ class LineageAnalyzerAgent:
             })
     
     async def _find_field_references(self, field_name: str) -> List[Dict[str, Any]]:
-        """Find all references to a field across the codebase"""
+        """Find all references to a field across the codebase - FIXED VERSION"""
         references = []
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
+            # FIRST: Check what tables exist
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [row[0] for row in cursor.fetchall()]
+            self.logger.info(f"Available tables: {tables}")
+            
             # Search in program chunks with more flexible patterns
             patterns = [
                 f"%{field_name}%",
-                f"%{field_name.upper()}%",
+                f"%{field_name.upper()}%", 
                 f"%{field_name.lower()}%"
             ]
             
@@ -392,12 +397,15 @@ class LineageAnalyzerAgent:
                     LIMIT 100
                 """, (pattern, pattern))
                 
-                for program_name, chunk_id, chunk_type, content, metadata_str in cursor.fetchall():
+                results = cursor.fetchall()
+                self.logger.info(f"Found {len(results)} chunks for pattern: {pattern}")
+                
+                for program_name, chunk_id, chunk_type, content, metadata_str in results:
                     # Avoid duplicates
                     if any(ref.get('chunk_id') == chunk_id for ref in references):
                         continue
                         
-                    metadata = json.loads(metadata_str) if metadata_str else {}
+                    metadata = self.safe_json_loads(metadata_str)
                     
                     # Check if field is actually referenced
                     if self._is_field_referenced(field_name, content, metadata):
@@ -409,7 +417,7 @@ class LineageAnalyzerAgent:
                             "program_name": program_name,
                             "chunk_id": chunk_id,
                             "chunk_type": chunk_type,
-                            "content": content[:500] + "..." if len(content) > 500 else content,  # Truncate for memory
+                            "content": content[:500] + "..." if len(content) > 500 else content,
                             "metadata": metadata,
                             "reference_details": ref_details
                         })
@@ -421,28 +429,26 @@ class LineageAnalyzerAgent:
                 if len(references) >= 50:
                     break
             
-            # Check for table definitions in a separate query
-            try:
-                cursor.execute("""
-                    SELECT DISTINCT table_name, 'VARCHAR' as field_type, 
-                           'Field definition' as field_description, 
-                           'Business field' as business_meaning
-                    FROM file_metadata
-                    WHERE fields LIKE ?
-                    LIMIT 10
-                """, (f"%{field_name}%",))
-                
-                for table_name, field_type, description, business_meaning in cursor.fetchall():
-                    references.append({
-                        "type": "table_definition",
-                        "table_name": table_name,
-                        "field_type": field_type,
-                        "description": description,
-                        "business_meaning": business_meaning
-                    })
-            except sqlite3.OperationalError:
-                # Table might not exist, that's ok
-                pass
+            # Check for table definitions in file_metadata if it exists
+            if 'file_metadata' in tables:
+                try:
+                    cursor.execute("""
+                        SELECT table_name, fields
+                        FROM file_metadata
+                        WHERE fields LIKE ?
+                        LIMIT 10
+                    """, (f"%{field_name}%",))
+                    
+                    for table_name, fields_str in cursor.fetchall():
+                        references.append({
+                            "type": "table_definition",
+                            "table_name": table_name,
+                            "field_type": "VARCHAR",
+                            "description": f"Field found in {table_name}",
+                            "business_meaning": "Business field"
+                        })
+                except sqlite3.OperationalError as e:
+                    self.logger.warning(f"Error querying file_metadata: {e}")
         
         except Exception as e:
             self.logger.error(f"Error finding field references: {str(e)}")
@@ -450,7 +456,20 @@ class LineageAnalyzerAgent:
         finally:
             conn.close()
         
+        self.logger.info(f"Found total {len(references)} references for {field_name}")
         return references
+
+    def safe_json_loads(self, json_str):
+        """Safely load JSON string with fallback"""
+        if not json_str:
+            return {}
+        try:
+            if isinstance(json_str, dict):
+                return json_str
+            return json.loads(json_str)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
     
     def _is_field_referenced(self, field_name: str, content: str, metadata: Dict) -> bool:
         """Check if field is actually referenced in content"""

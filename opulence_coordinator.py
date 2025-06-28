@@ -1411,7 +1411,67 @@ class DynamicOpulenceCoordinator:
         
     
     async def _determine_component_type(self, component_name: str, preferred_gpu: Optional[int] = None) -> str:
-        """Use LLM to determine component type with dynamic GPU allocation"""
+        """Determine component type with database checks first"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            # Check what tables exist
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [row[0] for row in cursor.fetchall()]
+            
+            # Check in program_chunks first
+            cursor.execute("""
+                SELECT COUNT(*), chunk_type FROM program_chunks 
+                WHERE program_name = ? OR program_name LIKE ?
+                GROUP BY chunk_type
+            """, (component_name, f"%{component_name}%"))
+            
+            chunk_results = cursor.fetchall()
+            
+            if chunk_results:
+                # Determine type based on chunk types found
+                chunk_types = [row[1] for row in chunk_results]
+                if any('job' in ct.lower() for ct in chunk_types):
+                    conn.close()
+                    return "jcl"
+                elif any(ct in ['working_storage', 'procedure_division'] for ct in chunk_types):
+                    conn.close()
+                    return "program"
+            
+            # Check if it might be a field (search in content)
+            cursor.execute("""
+                SELECT COUNT(*) FROM program_chunks
+                WHERE content LIKE ? OR metadata LIKE ?
+            """, (f"%{component_name}%", f"%{component_name}%"))
+            
+            field_count = cursor.fetchone()[0]
+            if field_count > 0:
+                conn.close()
+                return "field"
+            
+            # Check file_metadata if exists
+            if 'file_metadata' in tables:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM file_metadata 
+                    WHERE table_name = ? OR file_name = ?
+                """, (component_name, component_name))
+                
+                if cursor.fetchone()[0] > 0:
+                    conn.close()
+                    return "table"
+        
+        except Exception as e:
+            self.logger.error(f"Error determining component type: {e}")
+        
+        finally:
+            conn.close()
+        
+        # Fallback to LLM determination
+        return await self._llm_determine_component_type(component_name, preferred_gpu)
+    
+    async def _llm_determine_component_type(self, component_name: str, preferred_gpu: Optional[int] = None) -> str:
+        """Use LLM to determine component type as fallback"""
         prompt = f"""
         Analyze the component name '{component_name}' and determine its type.
         
@@ -1420,24 +1480,30 @@ class DynamicOpulenceCoordinator:
         - table: DB2 table
         - program: COBOL program
         - jcl: JCL job or procedure
+        - field: Data field name
         
         Based on naming conventions, determine the most likely type.
         Respond with only the type name.
         """
         
-        sampling_params = SamplingParams(
-            temperature=0.1,
-            max_tokens=50,
-            stop=["\n"]
-        )
+        sampling_params = SamplingParams(temperature=0.1, max_tokens=50, stop=["\n"])
         
-        # Use dynamic GPU allocation for component type determination
-        async with self.get_agent_with_gpu("logic_analyzer", preferred_gpu) as (agent, gpu_id):
-            # Get the LLM engine from the agent
-            engine = await self.get_or_create_llm_engine(gpu_id)
-            result = await engine.generate(prompt, sampling_params)
-            
-            return result.outputs[0].text.strip().lower()
+        try:
+            async with self.get_agent_with_gpu("logic_analyzer", preferred_gpu) as (agent, gpu_id):
+                engine = await self.get_or_create_llm_engine(gpu_id)
+                
+                # Handle both old and new vLLM API
+                try:
+                    request_id = str(uuid.uuid4())
+                    result = await engine.generate(prompt, sampling_params, request_id=request_id)
+                except TypeError:
+                    result = await engine.generate(prompt, sampling_params)
+                
+                return result.outputs[0].text.strip().lower()
+        except Exception as e:
+            self.logger.error(f"LLM component type determination failed: {e}")
+            return "unknown"
+
     
     async def _analyze_lifecycle(self, component_name: str, component_type: str, 
                                 preferred_gpu: Optional[int] = None) -> Dict[str, Any]:

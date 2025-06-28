@@ -750,9 +750,18 @@ def analyze_component(component_name: str, component_type: str):
 
 
 def display_component_analysis(analysis: dict):
-    """Display component analysis results"""
+    """Display component analysis results with better error handling"""
     if isinstance(analysis, dict) and "error" in analysis:
         st.error(f"Analysis error: {analysis['error']}")
+        
+        # Show debug info if available
+        if "debug_info" in analysis:
+            with st.expander("🐛 Debug Information"):
+                st.json(analysis["debug_info"])
+        
+        if "traceback" in analysis:
+            with st.expander("🔍 Technical Details"):
+                st.code(analysis["traceback"])
         return
     
     if not isinstance(analysis, dict):
@@ -764,8 +773,13 @@ def display_component_analysis(analysis: dict):
     
     st.success(f"✅ Analysis completed for {component_type}: **{component_name}**")
     
+    # Show what data was found
+    if "debug_info" in analysis:
+        debug_info = analysis["debug_info"]
+        st.info(f"📊 Found {debug_info.get('chunk_count', 0)} chunks in database")
+    
     # Create tabs for different aspects of analysis
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "🔄 Lineage", "📈 Impact", "📋 Report"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "🔄 Lineage", "📈 Impact", "📋 Report", "🐛 Debug"])
     
     with tab1:
         show_analysis_overview(analysis)
@@ -778,8 +792,41 @@ def display_component_analysis(analysis: dict):
     
     with tab4:
         show_analysis_report(analysis)
+    
+    with tab5:
+        show_analysis_debug(analysis)
 
-
+def show_analysis_debug(analysis: dict):
+    """Show debug information for analysis"""
+    st.markdown("### 🐛 Debug Information")
+    
+    # Show raw analysis data
+    with st.expander("Raw Analysis Data"):
+        st.json(analysis)
+    
+    # Show what analyses were attempted
+    attempted_analyses = []
+    if "lineage" in analysis:
+        attempted_analyses.append(("Lineage Analysis", analysis["lineage"]))
+    if "logic_analysis" in analysis:
+        attempted_analyses.append(("Logic Analysis", analysis["logic_analysis"]))
+    if "jcl_analysis" in analysis:
+        attempted_analyses.append(("JCL Analysis", analysis["jcl_analysis"]))
+    if "semantic_search" in analysis:
+        attempted_analyses.append(("Semantic Search", analysis["semantic_search"]))
+    if "basic_info" in analysis:
+        attempted_analyses.append(("Basic Info", analysis["basic_info"]))
+    
+    for name, result in attempted_analyses:
+        with st.expander(f"{name} Results"):
+            if isinstance(result, dict):
+                if "error" in result:
+                    st.error(f"❌ {name} failed: {result['error']}")
+                else:
+                    st.success(f"✅ {name} succeeded")
+                    st.json(result)
+            else:
+                st.write(result)
 def show_analysis_overview(analysis: dict):
     """Show analysis overview"""
     st.markdown("### Component Overview")
@@ -803,6 +850,65 @@ def show_analysis_overview(analysis: dict):
             with col3:
                 st.metric("Programs Using", len(usage_stats.get("programs_using", [])))
 
+def debug_database_content():
+    """Debug function to check database content"""
+    if not st.session_state.coordinator:
+        st.error("System not initialized")
+        return
+    
+    try:
+        conn = sqlite3.connect(st.session_state.coordinator.db_path)
+        cursor = conn.cursor()
+        
+        st.markdown("### 🗃️ Database Content Check")
+        
+        # Check tables
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [row[0] for row in cursor.fetchall()]
+        st.write(f"**Tables found:** {tables}")
+        
+        # Check program_chunks
+        cursor.execute("SELECT COUNT(*) FROM program_chunks")
+        chunk_count = cursor.fetchone()[0]
+        st.write(f"**Total chunks:** {chunk_count}")
+        
+        if chunk_count > 0:
+            cursor.execute("""
+                SELECT program_name, COUNT(*) as count 
+                FROM program_chunks 
+                GROUP BY program_name 
+                ORDER BY count DESC 
+                LIMIT 10
+            """)
+            programs = cursor.fetchall()
+            st.write("**Top programs by chunk count:**")
+            for prog, count in programs:
+                st.write(f"  - {prog}: {count} chunks")
+        
+        # Check chunk types
+        if chunk_count > 0:
+            cursor.execute("""
+                SELECT chunk_type, COUNT(*) as count 
+                FROM program_chunks 
+                GROUP BY chunk_type
+            """)
+            chunk_types = cursor.fetchall()
+            st.write("**Chunk types:**")
+            for chunk_type, count in chunk_types:
+                st.write(f"  - {chunk_type}: {count}")
+        
+        # Sample content
+        if chunk_count > 0:
+            cursor.execute("SELECT program_name, chunk_id, chunk_type, content FROM program_chunks LIMIT 3")
+            samples = cursor.fetchall()
+            st.write("**Sample chunks:**")
+            for prog, chunk_id, chunk_type, content in samples:
+                st.write(f"  - {prog}.{chunk_id} ({chunk_type}): {content[:100]}...")
+        
+        conn.close()
+        
+    except Exception as e:
+        st.error(f"Database debug failed: {str(e)}")
 
 def show_lineage_analysis(analysis: dict):
     """Show lineage analysis"""
