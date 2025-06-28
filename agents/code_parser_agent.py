@@ -18,10 +18,7 @@ import logging
 
 import torch
 from vllm import AsyncLLMEngine, SamplingParams
-import os
-# Disable external connections for airgap environment
-os.environ['DISABLE_TELEMETRY'] = '1'
-os.environ['NO_PROXY'] = '*'
+
 
 @dataclass
 class CodeChunk:

@@ -24,6 +24,10 @@ import faiss
 import chromadb
 from chromadb.api.types import EmbeddingFunction, Embeddings, Documents
 from vllm import AsyncLLMEngine, SamplingParams
+from typing import Dict, List, Optional, Any, Tuple, Union, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .code_parser_agent import CodeChunk
 import os
 # Disable external connections for airgap environment
 os.environ['DISABLE_TELEMETRY'] = '1'
@@ -358,22 +362,23 @@ class VectorIndexAgent:
         # Start with the actual code content
         text_parts = [content.strip()]
         
-        # Add metadata as context
-        if 'main_purpose' in metadata:
-            text_parts.append(f"Purpose: {metadata['main_purpose']}")
-        
-        if 'field_names' in metadata and metadata['field_names']:
-            text_parts.append(f"Fields: {', '.join(metadata['field_names'][:10])}")
-        
-        if 'operations' in metadata and metadata['operations']:
-            text_parts.append(f"Operations: {', '.join(metadata['operations'][:5])}")
-        
-        if 'file_operations' in metadata and metadata['file_operations']:
-            text_parts.append(f"File ops: {', '.join(metadata['file_operations'][:5])}")
+        # Add metadata as context safely
+        if metadata and isinstance(metadata, dict):
+            if 'main_purpose' in metadata:
+                text_parts.append(f"Purpose: {metadata['main_purpose']}")
+            
+            if 'field_names' in metadata and isinstance(metadata['field_names'], list):
+                text_parts.append(f"Fields: {', '.join(str(f) for f in metadata['field_names'][:10])}")
+            
+            if 'operations' in metadata and isinstance(metadata['operations'], list):
+                text_parts.append(f"Operations: {', '.join(str(op) for op in metadata['operations'][:5])}")
+            
+            if 'file_operations' in metadata and isinstance(metadata['file_operations'], list):
+                text_parts.append(f"File ops: {', '.join(str(op) for op in metadata['file_operations'][:5])}")
         
         return " | ".join(text_parts)
 
-    async def create_embeddings_for_chunks(self, chunks: List[Union[tuple, CodeChunk]]) -> Dict[str, Any]:
+    async def create_embeddings_for_chunks(self, chunks: List[Union[tuple, 'CodeChunk']]) -> Dict[str, Any]:
         """Create embeddings for a list of chunks"""
         try:
             await self._ensure_initialized()
@@ -381,18 +386,21 @@ class VectorIndexAgent:
             embeddings_created = 0
             
             for chunk_data in chunks:
-                if isinstance(chunk_data, tuple):
-                    chunk_id, program_name, chunk_id_str, chunk_type, content, metadata_str = chunk_data
-                else:  # It's a CodeChunk object
-                    chunk_id = chunk_data.chunk_id
-                    program_name = chunk_data.program_name
-                    chunk_id_str = chunk_data.chunk_id
-                    chunk_type = chunk_data.chunk_type
-                    content = chunk_data.content
-                    metadata_str = json.dumps(chunk_data.metadata)
-                
                 try:
-                    metadata = json.loads(metadata_str) if metadata_str else {}
+                    if isinstance(chunk_data, tuple):
+                        chunk_id, program_name, chunk_id_str, chunk_type, content, metadata_str = chunk_data
+                        metadata = json.loads(metadata_str) if metadata_str else {}
+                    else:  # It's a CodeChunk object
+                        chunk_id = getattr(chunk_data, 'chunk_id', str(uuid.uuid4()))
+                        program_name = chunk_data.program_name
+                        chunk_id_str = chunk_data.chunk_id
+                        chunk_type = chunk_data.chunk_type
+                        content = chunk_data.content
+                        metadata = chunk_data.metadata if chunk_data.metadata else {}
+                    
+                    # Ensure metadata is a dictionary
+                    if not isinstance(metadata, dict):
+                        metadata = {}
                     
                     # Generate embedding using local model
                     embedding = await self.embed_code_chunk(content, metadata)
@@ -402,22 +410,37 @@ class VectorIndexAgent:
                     self.faiss_index.add(embedding.reshape(1, -1).astype('float32'))
                     
                     # Store in ChromaDB (will use local embedding function automatically)
+                    chroma_metadata = {
+                        "program_name": program_name,
+                        "chunk_id": chunk_id_str,
+                        "chunk_type": chunk_type,
+                        "faiss_id": faiss_id
+                    }
+                    
+                    # Add other metadata safely
+                    for key, value in metadata.items():
+                        if isinstance(value, (str, int, float, bool)):
+                            chroma_metadata[key] = value
+                        elif isinstance(value, list):
+                            chroma_metadata[key] = json.dumps(value)
+                        elif isinstance(value, dict):
+                            chroma_metadata[key] = json.dumps(value)
+                        else:
+                            chroma_metadata[key] = str(value)
+                    
                     self.collection.add(
-                        documents=[content],  # ChromaDB will embed using our local function
-                        metadatas=[{
-                            "program_name": program_name,
-                            "chunk_id": chunk_id_str,
-                            "chunk_type": chunk_type,
-                            "faiss_id": faiss_id,
-                            **metadata
-                        }],
+                        documents=[content],
+                        metadatas=[chroma_metadata],
                         ids=[f"{program_name}_{chunk_id_str}"]
                     )
                     
                     # Store embedding reference in SQLite
                     embedding_id = f"{program_name}_{chunk_id_str}_embed"
                     await self._store_embedding_reference(
-                        chunk_id, embedding_id, faiss_id, embedding.tolist()
+                        chunk_id if isinstance(chunk_id, int) else hash(chunk_id_str), 
+                        embedding_id, 
+                        faiss_id, 
+                        embedding.tolist()
                     )
                     
                     embeddings_created += 1
