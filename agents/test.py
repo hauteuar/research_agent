@@ -243,3 +243,23 @@ if __name__ == "__main__":
     component_name = "YOUR_COMPONENT_NAME"
     result = quick_debug(component_name)
     print(f"\nDebug result: {result}")
+
+"""
+Clear all indices and rebuild:
+python# Remove FAISS index
+os.remove("opulence_faiss.index")
+
+# Clear ChromaDB
+import shutil
+shutil.rmtree("./chroma_db", ignore_errors=True)
+
+# Rebuild from scratch
+
+Reset database:
+python# Backup first
+shutil.copy("opulence_data.db", "opulence_data_backup.db")
+
+# Clear problematic tables
+conn = sqlite3.connect("opulence_data.db")
+conn.execute("DELETE FROM vector_embeddings")
+conn.commit() """
