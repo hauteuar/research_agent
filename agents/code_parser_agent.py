@@ -13,11 +13,12 @@ from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 from dataclasses import dataclass
 import hashlib
-from datetime import datetime, time
+from datetime import datetime
 import logging
 
 import torch
 from vllm import AsyncLLMEngine, SamplingParams
+
 
 
 
@@ -34,64 +35,28 @@ class CodeChunk:
 
 class CompleteEnhancedCodeParserAgent:
     def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
-                 gpu_id: int = None, coordinator=None, enable_llm: bool = True, 
-                 conservative_mode: bool = False):
-        """Initialize the Enhanced Code Parser Agent"""
-        
-        # Core attributes
+                 gpu_id: int = None, coordinator=None):
         self.llm_engine = llm_engine
         self.db_path = db_path or "opulence_data.db"
         self.gpu_id = gpu_id
         self.coordinator = coordinator
-        self.enable_llm = enable_llm
-        self.conservative_mode = conservative_mode
-        
-        # Initialize logger
         self.logger = logging.getLogger(__name__)
         
-        # Error tracking attributes (these were referenced but not initialized)
-        self.error_count = 0
-        self.last_error = ""
-        self._llm_available = llm_engine is not None
-        self._initialized = False
-        
-        # Thread safety attributes
+        # Thread safety
         self._engine_lock = asyncio.Lock()
         self._engine_created = False
         self._using_coordinator_llm = False
-        self._processed_files = set()
-        self._request_semaphore = asyncio.Semaphore(1)
-        self._last_request_time = 0
-        self._min_request_interval = 1.0
+        self._processed_files = set()  # Duplicate prevention
         
-        # Processing statistics
-        self.processing_stats = {
-            "files_processed": 0,
-            "chunks_created": 0,
-            "errors_encountered": 0,
-            "llm_calls_made": 0,
-            "fallback_used": 0
-        }
-        
-        # Initialize patterns (these were used but not initialized)
-        self._init_patterns()
-        
-        # Initialize database and connections
-        self._init_database()
-        self._disable_external_connections()
-        
-        # Mark as initialized
-        self._initialized = True
-        self.logger.info(f"CompleteEnhancedCodeParserAgent initialized on GPU {gpu_id}")
-    
-    def _init_patterns(self):
-        """Initialize all regex patterns"""
-        # COBOL PATTERNS - Add the patterns that were defined in your original code
+        # COMPLETE COBOL PATTERNS
         self.cobol_patterns = {
+            # Basic identification
             'program_id': re.compile(r'PROGRAM-ID\s*\.\s*([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
             'author': re.compile(r'AUTHOR\s*\.\s*(.*?)\.', re.IGNORECASE | re.DOTALL),
             'date_written': re.compile(r'DATE-WRITTEN\s*\.\s*(.*?)\.', re.IGNORECASE),
             'date_compiled': re.compile(r'DATE-COMPILED\s*\.\s*(.*?)\.', re.IGNORECASE),
+            
+            # Divisions and sections
             'identification_division': re.compile(r'IDENTIFICATION\s+DIVISION', re.IGNORECASE),
             'environment_division': re.compile(r'ENVIRONMENT\s+DIVISION', re.IGNORECASE),
             'data_division': re.compile(r'DATA\s+DIVISION', re.IGNORECASE),
@@ -101,17 +66,23 @@ class CompleteEnhancedCodeParserAgent:
             'linkage_section': re.compile(r'LINKAGE\s+SECTION', re.IGNORECASE),
             'local_storage': re.compile(r'LOCAL-STORAGE\s+SECTION', re.IGNORECASE),
             'section': re.compile(r'^([A-Z0-9][A-Z0-9-]*)\s+SECTION\s*\.\s*$', re.MULTILINE),
+            
+            # Paragraphs and control structures
             'paragraph': re.compile(r'^([A-Z0-9][A-Z0-9-]*)\s*\.\s*$', re.MULTILINE),
             'perform': re.compile(r'PERFORM\s+([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
             'perform_until': re.compile(r'PERFORM\s+.*?\s+UNTIL\s+(.*?)(?=\s+|$)', re.IGNORECASE | re.DOTALL),
             'perform_varying': re.compile(r'PERFORM\s+.*?\s+VARYING\s+(.*?)(?=\s+|$)', re.IGNORECASE | re.DOTALL),
             'perform_thru': re.compile(r'PERFORM\s+([A-Z0-9][A-Z0-9-]*)\s+(?:THROUGH|THRU)\s+([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
+            
+            # Control flow
             'if_statement': re.compile(r'IF\s+(.*?)(?=\s+THEN|\s|$)', re.IGNORECASE),
             'evaluate': re.compile(r'EVALUATE\s+(.*?)(?=\s|$)', re.IGNORECASE),
             'when_clause': re.compile(r'WHEN\s+([^\.]+)', re.IGNORECASE),
             'when_other': re.compile(r'WHEN\s+OTHER', re.IGNORECASE),
             'end_if': re.compile(r'END-IF', re.IGNORECASE),
             'end_evaluate': re.compile(r'END-EVALUATE', re.IGNORECASE),
+            
+            # Data definitions
             'data_item': re.compile(r'^(\s*)(\d+)\s+([A-Z][A-Z0-9-]*)\s+(.*?)\.?\s*$', re.MULTILINE),
             'pic_clause': re.compile(r'PIC(?:TURE)?\s+([X9AV\(\)S\+\-\.,/]+)', re.IGNORECASE),
             'usage_clause': re.compile(r'USAGE\s+(?:IS\s+)?(COMP(?:-[0-9])?|BINARY|DISPLAY|PACKED-DECIMAL|INDEX)', re.IGNORECASE),
@@ -120,6 +91,8 @@ class CompleteEnhancedCodeParserAgent:
             'redefines': re.compile(r'REDEFINES\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
             'depending_on': re.compile(r'DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
             'indexed_by': re.compile(r'INDEXED\s+BY\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            
+            # File operations
             'file_control': re.compile(r'FILE-CONTROL\s*\.', re.IGNORECASE),
             'select_statement': re.compile(r'SELECT\s+([A-Z][A-Z0-9-]*)\s+ASSIGN\s+TO\s+([^\s\.]+)', re.IGNORECASE),
             'fd_statement': re.compile(r'FD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
@@ -129,35 +102,48 @@ class CompleteEnhancedCodeParserAgent:
             'write_statement': re.compile(r'WRITE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
             'rewrite_statement': re.compile(r'REWRITE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
             'delete_statement': re.compile(r'DELETE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            
+            # SQL blocks
             'sql_block': re.compile(r'EXEC\s+SQL(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
             'sql_include': re.compile(r'EXEC\s+SQL\s+INCLUDE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
             'sql_declare': re.compile(r'EXEC\s+SQL\s+DECLARE\s+(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
             'sql_whenever': re.compile(r'EXEC\s+SQL\s+WHENEVER\s+(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
+            
+            # COPY statements
             'copy_statement': re.compile(r'COPY\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
             'copy_replacing': re.compile(r'COPY\s+([A-Z][A-Z0-9-]*)\s+REPLACING\s+(.*?)\.', re.IGNORECASE | re.DOTALL),
             'copy_in': re.compile(r'COPY\s+([A-Z][A-Z0-9-]*)\s+IN\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            
+            # Math operations
             'add_statement': re.compile(r'ADD\s+(.*?)\s+TO\s+(.*?)(?=\s|$)', re.IGNORECASE),
             'subtract_statement': re.compile(r'SUBTRACT\s+(.*?)\s+FROM\s+(.*?)(?=\s|$)', re.IGNORECASE),
             'multiply_statement': re.compile(r'MULTIPLY\s+(.*?)\s+BY\s+(.*?)(?=\s|$)', re.IGNORECASE),
             'divide_statement': re.compile(r'DIVIDE\s+(.*?)\s+(?:BY|INTO)\s+(.*?)(?=\s|$)', re.IGNORECASE),
             'compute_statement': re.compile(r'COMPUTE\s+(.*?)\s*=\s*(.*?)(?=\s|$)', re.IGNORECASE),
+            
+            # String operations
             'move_statement': re.compile(r'MOVE\s+(.*?)\s+TO\s+(.*?)(?=\s|$)', re.IGNORECASE),
             'string_statement': re.compile(r'STRING\s+(.*?)(?=\s+END-STRING|$)', re.IGNORECASE | re.DOTALL),
             'unstring_statement': re.compile(r'UNSTRING\s+(.*?)(?=\s+END-UNSTRING|$)', re.IGNORECASE | re.DOTALL),
             'inspect_statement': re.compile(r'INSPECT\s+(.*?)(?=\s|$)', re.IGNORECASE),
+            
+            # Call statements
             'call_statement': re.compile(r'CALL\s+([\'"]?[A-Z0-9][A-Z0-9-]*[\'"]?)', re.IGNORECASE),
             'invoke_statement': re.compile(r'INVOKE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            
+            # Error handling
             'on_size_error': re.compile(r'ON\s+SIZE\s+ERROR', re.IGNORECASE),
             'not_on_size_error': re.compile(r'NOT\s+ON\s+SIZE\s+ERROR', re.IGNORECASE),
             'at_end': re.compile(r'AT\s+END', re.IGNORECASE),
             'not_at_end': re.compile(r'NOT\s+AT\s+END', re.IGNORECASE),
             'invalid_key': re.compile(r'INVALID\s+KEY', re.IGNORECASE),
             'not_invalid_key': re.compile(r'NOT\s+INVALID\s+KEY', re.IGNORECASE),
+
             'cics_transaction_flow': re.compile(r'EXEC\s+CICS\s+(SEND|RECEIVE|RETURN)', re.IGNORECASE),
             'cics_error_handling': re.compile(r'EXEC\s+CICS\s+HANDLE\s+(CONDITION|AID|ABEND)', re.IGNORECASE),
         }
         
-        # JCL PATTERNS
+        # COMPLETE JCL PATTERNS
         self.jcl_patterns = {
             'job_card': re.compile(r'^//(\S+)\s+JOB\s+', re.MULTILINE),
             'job_step': re.compile(r'^//(\S+)\s+EXEC\s+', re.MULTILINE),
@@ -171,16 +157,19 @@ class CompleteEnhancedCodeParserAgent:
             'endif_statement': re.compile(r'^//\s+ENDIF', re.MULTILINE),
             'include_statement': re.compile(r'^//\s+INCLUDE\s+MEMBER=([A-Z0-9]+)', re.MULTILINE),
             'jcllib_statement': re.compile(r'^//\s+JCLLIB\s+ORDER=\((.*?)\)', re.MULTILINE),
-            'output_statement': re.compile(r'^//\s+OUTPUT\s+(.*?), re.MULTILINE),
+            'output_statement': re.compile(r'^//\s+OUTPUT\s+(.*?)$', re.MULTILINE),
         }
         
-        # CICS PATTERNS
+        # COMPLETE CICS PATTERNS
         self.cics_patterns = {
+            # Terminal operations
             'cics_send_map': re.compile(r'EXEC\s+CICS\s+SEND\s+MAP\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_receive_map': re.compile(r'EXEC\s+CICS\s+RECEIVE\s+MAP\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_send_text': re.compile(r'EXEC\s+CICS\s+SEND\s+TEXT\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_send_page': re.compile(r'EXEC\s+CICS\s+SEND\s+PAGE\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_receive': re.compile(r'EXEC\s+CICS\s+RECEIVE\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            
+            # File operations
             'cics_read': re.compile(r'EXEC\s+CICS\s+READ\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_write': re.compile(r'EXEC\s+CICS\s+WRITE\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_rewrite': re.compile(r'EXEC\s+CICS\s+REWRITE\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
@@ -190,71 +179,63 @@ class CompleteEnhancedCodeParserAgent:
             'cics_readprev': re.compile(r'EXEC\s+CICS\s+READPREV\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_endbr': re.compile(r'EXEC\s+CICS\s+ENDBR\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_unlock': re.compile(r'EXEC\s+CICS\s+UNLOCK\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            
+            # Program control
             'cics_link': re.compile(r'EXEC\s+CICS\s+LINK\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_xctl': re.compile(r'EXEC\s+CICS\s+XCTL\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_load': re.compile(r'EXEC\s+CICS\s+LOAD\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_release': re.compile(r'EXEC\s+CICS\s+RELEASE\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_return': re.compile(r'EXEC\s+CICS\s+RETURN\s*(?:\((.*?)\))?\s*END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_abend': re.compile(r'EXEC\s+CICS\s+ABEND\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            
+            # Storage operations
             'cics_getmain': re.compile(r'EXEC\s+CICS\s+GETMAIN\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_freemain': re.compile(r'EXEC\s+CICS\s+FREEMAIN\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            
+            # Task control
             'cics_suspend': re.compile(r'EXEC\s+CICS\s+SUSPEND\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_resume': re.compile(r'EXEC\s+CICS\s+RESUME\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_start': re.compile(r'EXEC\s+CICS\s+START\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_cancel': re.compile(r'EXEC\s+CICS\s+CANCEL\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            
+            # Interval control
             'cics_delay': re.compile(r'EXEC\s+CICS\s+DELAY\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_post': re.compile(r'EXEC\s+CICS\s+POST\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_wait': re.compile(r'EXEC\s+CICS\s+WAIT\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            
+            # Error handling
             'cics_handle_condition': re.compile(r'EXEC\s+CICS\s+HANDLE\s+CONDITION\s+(.*?)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_handle_aid': re.compile(r'EXEC\s+CICS\s+HANDLE\s+AID\s+(.*?)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_handle_abend': re.compile(r'EXEC\s+CICS\s+HANDLE\s+ABEND\s+(.*?)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_push_handle': re.compile(r'EXEC\s+CICS\s+PUSH\s+HANDLE\s*END-EXEC', re.IGNORECASE),
             'cics_pop_handle': re.compile(r'EXEC\s+CICS\s+POP\s+HANDLE\s*END-EXEC', re.IGNORECASE),
+            
+            # Syncpoint operations
             'cics_syncpoint': re.compile(r'EXEC\s+CICS\s+SYNCPOINT\s*(?:\((.*?)\))?\s*END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_syncpoint_rollback': re.compile(r'EXEC\s+CICS\s+SYNCPOINT\s+ROLLBACK\s*END-EXEC', re.IGNORECASE),
+            
+            # Temporary storage
             'cics_writeq_ts': re.compile(r'EXEC\s+CICS\s+WRITEQ\s+TS\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_readq_ts': re.compile(r'EXEC\s+CICS\s+READQ\s+TS\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_deleteq_ts': re.compile(r'EXEC\s+CICS\s+DELETEQ\s+TS\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            
+            # Transient data
             'cics_writeq_td': re.compile(r'EXEC\s+CICS\s+WRITEQ\s+TD\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_readq_td': re.compile(r'EXEC\s+CICS\s+READQ\s+TD\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_deleteq_td': re.compile(r'EXEC\s+CICS\s+DELETEQ\s+TD\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
         }
         
-        # BMS PATTERNS
+        # COMPLETE BMS PATTERNS
         self.bms_patterns = {
             'bms_mapset': re.compile(r'(\w+)\s+DFHMSD\s+(.*?)(?=\w+\s+DFHMSD|$)', re.IGNORECASE | re.DOTALL),
             'bms_map': re.compile(r'(\w+)\s+DFHMDI\s+(.*?)(?=\w+\s+DFHMDI|\w+\s+DFHMSD|$)', re.IGNORECASE | re.DOTALL),
             'bms_field': re.compile(r'(\w+)\s+DFHMDF\s+(.*?)(?=\w+\s+DFHMDF|\w+\s+DFHMDI|\w+\s+DFHMSD|$)', re.IGNORECASE | re.DOTALL),
             'bms_mapset_end': re.compile(r'\s+DFHMSD\s+TYPE=FINAL', re.IGNORECASE),
-        }    
-    
-    def _ensure_airgap_environment(self):
-        """Ensure no external connections are possible"""
-    import os
-    
-    # Set environment variables to disable external connections
-    os.environ.update({
-        'NO_PROXY': '*',
-        'DISABLE_TELEMETRY': '1',
-        'TOKENIZERS_PARALLELISM': 'false',
-        'TRANSFORMERS_OFFLINE': '1',
-        'HF_HUB_OFFLINE': '1',
-        'REQUESTS_CA_BUNDLE': '',
-        'CURL_CA_BUNDLE': ''
-    })
-    
-    # Disable requests library
-    try:
-        import requests
-        def blocked_request(*args, **kwargs):
-            raise requests.exceptions.ConnectionError("External connections disabled")
+        }
         
-        requests.get = blocked_request
-        requests.post = blocked_request
-        requests.request = blocked_request
-    except ImportError:
-        pass
-    
+        # Initialize database
+        self._init_database()
+
     def _init_database(self):
         """Initialize database with enhanced schema"""
         try:
@@ -449,56 +430,39 @@ class CompleteEnhancedCodeParserAgent:
             raise
 
     async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
-        """Generate text with LLM - FIXED async generator handling"""
-        
-        # Rate limiting to prevent request flooding
-        current_time = time.time()
-        time_since_last = current_time - self._last_request_time
-        if time_since_last < self._min_request_interval:
-            await asyncio.sleep(self._min_request_interval - time_since_last)
-        
-        async with self._request_semaphore:  # Prevent concurrent requests
+        """Generate text with LLM - handles async generator properly"""
+        try:
+            if self.llm_engine is None:
+                return ""
+            
+            request_id = str(uuid.uuid4())
+            
             try:
-                if self.llm_engine is None:
-                    self.logger.warning("LLM engine not available, using fallback")
-                    self.processing_stats["fallback_used"] += 1
-                    return ""
+                # Get async generator from vLLM
+                result_generator = self.llm_engine.generate(
+                    prompt, sampling_params, request_id=request_id
+                )
                 
-                request_id = str(uuid.uuid4())
-                self._last_request_time = time.time()
-                
-                try:
-                    # FIXED: Use async for instead of await
-                    result_generator = self.llm_engine.generate(
-                        prompt, sampling_params, request_id=request_id
-                    )
+                # Properly iterate through async generator
+                async for result in result_generator:
+                    if result and hasattr(result, 'outputs') and len(result.outputs) > 0:
+                        return result.outputs[0].text.strip()
+                    break  # Take first result
                     
-                    # Properly iterate through async generator
+            except TypeError as e:
+                if "request_id" in str(e):
+                    # Fallback to old API
+                    result_generator = self.llm_engine.generate(prompt, sampling_params)
                     async for result in result_generator:
                         if result and hasattr(result, 'outputs') and len(result.outputs) > 0:
-                            self.processing_stats["llm_calls_made"] += 1
                             return result.outputs[0].text.strip()
-                        break  # Take first result only
+                        break
                         
-                except TypeError as e:
-                    if "request_id" in str(e):
-                        # Fallback to old API
-                        result_generator = self.llm_engine.generate(prompt, sampling_params)
-                        async for result in result_generator:
-                            if result and hasattr(result, 'outputs') and len(result.outputs) > 0:
-                                self.processing_stats["llm_calls_made"] += 1
-                                return result.outputs[0].text.strip()
-                            break
-                    else:
-                        raise e
-                
-                return ""
-                
-            except Exception as e:
-                self.logger.error(f"LLM generation failed: {str(e)}")
-                self.processing_stats["fallback_used"] += 1
-                return ""
-
+            return ""
+            
+        except Exception as e:
+            self.logger.error(f"LLM generation failed: {str(e)}")
+            return ""
         
     def _extract_program_name(self, content: str, file_path: Path) -> str:
         """Extract program name more robustly from content or filename"""
@@ -541,108 +505,125 @@ class CompleteEnhancedCodeParserAgent:
             result['using_coordinator_llm'] = self._using_coordinator_llm
         return result
 
-    async def process_file(self, file_path) -> Dict[str, Any]:
-        """Process file with enhanced error handling and type safety"""
+    async def process_file(self, file_path: Path) -> Dict[str, Any]:
+        """Process a single code file with enhanced error handling and verification"""
         try:
-            # FIXED: Ensure proper type handling
-            if isinstance(file_path, str):
-                file_path = Path(file_path)
-            elif not isinstance(file_path, Path):
-                return self._create_error_result(
-                    f"Invalid file path type: {type(file_path)}", 
-                    str(file_path)
-                )
+            await self._ensure_llm_engine()
             
-            # Validate file exists
+            # Debug logging
+            self.logger.info(f"Processing file: {file_path}")
+            self.logger.info(f"File exists: {file_path.exists()}")
+            
             if not file_path.exists():
-                return self._create_error_result("File does not exist", str(file_path.name))
+                return self._add_processing_info({
+                    "status": "error",
+                    "file_name": str(file_path.name),
+                    "error": "File not found"
+                })
             
-            if not file_path.is_file():
-                return self._create_error_result("Path is not a file", str(file_path.name))
-            
-            # FIXED: Safe file reading with multiple encodings
-            content = None
-            encodings = ['utf-8', 'utf-8-sig', 'cp1252', 'latin1', 'ascii']
-            
-            for encoding in encodings:
-                try:
-                    with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
-                        content = f.read()
-                    self.logger.debug(f"Successfully read file with {encoding} encoding")
-                    break
-                except (UnicodeDecodeError, UnicodeError):
-                    continue
-            
-            if content is None:
-                return self._create_error_result("Could not read file with any encoding", str(file_path.name))
+            # Enhanced file reading
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                self.logger.info(f"File content read: {len(content)} characters")
+            except UnicodeDecodeError:
+                for encoding in ['cp1252', 'latin1', 'ascii']:
+                    try:
+                        with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
+                            content = f.read()
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                else:
+                    return self._add_processing_info({
+                        "status": "error",
+                        "file_name": file_path.name,
+                        "error": "Unable to decode file with any encoding"
+                    })
             
             if not content.strip():
-                return self._create_error_result("File is empty or contains only whitespace", str(file_path.name))
-            
-            # FIXED: Ensure all strings are properly converted
-            file_name_str = str(file_path.name)
-            content_str = str(content)
-            
+                return self._add_processing_info({
+                    "status": "error",
+                    "file_name": str(file_path.name),
+                    "error": "File is empty"
+                })
+
             # Check for duplicates
-            file_hash = self._generate_file_hash(content_str, file_path)
-            if self._is_duplicate_file(file_path, content_str):
-                return self._create_success_result(
-                    file_name_str, "skipped", 0, 
-                    message="File already processed (duplicate detected)"
-                )
+            if self._is_duplicate_file(file_path, content):
+                return self._add_processing_info({
+                    "status": "skipped",
+                    "file_name": str(file_path.name),
+                    "message": "File already processed (duplicate detected)"
+                })
             
-            # Detect file type
-            file_type = self._detect_file_type(content_str, str(file_path.suffix))
+            file_type = self._detect_file_type(content, file_path.suffix)
+            self.logger.info(f"Detected file type: {file_type}")
             
-            # Parse based on file type with fallback
-            chunks = []
-            try:
-                if file_type == 'cobol':
-                    chunks = await self._parse_cobol_safe(content_str, file_name_str)
-                elif file_type == 'jcl':
-                    chunks = await self._parse_jcl_safe(content_str, file_name_str)
-                elif file_type == 'copybook':
-                    chunks = await self._parse_copybook_complete(content, str(file_path.name))
-                elif file_type == 'bms':
-                    chunks = await self._parse_bms_complete(content, str(file_path.name))
-                elif file_type == 'cics':
-                    chunks = await self._parse_cics_complete(content, str(file_path.name))
-                elif file_type == 'sql':
-                    chunks = await self._parse_sql_blocks_complete(content_str, file_name_str)   
-                else:
-                    chunks = await self._parse_generic_safe(content_str, file_name_str)
-            except Exception as parse_error:
-                self.logger.error(f"Parsing failed for {file_name_str}: {str(parse_error)}")
-                # Create fallback chunk
-                chunks = [self._create_fallback_chunk(content_str, file_name_str, file_type)]
+            # Parse based on file type
+            if file_type == 'cobol':
+                chunks = await self._parse_cobol_complete(content, str(file_path.name))
+            elif file_type == 'jcl':
+                chunks = await self._parse_jcl_complete(content, str(file_path.name))
+            elif file_type == 'copybook':
+                chunks = await self._parse_copybook_complete(content, str(file_path.name))
+            elif file_type == 'bms':
+                chunks = await self._parse_bms_complete(content, str(file_path.name))
+            elif file_type == 'cics':
+                chunks = await self._parse_cics_complete(content, str(file_path.name))
+            else:
+                chunks = await self._parse_generic(content, str(file_path.name))
+            
+            self.logger.info(f"Generated {len(chunks)} chunks")
             
             if not chunks:
-                # Create fallback chunk if no chunks were created
-                chunks = [self._create_fallback_chunk(content_str, file_name_str, file_type)]
+                return self._add_processing_info({
+                    "status": "warning",
+                    "file_name": str(file_path.name),
+                    "file_type": file_type,
+                    "chunks_created": 0,
+                    "message": "No chunks were created from this file"
+                })
             
-            # Store chunks safely
-            try:
-                await self._store_chunks_enhanced(chunks, file_hash)
-                self.processing_stats["files_processed"] += 1
-                self.processing_stats["chunks_created"] += len(chunks)
-            except Exception as store_error:
-                self.logger.error(f"Failed to store chunks: {str(store_error)}")
-                return self._create_error_result(f"Storage failed: {str(store_error)}", file_name_str)
+            # Add file hash to all chunks
+            file_hash = self._generate_file_hash(content, file_path)
+            for chunk in chunks:
+                chunk.metadata['file_hash'] = file_hash
+            await self._store_chunks_enhanced(chunks, file_hash)
+            # After generating chunks, before storing:
+# Convert CodeChunk objects to tuples for vector agent compatibility
             
-            return self._create_success_result(
-                file_name_str, "success", len(chunks),
-                file_type=file_type, file_hash=file_hash
-            )
+                # Store chunks with verification
+            await self._store_chunks_enhanced(chunks, file_hash)
+            
+            # Verify chunks were stored
+            stored_chunks = await self._verify_chunks_stored(self._extract_program_name(content, file_path))
+            
+            # Generate metadata
+            metadata = await self._generate_metadata_enhanced(chunks, file_type)
+
+            lineage_records = await self._generate_field_lineage(file_path.stem, chunks)
+            await self._store_field_lineage(lineage_records)
+            
+            result = {
+                "status": "success",
+                "file_name": str(file_path.name),
+                "file_type": file_type,
+                "chunks_created": len(chunks),
+                "chunks_verified": stored_chunks,
+                "metadata": metadata,
+                "processing_timestamp": datetime.now().isoformat(),
+                "file_hash": file_hash
+            }
+            
+            return self._add_processing_info(result)
             
         except Exception as e:
-            self.error_count += 1
-            self.last_error = str(e)
-            self.processing_stats["errors_encountered"] += 1
-            
-            file_name_safe = str(file_path.name) if hasattr(file_path, 'name') else str(file_path)
-            self.logger.error(f"Processing failed for {file_name_safe}: {str(e)}")
-            
-            return self._create_error_result(str(e), file_name_safe)
+            self.logger.error(f"Processing failed for {file_path}: {str(e)}")
+            return self._add_processing_info({
+                "status": "error",
+                "file_name": file_path.name,
+                "error": str(e)
+            })
 
     def _detect_file_type(self, content: str, suffix: str) -> str:
         """Detect the type of mainframe file with enhanced detection"""
@@ -681,80 +662,6 @@ class CompleteEnhancedCodeParserAgent:
             return 'bms'
         else:
             return 'unknown'
-
-    def _create_error_result(self, error_msg: str, file_name: str) -> Dict[str, Any]:
-        """Create standardized error result"""
-        return {
-            "status": "error",
-            "file_name": str(file_name),
-            "error": str(error_msg),
-            "processing_timestamp": datetime.now().isoformat(),
-            "agent_type": "enhanced_code_parser",
-            "gpu_used": self.gpu_id
-        }
-
-    def _create_success_result(self, file_name: str, status: str, chunks_count: int, 
-                            **kwargs) -> Dict[str, Any]:
-        """Create standardized success result"""
-        result = {
-            "status": str(status),
-            "file_name": str(file_name),
-            "chunks_created": int(chunks_count),
-            "processing_timestamp": datetime.now().isoformat(),
-            "agent_type": "enhanced_code_parser",
-            "gpu_used": self.gpu_id
-        }
-        result.update(kwargs)
-        return result
-
-    def _create_fallback_chunk(self, content: str, file_name: str, file_type: str) -> CodeChunk:
-        """Create fallback chunk when parsing fails"""
-        program_name = self._extract_program_name_safe(content, file_name)
-        
-        return CodeChunk(
-            program_name=str(program_name),
-            chunk_id=f"{program_name}_FULL_FILE",
-            chunk_type="full_file_fallback",
-            content=str(content)[:2000],  # Limit content size
-            metadata={
-                "fallback": True,
-                "file_type": str(file_type),
-                "reason": "Parsing failed, created fallback chunk",
-                "content_length": len(content)
-            },
-            line_start=0,
-            line_end=len(content.split('\n'))
-        )
-
-    def _extract_program_name_safe(self, content: str, file_name: str) -> str:
-        """Safely extract program name with fallbacks"""
-        try:
-            # Try PROGRAM-ID first
-            if hasattr(self, 'cobol_patterns') and 'program_id' in self.cobol_patterns:
-                program_match = self.cobol_patterns['program_id'].search(content)
-                if program_match:
-                    return str(program_match.group(1)).strip()
-            
-            # Try JOB name
-            if hasattr(self, 'jcl_patterns') and 'job_card' in self.jcl_patterns:
-                job_match = self.jcl_patterns['job_card'].search(content)
-                if job_match:
-                    return str(job_match.group(1)).strip()
-            
-            # Fallback to filename
-            if isinstance(file_name, (str, Path)):
-                name = str(Path(file_name).stem)
-                # Remove common extensions
-                for ext in ['.cbl', '.cob', '.jcl', '.copy', '.cpy']:
-                    if name.lower().endswith(ext.lower()):
-                        name = name[:-len(ext)]
-                return name or "UNKNOWN_PROGRAM"
-            
-            return "UNKNOWN_PROGRAM"
-            
-        except Exception as e:
-            self.logger.warning(f"Program name extraction failed: {str(e)}")
-            return "UNKNOWN_PROGRAM"
 
     async def _parse_cobol_complete(self, content: str, filename: str) -> List[CodeChunk]:
         """Complete COBOL parsing with all structures"""
