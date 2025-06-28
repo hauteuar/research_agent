@@ -1,12 +1,8 @@
-# gpu_manager.py - CONSOLIDATED GPU Management Module
-"""
-Enhanced GPU Management System with Dynamic Allocation and Error Recovery
-Consolidates all GPU-related functionality into clear, non-overlapping classes
-"""
+# Updated GPU Manager with Enhanced Error Handling and Recovery
 
-import logging
 import torch
 import psutil
+import logging
 import subprocess
 import time
 import threading
@@ -17,10 +13,6 @@ from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
 from collections import defaultdict
 from enum import Enum
-from contextlib import contextmanager
-
-# Initialize logger
-logger = logging.getLogger(__name__)
 
 class GPUStatus(Enum):
     AVAILABLE = "available"
@@ -43,13 +35,129 @@ class GPUInfo:
     last_updated: float
     error_count: int = 0
     last_error: str = ""
+import threading
+from typing import Optional, Dict, Any, List
+from collections import defaultdict
 
-# =====================================
-# CORE GPU UTILITY CLASS - Hardware Interface
-# =====================================
+class DynamicGPUManager:
+    """Base Dynamic GPU Manager class"""
+    
+    def __init__(self, total_gpu_count: int = 4, memory_threshold: float = 0.80, 
+                 utilization_threshold: float = 75.0):
+        self.total_gpu_count = total_gpu_count
+        self.memory_threshold = memory_threshold
+        self.utilization_threshold = utilization_threshold
+        
+        # Initialize attributes that are referenced in subclass
+        self.gpu_info = {}
+        self.gpu_workloads = defaultdict(list)
+        self.lock = threading.Lock()
+        self.last_refresh = 0
+        self.refresh_interval = 5  # seconds
+        
+        # Initialize GPU info
+        self._update_all_gpu_info()
+    
+    def _update_all_gpu_info(self):
+        """Update GPU information for all GPUs"""
+        try:
+            for gpu_id in range(self.total_gpu_count):
+                self.gpu_info[gpu_id] = self._get_gpu_info(gpu_id)
+        except Exception as e:
+            logging.error(f"Failed to update GPU info: {e}")
+    
+    def _get_gpu_info(self, gpu_id: int):
+        """Get GPU information (to be implemented by subclass)"""
+        # Basic implementation - subclass should override
+        return {
+            'gpu_id': gpu_id,
+            'available': True,
+            'utilization': 0,
+            'memory_free': 8000,  # 8GB default
+            'workloads': []
+        }
+    
+    def get_available_gpu(self, preferred_gpu: Optional[int] = None, 
+                         fallback: bool = True, allow_sharing: bool = False) -> Optional[int]:
+        """Get available GPU - basic implementation"""
+        with self.lock:
+            # Try preferred GPU first
+            if preferred_gpu is not None and self._is_gpu_available(preferred_gpu):
+                return preferred_gpu
+            
+            # Find any available GPU
+            for gpu_id in range(self.total_gpu_count):
+                if self._is_gpu_available(gpu_id):
+                    return gpu_id
+            
+            return None
+    
+    def _is_gpu_available(self, gpu_id: int) -> bool:
+        """Check if GPU is available"""
+        gpu_info = self.gpu_info.get(gpu_id, {})
+        return gpu_info.get('available', False)
+    
+    def force_refresh(self):
+        """Force refresh GPU status"""
+        self._update_all_gpu_info()
+        self.last_refresh = time.time()
+    
+    def get_gpu_status_detailed(self) -> Dict[str, Any]:
+        """Get detailed GPU status"""
+        status = {}
+        for gpu_id, info in self.gpu_info.items():
+            status[f"gpu_{gpu_id}"] = {
+                'is_available': info.get('available', False),
+                'utilization_percent': info.get('utilization', 0),
+                'active_workloads': len(info.get('workloads', [])),
+                'memory_free_gb': info.get('memory_free', 0) / 1024,
+                'status': 'available' if info.get('available') else 'busy'
+            }
+        return status
+    
+    def get_workload_distribution(self) -> Dict[str, List]:
+        """Get workload distribution across GPUs"""
+        distribution = {}
+        for gpu_id in range(self.total_gpu_count):
+            distribution[f"gpu_{gpu_id}"] = self.gpu_workloads.get(gpu_id, [])
+        return distribution
+    
+    def reserve_gpu_for_workload(self, workload_type: str, preferred_gpu: Optional[int] = None,
+                                duration_estimate: int = 3600, allow_sharing: bool = True) -> Optional[int]:
+        """Reserve GPU for workload"""
+        gpu_id = self.get_available_gpu(preferred_gpu, fallback=True, allow_sharing=allow_sharing)
+        if gpu_id is not None:
+            self.gpu_workloads[gpu_id].append({
+                'workload_type': workload_type,
+                'start_time': time.time(),
+                'estimated_duration': duration_estimate
+            })
+        return gpu_id
+    
+    def release_gpu_workload(self, gpu_id: int, workload_type: str):
+        """Release GPU workload"""
+        if gpu_id in self.gpu_workloads:
+            self.gpu_workloads[gpu_id] = [
+                w for w in self.gpu_workloads[gpu_id] 
+                if w.get('workload_type') != workload_type
+            ]
+    
+    def cleanup_completed_workloads(self):
+        """Clean up completed workloads"""
+        current_time = time.time()
+        for gpu_id in self.gpu_workloads:
+            self.gpu_workloads[gpu_id] = [
+                w for w in self.gpu_workloads[gpu_id]
+                if current_time - w.get('start_time', 0) < w.get('estimated_duration', 3600)
+            ]
+    
+    def shutdown(self):
+        """Shutdown GPU manager"""
+        self.gpu_workloads.clear()
 
-class GPUHardwareInterface:
-    """Low-level GPU hardware interface - handles direct GPU communication"""
+
+class EnhancedGPUForcer:
+    """Enhanced GPU forcing with better error handling and memory management"""
     
     @staticmethod
     def check_gpu_memory(gpu_id: int, retry_count: int = 2) -> dict:
@@ -74,8 +182,29 @@ class GPUHardwareInterface:
                         gpu_util = float(parts[3]) if len(parts) > 3 else 0.0
                         temp = float(parts[4]) if len(parts) > 4 else 0.0
                         
-                        # Get process information
-                        processes = GPUHardwareInterface._get_gpu_processes(gpu_id)
+                        # Get process information with error handling
+                        processes = []
+                        try:
+                            process_result = subprocess.run([
+                                'nvidia-smi', 
+                                f'--id={gpu_id}',
+                                '--query-compute-apps=pid,used_memory',
+                                '--format=csv,noheader,nounits'
+                            ], capture_output=True, text=True, timeout=5)
+                            
+                            if process_result.stdout.strip():
+                                for proc_line in process_result.stdout.strip().split('\n'):
+                                    if proc_line.strip():
+                                        try:
+                                            pid, mem = proc_line.split(',')
+                                            processes.append({
+                                                'pid': int(pid.strip()),
+                                                'memory_mb': int(mem.strip())
+                                            })
+                                        except:
+                                            continue
+                        except subprocess.TimeoutExpired:
+                            logger.warning(f"Process query timeout for GPU {gpu_id}")
                         
                         # Determine availability with more nuanced logic
                         is_available = (
@@ -98,7 +227,7 @@ class GPUHardwareInterface:
                             'is_fragmented': used > 0 and free < 1000,
                             'is_available': is_available,
                             'is_healthy': temp < 80.0 and gpu_util < 95.0,
-                            'can_share': free > 2048 and len(processes) < 3,
+                            'can_share': free > 2048 and len(processes) < 3,  # Can accept more workloads
                             'last_check': time.time()
                         }
                 
@@ -124,34 +253,99 @@ class GPUHardwareInterface:
         }
     
     @staticmethod
-    def _get_gpu_processes(gpu_id: int) -> List[Dict]:
-        """Get processes running on specific GPU"""
-        processes = []
-        try:
-            process_result = subprocess.run([
-                'nvidia-smi', 
-                f'--id={gpu_id}',
-                '--query-compute-apps=pid,used_memory',
-                '--format=csv,noheader,nounits'
-            ], capture_output=True, text=True, timeout=5)
-            
-            if process_result.stdout.strip():
-                for proc_line in process_result.stdout.strip().split('\n'):
-                    if proc_line.strip():
-                        try:
-                            pid, mem = proc_line.split(',')
-                            processes.append({
-                                'pid': int(pid.strip()),
-                                'memory_mb': int(mem.strip())
-                            })
-                        except:
-                            continue
-        except subprocess.TimeoutExpired:
-            logger.warning(f"Process query timeout for GPU {gpu_id}")
-        except Exception as e:
-            logger.warning(f"Failed to get processes for GPU {gpu_id}: {e}")
+    def find_best_gpu_with_memory(min_free_gb: float = 2.0, exclude_gpu_0: bool = True, 
+                                 allow_sharing: bool = True, prioritize_health: bool = True) -> Optional[int]:
+        """Enhanced GPU finding with health considerations and sharing support"""
+        candidates = []
+        gpu_info = {}
         
-        return processes
+        # Check all GPUs
+        gpu_range = range(1 if exclude_gpu_0 else 0, 4)
+        
+        for gpu_id in gpu_range:
+            memory_info = EnhancedGPUForcer.check_gpu_memory(gpu_id)
+            free_gb = memory_info['free_gb']
+            gpu_info[gpu_id] = memory_info
+            
+            logger.info(f"GPU {gpu_id}: {free_gb:.1f}GB free, {memory_info['gpu_utilization']:.1f}% util, "
+                       f"temp: {memory_info['temperature']:.1f}°C, processes: {len(memory_info['processes'])}, "
+                       f"healthy: {memory_info['is_healthy']}, can_share: {memory_info['can_share']}")
+            
+            # Calculate suitability score
+            score = 0
+            
+            if memory_info['is_available']:
+                score += 100
+                
+                # Memory score
+                if free_gb >= min_free_gb:
+                    score += min(free_gb * 10, 100)  # Up to 100 points for memory
+                
+                # Health score
+                if memory_info['is_healthy']:
+                    score += 50
+                
+                # Sharing capability
+                if allow_sharing and memory_info['can_share']:
+                    score += 30
+                
+                # Penalize high utilization
+                score -= memory_info['gpu_utilization']
+                
+                # Penalize many processes
+                score -= len(memory_info['processes']) * 10
+                
+                # Temperature penalty
+                if memory_info['temperature'] > 70:
+                    score -= (memory_info['temperature'] - 70) * 2
+                
+                candidates.append((gpu_id, score, free_gb, memory_info))
+        
+        # Sort by score (highest first)
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        
+        # Log all candidates
+        for gpu_id, score, free_gb, info in candidates:
+            logger.info(f"GPU {gpu_id}: score={score:.1f}, free={free_gb:.1f}GB, "
+                       f"healthy={info['is_healthy']}, can_share={info['can_share']}")
+        
+        # Select best candidate that meets minimum requirements
+        for gpu_id, score, free_gb, info in candidates:
+            if free_gb >= min_free_gb:
+                if prioritize_health and not info['is_healthy']:
+                    logger.warning(f"GPU {gpu_id} has best score but is not healthy, checking next...")
+                    continue
+                    
+                logger.info(f"Selected GPU {gpu_id} with score {score:.1f} and {free_gb:.1f}GB free")
+                return gpu_id
+        
+        # If no GPU meets strict requirements, try with relaxed constraints
+        if allow_sharing and min_free_gb > 1.0:
+            logger.warning("No GPU meets strict requirements, trying with relaxed constraints...")
+            return EnhancedGPUForcer.find_best_gpu_with_memory(
+                min_free_gb=max(1.0, min_free_gb * 0.5),
+                exclude_gpu_0=exclude_gpu_0,
+                allow_sharing=True,
+                prioritize_health=False
+            )
+        
+        # Last resort: include GPU 0 if we were excluding it
+        if exclude_gpu_0:
+            logger.warning("No suitable GPU found excluding GPU 0, checking GPU 0 as last resort...")
+            memory_info = EnhancedGPUForcer.check_gpu_memory(0)
+            gpu_info[0] = memory_info
+            
+            if memory_info['free_gb'] >= max(0.5, min_free_gb * 0.25):  # Very relaxed requirement
+                logger.warning(f"Using GPU 0 as last resort with {memory_info['free_gb']:.1f}GB free")
+                return 0
+        
+        logger.error(f"No GPU found with at least {min_free_gb}GB free")
+        logger.error("GPU Status Summary:")
+        for gpu_id, info in gpu_info.items():
+            logger.error(f"  GPU {gpu_id}: {info['free_gb']:.1f}GB free, {len(info['processes'])} processes, "
+                        f"healthy: {info.get('is_healthy', False)}, error: {info.get('error', 'none')}")
+        
+        return None
     
     @staticmethod
     def aggressive_gpu_cleanup(gpu_id: int) -> bool:
@@ -160,10 +354,12 @@ class GPUHardwareInterface:
         
         try:
             # Strategy 1: Python garbage collection
+            logger.info("Step 1: Python garbage collection")
             gc.collect()
             
             # Strategy 2: PyTorch cleanup
             if torch.cuda.is_available():
+                logger.info("Step 2: PyTorch CUDA cleanup")
                 try:
                     with torch.cuda.device(gpu_id):
                         torch.cuda.empty_cache()
@@ -174,14 +370,20 @@ class GPUHardwareInterface:
                     logger.warning(f"PyTorch cleanup failed: {e}")
             
             # Strategy 3: Force garbage collection again
+            logger.info("Step 3: Second garbage collection")
+            import gc
             for _ in range(3):
                 gc.collect()
                 time.sleep(0.1)
             
             # Strategy 4: Check and wait for cleanup to take effect
-            initial_memory = GPUHardwareInterface.check_gpu_memory(gpu_id)
+            logger.info("Step 4: Verifying cleanup results")
+            initial_memory = EnhancedGPUForcer.check_gpu_memory(gpu_id)
+            
+            # Wait a bit for cleanup to take effect
             time.sleep(2)
-            final_memory = GPUHardwareInterface.check_gpu_memory(gpu_id)
+            
+            final_memory = EnhancedGPUForcer.check_gpu_memory(gpu_id)
             
             freed_mb = final_memory['free_mb'] - initial_memory['free_mb']
             logger.info(f"Cleanup freed {freed_mb}MB on GPU {gpu_id}")
@@ -191,13 +393,6 @@ class GPUHardwareInterface:
         except Exception as e:
             logger.error(f"Aggressive cleanup failed for GPU {gpu_id}: {e}")
             return False
-
-# =====================================
-# GPU ENVIRONMENT MANAGER - Environment Setup
-# =====================================
-
-class GPUEnvironmentManager:
-    """Manages GPU environment setup and configuration"""
     
     @staticmethod
     def safe_force_gpu_environment(gpu_id: int, cleanup_first: bool = True, 
@@ -205,15 +400,16 @@ class GPUEnvironmentManager:
         """Safely force GPU environment with verification"""
         try:
             if cleanup_first:
-                GPUHardwareInterface.aggressive_gpu_cleanup(gpu_id)
+                logger.info(f"Pre-cleanup for GPU {gpu_id}")
+                EnhancedGPUForcer.aggressive_gpu_cleanup(gpu_id)
             
             # Check GPU availability before forcing
-            memory_info = GPUHardwareInterface.check_gpu_memory(gpu_id)
+            memory_info = EnhancedGPUForcer.check_gpu_memory(gpu_id)
             if not memory_info['is_available']:
                 logger.warning(f"GPU {gpu_id} is not available before forcing environment")
-                if not cleanup_first:
-                    GPUHardwareInterface.aggressive_gpu_cleanup(gpu_id)
-                    memory_info = GPUHardwareInterface.check_gpu_memory(gpu_id)
+                if not cleanup_first:  # Try cleanup if we haven't already
+                    EnhancedGPUForcer.aggressive_gpu_cleanup(gpu_id)
+                    memory_info = EnhancedGPUForcer.check_gpu_memory(gpu_id)
                     
                 if not memory_info['is_available']:
                     logger.error(f"GPU {gpu_id} is still not available after cleanup")
@@ -262,11 +458,7 @@ class GPUEnvironmentManager:
     @staticmethod
     def create_conservative_vllm_args(model_name: str, max_tokens: int = 2048):
         """Create very conservative VLLM engine args to avoid OOM"""
-        try:
-            from vllm import AsyncEngineArgs
-        except ImportError:
-            logger.error("vLLM not available")
-            return None
+        from vllm import AsyncEngineArgs
         
         return AsyncEngineArgs(
             model=model_name,
@@ -287,234 +479,31 @@ class GPUEnvironmentManager:
             max_seq_len_to_capture=1024,  # Smaller capture length
         )
 
-# =====================================
-# GPU ALLOCATION STRATEGY - Smart GPU Selection
-# =====================================
-
-class GPUAllocationStrategy:
-    """Handles intelligent GPU allocation decisions"""
-    
-    @staticmethod
-    def find_best_gpu_with_memory(min_free_gb: float = 2.0, exclude_gpu_0: bool = True, 
-                                 allow_sharing: bool = True, prioritize_health: bool = True) -> Optional[int]:
-        """Enhanced GPU finding with health considerations and sharing support"""
-        candidates = []
-        gpu_info = {}
-        
-        # Check all GPUs
-        gpu_range = range(1 if exclude_gpu_0 else 0, 4)
-        
-        for gpu_id in gpu_range:
-            memory_info = GPUHardwareInterface.check_gpu_memory(gpu_id)
-            free_gb = memory_info['free_gb']
-            gpu_info[gpu_id] = memory_info
-            
-            logger.info(f"GPU {gpu_id}: {free_gb:.1f}GB free, {memory_info['gpu_utilization']:.1f}% util, "
-                       f"temp: {memory_info['temperature']:.1f}°C, processes: {len(memory_info['processes'])}, "
-                       f"healthy: {memory_info['is_healthy']}, can_share: {memory_info['can_share']}")
-            
-            # Calculate suitability score
-            score = GPUAllocationStrategy._calculate_gpu_score(
-                memory_info, free_gb, min_free_gb, allow_sharing
-            )
-            
-            if score > 0:
-                candidates.append((gpu_id, score, free_gb, memory_info))
-        
-        # Sort by score (highest first)
-        candidates.sort(key=lambda x: x[1], reverse=True)
-        
-        # Select best candidate that meets minimum requirements
-        for gpu_id, score, free_gb, info in candidates:
-            if free_gb >= min_free_gb:
-                if prioritize_health and not info['is_healthy']:
-                    logger.warning(f"GPU {gpu_id} has best score but is not healthy, checking next...")
-                    continue
-                    
-                logger.info(f"Selected GPU {gpu_id} with score {score:.1f} and {free_gb:.1f}GB free")
-                return gpu_id
-        
-        # If no GPU meets strict requirements, try with relaxed constraints
-        if allow_sharing and min_free_gb > 1.0:
-            logger.warning("No GPU meets strict requirements, trying with relaxed constraints...")
-            return GPUAllocationStrategy.find_best_gpu_with_memory(
-                min_free_gb=max(1.0, min_free_gb * 0.5),
-                exclude_gpu_0=exclude_gpu_0,
-                allow_sharing=True,
-                prioritize_health=False
-            )
-        
-        # Last resort: include GPU 0 if we were excluding it
-        if exclude_gpu_0:
-            logger.warning("No suitable GPU found excluding GPU 0, checking GPU 0 as last resort...")
-            memory_info = GPUHardwareInterface.check_gpu_memory(0)
-            gpu_info[0] = memory_info
-            
-            if memory_info['free_gb'] >= max(0.5, min_free_gb * 0.25):
-                logger.warning(f"Using GPU 0 as last resort with {memory_info['free_gb']:.1f}GB free")
-                return 0
-        
-        logger.error(f"No GPU found with at least {min_free_gb}GB free")
-        return None
-    
-    @staticmethod
-    def _calculate_gpu_score(memory_info: dict, free_gb: float, min_free_gb: float, allow_sharing: bool) -> float:
-        """Calculate suitability score for GPU"""
-        score = 0
-        
-        if memory_info['is_available']:
-            score += 100
-            
-            # Memory score
-            if free_gb >= min_free_gb:
-                score += min(free_gb * 10, 100)
-            
-            # Health score
-            if memory_info['is_healthy']:
-                score += 50
-            
-            # Sharing capability
-            if allow_sharing and memory_info['can_share']:
-                score += 30
-            
-            # Penalize high utilization
-            score -= memory_info['gpu_utilization']
-            
-            # Penalize many processes
-            score -= len(memory_info['processes']) * 10
-            
-            # Temperature penalty
-            if memory_info['temperature'] > 70:
-                score -= (memory_info['temperature'] - 70) * 2
-        
-        return score
-
-# =====================================
-# WORKLOAD MANAGER - Workload Tracking and Management
-# =====================================
-
-class WorkloadManager:
-    """Manages GPU workloads and resource allocation"""
-    
-    def __init__(self):
-        self.gpu_workloads = defaultdict(list)
-        self.workload_history = defaultdict(list)
-        self.performance_metrics = defaultdict(dict)
-        self.lock = threading.Lock()
-    
-    def reserve_gpu_for_workload(self, gpu_id: int, workload_type: str, 
-                                duration_estimate: int = 3600, allow_sharing: bool = True) -> bool:
-        """Reserve GPU for workload"""
-        with self.lock:
-            self.gpu_workloads[gpu_id].append({
-                'workload_type': workload_type,
-                'start_time': time.time(),
-                'estimated_duration': duration_estimate,
-                'allow_sharing': allow_sharing
-            })
-            return True
-    
-    def release_gpu_workload(self, gpu_id: int, workload_type: str):
-        """Release GPU workload"""
-        with self.lock:
-            if gpu_id in self.gpu_workloads:
-                original_count = len(self.gpu_workloads[gpu_id])
-                self.gpu_workloads[gpu_id] = [
-                    w for w in self.gpu_workloads[gpu_id] 
-                    if w.get('workload_type') != workload_type
-                ]
-                released_count = original_count - len(self.gpu_workloads[gpu_id])
-                if released_count > 0:
-                    logger.info(f"Released {released_count} workload(s) of type {workload_type} from GPU {gpu_id}")
-    
-    def cleanup_completed_workloads(self):
-        """Clean up completed workloads"""
-        current_time = time.time()
-        with self.lock:
-            for gpu_id in self.gpu_workloads:
-                original_count = len(self.gpu_workloads[gpu_id])
-                self.gpu_workloads[gpu_id] = [
-                    w for w in self.gpu_workloads[gpu_id]
-                    if current_time - w.get('start_time', 0) < w.get('estimated_duration', 3600)
-                ]
-                cleaned_count = original_count - len(self.gpu_workloads[gpu_id])
-                if cleaned_count > 0:
-                    logger.debug(f"Cleaned up {cleaned_count} completed workloads from GPU {gpu_id}")
-    
-    def get_workload_distribution(self) -> Dict[str, List]:
-        """Get workload distribution across GPUs"""
-        with self.lock:
-            distribution = {}
-            for gpu_id in range(4):  # Assuming 4 GPUs
-                distribution[f"gpu_{gpu_id}"] = self.gpu_workloads.get(gpu_id, [])
-            return distribution
-    
-    def get_gpu_sharing_info(self) -> Dict[str, Any]:
-        """Get GPU sharing information"""
-        sharing_info = {}
-        
-        with self.lock:
-            for gpu_id in range(4):
-                workloads = self.gpu_workloads.get(gpu_id, [])
-                sharing_info[f"gpu_{gpu_id}"] = {
-                    "active_workloads": len(workloads),
-                    "workload_types": [w.get('workload_type', 'unknown') for w in workloads],
-                    "can_share": len(workloads) < 3,
-                    "sharing_capacity": max(0, 3 - len(workloads))
-                }
-        
-        return sharing_info
-
-# =====================================
-# MAIN GPU MANAGER - High-Level Coordination
-# =====================================
-
-class DynamicGPUManager:
-    """Main GPU Manager class that coordinates all GPU operations"""
+class ImprovedDynamicGPUManager(DynamicGPUManager):
+    """Improved GPU Manager with enhanced error recovery and request management"""
     
     def __init__(self, total_gpu_count: int = 4, memory_threshold: float = 0.80, 
                  utilization_threshold: float = 75.0):
-        self.total_gpu_count = total_gpu_count
-        self.memory_threshold = memory_threshold
-        self.utilization_threshold = utilization_threshold
+        super().__init__(total_gpu_count, memory_threshold, utilization_threshold)
         
-        # Components
-        self.workload_manager = WorkloadManager()
-        
-        # GPU state tracking
-        self.gpu_info = {}
-        self.lock = threading.Lock()
-        self.last_refresh = 0
-        self.refresh_interval = 5  # seconds
-        
-        # Error tracking
+        # Enhanced error tracking
         self.gpu_error_counts = defaultdict(int)
         self.gpu_last_errors = {}
         self.recovery_attempts = defaultdict(int)
         
-        # Request management
+        # Request management to prevent flooding
         self.request_semaphores = {}
         self.active_requests = defaultdict(int)
         
-        # Initialize request semaphores
+        # Initialize request semaphores for each GPU
         for gpu_id in range(total_gpu_count):
-            self.request_semaphores[gpu_id] = threading.Semaphore(2)
-        
-        # Initialize GPU info
-        self._update_all_gpu_info()
-    
-    def _update_all_gpu_info(self):
-        """Update GPU information for all GPUs"""
-        try:
-            for gpu_id in range(self.total_gpu_count):
-                self.gpu_info[gpu_id] = self._get_gpu_info(gpu_id)
-        except Exception as e:
-            logger.error(f"Failed to update GPU info: {e}")
+            self.request_semaphores[gpu_id] = threading.Semaphore(2)  # Max 2 concurrent requests per GPU
     
     def _get_gpu_info(self, gpu_id: int) -> GPUInfo:
-        """Get comprehensive GPU information"""
+        """Enhanced GPU info with error tracking"""
         try:
-            info_dict = GPUHardwareInterface.check_gpu_memory(gpu_id)
+            # Use enhanced GPU forcer
+            info_dict = EnhancedGPUForcer.check_gpu_memory(gpu_id)
             
             if 'error' in info_dict:
                 # Handle error state
@@ -541,7 +530,7 @@ class DynamicGPUManager:
                 logger.info(f"GPU {gpu_id} recovered after {self.gpu_error_counts[gpu_id]} errors")
                 self.gpu_error_counts[gpu_id] = 0
             
-            # Determine status
+            # Determine status with error consideration
             if info_dict['gpu_utilization'] > 90:
                 status = GPUStatus.OCCUPIED
             elif info_dict['gpu_utilization'] > 50 or not info_dict['is_available']:
@@ -590,122 +579,147 @@ class DynamicGPUManager:
                               workload_type: str = "unknown", 
                               allow_sharing: bool = True,
                               exclude_gpu_0: bool = True) -> Optional[int]:
-        """Smart GPU allocation with workload awareness"""
+        """Smart GPU allocation with workload awareness and error recovery"""
         
         with self.lock:
-            # Force refresh
+            # Force refresh with error handling
             try:
                 self._update_all_gpu_info()
             except Exception as e:
                 logger.error(f"Failed to update GPU info: {e}")
                 return None
             
-            # Determine memory requirements based on workload type
-            if "llm_engine" in workload_type.lower():
-                min_memory = 3.0
-                allow_sharing = False
-            elif "embedding" in workload_type.lower():
-                min_memory = 1.5
-            elif "analysis" in workload_type.lower():
-                min_memory = 1.0
-            else:
-                min_memory = 2.0
+            # Try enhanced GPU forcer first
+            try:
+                # Determine memory requirements based on workload type
+                if "llm_engine" in workload_type.lower():
+                    min_memory = 3.0  # LLM engines need more memory
+                    allow_sharing = False  # LLM engines prefer exclusive access
+                elif "embedding" in workload_type.lower():
+                    min_memory = 1.5  # Embedding models need moderate memory
+                elif "analysis" in workload_type.lower():
+                    min_memory = 1.0  # Analysis can work with less
+                else:
+                    min_memory = 2.0  # Default requirement
+                
+                best_gpu = EnhancedGPUForcer.find_best_gpu_with_memory(
+                    min_free_gb=min_memory,
+                    exclude_gpu_0=exclude_gpu_0,
+                    allow_sharing=allow_sharing,
+                    prioritize_health=True
+                )
+                
+                if best_gpu is not None:
+                    logger.info(f"Enhanced GPU forcer selected GPU {best_gpu} for {workload_type}")
+                    return best_gpu
+                    
+            except Exception as e:
+                logger.warning(f"Enhanced GPU forcer failed: {e}, falling back to standard method")
             
-            # Use allocation strategy
-            best_gpu = GPUAllocationStrategy.find_best_gpu_with_memory(
-                min_free_gb=min_memory,
-                exclude_gpu_0=exclude_gpu_0,
-                allow_sharing=allow_sharing,
-                prioritize_health=True
-            )
-            
-            if best_gpu is not None:
-                logger.info(f"Smart allocation selected GPU {best_gpu} for {workload_type}")
-                return best_gpu
-            
-            # Fallback logic
-            return self._fallback_allocation(preferred_gpu, allow_sharing)
+            # Fallback to standard method
+            return super().get_available_gpu(preferred_gpu, fallback=True, allow_sharing=allow_sharing)
     
-    def _fallback_allocation(self, preferred_gpu: Optional[int], allow_sharing: bool) -> Optional[int]:
-        """Fallback allocation when smart allocation fails"""
-        # Try preferred GPU if specified
-        if preferred_gpu is not None and self._is_gpu_available(preferred_gpu):
-            return preferred_gpu
-        
-        # Try any available GPU
-        for gpu_id in range(self.total_gpu_count):
-            if self._is_gpu_available(gpu_id):
-                return gpu_id
-        
-        return None
-    
-    def _is_gpu_available(self, gpu_id: int) -> bool:
-        """Check if GPU is available"""
-        gpu_info = self.gpu_info.get(gpu_id)
-        if not gpu_info:
+    def attempt_gpu_recovery(self, gpu_id: int) -> bool:
+        """Attempt to recover a problematic GPU"""
+        if self.recovery_attempts[gpu_id] >= 3:
+            logger.error(f"GPU {gpu_id} recovery limit reached, marking as permanently failed")
             return False
         
-        return (gpu_info.status == GPUStatus.AVAILABLE and 
-                gpu_info.free_memory > 1024 * 1024 * 1024)  # 1GB
-    
-    def get_recommendation(self, workload_type: str) -> Dict[str, Any]:
-        """Get GPU recommendation for specific workload type"""
+        logger.info(f"Attempting recovery for GPU {gpu_id} (attempt {self.recovery_attempts[gpu_id] + 1})")
+        self.recovery_attempts[gpu_id] += 1
+        
         try:
-            # Get current GPU status
-            self._update_all_gpu_info()
+            # Step 1: Aggressive cleanup
+            success = EnhancedGPUForcer.aggressive_gpu_cleanup(gpu_id)
+            if not success:
+                logger.warning(f"Cleanup failed for GPU {gpu_id}")
             
-            # Find best GPU
-            best_gpu = self.get_available_gpu_smart(
-                workload_type=workload_type,
-                allow_sharing="llm_engine" not in workload_type.lower()
-            )
+            # Step 2: Wait for recovery
+            time.sleep(5)
             
-            # Get alternatives
-            alternatives = []
-            for gpu_id in range(self.total_gpu_count):
-                if gpu_id != best_gpu and self._is_gpu_available(gpu_id):
-                    alternatives.append(gpu_id)
-            
-            confidence = 0.8 if best_gpu is not None else 0.1
-            
-            return {
-                "recommended_gpu": best_gpu,
-                "confidence": confidence,
-                "reason": f"Best available GPU for {workload_type}",
-                "alternative_gpus": alternatives[:2],  # Top 2 alternatives
-                "workload_type": workload_type,
-                "expected_performance": "good" if best_gpu is not None else "poor"
-            }
-            
+            # Step 3: Test GPU
+            memory_info = EnhancedGPUForcer.check_gpu_memory(gpu_id)
+            if memory_info['is_available']:
+                logger.info(f"GPU {gpu_id} recovery successful")
+                self.recovery_attempts[gpu_id] = 0  # Reset on successful recovery
+                return True
+            else:
+                logger.warning(f"GPU {gpu_id} recovery failed - still not available")
+                return False
+                
         except Exception as e:
-            logger.error(f"GPU recommendation failed for {workload_type}: {e}")
-            return {
-                "recommended_gpu": None,
-                "confidence": 0.0,
-                "reason": f"Recommendation failed: {str(e)}",
-                "alternative_gpus": [],
-                "workload_type": workload_type,
-                "expected_performance": "unknown",
-                "error": str(e)
+            logger.error(f"GPU {gpu_id} recovery attempt failed: {e}")
+            return False
+    
+    def get_detailed_gpu_report(self) -> Dict[str, Any]:
+        """Get comprehensive GPU status report"""
+        with self.lock:
+            report = {
+                "timestamp": time.time(),
+                "gpus": {},
+                "summary": {
+                    "total_gpus": self.total_gpu_count,
+                    "available_gpus": 0,
+                    "busy_gpus": 0,
+                    "error_gpus": 0,
+                    "recovering_gpus": 0
+                },
+                "workload_distribution": self.get_workload_distribution(),
+                "sharing_info": self.get_gpu_sharing_info()
             }
+            
+            for gpu_id, info in self.gpu_info.items():
+                report["gpus"][f"gpu_{gpu_id}"] = {
+                    "id": gpu_id,
+                    "name": info.name,
+                    "status": info.status.value,
+                    "memory_total_gb": round(info.total_memory / (1024**3), 2),
+                    "memory_free_gb": round(info.free_memory / (1024**3), 2),
+                    "memory_utilization_percent": round((info.used_memory / max(info.total_memory, 1)) * 100, 2),
+                    "gpu_utilization_percent": round(info.utilization, 2),
+                    "temperature_celsius": round(info.temperature, 1),
+                    "process_count": info.process_count,
+                    "error_count": info.error_count,
+                    "last_error": info.last_error,
+                    "last_updated": info.last_updated,
+                    "recovery_attempts": self.recovery_attempts.get(gpu_id, 0),
+                    "active_requests": self.active_requests.get(gpu_id, 0)
+                }
+                
+                # Update summary
+                if info.status == GPUStatus.AVAILABLE:
+                    report["summary"]["available_gpus"] += 1
+                elif info.status == GPUStatus.BUSY:
+                    report["summary"]["busy_gpus"] += 1
+                elif info.status == GPUStatus.ERROR:
+                    report["summary"]["error_gpus"] += 1
+                elif info.status == GPUStatus.RECOVERING:
+                    report["summary"]["recovering_gpus"] += 1
+            
+            return report
     
     def safe_request_gpu(self, gpu_id: int, workload_type: str, timeout: float = 30.0) -> bool:
         """Safely request GPU access with timeout and rate limiting"""
         try:
+            # Get semaphore for this GPU
             semaphore = self.request_semaphores.get(gpu_id)
             if semaphore is None:
                 logger.error(f"No semaphore found for GPU {gpu_id}")
                 return False
             
+            # Try to acquire semaphore with timeout
             acquired = semaphore.acquire(timeout=timeout)
             if not acquired:
                 logger.warning(f"Timeout waiting for GPU {gpu_id} access")
                 return False
             
             try:
+                # Track active request
                 self.active_requests[gpu_id] += 1
-                logger.info(f"Acquired GPU {gpu_id} for {workload_type}")
+                logger.info(f"Acquired GPU {gpu_id} for {workload_type} "
+                           f"({self.active_requests[gpu_id]} active requests)")
                 return True
+                
             except Exception as e:
                 logger.error(f"Error tracking GPU request: {e}")
                 semaphore.release()
@@ -725,441 +739,368 @@ class DynamicGPUManager:
             if gpu_id in self.active_requests:
                 self.active_requests[gpu_id] = max(0, self.active_requests[gpu_id] - 1)
                 
-            logger.info(f"Released GPU {gpu_id} from {workload_type}")
+            logger.info(f"Released GPU {gpu_id} from {workload_type} "
+                       f"({self.active_requests[gpu_id]} remaining requests)")
                        
         except Exception as e:
             logger.error(f"Error releasing GPU {gpu_id}: {e}")
-    
-    def reserve_gpu_for_workload(self, workload_type: str, preferred_gpu: Optional[int] = None,
-                                duration_estimate: int = 3600, allow_sharing: bool = True) -> Optional[int]:
-        """Reserve GPU for workload"""
-        gpu_id = self.get_available_gpu_smart(
-            preferred_gpu, workload_type, allow_sharing
-        )
-        
-        if gpu_id is not None:
-            self.workload_manager.reserve_gpu_for_workload(
-                gpu_id, workload_type, duration_estimate, allow_sharing
-            )
-        return gpu_id
-    
-    def release_gpu_workload(self, gpu_id: int, workload_type: str):
-        """Release GPU workload"""
-        self.workload_manager.release_gpu_workload(gpu_id, workload_type)
-    
-    def force_refresh(self):
-        """Force refresh GPU status"""
-        self._update_all_gpu_info()
-        self.last_refresh = time.time()
-        self.workload_manager.cleanup_completed_workloads()
-    
-    def get_gpu_status_detailed(self) -> Dict[str, Any]:
-        """Get detailed GPU status"""
-        status = {}
-        for gpu_id, info in self.gpu_info.items():
-            status[f"gpu_{gpu_id}"] = {
-                'is_available': info.status == GPUStatus.AVAILABLE,
-                'utilization_percent': info.utilization,
-                'active_workloads': len(self.workload_manager.gpu_workloads.get(gpu_id, [])),
-                'memory_free_gb': info.free_memory / (1024**3),
-                'status': info.status.value,
-                'process_count': info.process_count,
-                'temperature': info.temperature,
-                'error_count': info.error_count,
-                'last_error': info.last_error
-            }
-        return status
-    
-    def get_workload_distribution(self) -> Dict[str, List]:
-        """Get workload distribution across GPUs"""
-        return self.workload_manager.get_workload_distribution()
-    
-    def get_gpu_sharing_info(self) -> Dict[str, Any]:
-        """Get GPU sharing information"""
-        return self.workload_manager.get_gpu_sharing_info()
-    
-    def cleanup_completed_workloads(self):
-        """Clean up completed workloads"""
-        self.workload_manager.cleanup_completed_workloads()
-    
-    def shutdown(self):
-        """Shutdown GPU manager"""
-        self.workload_manager.gpu_workloads.clear()
-        self.gpu_info.clear()
 
-# =====================================
-# SAFE GPU CONTEXT MANAGER
-# =====================================
-
-@contextmanager
-def SafeGPUContext(gpu_manager: DynamicGPUManager, workload_type: str,
-                   preferred_gpu: Optional[int] = None, cleanup_on_exit: bool = True):
+# Context manager for safe GPU usage
+class SafeGPUContext:
     """Context manager for safe GPU allocation and cleanup"""
     
-    allocated_gpu = None
-    request_acquired = False
+    def __init__(self, gpu_manager: ImprovedDynamicGPUManager, workload_type: str,
+                 preferred_gpu: Optional[int] = None, cleanup_on_exit: bool = True):
+        self.gpu_manager = gpu_manager
+        self.workload_type = workload_type
+        self.preferred_gpu = preferred_gpu
+        self.cleanup_on_exit = cleanup_on_exit
+        self.allocated_gpu = None
+        self.request_acquired = False
     
-    try:
-        # Get GPU allocation
-        allocated_gpu = gpu_manager.get_available_gpu_smart(
-            preferred_gpu=preferred_gpu,
-            workload_type=workload_type,
-            allow_sharing="llm_engine" not in workload_type.lower()
-        )
-        
-        if allocated_gpu is None:
-            logger.error(f"No GPU available for {workload_type}")
-            yield None
-            return
-        
-        # Request safe access
-        request_acquired = gpu_manager.safe_request_gpu(
-            allocated_gpu, workload_type
-        )
-        
-        if not request_acquired:
-            logger.error(f"Failed to acquire safe access to GPU {allocated_gpu}")
-            allocated_gpu = None
-            yield None
-            return
-        
-        # Force GPU environment
-        success = GPUEnvironmentManager.safe_force_gpu_environment(
-            allocated_gpu, 
-            cleanup_first=True,
-            verify_success=True
-        )
-        
-        if not success:
-            logger.error(f"Failed to force GPU environment for GPU {allocated_gpu}")
-            gpu_manager.release_gpu_request(allocated_gpu, workload_type)
-            allocated_gpu = None
-            yield None
-            return
-        
-        logger.info(f"Successfully allocated GPU {allocated_gpu} for {workload_type}")
-        yield allocated_gpu
-        
-    except Exception as e:
-        logger.error(f"GPU context setup failed: {e}")
-        yield None
-    
-    finally:
+    def __enter__(self) -> Optional[int]:
         try:
-            if allocated_gpu is not None:
-                if cleanup_on_exit:
-                    logger.info(f"Cleaning up GPU {allocated_gpu}")
-                    GPUHardwareInterface.aggressive_gpu_cleanup(allocated_gpu)
+            # Get GPU allocation
+            self.allocated_gpu = self.gpu_manager.get_available_gpu_smart(
+                preferred_gpu=self.preferred_gpu,
+                workload_type=self.workload_type,
+                allow_sharing="llm_engine" not in self.workload_type.lower()
+            )
+            
+            if self.allocated_gpu is None:
+                logger.error(f"No GPU available for {self.workload_type}")
+                return None
+            
+            # Request safe access
+            self.request_acquired = self.gpu_manager.safe_request_gpu(
+                self.allocated_gpu, self.workload_type
+            )
+            
+            if not self.request_acquired:
+                logger.error(f"Failed to acquire safe access to GPU {self.allocated_gpu}")
+                self.allocated_gpu = None
+                return None
+            
+            # Force GPU environment
+            success = EnhancedGPUForcer.safe_force_gpu_environment(
+                self.allocated_gpu, 
+                cleanup_first=True,
+                verify_success=True
+            )
+            
+            if not success:
+                logger.error(f"Failed to force GPU environment for GPU {self.allocated_gpu}")
+                self.gpu_manager.release_gpu_request(self.allocated_gpu, self.workload_type)
+                self.allocated_gpu = None
+                self.request_acquired = False
+                return None
+            
+            logger.info(f"Successfully allocated GPU {self.allocated_gpu} for {self.workload_type}")
+            return self.allocated_gpu
+            
+        except Exception as e:
+            logger.error(f"GPU context setup failed: {e}")
+            return None
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            if self.allocated_gpu is not None:
+                if self.cleanup_on_exit:
+                    logger.info(f"Cleaning up GPU {self.allocated_gpu}")
+                    EnhancedGPUForcer.aggressive_gpu_cleanup(self.allocated_gpu)
                 
-                if request_acquired:
-                    gpu_manager.release_gpu_request(allocated_gpu, workload_type)
+                if self.request_acquired:
+                    self.gpu_manager.release_gpu_request(self.allocated_gpu, self.workload_type)
                 
-                logger.info(f"Released GPU {allocated_gpu} from {workload_type}")
+                logger.info(f"Released GPU {self.allocated_gpu} from {self.workload_type}")
                 
         except Exception as e:
             logger.error(f"GPU context cleanup failed: {e}")
 
-# =====================================
-# RECOVERY AND MONITORING UTILITIES
-# =====================================
-
-class GPURecoveryManager:
-    """Handles GPU error recovery and system restoration"""
-    
-    @staticmethod
-    def recover_from_gpu_errors() -> Dict[str, Any]:
-        """Recover from common GPU errors"""
-        logger.info("Starting GPU error recovery process...")
-        recovery_results = {}
-        
-        try:
-            # Check all GPUs
-            logger.info("Step 1: Checking all GPU states")
-            gpu_states = {}
-            
-            for gpu_id in range(4):
-                try:
-                    memory_info = GPUHardwareInterface.check_gpu_memory(gpu_id)
-                    gpu_states[gpu_id] = memory_info
-                    logger.info(f"GPU {gpu_id}: {memory_info['free_gb']:.1f}GB free, "
-                               f"healthy: {memory_info.get('is_healthy', False)}")
-                except Exception as e:
-                    logger.error(f"GPU {gpu_id} check failed: {e}")
-                    gpu_states[gpu_id] = {'error': str(e)}
-            
-            # Cleanup problematic GPUs
-            logger.info("Step 2: Cleaning up problematic GPUs")
-            for gpu_id, state in gpu_states.items():
-                if 'error' in state or not state.get('is_healthy', False):
-                    logger.info(f"Attempting recovery for GPU {gpu_id}")
-                    success = GPUHardwareInterface.aggressive_gpu_cleanup(gpu_id)
-                    recovery_results[gpu_id] = {
-                        'attempted': True,
-                        'success': success,
-                        'initial_state': state
-                    }
-                    
-                    if success:
-                        logger.info(f"✅ GPU {gpu_id} recovery successful")
-                    else:
-                        logger.warning(f"❌ GPU {gpu_id} recovery failed")
-                else:
-                    recovery_results[gpu_id] = {
-                        'attempted': False,
-                        'reason': 'GPU appears healthy'
-                    }
-            
-            # Verify recovery
-            logger.info("Step 3: Verifying recovery")
-            recovered_count = 0
-            for gpu_id in range(4):
-                try:
-                    memory_info = GPUHardwareInterface.check_gpu_memory(gpu_id)
-                    if memory_info.get('is_available', False):
-                        recovered_count += 1
-                        logger.info(f"✅ GPU {gpu_id} is now available")
-                        if gpu_id in recovery_results:
-                            recovery_results[gpu_id]['final_state'] = 'available'
-                    else:
-                        logger.warning(f"❌ GPU {gpu_id} still not available")
-                        if gpu_id in recovery_results:
-                            recovery_results[gpu_id]['final_state'] = 'unavailable'
-                except Exception as e:
-                    logger.error(f"GPU {gpu_id} verification failed: {e}")
-                    if gpu_id in recovery_results:
-                        recovery_results[gpu_id]['final_state'] = 'error'
-            
-            logger.info(f"Recovery complete: {recovered_count}/4 GPUs available")
-            
-            return {
-                'status': 'completed',
-                'recovered_gpus': recovered_count,
-                'total_gpus': 4,
-                'recovery_details': recovery_results,
-                'success_rate': recovered_count / 4
-            }
-            
-        except Exception as e:
-            logger.error(f"GPU recovery process failed: {e}")
-            return {
-                'status': 'error',
-                'error': str(e),
-                'recovery_details': recovery_results
-            }
-
-class GPUMonitor:
-    """Continuous GPU monitoring service"""
-    
-    def __init__(self, gpu_manager: DynamicGPUManager, interval: int = 30):
-        self.gpu_manager = gpu_manager
-        self.interval = interval
-        self.monitoring = False
-        self.monitor_thread = None
-    
-    def start_monitoring(self):
-        """Start continuous GPU monitoring"""
-        if self.monitoring:
-            logger.warning("GPU monitoring already running")
-            return
-        
-        self.monitoring = True
-        self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
-        self.monitor_thread.start()
-        logger.info(f"Started GPU monitoring with {self.interval}s interval")
-    
-    def stop_monitoring(self):
-        """Stop GPU monitoring"""
-        self.monitoring = False
-        if self.monitor_thread:
-            self.monitor_thread.join(timeout=5)
-        logger.info("Stopped GPU monitoring")
-    
-    def _monitor_loop(self):
-        """Main monitoring loop"""
-        while self.monitoring:
-            try:
-                self._perform_health_check()
-                time.sleep(self.interval)
-            except Exception as e:
-                logger.error(f"Monitoring loop error: {e}")
-                time.sleep(self.interval)
-    
-    def _perform_health_check(self):
-        """Perform health check on all GPUs"""
-        try:
-            logger.debug("=== GPU Health Check ===")
-            
-            # Force refresh GPU status
-            self.gpu_manager.force_refresh()
-            
-            # Get detailed status
-            gpu_status = self.gpu_manager.get_gpu_status_detailed()
-            
-            critical_issues = []
-            warnings = []
-            
-            for gpu_name, status in gpu_status.items():
-                gpu_id = int(gpu_name.split('_')[1])
-                
-                # Check for critical issues
-                if status['error_count'] > 5:
-                    critical_issues.append(f"GPU {gpu_id} has {status['error_count']} errors")
-                
-                if status['temperature'] > 85:
-                    critical_issues.append(f"GPU {gpu_id} overheating: {status['temperature']:.1f}°C")
-                
-                # Check for warnings
-                if status['utilization_percent'] > 95:
-                    warnings.append(f"GPU {gpu_id} high utilization: {status['utilization_percent']:.1f}%")
-                
-                if status['memory_free_gb'] < 0.5:
-                    warnings.append(f"GPU {gpu_id} low memory: {status['memory_free_gb']:.1f}GB free")
-                
-                logger.debug(f"GPU {gpu_id}: {status['memory_free_gb']:.1f}GB free, "
-                            f"{status['utilization_percent']:.1f}% util, "
-                            f"temp: {status['temperature']:.1f}°C, "
-                            f"errors: {status['error_count']}")
-            
-            # Report issues
-            if critical_issues:
-                logger.error("🚨 CRITICAL GPU ISSUES:")
-                for issue in critical_issues:
-                    logger.error(f"  - {issue}")
-            
-            if warnings:
-                logger.warning("⚠️ GPU WARNINGS:")
-                for warning in warnings:
-                    logger.warning(f"  - {warning}")
-            
-            if not critical_issues and not warnings:
-                logger.debug("✅ All GPUs healthy")
-                
-        except Exception as e:
-            logger.error(f"Health check failed: {e}")
-
-# =====================================
-# TESTING AND UTILITY FUNCTIONS
-# =====================================
-
-def test_gpu_manager():
-    """Test the GPU manager functionality"""
-    print("🚀 Testing Dynamic GPU Manager")
+# Usage example and testing functions
+def test_enhanced_gpu_manager():
+    """Test the enhanced GPU manager"""
+    print("Testing Enhanced GPU Manager")
     print("=" * 50)
     
     # Create manager
-    manager = DynamicGPUManager()
+    manager = ImprovedDynamicGPUManager()
     
-    # Test GPU status
-    print("\n📊 GPU Status:")
-    status = manager.get_gpu_status_detailed()
-    for gpu_name, gpu_info in status.items():
+    # Wait for initial GPU scan
+    time.sleep(2)
+    
+    # Get detailed report
+    report = manager.get_detailed_gpu_report()
+    
+    print("GPU Status Report:")
+    for gpu_name, gpu_info in report["gpus"].items():
         print(f"{gpu_name}: {gpu_info['status']}, "
               f"{gpu_info['memory_free_gb']:.1f}GB free, "
-              f"{gpu_info['utilization_percent']:.1f}% util")
+              f"{gpu_info['gpu_utilization_percent']:.1f}% util, "
+              f"errors: {gpu_info['error_count']}")
+    
+    print(f"\nSummary: {report['summary']['available_gpus']} available, "
+          f"{report['summary']['busy_gpus']} busy, "
+          f"{report['summary']['error_gpus']} error")
     
     # Test GPU allocation
-    print("\n🔧 Testing GPU Allocation:")
+    print("\nTesting GPU allocation...")
+    
+    # Test with context manager
     with SafeGPUContext(manager, "test_workload") as gpu_id:
         if gpu_id is not None:
             print(f"✅ Successfully allocated GPU {gpu_id}")
             
             # Test memory check
-            memory_info = GPUHardwareInterface.check_gpu_memory(gpu_id)
+            memory_info = EnhancedGPUForcer.check_gpu_memory(gpu_id)
             print(f"GPU {gpu_id} memory: {memory_info['free_gb']:.1f}GB free")
         else:
             print("❌ Failed to allocate GPU")
     
-    # Test recommendations
-    print("\n💡 Testing Recommendations:")
-    for workload in ["llm_engine", "embedding", "analysis"]:
-        rec = manager.get_recommendation(workload)
-        print(f"{workload}: GPU {rec['recommended_gpu']} (confidence: {rec['confidence']:.1f})")
-    
     # Cleanup
     manager.shutdown()
-    print("\n✅ GPU manager test completed")
+    print("✅ GPU manager test completed")
 
-def start_gpu_monitoring(gpu_manager: DynamicGPUManager, interval: int = 30) -> GPUMonitor:
-    """Start GPU monitoring service"""
-    monitor = GPUMonitor(gpu_manager, interval)
-    monitor.start_monitoring()
-    return monitor
-
-# =====================================
-# MAIN EXPORT CLASS - Simplified Interface
-# =====================================
-
-class ImprovedDynamicGPUManager(DynamicGPUManager):
-    """Main export class with simplified interface for backward compatibility"""
+# Integration functions for the coordinator
+async def integrate_with_coordinator(coordinator):
+    """Integrate enhanced GPU manager with coordinator"""
     
-    def __init__(self, total_gpu_count: int = 4, memory_threshold: float = 0.80, 
-                 utilization_threshold: float = 75.0):
-        super().__init__(total_gpu_count, memory_threshold, utilization_threshold)
+    # Replace coordinator's GPU manager
+    coordinator.gpu_manager = ImprovedDynamicGPUManager()
+    
+    # Update coordinator's get_available_gpu_for_agent method
+    async def enhanced_get_available_gpu_for_agent(self, agent_type: str, 
+                                                  preferred_gpu: Optional[int] = None) -> Optional[int]:
+        """Enhanced GPU allocation for agents"""
         
-        # Additional convenience methods for backward compatibility
-        self.recovery_manager = GPURecoveryManager()
-        self.monitor = None
-    
-    def start_monitoring(self, interval: int = 30):
-        """Start GPU monitoring"""
-        if self.monitor is None:
-            self.monitor = GPUMonitor(self, interval)
-            self.monitor.start_monitoring()
-    
-    def stop_monitoring(self):
-        """Stop GPU monitoring"""
-        if self.monitor:
-            self.monitor.stop_monitoring()
-            self.monitor = None
-    
-    def emergency_recovery(self) -> Dict[str, Any]:
-        """Perform emergency GPU recovery"""
-        return self.recovery_manager.recover_from_gpu_errors()
-    
-    def get_available_gpu(self, preferred_gpu: Optional[int] = None, 
-                         fallback: bool = True, allow_sharing: bool = False) -> Optional[int]:
-        """Backward compatibility method"""
-        return self.get_available_gpu_smart(
+        # Force refresh GPU status
+        self.gpu_manager.force_refresh()
+        
+        # Check for existing engines that can be shared
+        existing_engines = list(self.llm_engine_pool.keys())
+        if existing_engines and "llm" not in agent_type.lower():
+            for engine_key in existing_engines:
+                gpu_id = int(engine_key.split('_')[1])
+                
+                try:
+                    memory_info = EnhancedGPUForcer.check_gpu_memory(gpu_id)
+                    if memory_info.get('can_share', False):
+                        self.logger.info(f"Sharing existing LLM engine on GPU {gpu_id} for {agent_type}")
+                        return gpu_id
+                except Exception as e:
+                    self.logger.warning(f"Error checking GPU {gpu_id} for sharing: {e}")
+                    continue
+        
+        # Use smart GPU allocation
+        best_gpu = self.gpu_manager.get_available_gpu_smart(
             preferred_gpu=preferred_gpu,
-            workload_type="general",
-            allow_sharing=allow_sharing,
-            exclude_gpu_0=True
+            workload_type=agent_type,
+            allow_sharing="llm_engine" not in agent_type.lower(),
+            exclude_gpu_0=True  # Prefer to avoid GPU 0
         )
+        
+        if best_gpu is not None:
+            self.logger.info(f"Allocated GPU {best_gpu} for {agent_type}")
+            return best_gpu
+        
+        # Last resort: try any GPU including GPU 0
+        best_gpu = self.gpu_manager.get_available_gpu_smart(
+            preferred_gpu=None,
+            workload_type=agent_type,
+            allow_sharing=True,
+            exclude_gpu_0=False
+        )
+        
+        if best_gpu is not None:
+            self.logger.warning(f"Using GPU {best_gpu} for {agent_type} as last resort")
+            return best_gpu
+        
+        self.logger.error(f"No GPU available for {agent_type}")
+        return None
+    
+    # Replace method on coordinator instance
+    coordinator.get_available_gpu_for_agent = enhanced_get_available_gpu_for_agent.__get__(coordinator)
+    
+    # Update LLM engine creation method
+    async def enhanced_get_or_create_llm_engine(self, gpu_id: int, force_reload: bool = False):
+        """Enhanced LLM engine creation with improved memory management"""
+        async with self.engine_lock:
+            engine_key = f"gpu_{gpu_id}"
+            
+            # Return existing engine if available and not forcing reload
+            if engine_key in self.llm_engine_pool and not force_reload:
+                self.logger.info(f"Reusing existing LLM engine on GPU {gpu_id}")
+                return self.llm_engine_pool[engine_key]
+            
+            # Use safe GPU context for engine creation
+            with SafeGPUContext(self.gpu_manager, f"llm_engine_{engine_key}", 
+                              preferred_gpu=gpu_id, cleanup_on_exit=False) as allocated_gpu:
+                
+                if allocated_gpu != gpu_id:
+                    if allocated_gpu is None:
+                        raise RuntimeError(f"Failed to allocate GPU {gpu_id} for LLM engine")
+                    else:
+                        self.logger.warning(f"GPU {gpu_id} not available, using GPU {allocated_gpu} instead")
+                        gpu_id = allocated_gpu
+                        engine_key = f"gpu_{gpu_id}"
+                
+                try:
+                    # Check final memory state
+                    memory_info = EnhancedGPUForcer.check_gpu_memory(gpu_id)
+                    free_gb = memory_info['free_gb']
+                    
+                    if free_gb < 1.5:
+                        raise RuntimeError(f"Insufficient memory on GPU {gpu_id}: {free_gb:.1f}GB free")
+                    
+                    self.logger.info(f"Creating LLM engine on GPU {gpu_id} with {free_gb:.1f}GB available")
+                    
+                    # Create conservative engine args
+                    engine_args = EnhancedGPUForcer.create_conservative_vllm_args(
+                        self.config.model_name,
+                        self.config.max_tokens
+                    )
+                    
+                    # Create engine
+                    from vllm import AsyncLLMEngine
+                    engine = AsyncLLMEngine.from_engine_args(engine_args)
+                    
+                    self.llm_engine_pool[engine_key] = engine
+                    
+                    # Reserve GPU in manager
+                    self.gpu_manager.reserve_gpu_for_workload(
+                        workload_type=f"llm_engine_{engine_key}",
+                        preferred_gpu=gpu_id,
+                        duration_estimate=3600,
+                        allow_sharing=True
+                    )
+                    
+                    # Verify final state
+                    final_memory = EnhancedGPUForcer.check_gpu_memory(gpu_id)
+                    used_gb = free_gb - final_memory['free_gb']
+                    
+                    self.logger.info(f"✅ LLM engine created on GPU {gpu_id}. "
+                                   f"Used {used_gb:.1f}GB, {final_memory['free_gb']:.1f}GB remaining")
+                    
+                    return engine
+                    
+                except Exception as e:
+                    self.logger.error(f"Failed to create LLM engine on GPU {gpu_id}: {e}")
+                    
+                    # Cleanup on failure
+                    if engine_key in self.llm_engine_pool:
+                        del self.llm_engine_pool[engine_key]
+                    
+                    # Release GPU workload
+                    try:
+                        self.gpu_manager.release_gpu_workload(gpu_id, f"llm_engine_{engine_key}")
+                    except:
+                        pass
+                    
+                    # Perform cleanup
+                    EnhancedGPUForcer.aggressive_gpu_cleanup(gpu_id)
+                    
+                    raise
+    
+    # Replace method on coordinator instance
+    coordinator.get_or_create_llm_engine = enhanced_get_or_create_llm_engine.__get__(coordinator)
+    
+    coordinator.logger.info("Enhanced GPU manager integrated with coordinator")
 
-# =====================================
-# CONVENIENCE FUNCTIONS
-# =====================================
+# Error recovery functions
+def recover_from_gpu_errors():
+    """Recover from common GPU errors"""
+    logger.info("Starting GPU error recovery process...")
+    
+    try:
+        # Step 1: Check all GPUs
+        logger.info("Step 1: Checking all GPU states")
+        gpu_states = {}
+        
+        for gpu_id in range(4):
+            try:
+                memory_info = EnhancedGPUForcer.check_gpu_memory(gpu_id)
+                gpu_states[gpu_id] = memory_info
+                logger.info(f"GPU {gpu_id}: {memory_info['free_gb']:.1f}GB free, "
+                           f"healthy: {memory_info.get('is_healthy', False)}")
+            except Exception as e:
+                logger.error(f"GPU {gpu_id} check failed: {e}")
+                gpu_states[gpu_id] = {'error': str(e)}
+        
+        # Step 2: Cleanup problematic GPUs
+        logger.info("Step 2: Cleaning up problematic GPUs")
+        for gpu_id, state in gpu_states.items():
+            if 'error' in state or not state.get('is_healthy', False):
+                logger.info(f"Attempting recovery for GPU {gpu_id}")
+                success = EnhancedGPUForcer.aggressive_gpu_cleanup(gpu_id)
+                if success:
+                    logger.info(f"✅ GPU {gpu_id} recovery successful")
+                else:
+                    logger.warning(f"❌ GPU {gpu_id} recovery failed")
+        
+        # Step 3: Verify recovery
+        logger.info("Step 3: Verifying recovery")
+        recovered_count = 0
+        for gpu_id in range(4):
+            try:
+                memory_info = EnhancedGPUForcer.check_gpu_memory(gpu_id)
+                if memory_info.get('is_available', False):
+                    recovered_count += 1
+                    logger.info(f"✅ GPU {gpu_id} is now available")
+                else:
+                    logger.warning(f"❌ GPU {gpu_id} still not available")
+            except Exception as e:
+                logger.error(f"GPU {gpu_id} verification failed: {e}")
+        
+        logger.info(f"Recovery complete: {recovered_count}/4 GPUs available")
+        return recovered_count > 0
+        
+    except Exception as e:
+        logger.error(f"GPU recovery process failed: {e}")
+        return False
 
-def create_gpu_manager(total_gpus: int = 4) -> ImprovedDynamicGPUManager:
-    """Create a GPU manager with default settings"""
-    return ImprovedDynamicGPUManager(total_gpu_count=total_gpus)
-
-def check_all_gpus() -> Dict[int, Dict[str, Any]]:
-    """Quick check of all GPU statuses"""
-    results = {}
-    for gpu_id in range(4):
-        results[gpu_id] = GPUHardwareInterface.check_gpu_memory(gpu_id)
-    return results
-
-def find_best_gpu(min_memory_gb: float = 2.0) -> Optional[int]:
-    """Find the best available GPU"""
-    return GPUAllocationStrategy.find_best_gpu_with_memory(min_memory_gb)
-
-def cleanup_gpu(gpu_id: int) -> bool:
-    """Clean up a specific GPU"""
-    return GPUHardwareInterface.aggressive_gpu_cleanup(gpu_id)
-
-def force_gpu_environment(gpu_id: int) -> bool:
-    """Force GPU environment for specific GPU"""
-    return GPUEnvironmentManager.safe_force_gpu_environment(gpu_id)
+# Monitoring functions
+def start_gpu_monitoring(interval: int = 30):
+    """Start continuous GPU monitoring"""
+    import threading
+    
+    def monitor_loop():
+        while True:
+            try:
+                logger.info("=== GPU Monitoring Report ===")
+                
+                for gpu_id in range(4):
+                    try:
+                        memory_info = EnhancedGPUForcer.check_gpu_memory(gpu_id)
+                        logger.info(f"GPU {gpu_id}: {memory_info['free_gb']:.1f}GB free, "
+                                   f"{memory_info['gpu_utilization']:.1f}% util, "
+                                   f"{memory_info['temperature']:.1f}°C, "
+                                   f"processes: {len(memory_info['processes'])}")
+                    except Exception as e:
+                        logger.error(f"GPU {gpu_id} monitoring failed: {e}")
+                
+                time.sleep(interval)
+                
+            except Exception as e:
+                logger.error(f"Monitoring loop error: {e}")
+                time.sleep(interval)
+    
+    monitor_thread = threading.Thread(target=monitor_loop, daemon=True, name="GPU_Monitor")
+    monitor_thread.start()
+    logger.info(f"Started GPU monitoring with {interval}s interval")
 
 if __name__ == "__main__":
-    # Run tests if script is executed directly
+    # Test the enhanced GPU manager
     logging.basicConfig(level=logging.INFO)
-    test_gpu_manager()
     
-    # Test recovery
-    print("\n🔧 Testing GPU Recovery:")
-    recovery_result = GPURecoveryManager.recover_from_gpu_errors()
-    print(f"Recovery completed: {recovery_result['status']}")
-    print(f"Success rate: {recovery_result.get('success_rate', 0):.1%}")
+    print("🚀 Testing Enhanced GPU Manager")
+    test_enhanced_gpu_manager()
+    
+    print("\n🔧 Testing GPU Error Recovery")
+    recover_from_gpu_errors()
+    
+    print("\n📊 Starting GPU Monitoring (Ctrl+C to stop)")
+    try:
+        start_gpu_monitoring(10)
+        time.sleep(60)  # Monitor for 1 minute
+    except KeyboardInterrupt:
+        print("\n✅ Monitoring stopped")
