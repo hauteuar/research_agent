@@ -22,6 +22,7 @@ from contextlib import asynccontextmanager
 import streamlit as st
 import torch
 from vllm import AsyncLLMEngine, AsyncEngineArgs, SamplingParams
+
 import faiss
 import chromadb
 import pandas as pd
@@ -36,41 +37,10 @@ from agents.logic_analyzer_agent import LogicAnalyzerAgent
 from agents.documentation_agent import DocumentationAgent
 from agents.db2_comparator_agent import DB2ComparatorAgent
 from utils.gpu_manager import ImprovedDynamicGPUManager, SafeGPUContext, GPUHardwareInterface, GPUEnvironmentManager
-from utils.config_manager import ConfigManager, GPUConfig, SystemConfig, AgentConfig
-def _ensure_airgap_environment(self):
-    """Ensure no external connections are possible"""
-    import os
-    import socket
-    
-    # Set environment variables to disable external connections
-    os.environ.update({
-        'NO_PROXY': '*',
-        'DISABLE_TELEMETRY': '1',
-        'TOKENIZERS_PARALLELISM': 'false',
-        'TRANSFORMERS_OFFLINE': '1',
-        'HF_HUB_OFFLINE': '1',
-        'REQUESTS_CA_BUNDLE': '',
-        'CURL_CA_BUNDLE': '',
-        'SSL_VERIFY': 'false',
-        'PYTHONHTTPSVERIFY': '0'
-    })
-    
-    # Block socket connections
-    original_socket = socket.socket
-    def blocked_socket(*args, **kwargs):
-        raise OSError("Network connections disabled in airgap mode")
-    socket.socket = blocked_socket
-    
-    # Block requests library
-    try:
-        import requests
-        def blocked_request(*args, **kwargs):
-            raise requests.exceptions.ConnectionError("External connections disabled")
-        requests.request = blocked_request
-        requests.get = blocked_request
-        requests.post = blocked_request
-    except ImportError:
-        pass
+from utils.config_manager import ConfigManager, GPUConfig, SystemConfig
+from utils.cache_manager import CacheManager
+
+
 
 @dataclass
 class OpulenceConfig:
@@ -122,9 +92,9 @@ class DynamicOpulenceCoordinator:
         self._last_request_time = 0
         self._min_request_interval = 0.5
         self._active_llm_requests = 0
-        
-        
-        
+        cache_ttl = self.config_manager.get("system.cache_ttl", 3600)
+        self.cache_manager = CacheManager(cache_ttl)
+               
         
         # Initialize SQLite database
         self.db_path = "opulence_data.db"
@@ -1365,7 +1335,11 @@ class DynamicOpulenceCoordinator:
             self.logger.info(f"Starting analysis for component: {component_name}, type: {component_type}")
             
             # Check cache first
-            
+            cache_key = f"analyze_{component_name}_{component_type}"
+            cached_result = self.cache_manager.get(cache_key)
+            if cached_result:
+                self.logger.info(f"Returning cached result for {component_name}")
+                return cached_result
             
             # Determine component type if not specified
             if not component_type:
@@ -1436,7 +1410,7 @@ class DynamicOpulenceCoordinator:
             analysis_result["status"] = "completed"
             
             # Cache the result
-            
+            self.cache_manager.set(cache_key, analysis_result)
             
             processing_time = time.time() - start_time
             self.logger.info(f"Component analysis completed for {component_name} in {processing_time:.2f}s")
