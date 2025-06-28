@@ -159,18 +159,34 @@ class VectorIndexAgent:
         try:
             # Try new API first (with request_id)
             request_id = str(uuid.uuid4())
-            result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
-            return result.outputs[0].text.strip()
+            async_generator = self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
+            
+            # Properly handle the async generator
+            async for result in async_generator:
+                return result.outputs[0].text.strip()
+                
         except TypeError as e:
             if "request_id" in str(e):
                 # Fallback to old API (without request_id)
-                result = await self.llm_engine.generate(prompt, sampling_params)
-                return result.outputs[0].text.strip()
+                async_generator = self.llm_engine.generate(prompt, sampling_params)
+                async for result in async_generator:
+                    return result.outputs[0].text.strip()
             else:
                 raise e
         except Exception as e:
             self.logger.error(f"LLM generation failed: {str(e)}")
             return ""
+    
+    def safe_json_loads(json_str):
+        """Safely load JSON string with fallback"""
+        if not json_str:
+            return {}
+        try:
+            if isinstance(json_str, dict):
+                return json_str
+            return json.loads(json_str)
+        except (json.JSONDecodeError, TypeError):
+            return {}
 
     async def _ensure_llm_engine(self):
         """Ensure LLM engine is available - use coordinator first, fallback to own"""

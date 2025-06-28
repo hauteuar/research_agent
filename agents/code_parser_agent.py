@@ -432,13 +432,19 @@ class CompleteEnhancedCodeParserAgent:
         try:
             # Try new API first (with request_id)
             request_id = str(uuid.uuid4())
-            result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
-            return result.outputs[0].text.strip()
+            async_generator = self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
+            async for result in async_generator:
+                return result.outputs[0].text.strip()
+            #result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
+            #return result.outputs[0].text.strip()
         except TypeError as e:
             if "request_id" in str(e):
                 # Fallback to old API (without request_id)
-                result = await self.llm_engine.generate(prompt, sampling_params)
-                return result.outputs[0].text.strip()
+                async_generator = self.llm_engine.generate(prompt, sampling_params)
+                async for result in async_generator:
+                    return result.outputs[0].text.strip()
+                #result = await self.llm_engine.generate(prompt, sampling_params)
+                #return result.outputs[0].text.strip()
             else:
                 raise e
         except Exception as e:
@@ -459,6 +465,8 @@ class CompleteEnhancedCodeParserAgent:
                 return job_match.group(1).strip()
             
             # Fallback to filename
+            if isinstance(file_path, str):
+                file_path = Path(file_path)
             filename = file_path.name
             
             # Remove common extensions
@@ -472,6 +480,8 @@ class CompleteEnhancedCodeParserAgent:
         except Exception as e:
             self.logger.error(f"Error extracting program name: {str(e)}")
             # Ultimate fallback
+            if isinstance(file_path, (str, Path)):
+                return Path(file_path).stem or "UNKNOWN_PROGRAM"
             return file_path.stem or "UNKNOWN_PROGRAM"
         
     def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
@@ -494,7 +504,7 @@ class CompleteEnhancedCodeParserAgent:
             if not file_path.exists():
                 return self._add_processing_info({
                     "status": "error",
-                    "file_name": file_path.name,
+                    "file_name": str(file_path.name),
                     "error": "File not found"
                 })
             
@@ -521,7 +531,7 @@ class CompleteEnhancedCodeParserAgent:
             if not content.strip():
                 return self._add_processing_info({
                     "status": "error",
-                    "file_name": file_path.name,
+                    "file_name": str(file_path.name),
                     "error": "File is empty"
                 })
 
@@ -529,7 +539,7 @@ class CompleteEnhancedCodeParserAgent:
             if self._is_duplicate_file(file_path, content):
                 return self._add_processing_info({
                     "status": "skipped",
-                    "file_name": file_path.name,
+                    "file_name": str(file_path.name),
                     "message": "File already processed (duplicate detected)"
                 })
             
@@ -538,24 +548,24 @@ class CompleteEnhancedCodeParserAgent:
             
             # Parse based on file type
             if file_type == 'cobol':
-                chunks = await self._parse_cobol_complete(content, file_path.name)
+                chunks = await self._parse_cobol_complete(content, str(file_path.name))
             elif file_type == 'jcl':
-                chunks = await self._parse_jcl_complete(content, file_path.name)
+                chunks = await self._parse_jcl_complete(content, str(file_path.name))
             elif file_type == 'copybook':
-                chunks = await self._parse_copybook_complete(content, file_path.name)
+                chunks = await self._parse_copybook_complete(content, str(file_path.name))
             elif file_type == 'bms':
-                chunks = await self._parse_bms_complete(content, file_path.name)
+                chunks = await self._parse_bms_complete(content, str(file_path.name))
             elif file_type == 'cics':
-                chunks = await self._parse_cics_complete(content, file_path.name)
+                chunks = await self._parse_cics_complete(content, str(file_path.name))
             else:
-                chunks = await self._parse_generic(content, file_path.name)
+                chunks = await self._parse_generic(content, str(file_path.name))
             
             self.logger.info(f"Generated {len(chunks)} chunks")
             
             if not chunks:
                 return self._add_processing_info({
                     "status": "warning",
-                    "file_name": file_path.name,
+                    "file_name": str(file_path.name),
                     "file_type": file_type,
                     "chunks_created": 0,
                     "message": "No chunks were created from this file"
@@ -565,20 +575,10 @@ class CompleteEnhancedCodeParserAgent:
             file_hash = self._generate_file_hash(content, file_path)
             for chunk in chunks:
                 chunk.metadata['file_hash'] = file_hash
+            await self._store_chunks_enhanced(chunks, file_hash)
             # After generating chunks, before storing:
 # Convert CodeChunk objects to tuples for vector agent compatibility
-            chunk_tuples = []
-            for chunk in chunks:
-                    chunk_tuple = (
-                        0,  # chunk_id (will be auto-generated)
-                        chunk.program_name,
-                        chunk.chunk_id,
-                        chunk.chunk_type,
-                        chunk.content,
-                        json.dumps(chunk.metadata)
-                    )
-                    chunk_tuples.append(chunk_tuple)
-
+            
                 # Store chunks with verification
             await self._store_chunks_enhanced(chunks, file_hash)
             
@@ -593,7 +593,7 @@ class CompleteEnhancedCodeParserAgent:
             
             result = {
                 "status": "success",
-                "file_name": file_path.name,
+                "file_name": str(file_path.name),
                 "file_type": file_type,
                 "chunks_created": len(chunks),
                 "chunks_verified": stored_chunks,
@@ -3162,11 +3162,19 @@ class CompleteEnhancedCodeParserAgent:
                 
                     for chunk in chunks:
                         try:
+                            # Ensure all values are properly converted to strings/appropriate types
+                            program_name = str(chunk.program_name)
+                            chunk_id = str(chunk.chunk_id)
+                            chunk_type = str(chunk.chunk_type)
+                            content = str(chunk.content)
+                            metadata_json = json.dumps(chunk.metadata) if chunk.metadata else "{}"
+                            embedding_id = hashlib.md5(content.encode()).hexdigest()
+                            
                             # Check for existing chunk with same ID
                             cursor.execute("""
                             SELECT id FROM program_chunks 
                             WHERE program_name = ? AND chunk_id = ?
-                            """, (chunk.program_name, chunk.chunk_id))
+                            """, (program_name, chunk_id))
                         
                             existing = cursor.fetchone()
                         
@@ -3178,33 +3186,33 @@ class CompleteEnhancedCodeParserAgent:
                                     line_start = ?, line_end = ?, created_timestamp = CURRENT_TIMESTAMP
                                     WHERE id = ?
                                 """, (
-                                    chunk.content,
-                                    json.dumps(chunk.metadata),
-                                    file_hash,
-                                    chunk.line_start,
-                                    chunk.line_end,
+                                    content,
+                                    metadata_json,
+                                    str(file_hash),
+                                    int(chunk.line_start),
+                                    int(chunk.line_end),
                                     existing[0]
                                 ))
-                                self.logger.debug(f"Updated existing chunk: {chunk.chunk_id}")
+                                self.logger.debug(f"Updated existing chunk: {chunk_id}")
                             else:
                             # Insert new chunk
                                 cursor.execute("""
                                     INSERT INTO program_chunks 
                                     (program_name, chunk_id, chunk_type, content, metadata, 
-                                     embedding_id, file_hash, line_start, line_end)
+                                    embedding_id, file_hash, line_start, line_end)
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 """, (
-                                    chunk.program_name,
-                                    chunk.chunk_id,
-                                    chunk.chunk_type,
-                                    chunk.content,
-                                    json.dumps(chunk.metadata),
-                                    hashlib.md5(chunk.content.encode()).hexdigest(),
-                                    file_hash,
-                                    chunk.line_start,
-                                    chunk.line_end
+                                    program_name,
+                                    chunk_id,
+                                    chunk_type,
+                                    content,
+                                    metadata_json,
+                                    embedding_id,
+                                    str(file_hash),
+                                    int(chunk.line_start),
+                                    int(chunk.line_end)
                                 ))
-                                self.logger.debug(f"Inserted new chunk: {chunk.chunk_id}")
+                                self.logger.debug(f"Inserted new chunk: {chunk_id}")
                         
                             stored_count += 1
                         
@@ -3226,10 +3234,6 @@ class CompleteEnhancedCodeParserAgent:
         except Exception as e:
             self.logger.error(f"Database operation failed: {str(e)}")
             raise e
-            
-        finally:
-            if 'conn' in locals():
-                conn.close()
 
     async def _verify_chunks_stored(self, program_name: str) -> int:
         """Verify chunks were stored"""
@@ -3437,39 +3441,50 @@ class CompleteEnhancedCodeParserAgent:
         
         return min(score, 100)  # Cap at 100
     
-    async def _generate_field_lineage(self, program_name: str, chunks: List[Dict]) -> List[Dict]:
+    async def _generate_field_lineage(self, program_name: str, chunks: List) -> List[Dict]:
         """Generate field lineage data from parsed chunks"""
         lineage_records = []
         
         for chunk in chunks:
-            if isinstance(chunk, CodeChunk):
-                content = chunk.content
-                metadata = chunk.metadata
-                chunk_id = chunk.chunk_id
-            else:  # It's a dictionary
-                content = chunk.get('content', '')
-                metadata = chunk.get('metadata', {})
-                chunk_id = chunk.get('chunk_id', '')
-                    
-            # Extract field operations from content
-            field_operations = self._extract_field_operations(content)
-            
-            for field_op in field_operations:
-                lineage_record = {
-                    'field_name': field_op['field_name'],
-                    'program_name': program_name,
-                    'paragraph': chunk_id,
-                    'operation': field_op['operation'],
-                    'source_file': field_op.get('source_file', ''),
-                    'last_used': datetime.now().isoformat(),
-                    'read_in': program_name if field_op['operation'] == 'READ' else '',
-                    'updated_in': program_name if field_op['operation'] in ['WRITE', 'UPDATE'] else '',
-                    'purged_in': program_name if field_op['operation'] == 'DELETE' else ''
-                }
-                lineage_records.append(lineage_record)
+            try:
+                if isinstance(chunk, CodeChunk):
+                    content = chunk.content
+                    metadata = chunk.metadata or {}
+                    chunk_id = chunk.chunk_id
+                elif isinstance(chunk, dict):
+                    content = chunk.get('content', '')
+                    metadata = chunk.get('metadata', {})
+                    chunk_id = chunk.get('chunk_id', '')
+                else:  # It's a tuple or other format
+                    # Handle tuple format safely
+                    if len(chunk) >= 5:
+                        content = str(chunk[4]) if chunk[4] else ''
+                        metadata = {}
+                        chunk_id = str(chunk[2]) if chunk[2] else ''
+                    else:
+                        continue  # Skip malformed chunk
+                        
+                # Extract field operations from content
+                field_operations = self._extract_field_operations(content)
+                
+                for field_op in field_operations:
+                    lineage_record = {
+                        'field_name': str(field_op.get('field_name', '')),
+                        'program_name': str(program_name),
+                        'paragraph': str(chunk_id),
+                        'operation': str(field_op.get('operation', '')),
+                        'source_file': str(field_op.get('source_file', '')),
+                        'last_used': datetime.now().isoformat(),
+                        'read_in': str(program_name) if field_op.get('operation') == 'READ' else '',
+                        'updated_in': str(program_name) if field_op.get('operation') in ['WRITE', 'UPDATE'] else '',
+                        'purged_in': str(program_name) if field_op.get('operation') == 'DELETE' else ''
+                    }
+                    lineage_records.append(lineage_record)
+            except Exception as e:
+                self.logger.error(f"Error processing chunk for lineage: {str(e)}")
+                continue
         
         return lineage_records
-
     def _extract_field_operations(self, content: str) -> List[Dict]:
         """Extract field operations from COBOL content"""
         operations = []
