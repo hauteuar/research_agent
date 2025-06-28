@@ -20,6 +20,8 @@ import traceback
 import sys
 import os
 import shutil
+import sqlite3
+import traceback
 
 # Set page config FIRST - before any other Streamlit commands
 st.set_page_config(

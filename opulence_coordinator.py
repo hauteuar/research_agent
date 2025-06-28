@@ -1181,104 +1181,284 @@ class DynamicOpulenceCoordinator:
         """
 
     async def analyze_component(self, component_name: str, component_type: str = None, 
-                          preferred_gpu: Optional[int] = None) -> Dict[str, Any]:
-        """Enhanced component analysis with better error handling"""
+                            preferred_gpu: Optional[int] = None) -> Dict[str, Any]:
+        """Enhanced component analysis with detailed logging and debugging"""
         start_time = time.time()
         
         try:
-            self.logger.info(f"Starting analysis for component: {component_name}, type: {component_type}")
+            self.logger.info(f"🔍 Starting analysis for component: {component_name}, type: {component_type}")
             
-            # Check cache first
-            cache_key = f"analyze_{component_name}_{component_type}"
-            cached_result = self.cache_manager.get(cache_key)
-            if cached_result:
-                self.logger.info(f"Returning cached result for {component_name}")
-                return cached_result
+            # STEP 1: Verify database connection and data
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
             
-            # Determine component type if not specified
-            if not component_type:
-                component_type = await self._determine_component_type(component_name, preferred_gpu)
-                self.logger.info(f"Determined component type: {component_type}")
+            # Check if component exists in database
+            cursor.execute("""
+                SELECT COUNT(*) FROM program_chunks 
+                WHERE program_name = ? OR program_name LIKE ?
+            """, (component_name, f"%{component_name}%"))
             
+            chunk_count = cursor.fetchone()[0]
+            self.logger.info(f"📊 Found {chunk_count} chunks for {component_name}")
+            
+            # Get available tables for debugging
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [row[0] for row in cursor.fetchall()]
+            
+            if chunk_count == 0:
+                # Try content search as fallback
+                cursor.execute("""
+                    SELECT COUNT(*) FROM program_chunks 
+                    WHERE content LIKE ? OR metadata LIKE ?
+                """, (f"%{component_name}%", f"%{component_name}%"))
+                
+                content_matches = cursor.fetchone()[0]
+                self.logger.info(f"📊 Found {content_matches} content matches for {component_name}")
+                
+                if content_matches == 0:
+                    conn.close()
+                    return {
+                        "component_name": component_name,
+                        "component_type": component_type or "unknown",
+                        "status": "error",
+                        "error": f"Component '{component_name}' not found in database",
+                        "suggestion": "Check component name spelling or ensure files were processed",
+                        "debug_info": {
+                            "available_tables": tables,
+                            "chunk_count": chunk_count,
+                            "content_matches": content_matches
+                        }
+                    }
+            
+            conn.close()
+            
+            # STEP 2: Determine component type with database-first approach
+            if not component_type or component_type == "auto-detect":
+                component_type = await self._determine_component_type_fixed(component_name, preferred_gpu)
+                self.logger.info(f"🎯 Determined component type: {component_type}")
+            
+            # STEP 3: Initialize analysis result
             analysis_result = {
                 "component_name": component_name,
                 "component_type": component_type,
-                "status": "processing"
+                "status": "processing",
+                "chunks_found": chunk_count,
+                "timestamp": datetime.now().isoformat(),
+                "debug_info": {
+                    "available_tables": tables,
+                    "chunk_count": chunk_count,
+                    "determined_type": component_type
+                }
             }
             
-            try:
-                # Semantic search with better error handling
-                async with self.get_agent_with_gpu("vector_index", preferred_gpu) as (vector_agent, gpu_id):
-                    try:
-                        semantic_results = await vector_agent.search_similar_components(component_name)
-                        analysis_result["semantic_search"] = semantic_results
-                        analysis_result["vector_gpu_used"] = gpu_id
-                        self.logger.info(f"Semantic search completed for {component_name}")
-                    except Exception as e:
-                        self.logger.error(f"Semantic search failed: {e}")
-                        analysis_result["semantic_search"] = {"error": str(e)}
-            except Exception as e:
-                self.logger.error(f"Vector agent allocation failed: {e}")
-                analysis_result["semantic_search"] = {"error": "Vector agent unavailable"}
+            # STEP 4: Component-specific analysis with proper error handling
+            analysis_success = False
             
-            # Component-specific analysis with fallbacks
-            if component_type in ["file", "table"]:
+            if component_type in ["field"]:
                 try:
-                    async with self.get_agent_with_gpu("lineage_analyzer", preferred_gpu) as (lineage_agent, gpu1):
+                    self.logger.info(f"🔧 Starting lineage analysis for field {component_name}")
+                    async with self.get_agent_with_gpu("lineage_analyzer", preferred_gpu) as (lineage_agent, gpu_id):
                         lineage_result = await lineage_agent.analyze_field_lineage(component_name)
                         analysis_result["lineage"] = lineage_result
-                        self.logger.info(f"Lineage analysis completed for {component_name}")
+                        analysis_result["lineage_gpu_used"] = gpu_id
+                        analysis_success = True
+                        self.logger.info(f"✅ Lineage analysis completed: {lineage_result.get('status', 'unknown')}")
                 except Exception as e:
-                    self.logger.error(f"Lineage analysis failed: {e}")
-                    analysis_result["lineage"] = {"error": str(e)}
-                
-                try:
-                    async with self.get_agent_with_gpu("data_loader", preferred_gpu) as (data_agent, gpu2):
-                        data_result = await data_agent.get_component_info(component_name)
-                        analysis_result["data_info"] = data_result
-                        self.logger.info(f"Data info completed for {component_name}")
-                except Exception as e:
-                    self.logger.error(f"Data info failed: {e}")
-                    analysis_result["data_info"] = {"error": str(e)}
+                    self.logger.error(f"❌ Lineage analysis failed: {e}")
+                    analysis_result["lineage"] = {"error": str(e), "status": "error"}
             
             elif component_type in ["program", "cobol"]:
                 try:
+                    self.logger.info(f"🔧 Starting logic analysis for program {component_name}")
                     async with self.get_agent_with_gpu("logic_analyzer", preferred_gpu) as (logic_agent, gpu_id):
                         logic_result = await logic_agent.analyze_program(component_name)
                         analysis_result["logic_analysis"] = logic_result
-                        self.logger.info(f"Logic analysis completed for {component_name}")
+                        analysis_result["logic_gpu_used"] = gpu_id
+                        analysis_success = True
+                        self.logger.info(f"✅ Logic analysis completed: {logic_result.get('status', 'unknown')}")
                 except Exception as e:
-                    self.logger.error(f"Logic analysis failed: {e}")
-                    analysis_result["logic_analysis"] = {"error": str(e)}
+                    self.logger.error(f"❌ Logic analysis failed: {e}")
+                    analysis_result["logic_analysis"] = {"error": str(e), "status": "error"}
             
-            # Always try to provide some basic info from database
-            if not any(key in analysis_result for key in ["lineage", "data_info", "logic_analysis"]):
+            elif component_type in ["jcl"]:
                 try:
-                    basic_info = await self._get_basic_component_info(component_name)
-                    analysis_result["basic_info"] = basic_info
-                    self.logger.info(f"Basic info retrieved for {component_name}")
+                    self.logger.info(f"🔧 Starting JCL analysis for {component_name}")
+                    async with self.get_agent_with_gpu("lineage_analyzer", preferred_gpu) as (lineage_agent, gpu_id):
+                        jcl_result = await lineage_agent.analyze_full_lifecycle(component_name, "jcl")
+                        analysis_result["jcl_analysis"] = jcl_result
+                        analysis_result["jcl_gpu_used"] = gpu_id
+                        analysis_success = True
+                        self.logger.info(f"✅ JCL analysis completed: {jcl_result.get('status', 'unknown')}")
                 except Exception as e:
-                    self.logger.error(f"Basic info failed: {e}")
-                    analysis_result["basic_info"] = {"error": str(e)}
+                    self.logger.error(f"❌ JCL analysis failed: {e}")
+                    analysis_result["jcl_analysis"] = {"error": str(e), "status": "error"}
             
-            analysis_result["status"] = "completed"
+            # STEP 5: Always try semantic search for additional context
+            try:
+                self.logger.info(f"🔧 Starting semantic search for {component_name}")
+                async with self.get_agent_with_gpu("vector_index", preferred_gpu) as (vector_agent, gpu_id):
+                    semantic_results = await vector_agent.search_similar_components(component_name)
+                    analysis_result["semantic_search"] = semantic_results
+                    analysis_result["vector_gpu_used"] = gpu_id
+                    self.logger.info(f"✅ Semantic search completed")
+            except Exception as e:
+                self.logger.error(f"❌ Semantic search failed: {e}")
+                analysis_result["semantic_search"] = {"error": str(e), "status": "error"}
             
-            # Cache the result
-            self.cache_manager.set(cache_key, analysis_result)
+            # STEP 6: Always provide basic database info
+            try:
+                basic_info = await self._get_basic_component_info_fixed(component_name)
+                analysis_result["basic_info"] = basic_info
+                self.logger.info(f"✅ Basic info retrieved")
+            except Exception as e:
+                self.logger.error(f"❌ Basic info failed: {e}")
+                analysis_result["basic_info"] = {"error": str(e)}
             
-            processing_time = time.time() - start_time
-            self.logger.info(f"Component analysis completed for {component_name} in {processing_time:.2f}s")
+            # STEP 7: Finalize result
+            analysis_result["status"] = "completed" if analysis_success else "partial"
+            analysis_result["processing_time"] = time.time() - start_time
             
+            self.logger.info(f"🎯 Component analysis completed for {component_name}")
             return analysis_result
             
         except Exception as e:
-            self.logger.error(f"Component analysis failed for {component_name}: {str(e)}")
+            self.logger.error(f"❌ Component analysis failed for {component_name}: {str(e)}")
             return {
                 "component_name": component_name,
                 "component_type": component_type or "unknown",
                 "status": "error",
-                "error": str(e)
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+                "processing_time": time.time() - start_time
             }
+
+    # 4. FIX: Add the helper methods to opulence_coordinator.py
+
+    async def _determine_component_type_fixed(self, component_name: str, preferred_gpu: Optional[int] = None) -> str:
+        """Fixed component type determination with database-first approach"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            self.logger.info(f"🔍 Determining type for {component_name}")
+            
+            # Check in program_chunks for exact match
+            cursor.execute("""
+                SELECT chunk_type, COUNT(*) as count 
+                FROM program_chunks 
+                WHERE program_name = ?
+                GROUP BY chunk_type
+                ORDER BY count DESC
+            """, (component_name,))
+            
+            chunk_types = cursor.fetchall()
+            
+            if chunk_types:
+                # Determine type based on chunk types found
+                dominant_chunk_type = chunk_types[0][0]  # Most common chunk type
+                
+                # Map chunk types to component types
+                if any('job' in ct.lower() for ct, _ in chunk_types):
+                    conn.close()
+                    self.logger.info(f"🎯 Determined type: jcl (found job chunks)")
+                    return "jcl"
+                elif any(ct in ['working_storage', 'procedure_division', 'data_division'] for ct, _ in chunk_types):
+                    conn.close()
+                    self.logger.info(f"🎯 Determined type: program (found COBOL chunks)")
+                    return "program"
+                else:
+                    conn.close()
+                    self.logger.info(f"🎯 Determined type: program (found code chunks)")
+                    return "program"
+            
+            # If no exact program match, check if it might be a field
+            cursor.execute("""
+                SELECT COUNT(*) FROM program_chunks
+                WHERE content LIKE ? OR metadata LIKE ?
+                LIMIT 1
+            """, (f"%{component_name}%", f"%{component_name}%"))
+            
+            content_matches = cursor.fetchone()[0]
+            
+            if content_matches > 0:
+                # Check if it looks like a field name (all uppercase, contains underscore, etc.)
+                if (component_name.isupper() and 
+                    ('_' in component_name or len(component_name) <= 20)):
+                    conn.close()
+                    self.logger.info(f"🎯 Determined type: field (found in content, looks like field)")
+                    return "field"
+            
+            conn.close()
+            
+            # Default to program if found in database but type unclear
+            self.logger.info(f"🎯 Determined type: program (default)")
+            return "program"
+            
+        except Exception as e:
+            self.logger.error(f"❌ Component type determination failed: {e}")
+            conn.close()
+            return "program"  # Safe default
+
+    async def _get_basic_component_info_fixed(self, component_name: str) -> Dict[str, Any]:
+        """Get basic component info with better error handling"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Check program_chunks
+            cursor.execute("""
+                SELECT chunk_type, chunk_id, 
+                    LENGTH(content) as content_length,
+                    CASE WHEN metadata IS NOT NULL THEN 1 ELSE 0 END as has_metadata
+                FROM program_chunks 
+                WHERE program_name = ? OR program_name LIKE ?
+                ORDER BY chunk_id
+            """, (component_name, f"%{component_name}%"))
+            
+            chunk_info = cursor.fetchall()
+            
+            # Summarize chunk info
+            chunk_summary = {}
+            total_content = 0
+            metadata_count = 0
+            
+            for chunk_type, chunk_id, content_length, has_metadata in chunk_info:
+                if chunk_type not in chunk_summary:
+                    chunk_summary[chunk_type] = 0
+                chunk_summary[chunk_type] += 1
+                total_content += content_length or 0
+                metadata_count += has_metadata
+            
+            # Check file_metadata if available
+            file_info = []
+            try:
+                cursor.execute("""
+                    SELECT file_name, file_type, table_name 
+                    FROM file_metadata 
+                    WHERE file_name LIKE ? OR table_name LIKE ?
+                """, (f"%{component_name}%", f"%{component_name}%"))
+                
+                file_info = cursor.fetchall()
+            except sqlite3.OperationalError:
+                # Table doesn't exist
+                pass
+            
+            conn.close()
+            
+            return {
+                "chunk_summary": chunk_summary,
+                "total_chunks": len(chunk_info),
+                "total_content_length": total_content,
+                "chunks_with_metadata": metadata_count,
+                "file_info": file_info,
+                "found_in_chunks": len(chunk_info) > 0,
+                "found_in_files": len(file_info) > 0,
+                "analysis_timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Basic component info failed: {e}")
+            return {"error": str(e)}
 
     async def _get_basic_component_info(self, component_name: str) -> Dict[str, Any]:
         """Get basic component info directly from database"""
