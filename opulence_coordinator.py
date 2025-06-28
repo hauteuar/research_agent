@@ -683,6 +683,7 @@ class DynamicOpulenceCoordinator:
                 "overall_health": "error",
                 "error": str(e),
                 "timestamp": datetime.now().isoformat()
+            }
                 
     async def reload_model_on_gpu(self, gpu_id: int) -> bool:
         """Force reload model on specific GPU"""
