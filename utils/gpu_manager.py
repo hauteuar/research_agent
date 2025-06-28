@@ -35,6 +35,126 @@ class GPUInfo:
     last_updated: float
     error_count: int = 0
     last_error: str = ""
+import threading
+from typing import Optional, Dict, Any, List
+from collections import defaultdict
+
+class DynamicGPUManager:
+    """Base Dynamic GPU Manager class"""
+    
+    def __init__(self, total_gpu_count: int = 4, memory_threshold: float = 0.80, 
+                 utilization_threshold: float = 75.0):
+        self.total_gpu_count = total_gpu_count
+        self.memory_threshold = memory_threshold
+        self.utilization_threshold = utilization_threshold
+        
+        # Initialize attributes that are referenced in subclass
+        self.gpu_info = {}
+        self.gpu_workloads = defaultdict(list)
+        self.lock = threading.Lock()
+        self.last_refresh = 0
+        self.refresh_interval = 5  # seconds
+        
+        # Initialize GPU info
+        self._update_all_gpu_info()
+    
+    def _update_all_gpu_info(self):
+        """Update GPU information for all GPUs"""
+        try:
+            for gpu_id in range(self.total_gpu_count):
+                self.gpu_info[gpu_id] = self._get_gpu_info(gpu_id)
+        except Exception as e:
+            logging.error(f"Failed to update GPU info: {e}")
+    
+    def _get_gpu_info(self, gpu_id: int):
+        """Get GPU information (to be implemented by subclass)"""
+        # Basic implementation - subclass should override
+        return {
+            'gpu_id': gpu_id,
+            'available': True,
+            'utilization': 0,
+            'memory_free': 8000,  # 8GB default
+            'workloads': []
+        }
+    
+    def get_available_gpu(self, preferred_gpu: Optional[int] = None, 
+                         fallback: bool = True, allow_sharing: bool = False) -> Optional[int]:
+        """Get available GPU - basic implementation"""
+        with self.lock:
+            # Try preferred GPU first
+            if preferred_gpu is not None and self._is_gpu_available(preferred_gpu):
+                return preferred_gpu
+            
+            # Find any available GPU
+            for gpu_id in range(self.total_gpu_count):
+                if self._is_gpu_available(gpu_id):
+                    return gpu_id
+            
+            return None
+    
+    def _is_gpu_available(self, gpu_id: int) -> bool:
+        """Check if GPU is available"""
+        gpu_info = self.gpu_info.get(gpu_id, {})
+        return gpu_info.get('available', False)
+    
+    def force_refresh(self):
+        """Force refresh GPU status"""
+        self._update_all_gpu_info()
+        self.last_refresh = time.time()
+    
+    def get_gpu_status_detailed(self) -> Dict[str, Any]:
+        """Get detailed GPU status"""
+        status = {}
+        for gpu_id, info in self.gpu_info.items():
+            status[f"gpu_{gpu_id}"] = {
+                'is_available': info.get('available', False),
+                'utilization_percent': info.get('utilization', 0),
+                'active_workloads': len(info.get('workloads', [])),
+                'memory_free_gb': info.get('memory_free', 0) / 1024,
+                'status': 'available' if info.get('available') else 'busy'
+            }
+        return status
+    
+    def get_workload_distribution(self) -> Dict[str, List]:
+        """Get workload distribution across GPUs"""
+        distribution = {}
+        for gpu_id in range(self.total_gpu_count):
+            distribution[f"gpu_{gpu_id}"] = self.gpu_workloads.get(gpu_id, [])
+        return distribution
+    
+    def reserve_gpu_for_workload(self, workload_type: str, preferred_gpu: Optional[int] = None,
+                                duration_estimate: int = 3600, allow_sharing: bool = True) -> Optional[int]:
+        """Reserve GPU for workload"""
+        gpu_id = self.get_available_gpu(preferred_gpu, fallback=True, allow_sharing=allow_sharing)
+        if gpu_id is not None:
+            self.gpu_workloads[gpu_id].append({
+                'workload_type': workload_type,
+                'start_time': time.time(),
+                'estimated_duration': duration_estimate
+            })
+        return gpu_id
+    
+    def release_gpu_workload(self, gpu_id: int, workload_type: str):
+        """Release GPU workload"""
+        if gpu_id in self.gpu_workloads:
+            self.gpu_workloads[gpu_id] = [
+                w for w in self.gpu_workloads[gpu_id] 
+                if w.get('workload_type') != workload_type
+            ]
+    
+    def cleanup_completed_workloads(self):
+        """Clean up completed workloads"""
+        current_time = time.time()
+        for gpu_id in self.gpu_workloads:
+            self.gpu_workloads[gpu_id] = [
+                w for w in self.gpu_workloads[gpu_id]
+                if current_time - w.get('start_time', 0) < w.get('estimated_duration', 3600)
+            ]
+    
+    def shutdown(self):
+        """Shutdown GPU manager"""
+        self.gpu_workloads.clear()
+
 
 class EnhancedGPUForcer:
     """Enhanced GPU forcing with better error handling and memory management"""

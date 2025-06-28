@@ -19,8 +19,217 @@ import logging
 import torch
 from vllm import AsyncLLMEngine, SamplingParams
 
-def _ensure_airgap_environment(self):
-    """Ensure no external connections are possible"""
+
+
+@dataclass
+class CodeChunk:
+    """Represents a parsed code chunk"""
+    program_name: str
+    chunk_id: str
+    chunk_type: str  # paragraph, perform, job_step, proc, sql_block, section, cics_command
+    content: str
+    metadata: Dict[str, Any]
+    line_start: int
+    line_end: int
+
+class CompleteEnhancedCodeParserAgent:
+    def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
+                 gpu_id: int = None, coordinator=None, enable_llm: bool = True, 
+                 conservative_mode: bool = False):
+        """Initialize the Enhanced Code Parser Agent"""
+        
+        # Core attributes
+        self.llm_engine = llm_engine
+        self.db_path = db_path or "opulence_data.db"
+        self.gpu_id = gpu_id
+        self.coordinator = coordinator
+        self.enable_llm = enable_llm
+        self.conservative_mode = conservative_mode
+        
+        # Initialize logger
+        self.logger = logging.getLogger(__name__)
+        
+        # Error tracking attributes (these were referenced but not initialized)
+        self.error_count = 0
+        self.last_error = ""
+        self._llm_available = llm_engine is not None
+        self._initialized = False
+        
+        # Thread safety attributes
+        self._engine_lock = asyncio.Lock()
+        self._engine_created = False
+        self._using_coordinator_llm = False
+        self._processed_files = set()
+        self._request_semaphore = asyncio.Semaphore(1)
+        self._last_request_time = 0
+        self._min_request_interval = 1.0
+        
+        # Processing statistics
+        self.processing_stats = {
+            "files_processed": 0,
+            "chunks_created": 0,
+            "errors_encountered": 0,
+            "llm_calls_made": 0,
+            "fallback_used": 0
+        }
+        
+        # Initialize patterns (these were used but not initialized)
+        self._init_patterns()
+        
+        # Initialize database and connections
+        self._init_database()
+        self._disable_external_connections()
+        
+        # Mark as initialized
+        self._initialized = True
+        self.logger.info(f"CompleteEnhancedCodeParserAgent initialized on GPU {gpu_id}")
+    
+    def _init_patterns(self):
+        """Initialize all regex patterns"""
+        # COBOL PATTERNS - Add the patterns that were defined in your original code
+        self.cobol_patterns = {
+            'program_id': re.compile(r'PROGRAM-ID\s*\.\s*([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
+            'author': re.compile(r'AUTHOR\s*\.\s*(.*?)\.', re.IGNORECASE | re.DOTALL),
+            'date_written': re.compile(r'DATE-WRITTEN\s*\.\s*(.*?)\.', re.IGNORECASE),
+            'date_compiled': re.compile(r'DATE-COMPILED\s*\.\s*(.*?)\.', re.IGNORECASE),
+            'identification_division': re.compile(r'IDENTIFICATION\s+DIVISION', re.IGNORECASE),
+            'environment_division': re.compile(r'ENVIRONMENT\s+DIVISION', re.IGNORECASE),
+            'data_division': re.compile(r'DATA\s+DIVISION', re.IGNORECASE),
+            'procedure_division': re.compile(r'PROCEDURE\s+DIVISION', re.IGNORECASE),
+            'working_storage': re.compile(r'WORKING-STORAGE\s+SECTION', re.IGNORECASE),
+            'file_section': re.compile(r'FILE\s+SECTION', re.IGNORECASE),
+            'linkage_section': re.compile(r'LINKAGE\s+SECTION', re.IGNORECASE),
+            'local_storage': re.compile(r'LOCAL-STORAGE\s+SECTION', re.IGNORECASE),
+            'section': re.compile(r'^([A-Z0-9][A-Z0-9-]*)\s+SECTION\s*\.\s*$', re.MULTILINE),
+            'paragraph': re.compile(r'^([A-Z0-9][A-Z0-9-]*)\s*\.\s*$', re.MULTILINE),
+            'perform': re.compile(r'PERFORM\s+([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
+            'perform_until': re.compile(r'PERFORM\s+.*?\s+UNTIL\s+(.*?)(?=\s+|$)', re.IGNORECASE | re.DOTALL),
+            'perform_varying': re.compile(r'PERFORM\s+.*?\s+VARYING\s+(.*?)(?=\s+|$)', re.IGNORECASE | re.DOTALL),
+            'perform_thru': re.compile(r'PERFORM\s+([A-Z0-9][A-Z0-9-]*)\s+(?:THROUGH|THRU)\s+([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
+            'if_statement': re.compile(r'IF\s+(.*?)(?=\s+THEN|\s|$)', re.IGNORECASE),
+            'evaluate': re.compile(r'EVALUATE\s+(.*?)(?=\s|$)', re.IGNORECASE),
+            'when_clause': re.compile(r'WHEN\s+([^\.]+)', re.IGNORECASE),
+            'when_other': re.compile(r'WHEN\s+OTHER', re.IGNORECASE),
+            'end_if': re.compile(r'END-IF', re.IGNORECASE),
+            'end_evaluate': re.compile(r'END-EVALUATE', re.IGNORECASE),
+            'data_item': re.compile(r'^(\s*)(\d+)\s+([A-Z][A-Z0-9-]*)\s+(.*?)\.?\s*$', re.MULTILINE),
+            'pic_clause': re.compile(r'PIC(?:TURE)?\s+([X9AV\(\)S\+\-\.,/]+)', re.IGNORECASE),
+            'usage_clause': re.compile(r'USAGE\s+(?:IS\s+)?(COMP(?:-[0-9])?|BINARY|DISPLAY|PACKED-DECIMAL|INDEX)', re.IGNORECASE),
+            'value_clause': re.compile(r'VALUE\s+(?:IS\s+)?([\'"][^\']*[\'"]|\S+)', re.IGNORECASE),
+            'occurs_clause': re.compile(r'OCCURS\s+(\d+)(?:\s+TO\s+(\d+))?\s+TIMES', re.IGNORECASE),
+            'redefines': re.compile(r'REDEFINES\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'depending_on': re.compile(r'DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'indexed_by': re.compile(r'INDEXED\s+BY\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'file_control': re.compile(r'FILE-CONTROL\s*\.', re.IGNORECASE),
+            'select_statement': re.compile(r'SELECT\s+([A-Z][A-Z0-9-]*)\s+ASSIGN\s+TO\s+([^\s\.]+)', re.IGNORECASE),
+            'fd_statement': re.compile(r'FD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'open_statement': re.compile(r'OPEN\s+(INPUT|OUTPUT|I-O|EXTEND)\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'close_statement': re.compile(r'CLOSE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'read_statement': re.compile(r'READ\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'write_statement': re.compile(r'WRITE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'rewrite_statement': re.compile(r'REWRITE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'delete_statement': re.compile(r'DELETE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_block': re.compile(r'EXEC\s+SQL(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
+            'sql_include': re.compile(r'EXEC\s+SQL\s+INCLUDE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_declare': re.compile(r'EXEC\s+SQL\s+DECLARE\s+(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
+            'sql_whenever': re.compile(r'EXEC\s+SQL\s+WHENEVER\s+(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
+            'copy_statement': re.compile(r'COPY\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'copy_replacing': re.compile(r'COPY\s+([A-Z][A-Z0-9-]*)\s+REPLACING\s+(.*?)\.', re.IGNORECASE | re.DOTALL),
+            'copy_in': re.compile(r'COPY\s+([A-Z][A-Z0-9-]*)\s+IN\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'add_statement': re.compile(r'ADD\s+(.*?)\s+TO\s+(.*?)(?=\s|$)', re.IGNORECASE),
+            'subtract_statement': re.compile(r'SUBTRACT\s+(.*?)\s+FROM\s+(.*?)(?=\s|$)', re.IGNORECASE),
+            'multiply_statement': re.compile(r'MULTIPLY\s+(.*?)\s+BY\s+(.*?)(?=\s|$)', re.IGNORECASE),
+            'divide_statement': re.compile(r'DIVIDE\s+(.*?)\s+(?:BY|INTO)\s+(.*?)(?=\s|$)', re.IGNORECASE),
+            'compute_statement': re.compile(r'COMPUTE\s+(.*?)\s*=\s*(.*?)(?=\s|$)', re.IGNORECASE),
+            'move_statement': re.compile(r'MOVE\s+(.*?)\s+TO\s+(.*?)(?=\s|$)', re.IGNORECASE),
+            'string_statement': re.compile(r'STRING\s+(.*?)(?=\s+END-STRING|$)', re.IGNORECASE | re.DOTALL),
+            'unstring_statement': re.compile(r'UNSTRING\s+(.*?)(?=\s+END-UNSTRING|$)', re.IGNORECASE | re.DOTALL),
+            'inspect_statement': re.compile(r'INSPECT\s+(.*?)(?=\s|$)', re.IGNORECASE),
+            'call_statement': re.compile(r'CALL\s+([\'"]?[A-Z0-9][A-Z0-9-]*[\'"]?)', re.IGNORECASE),
+            'invoke_statement': re.compile(r'INVOKE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'on_size_error': re.compile(r'ON\s+SIZE\s+ERROR', re.IGNORECASE),
+            'not_on_size_error': re.compile(r'NOT\s+ON\s+SIZE\s+ERROR', re.IGNORECASE),
+            'at_end': re.compile(r'AT\s+END', re.IGNORECASE),
+            'not_at_end': re.compile(r'NOT\s+AT\s+END', re.IGNORECASE),
+            'invalid_key': re.compile(r'INVALID\s+KEY', re.IGNORECASE),
+            'not_invalid_key': re.compile(r'NOT\s+INVALID\s+KEY', re.IGNORECASE),
+            'cics_transaction_flow': re.compile(r'EXEC\s+CICS\s+(SEND|RECEIVE|RETURN)', re.IGNORECASE),
+            'cics_error_handling': re.compile(r'EXEC\s+CICS\s+HANDLE\s+(CONDITION|AID|ABEND)', re.IGNORECASE),
+        }
+        
+        # JCL PATTERNS
+        self.jcl_patterns = {
+            'job_card': re.compile(r'^//(\S+)\s+JOB\s+', re.MULTILINE),
+            'job_step': re.compile(r'^//(\S+)\s+EXEC\s+', re.MULTILINE),
+            'dd_statement': re.compile(r'^//(\S+)\s+DD\s+', re.MULTILINE),
+            'proc_call': re.compile(r'EXEC\s+(\S+)', re.IGNORECASE),
+            'dataset': re.compile(r'DSN=([^,\s]+)', re.IGNORECASE),
+            'proc_definition': re.compile(r'^//(\S+)\s+PROC', re.MULTILINE),
+            'pend_statement': re.compile(r'^//\s+PEND', re.MULTILINE),
+            'set_statement': re.compile(r'^//\s+SET\s+([^=]+)=([^\s,]+)', re.MULTILINE),
+            'if_statement': re.compile(r'^//\s+IF\s+(.*?)\s+THEN', re.MULTILINE),
+            'endif_statement': re.compile(r'^//\s+ENDIF', re.MULTILINE),
+            'include_statement': re.compile(r'^//\s+INCLUDE\s+MEMBER=([A-Z0-9]+)', re.MULTILINE),
+            'jcllib_statement': re.compile(r'^//\s+JCLLIB\s+ORDER=\((.*?)\)', re.MULTILINE),
+            'output_statement': re.compile(r'^//\s+OUTPUT\s+(.*?), re.MULTILINE),
+        }
+        
+        # CICS PATTERNS
+        self.cics_patterns = {
+            'cics_send_map': re.compile(r'EXEC\s+CICS\s+SEND\s+MAP\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_receive_map': re.compile(r'EXEC\s+CICS\s+RECEIVE\s+MAP\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_send_text': re.compile(r'EXEC\s+CICS\s+SEND\s+TEXT\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_send_page': re.compile(r'EXEC\s+CICS\s+SEND\s+PAGE\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_receive': re.compile(r'EXEC\s+CICS\s+RECEIVE\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_read': re.compile(r'EXEC\s+CICS\s+READ\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_write': re.compile(r'EXEC\s+CICS\s+WRITE\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_rewrite': re.compile(r'EXEC\s+CICS\s+REWRITE\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_delete': re.compile(r'EXEC\s+CICS\s+DELETE\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_startbr': re.compile(r'EXEC\s+CICS\s+STARTBR\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_readnext': re.compile(r'EXEC\s+CICS\s+READNEXT\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_readprev': re.compile(r'EXEC\s+CICS\s+READPREV\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_endbr': re.compile(r'EXEC\s+CICS\s+ENDBR\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_unlock': re.compile(r'EXEC\s+CICS\s+UNLOCK\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_link': re.compile(r'EXEC\s+CICS\s+LINK\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_xctl': re.compile(r'EXEC\s+CICS\s+XCTL\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_load': re.compile(r'EXEC\s+CICS\s+LOAD\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_release': re.compile(r'EXEC\s+CICS\s+RELEASE\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_return': re.compile(r'EXEC\s+CICS\s+RETURN\s*(?:\((.*?)\))?\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_abend': re.compile(r'EXEC\s+CICS\s+ABEND\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_getmain': re.compile(r'EXEC\s+CICS\s+GETMAIN\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_freemain': re.compile(r'EXEC\s+CICS\s+FREEMAIN\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_suspend': re.compile(r'EXEC\s+CICS\s+SUSPEND\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_resume': re.compile(r'EXEC\s+CICS\s+RESUME\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_start': re.compile(r'EXEC\s+CICS\s+START\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_cancel': re.compile(r'EXEC\s+CICS\s+CANCEL\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_delay': re.compile(r'EXEC\s+CICS\s+DELAY\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_post': re.compile(r'EXEC\s+CICS\s+POST\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_wait': re.compile(r'EXEC\s+CICS\s+WAIT\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_handle_condition': re.compile(r'EXEC\s+CICS\s+HANDLE\s+CONDITION\s+(.*?)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_handle_aid': re.compile(r'EXEC\s+CICS\s+HANDLE\s+AID\s+(.*?)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_handle_abend': re.compile(r'EXEC\s+CICS\s+HANDLE\s+ABEND\s+(.*?)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_push_handle': re.compile(r'EXEC\s+CICS\s+PUSH\s+HANDLE\s*END-EXEC', re.IGNORECASE),
+            'cics_pop_handle': re.compile(r'EXEC\s+CICS\s+POP\s+HANDLE\s*END-EXEC', re.IGNORECASE),
+            'cics_syncpoint': re.compile(r'EXEC\s+CICS\s+SYNCPOINT\s*(?:\((.*?)\))?\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_syncpoint_rollback': re.compile(r'EXEC\s+CICS\s+SYNCPOINT\s+ROLLBACK\s*END-EXEC', re.IGNORECASE),
+            'cics_writeq_ts': re.compile(r'EXEC\s+CICS\s+WRITEQ\s+TS\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_readq_ts': re.compile(r'EXEC\s+CICS\s+READQ\s+TS\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_deleteq_ts': re.compile(r'EXEC\s+CICS\s+DELETEQ\s+TS\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_writeq_td': re.compile(r'EXEC\s+CICS\s+WRITEQ\s+TD\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_readq_td': re.compile(r'EXEC\s+CICS\s+READQ\s+TD\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_deleteq_td': re.compile(r'EXEC\s+CICS\s+DELETEQ\s+TD\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+        }
+        
+        # BMS PATTERNS
+        self.bms_patterns = {
+            'bms_mapset': re.compile(r'(\w+)\s+DFHMSD\s+(.*?)(?=\w+\s+DFHMSD|$)', re.IGNORECASE | re.DOTALL),
+            'bms_map': re.compile(r'(\w+)\s+DFHMDI\s+(.*?)(?=\w+\s+DFHMDI|\w+\s+DFHMSD|$)', re.IGNORECASE | re.DOTALL),
+            'bms_field': re.compile(r'(\w+)\s+DFHMDF\s+(.*?)(?=\w+\s+DFHMDF|\w+\s+DFHMDI|\w+\s+DFHMSD|$)', re.IGNORECASE | re.DOTALL),
+            'bms_mapset_end': re.compile(r'\s+DFHMSD\s+TYPE=FINAL', re.IGNORECASE),
+        }    
+    
+    def _ensure_airgap_environment(self):
+        """Ensure no external connections are possible"""
     import os
     
     # Set environment variables to disable external connections
@@ -45,282 +254,7 @@ def _ensure_airgap_environment(self):
         requests.request = blocked_request
     except ImportError:
         pass
-
-
-@dataclass
-class CodeChunk:
-    """Represents a parsed code chunk"""
-    program_name: str
-    chunk_id: str
-    chunk_type: str  # paragraph, perform, job_step, proc, sql_block, section, cics_command
-    content: str
-    metadata: Dict[str, Any]
-    line_start: int
-    line_end: int
-
-class CompleteEnhancedCodeParserAgent:
-    def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
-                 gpu_id: int = None, coordinator=None):
-        self.llm_engine = llm_engine
-        self.db_path = db_path or "opulence_data.db"
-        self.gpu_id = gpu_id
-        self.coordinator = coordinator
-        self.logger = logging.getLogger(__name__)
-        
-        # Thread safety
-        self._engine_lock = asyncio.Lock()
-        self._engine_created = False
-        self._using_coordinator_llm = False
-        self._processed_files = set()  # Duplicate prevention
-        self._request_semaphore = asyncio.Semaphore(1)  # Prevent request flooding
-        self._last_request_time = 0
-        self._min_request_interval = 1.0  # Minimum 1 second between LLM requests
-        
-        self.processing_stats = {
-            "files_processed": 0,
-            "chunks_created": 0,
-            "errors_encountered": 0,
-            "llm_calls_made": 0,
-            "fallback_used": 0
-        }
-        
-        # Initialize database first
-        self._init_database()
-        
-        # COMPLETE COBOL PATTERNS
-        self.cobol_patterns = {
-            # Basic identification
-            'program_id': re.compile(r'PROGRAM-ID\s*\.\s*([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
-            'author': re.compile(r'AUTHOR\s*\.\s*(.*?)\.', re.IGNORECASE | re.DOTALL),
-            'date_written': re.compile(r'DATE-WRITTEN\s*\.\s*(.*?)\.', re.IGNORECASE),
-            'date_compiled': re.compile(r'DATE-COMPILED\s*\.\s*(.*?)\.', re.IGNORECASE),
-            
-            # Divisions and sections
-            'identification_division': re.compile(r'IDENTIFICATION\s+DIVISION', re.IGNORECASE),
-            'environment_division': re.compile(r'ENVIRONMENT\s+DIVISION', re.IGNORECASE),
-            'data_division': re.compile(r'DATA\s+DIVISION', re.IGNORECASE),
-            'procedure_division': re.compile(r'PROCEDURE\s+DIVISION', re.IGNORECASE),
-            'working_storage': re.compile(r'WORKING-STORAGE\s+SECTION', re.IGNORECASE),
-            'file_section': re.compile(r'FILE\s+SECTION', re.IGNORECASE),
-            'linkage_section': re.compile(r'LINKAGE\s+SECTION', re.IGNORECASE),
-            'local_storage': re.compile(r'LOCAL-STORAGE\s+SECTION', re.IGNORECASE),
-            'section': re.compile(r'^([A-Z0-9][A-Z0-9-]*)\s+SECTION\s*\.\s*$', re.MULTILINE),
-            
-            # Paragraphs and control structures
-            'paragraph': re.compile(r'^([A-Z0-9][A-Z0-9-]*)\s*\.\s*$', re.MULTILINE),
-            'perform': re.compile(r'PERFORM\s+([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
-            'perform_until': re.compile(r'PERFORM\s+.*?\s+UNTIL\s+(.*?)(?=\s+|$)', re.IGNORECASE | re.DOTALL),
-            'perform_varying': re.compile(r'PERFORM\s+.*?\s+VARYING\s+(.*?)(?=\s+|$)', re.IGNORECASE | re.DOTALL),
-            'perform_thru': re.compile(r'PERFORM\s+([A-Z0-9][A-Z0-9-]*)\s+(?:THROUGH|THRU)\s+([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
-            
-            # Control flow
-            'if_statement': re.compile(r'IF\s+(.*?)(?=\s+THEN|\s|$)', re.IGNORECASE),
-            'evaluate': re.compile(r'EVALUATE\s+(.*?)(?=\s|$)', re.IGNORECASE),
-            'when_clause': re.compile(r'WHEN\s+([^\.]+)', re.IGNORECASE),
-            'when_other': re.compile(r'WHEN\s+OTHER', re.IGNORECASE),
-            'end_if': re.compile(r'END-IF', re.IGNORECASE),
-            'end_evaluate': re.compile(r'END-EVALUATE', re.IGNORECASE),
-            
-            # Data definitions
-            'data_item': re.compile(r'^(\s*)(\d+)\s+([A-Z][A-Z0-9-]*)\s+(.*?)\.?\s*$', re.MULTILINE),
-            'pic_clause': re.compile(r'PIC(?:TURE)?\s+([X9AV\(\)S\+\-\.,/]+)', re.IGNORECASE),
-            'usage_clause': re.compile(r'USAGE\s+(?:IS\s+)?(COMP(?:-[0-9])?|BINARY|DISPLAY|PACKED-DECIMAL|INDEX)', re.IGNORECASE),
-            'value_clause': re.compile(r'VALUE\s+(?:IS\s+)?([\'"][^\']*[\'"]|\S+)', re.IGNORECASE),
-            'occurs_clause': re.compile(r'OCCURS\s+(\d+)(?:\s+TO\s+(\d+))?\s+TIMES', re.IGNORECASE),
-            'redefines': re.compile(r'REDEFINES\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
-            'depending_on': re.compile(r'DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
-            'indexed_by': re.compile(r'INDEXED\s+BY\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
-            
-            # File operations
-            'file_control': re.compile(r'FILE-CONTROL\s*\.', re.IGNORECASE),
-            'select_statement': re.compile(r'SELECT\s+([A-Z][A-Z0-9-]*)\s+ASSIGN\s+TO\s+([^\s\.]+)', re.IGNORECASE),
-            'fd_statement': re.compile(r'FD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
-            'open_statement': re.compile(r'OPEN\s+(INPUT|OUTPUT|I-O|EXTEND)\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
-            'close_statement': re.compile(r'CLOSE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
-            'read_statement': re.compile(r'READ\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
-            'write_statement': re.compile(r'WRITE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
-            'rewrite_statement': re.compile(r'REWRITE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
-            'delete_statement': re.compile(r'DELETE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
-            
-            # SQL blocks
-            'sql_block': re.compile(r'EXEC\s+SQL(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
-            'sql_include': re.compile(r'EXEC\s+SQL\s+INCLUDE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
-            'sql_declare': re.compile(r'EXEC\s+SQL\s+DECLARE\s+(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
-            'sql_whenever': re.compile(r'EXEC\s+SQL\s+WHENEVER\s+(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
-            
-            # COPY statements
-            'copy_statement': re.compile(r'COPY\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
-            'copy_replacing': re.compile(r'COPY\s+([A-Z][A-Z0-9-]*)\s+REPLACING\s+(.*?)\.', re.IGNORECASE | re.DOTALL),
-            'copy_in': re.compile(r'COPY\s+([A-Z][A-Z0-9-]*)\s+IN\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
-            
-            # Math operations
-            'add_statement': re.compile(r'ADD\s+(.*?)\s+TO\s+(.*?)(?=\s|$)', re.IGNORECASE),
-            'subtract_statement': re.compile(r'SUBTRACT\s+(.*?)\s+FROM\s+(.*?)(?=\s|$)', re.IGNORECASE),
-            'multiply_statement': re.compile(r'MULTIPLY\s+(.*?)\s+BY\s+(.*?)(?=\s|$)', re.IGNORECASE),
-            'divide_statement': re.compile(r'DIVIDE\s+(.*?)\s+(?:BY|INTO)\s+(.*?)(?=\s|$)', re.IGNORECASE),
-            'compute_statement': re.compile(r'COMPUTE\s+(.*?)\s*=\s*(.*?)(?=\s|$)', re.IGNORECASE),
-            
-            # String operations
-            'move_statement': re.compile(r'MOVE\s+(.*?)\s+TO\s+(.*?)(?=\s|$)', re.IGNORECASE),
-            'string_statement': re.compile(r'STRING\s+(.*?)(?=\s+END-STRING|$)', re.IGNORECASE | re.DOTALL),
-            'unstring_statement': re.compile(r'UNSTRING\s+(.*?)(?=\s+END-UNSTRING|$)', re.IGNORECASE | re.DOTALL),
-            'inspect_statement': re.compile(r'INSPECT\s+(.*?)(?=\s|$)', re.IGNORECASE),
-            
-            # Call statements
-            'call_statement': re.compile(r'CALL\s+([\'"]?[A-Z0-9][A-Z0-9-]*[\'"]?)', re.IGNORECASE),
-            'invoke_statement': re.compile(r'INVOKE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
-            
-            # Error handling
-            'on_size_error': re.compile(r'ON\s+SIZE\s+ERROR', re.IGNORECASE),
-            'not_on_size_error': re.compile(r'NOT\s+ON\s+SIZE\s+ERROR', re.IGNORECASE),
-            'at_end': re.compile(r'AT\s+END', re.IGNORECASE),
-            'not_at_end': re.compile(r'NOT\s+AT\s+END', re.IGNORECASE),
-            'invalid_key': re.compile(r'INVALID\s+KEY', re.IGNORECASE),
-            'not_invalid_key': re.compile(r'NOT\s+INVALID\s+KEY', re.IGNORECASE),
-
-            'cics_transaction_flow': re.compile(r'EXEC\s+CICS\s+(SEND|RECEIVE|RETURN)', re.IGNORECASE),
-            'cics_error_handling': re.compile(r'EXEC\s+CICS\s+HANDLE\s+(CONDITION|AID|ABEND)', re.IGNORECASE),
-        }
-        
-        # COMPLETE JCL PATTERNS
-        self.jcl_patterns = {
-            'job_card': re.compile(r'^//(\S+)\s+JOB\s+', re.MULTILINE),
-            'job_step': re.compile(r'^//(\S+)\s+EXEC\s+', re.MULTILINE),
-            'dd_statement': re.compile(r'^//(\S+)\s+DD\s+', re.MULTILINE),
-            'proc_call': re.compile(r'EXEC\s+(\S+)', re.IGNORECASE),
-            'dataset': re.compile(r'DSN=([^,\s]+)', re.IGNORECASE),
-            'proc_definition': re.compile(r'^//(\S+)\s+PROC', re.MULTILINE),
-            'pend_statement': re.compile(r'^//\s+PEND', re.MULTILINE),
-            'set_statement': re.compile(r'^//\s+SET\s+([^=]+)=([^\s,]+)', re.MULTILINE),
-            'if_statement': re.compile(r'^//\s+IF\s+(.*?)\s+THEN', re.MULTILINE),
-            'endif_statement': re.compile(r'^//\s+ENDIF', re.MULTILINE),
-            'include_statement': re.compile(r'^//\s+INCLUDE\s+MEMBER=([A-Z0-9]+)', re.MULTILINE),
-            'jcllib_statement': re.compile(r'^//\s+JCLLIB\s+ORDER=\((.*?)\)', re.MULTILINE),
-            'output_statement': re.compile(r'^//\s+OUTPUT\s+(.*?)$', re.MULTILINE),
-        }
-        
-        # COMPLETE CICS PATTERNS
-        self.cics_patterns = {
-            # Terminal operations
-            'cics_send_map': re.compile(r'EXEC\s+CICS\s+SEND\s+MAP\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_receive_map': re.compile(r'EXEC\s+CICS\s+RECEIVE\s+MAP\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_send_text': re.compile(r'EXEC\s+CICS\s+SEND\s+TEXT\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_send_page': re.compile(r'EXEC\s+CICS\s+SEND\s+PAGE\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_receive': re.compile(r'EXEC\s+CICS\s+RECEIVE\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            
-            # File operations
-            'cics_read': re.compile(r'EXEC\s+CICS\s+READ\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_write': re.compile(r'EXEC\s+CICS\s+WRITE\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_rewrite': re.compile(r'EXEC\s+CICS\s+REWRITE\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_delete': re.compile(r'EXEC\s+CICS\s+DELETE\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_startbr': re.compile(r'EXEC\s+CICS\s+STARTBR\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_readnext': re.compile(r'EXEC\s+CICS\s+READNEXT\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_readprev': re.compile(r'EXEC\s+CICS\s+READPREV\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_endbr': re.compile(r'EXEC\s+CICS\s+ENDBR\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_unlock': re.compile(r'EXEC\s+CICS\s+UNLOCK\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            
-            # Program control
-            'cics_link': re.compile(r'EXEC\s+CICS\s+LINK\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_xctl': re.compile(r'EXEC\s+CICS\s+XCTL\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_load': re.compile(r'EXEC\s+CICS\s+LOAD\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_release': re.compile(r'EXEC\s+CICS\s+RELEASE\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_return': re.compile(r'EXEC\s+CICS\s+RETURN\s*(?:\((.*?)\))?\s*END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_abend': re.compile(r'EXEC\s+CICS\s+ABEND\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            
-            # Storage operations
-            'cics_getmain': re.compile(r'EXEC\s+CICS\s+GETMAIN\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_freemain': re.compile(r'EXEC\s+CICS\s+FREEMAIN\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            
-            # Task control
-            'cics_suspend': re.compile(r'EXEC\s+CICS\s+SUSPEND\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_resume': re.compile(r'EXEC\s+CICS\s+RESUME\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_start': re.compile(r'EXEC\s+CICS\s+START\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_cancel': re.compile(r'EXEC\s+CICS\s+CANCEL\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            
-            # Interval control
-            'cics_delay': re.compile(r'EXEC\s+CICS\s+DELAY\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_post': re.compile(r'EXEC\s+CICS\s+POST\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_wait': re.compile(r'EXEC\s+CICS\s+WAIT\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            
-            # Error handling
-            'cics_handle_condition': re.compile(r'EXEC\s+CICS\s+HANDLE\s+CONDITION\s+(.*?)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_handle_aid': re.compile(r'EXEC\s+CICS\s+HANDLE\s+AID\s+(.*?)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_handle_abend': re.compile(r'EXEC\s+CICS\s+HANDLE\s+ABEND\s+(.*?)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_push_handle': re.compile(r'EXEC\s+CICS\s+PUSH\s+HANDLE\s*END-EXEC', re.IGNORECASE),
-            'cics_pop_handle': re.compile(r'EXEC\s+CICS\s+POP\s+HANDLE\s*END-EXEC', re.IGNORECASE),
-            
-            # Syncpoint operations
-            'cics_syncpoint': re.compile(r'EXEC\s+CICS\s+SYNCPOINT\s*(?:\((.*?)\))?\s*END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_syncpoint_rollback': re.compile(r'EXEC\s+CICS\s+SYNCPOINT\s+ROLLBACK\s*END-EXEC', re.IGNORECASE),
-            
-            # Temporary storage
-            'cics_writeq_ts': re.compile(r'EXEC\s+CICS\s+WRITEQ\s+TS\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_readq_ts': re.compile(r'EXEC\s+CICS\s+READQ\s+TS\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_deleteq_ts': re.compile(r'EXEC\s+CICS\s+DELETEQ\s+TS\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            
-            # Transient data
-            'cics_writeq_td': re.compile(r'EXEC\s+CICS\s+WRITEQ\s+TD\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_readq_td': re.compile(r'EXEC\s+CICS\s+READQ\s+TD\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cics_deleteq_td': re.compile(r'EXEC\s+CICS\s+DELETEQ\s+TD\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-        }
-        
-        # COMPLETE BMS PATTERNS
-        self.bms_patterns = {
-            'bms_mapset': re.compile(r'(\w+)\s+DFHMSD\s+(.*?)(?=\w+\s+DFHMSD|$)', re.IGNORECASE | re.DOTALL),
-            'bms_map': re.compile(r'(\w+)\s+DFHMDI\s+(.*?)(?=\w+\s+DFHMDI|\w+\s+DFHMSD|$)', re.IGNORECASE | re.DOTALL),
-            'bms_field': re.compile(r'(\w+)\s+DFHMDF\s+(.*?)(?=\w+\s+DFHMDF|\w+\s+DFHMDI|\w+\s+DFHMSD|$)', re.IGNORECASE | re.DOTALL),
-            'bms_mapset_end': re.compile(r'\s+DFHMSD\s+TYPE=FINAL', re.IGNORECASE),
-        }
-        
-        # Initialize database
-        self._init_database()
-        self._disable_external_connections()
     
-    def get_processing_statistics(self) -> Dict[str, Any]:
-        """Get processing statistics"""
-        return {
-            "processing_stats": self.processing_stats.copy(),
-            "error_count": self.error_count,
-            "last_error": self.last_error,
-            "llm_available": self._llm_available,
-            "initialized": self._initialized,
-            "gpu_used": self.gpu_id,
-            "timestamp": datetime.now().isoformat()
-        }
-
-    def _disable_external_connections(self):
-        """Completely disable external connections for airgap mode"""
-        import os
-        import socket
-        
-        # Set environment variables
-        os.environ.update({
-            'NO_PROXY': '*',
-            'DISABLE_TELEMETRY': '1',
-            'TOKENIZERS_PARALLELISM': 'false',
-            'TRANSFORMERS_OFFLINE': '1',
-            'HF_HUB_OFFLINE': '1',
-            'REQUESTS_CA_BUNDLE': '',
-            'CURL_CA_BUNDLE': ''
-        })
-        
-        # Block socket connections
-        original_socket = socket.socket
-        def blocked_socket(*args, **kwargs):
-            raise OSError("Network connections disabled in airgap mode")
-        socket.socket = blocked_socket
-        
-        # Block requests library
-        try:
-            import requests
-            def blocked_request(*args, **kwargs):
-                raise requests.exceptions.ConnectionError("External connections disabled")
-            requests.request = blocked_request
-            requests.get = blocked_request
-            requests.post = blocked_request
-        except ImportError:
-            pass
-
     def _init_database(self):
         """Initialize database with enhanced schema"""
         try:
@@ -688,7 +622,7 @@ class CompleteEnhancedCodeParserAgent:
             
             # Store chunks safely
             try:
-                await self._store_chunks_safe(chunks, file_hash)
+                await self._store_chunks_enhanced(chunks, file_hash)
                 self.processing_stats["files_processed"] += 1
                 self.processing_stats["chunks_created"] += len(chunks)
             except Exception as store_error:

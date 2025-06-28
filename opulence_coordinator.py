@@ -92,11 +92,11 @@ class OpulenceConfig:
     utilization_threshold: float = 80.0
 
 class DynamicOpulenceCoordinator:
-    """Enhanced coordinator with dynamic GPU allocation"""
-    
     def __init__(self, config: OpulenceConfig = None):
-        # Initialize configuration manager first
+        # FIXED: Make _ensure_airgap_environment an instance method
         self._ensure_airgap_environment()
+        
+        # Initialize configuration manager first
         self.config_manager = DynamicConfigManager()
         
         # Use provided config or create from config manager
@@ -120,9 +120,9 @@ class DynamicOpulenceCoordinator:
         )
         
         self.health_monitor = HealthMonitor()
-        self._request_semaphore = asyncio.Semaphore(2)  # Max 2 concurrent LLM requests
+        self._request_semaphore = asyncio.Semaphore(2)
         self._last_request_time = 0
-        self._min_request_interval = 0.5  # Minimum 500ms between requests
+        self._min_request_interval = 0.5
         self._active_llm_requests = 0
         
         # Get cache configuration
@@ -152,7 +152,42 @@ class DynamicOpulenceCoordinator:
         }
         
         self.logger.info("Dynamic Opulence Coordinator initialized with configuration management")
+
+    def _ensure_airgap_environment(self):
+        """FIXED: Instance method to ensure no external connections are possible"""
+        import os
+        import socket
         
+        # Set environment variables to disable external connections
+        os.environ.update({
+            'NO_PROXY': '*',
+            'DISABLE_TELEMETRY': '1',
+            'TOKENIZERS_PARALLELISM': 'false',
+            'TRANSFORMERS_OFFLINE': '1',
+            'HF_HUB_OFFLINE': '1',
+            'REQUESTS_CA_BUNDLE': '',
+            'CURL_CA_BUNDLE': '',
+            'SSL_VERIFY': 'false',
+            'PYTHONHTTPSVERIFY': '0'
+        })
+        
+        # Block socket connections
+        original_socket = socket.socket
+        def blocked_socket(*args, **kwargs):
+            raise OSError("Network connections disabled in airgap mode")
+        socket.socket = blocked_socket
+        
+        # Block requests library
+        try:
+            import requests
+            def blocked_request(*args, **kwargs):
+                raise requests.exceptions.ConnectionError("External connections disabled")
+            requests.request = blocked_request
+            requests.get = blocked_request
+            requests.post = blocked_request
+        except ImportError:
+            pass
+                
     def _setup_logging(self) -> logging.Logger:
         """Setup logging configuration"""
         logging.basicConfig(
