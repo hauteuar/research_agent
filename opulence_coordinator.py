@@ -27,9 +27,8 @@ import chromadb
 import pandas as pd
 
 # Import our agents
-from agents.code_parser_agent import CompleteEnhancedCodeParserAgent as CodeParserAgent
-from agents.vector_index_agent import VectorIndexAgent
-  
+from agents.code_parser_agent import CodeParserAgent
+from agents.vector_index_agent import VectorIndexAgent  
 from agents.data_loader_agent import DataLoaderAgent
 from agents.lineage_analyzer_agent import LineageAnalyzerAgent
 from agents.logic_analyzer_agent import LogicAnalyzerAgent
@@ -44,7 +43,6 @@ from utils.cache_manager import CacheManager
 def _ensure_airgap_environment(self):
     """Ensure no external connections are possible"""
     import os
-    import socket
     
     # Set environment variables to disable external connections
     os.environ.update({
@@ -54,25 +52,18 @@ def _ensure_airgap_environment(self):
         'TRANSFORMERS_OFFLINE': '1',
         'HF_HUB_OFFLINE': '1',
         'REQUESTS_CA_BUNDLE': '',
-        'CURL_CA_BUNDLE': '',
-        'SSL_VERIFY': 'false',
-        'PYTHONHTTPSVERIFY': '0'
+        'CURL_CA_BUNDLE': ''
     })
     
-    # Block socket connections
-    original_socket = socket.socket
-    def blocked_socket(*args, **kwargs):
-        raise OSError("Network connections disabled in airgap mode")
-    socket.socket = blocked_socket
-    
-    # Block requests library
+    # Disable requests library
     try:
         import requests
         def blocked_request(*args, **kwargs):
             raise requests.exceptions.ConnectionError("External connections disabled")
-        requests.request = blocked_request
+        
         requests.get = blocked_request
         requests.post = blocked_request
+        requests.request = blocked_request
     except ImportError:
         pass
 
@@ -96,7 +87,6 @@ class DynamicOpulenceCoordinator:
     
     def __init__(self, config: OpulenceConfig = None):
         # Initialize configuration manager first
-        self._ensure_airgap_environment()
         self.config_manager = DynamicConfigManager()
         
         # Use provided config or create from config manager
@@ -120,10 +110,6 @@ class DynamicOpulenceCoordinator:
         )
         
         self.health_monitor = HealthMonitor()
-        self._request_semaphore = asyncio.Semaphore(2)  # Max 2 concurrent LLM requests
-        self._last_request_time = 0
-        self._min_request_interval = 0.5  # Minimum 500ms between requests
-        self._active_llm_requests = 0
         
         # Get cache configuration
         cache_ttl = self.config_manager.get("system.cache_ttl", 3600)
@@ -165,38 +151,6 @@ class DynamicOpulenceCoordinator:
         )
         return logging.getLogger(__name__)
     
-    async def _safe_llm_generate(self, engine: AsyncLLMEngine, prompt: str, sampling_params) -> str:
-        """Safely generate with LLM to prevent request flooding"""
-        
-        # Rate limiting
-        current_time = time.time()
-        time_since_last = current_time - self._last_request_time
-        if time_since_last < self._min_request_interval:
-            await asyncio.sleep(self._min_request_interval - time_since_last)
-        
-        async with self._request_semaphore:
-            try:
-                self._active_llm_requests += 1
-                self._last_request_time = time.time()
-                
-                request_id = str(uuid.uuid4())
-                
-                # Use async generator properly
-                result_generator = engine.generate(prompt, sampling_params, request_id=request_id)
-                
-                async for result in result_generator:
-                    if result and hasattr(result, 'outputs') and len(result.outputs) > 0:
-                        return result.outputs[0].text.strip()
-                    break
-                
-                return ""
-                
-            except Exception as e:
-                self.logger.error(f"Safe LLM generation failed: {e}")
-                return ""
-            finally:
-                self._active_llm_requests -= 1
-
     # FIX 12: Enhanced database initialization in coordinator
     def _init_database(self):
         """Initialize SQLite database with required tables and proper configuration"""
@@ -312,90 +266,106 @@ class DynamicOpulenceCoordinator:
             raise
 
     async def get_or_create_llm_engine(self, gpu_id: int, force_reload: bool = False) -> AsyncLLMEngine:
-        """Enhanced LLM engine creation with improved error handling"""
+        """Get or create LLM engine for specific GPU with availability check and reload capability"""
         async with self.engine_lock:
             engine_key = f"gpu_{gpu_id}"
             
-            # Return existing engine if available and not forcing reload
+            # If engine exists and not forcing reload, return it
             if engine_key in self.llm_engine_pool and not force_reload:
-                # Test if engine is still working
-                try:
-                    # Quick test
-                    test_params = SamplingParams(temperature=0.1, max_tokens=5)
-                    test_generator = self.llm_engine_pool[engine_key].generate("test", test_params)
-                    async for result in test_generator:
-                        break  # Just test if it works
-                    self.logger.info(f"Reusing verified LLM engine on GPU {gpu_id}")
-                    return self.llm_engine_pool[engine_key]
-                except Exception as e:
-                    self.logger.warning(f"Existing engine on GPU {gpu_id} failed test: {e}")
-                    # Remove failed engine and create new one
-                    del self.llm_engine_pool[engine_key]
+                self.logger.info(f"Reusing existing LLM engine on GPU {gpu_id}")
+                return self.llm_engine_pool[engine_key]
             
-            # Use SafeGPUContext for engine creation
             try:
-                with SafeGPUContext(
-                    self.gpu_manager, 
-                    f"llm_engine_{engine_key}", 
-                    preferred_gpu=gpu_id,
-                    cleanup_on_exit=False
-                ) as allocated_gpu:
+                # Import the GPU forcer
+                from gpu_force_fix import GPUForcer
+                
+                # CHECK GPU AVAILABILITY FIRST
+                if not self._is_gpu_available(gpu_id):
+                    raise RuntimeError(f"GPU {gpu_id} is not available or already occupied")
+                
+                # Check memory before attempting
+                memory_info = GPUForcer.check_gpu_memory(gpu_id)
+                free_gb = memory_info['free_gb']
+                
+                # If GPU has existing model and insufficient memory, try to clean it up
+                if free_gb < 2.0:
+                    self.logger.warning(f"GPU {gpu_id} has insufficient memory: {free_gb:.1f}GB free")
                     
-                    if allocated_gpu != gpu_id:
-                        if allocated_gpu is None:
-                            raise RuntimeError(f"Failed to allocate GPU {gpu_id} for LLM engine")
-                        else:
-                            self.logger.warning(f"GPU {gpu_id} not available, using GPU {allocated_gpu}")
-                            gpu_id = allocated_gpu
-                            engine_key = f"gpu_{gpu_id}"
+                    # Try to cleanup existing model on this GPU
+                    if engine_key in self.llm_engine_pool:
+                        self.logger.info(f"Cleaning up existing model on GPU {gpu_id}")
+                        await self._cleanup_gpu_engine(gpu_id)
+                        
+                        # Check memory again after cleanup
+                        memory_info = GPUForcer.check_gpu_memory(gpu_id)
+                        free_gb = memory_info['free_gb']
+                        
+                    if free_gb < 2.0:
+                        raise RuntimeError(f"GPU {gpu_id} still has insufficient memory after cleanup: {free_gb:.1f}GB free (need at least 2GB)")
+                
+                self.logger.info(f"Creating LLM engine on GPU {gpu_id} with {free_gb:.1f}GB free memory")
+                
+                # AGGRESSIVE GPU FORCING - This changes the entire CUDA environment
+                original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
+                
+                try:
+                    # Force GPU environment - this makes CUDA only see our target GPU
+                    GPUForcer.force_gpu_environment(gpu_id)
                     
-                    # Check memory before creation
-                    memory_info = EnhancedGPUForcer.check_gpu_memory(gpu_id)
-                    free_gb = memory_info['free_gb']
-                    
-                    if free_gb < 1.5:
-                        raise RuntimeError(f"Insufficient memory on GPU {gpu_id}: {free_gb:.1f}GB free")
-                    
-                    self.logger.info(f"Creating LLM engine on GPU {gpu_id} with {free_gb:.1f}GB available")
-                    
-                    # Force GPU environment safely
-                    success = EnhancedGPUForcer.safe_force_gpu_environment(
-                        gpu_id, cleanup_first=True, verify_success=True
-                    )
-                    
-                    if not success:
-                        raise RuntimeError(f"Failed to force GPU environment for GPU {gpu_id}")
-                    
-                    # Create conservative engine args
-                    engine_args = EnhancedGPUForcer.create_conservative_vllm_args(
-                        self.config.model_name,
+                    # Now create engine args (device 0 now maps to our target GPU)
+                    engine_args = GPUForcer.create_vllm_engine_args(
+                        self.config.model_name, 
                         self.config.max_tokens
                     )
                     
-                    # Create engine
+                    self.logger.info(f"Creating VLLM engine with forced GPU environment...")
+                    
+                    # Create the engine - it will use the GPU forced by environment
                     engine = AsyncLLMEngine.from_engine_args(engine_args)
+                    
                     self.llm_engine_pool[engine_key] = engine
                     
-                    # Verify final state
-                    final_memory = EnhancedGPUForcer.check_gpu_memory(gpu_id)
-                    used_gb = free_gb - final_memory['free_gb']
+                    # Mark GPU as occupied in our manager  
+                    self.gpu_manager.reserve_gpu_for_workload(
+                        workload_type=f"llm_engine_{engine_key}",
+                        preferred_gpu=gpu_id,
+                        duration_estimate=3600  # 1 hour estimated
+                    )
                     
-                    self.logger.info(f"✅ LLM engine created on GPU {gpu_id}. "
-                                f"Used {used_gb:.1f}GB, {final_memory['free_gb']:.1f}GB remaining")
+                    # Verify final memory usage
+                    final_memory = GPUForcer.check_gpu_memory(gpu_id)
+                    final_free_gb = final_memory['free_gb']
+                    used_gb = free_gb - final_free_gb
                     
-                    return engine
+                    self.logger.info(f"✅ LLM engine created on GPU {gpu_id}. Used {used_gb:.1f}GB, {final_free_gb:.1f}GB remaining")
                     
-            except Exception as e:
-                self.logger.error(f"Failed to create LLM engine on GPU {gpu_id}: {e}")
+                finally:
+                    # Restore original CUDA_VISIBLE_DEVICES if it existed
+                    if original_cuda_visible is not None:
+                        os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible
+                    elif 'CUDA_VISIBLE_DEVICES' in os.environ:
+                        del os.environ['CUDA_VISIBLE_DEVICES']
                 
-                # Cleanup on failure
+            except Exception as e:
+                self.logger.error(f"Failed to create LLM engine for GPU {gpu_id}: {str(e)}")
+                
+                # Clean up on failure
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                
+                # Remove from pool if it was partially created
                 if engine_key in self.llm_engine_pool:
                     del self.llm_engine_pool[engine_key]
                 
-                # Perform cleanup
-                EnhancedGPUForcer.aggressive_gpu_cleanup(gpu_id)
+                # Release GPU workload on failure
+                try:
+                    self.gpu_manager.release_gpu_workload(gpu_id, f"llm_engine_{engine_key}")
+                except:
+                    pass  # Ignore errors during cleanup
                 
                 raise
+            
+            return self.llm_engine_pool[engine_key]
     
     @asynccontextmanager
     async def get_agent_with_gpu(self, agent_type: str, preferred_gpu: Optional[int] = None):
@@ -505,52 +475,37 @@ class DynamicOpulenceCoordinator:
             return False
 
     async def get_available_gpu_for_agent(self, agent_type: str, preferred_gpu: Optional[int] = None) -> Optional[int]:
-        """Enhanced GPU allocation for agents using improved GPU manager"""
-        
-        # Force refresh GPU status first
-        self.gpu_manager.force_refresh()
-        
-        # Check for existing engines that can be shared (except for LLM engines)
-        if "llm_engine" not in agent_type.lower():
-            existing_engines = list(self.llm_engine_pool.keys())
-            for engine_key in existing_engines:
-                gpu_id = int(engine_key.split('_')[1])
-                
+        """Enhanced GPU allocation with better error handling"""
+        try:
+            # Force refresh GPU status first
+            self.gpu_manager.force_refresh()
+            
+            # Check existing engines for sharing opportunities
+            for engine_key in list(self.llm_engine_pool.keys()):
                 try:
-                    memory_info = EnhancedGPUForcer.check_gpu_memory(gpu_id)
-                    if memory_info.get('can_share', False):
-                        self.logger.info(f"Sharing existing LLM engine on GPU {gpu_id} for {agent_type}")
+                    gpu_id = int(engine_key.split('_')[1])
+                    from gpu_force_fix import GPUForcer
+                    memory_info = GPUForcer.check_gpu_memory(gpu_id)
+                    free_gb = memory_info.get('free_gb', 0)
+                    
+                    if free_gb >= 1.0:  # Can share this GPU
+                        self.logger.info(f"Sharing existing engine on GPU {gpu_id} for {agent_type}")
                         return gpu_id
                 except Exception as e:
-                    self.logger.warning(f"Error checking GPU {gpu_id} for sharing: {e}")
+                    self.logger.warning(f"Error checking GPU {gpu_id}: {e}")
                     continue
-        
-        # Use enhanced GPU allocation
-        best_gpu = self.gpu_manager.get_available_gpu_smart(
-            preferred_gpu=preferred_gpu,
-            workload_type=agent_type,
-            allow_sharing="llm_engine" not in agent_type.lower(),
-            exclude_gpu_0=True  # Prefer to avoid GPU 0
-        )
-        
-        if best_gpu is not None:
-            self.logger.info(f"Allocated GPU {best_gpu} for {agent_type}")
-            return best_gpu
-        
-        # Last resort: try any GPU including GPU 0
-        best_gpu = self.gpu_manager.get_available_gpu_smart(
-            preferred_gpu=None,
-            workload_type=agent_type,
-            allow_sharing=True,
-            exclude_gpu_0=False
-        )
-        
-        if best_gpu is not None:
-            self.logger.warning(f"Using GPU {best_gpu} for {agent_type} as last resort")
-            return best_gpu
-        
-        self.logger.error(f"No GPU available for {agent_type}")
-        return None
+            
+            # Find new GPU
+            best_gpu = self.gpu_manager.get_available_gpu(preferred_gpu, fallback=True, allow_sharing=True)
+            if best_gpu is not None:
+                return best_gpu
+                
+            self.logger.error("No GPUs available")
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"GPU allocation failed: {e}")
+            return None
 
     async def _cleanup_gpu_engine(self, gpu_id: int):
         """Clean up existing LLM engine on GPU using GPUForcer"""
@@ -708,37 +663,56 @@ class DynamicOpulenceCoordinator:
             }
     
     def _create_agent(self, agent_type: str, llm_engine: AsyncLLMEngine, gpu_id: int):
-        """Create agent instance with enhanced configuration"""
-        
-        # Common parameters for all agents
-        common_params = {
-            "llm_engine": llm_engine,
-            "db_path": self.db_path,
-            "gpu_id": gpu_id,
-            "coordinator": self,
-            "enable_llm": True,
-            "conservative_mode": True  # Use conservative mode to prevent errors
-        }
-        
+        """Create agent instance with coordinator reference"""
         if agent_type == "code_parser":
-            return CompleteEnhancedCodeParserAgent(**common_params)
+            return CodeParserAgent(
+                llm_engine=llm_engine,
+                db_path=self.db_path,
+                gpu_id=gpu_id,
+                coordinator=self  # ADD coordinator reference
+            )
         elif agent_type == "vector_index":
             return VectorIndexAgent(
-                local_model_path="./models/microsoft-codebert-base",
-                **common_params
+                llm_engine=llm_engine,
+                db_path=self.db_path,
+                gpu_id=gpu_id,
+                coordinator=self  # ADD coordinator reference
             )
         elif agent_type == "data_loader":
-            return DataLoaderAgent(**common_params)
+            return DataLoaderAgent(
+                llm_engine=llm_engine,
+                db_path=self.db_path,
+                gpu_id=gpu_id,
+                coordinator=self  # ADD coordinator reference
+            )
         elif agent_type == "lineage_analyzer":
-            return LineageAnalyzerAgent(**common_params)
+            return LineageAnalyzerAgent(
+                llm_engine=llm_engine,
+                db_path=self.db_path,
+                gpu_id=gpu_id,
+                coordinator=self  # ADD coordinator reference
+            )
         elif agent_type == "logic_analyzer":
-            return LogicAnalyzerAgent(**common_params)
+            return LogicAnalyzerAgent(
+                llm_engine=llm_engine,
+                db_path=self.db_path,
+                gpu_id=gpu_id,
+                coordinator=self  # ADD coordinator reference
+            )
         elif agent_type == "documentation":
-            return DocumentationAgent(**common_params)
+            return DocumentationAgent(
+                llm_engine=llm_engine,
+                db_path=self.db_path,
+                gpu_id=gpu_id,
+                coordinator=self  # ADD coordinator reference
+            )
         elif agent_type == "db2_comparator":
             return DB2ComparatorAgent(
+                llm_engine=llm_engine,
+                db_path=self.db_path,
+                gpu_id=gpu_id,
                 max_rows=self.config.max_db_rows,
-                **common_params
+                coordinator=self  # ADD coordinator reference
             )
         else:
             raise ValueError(f"Unknown agent type: {agent_type}")
@@ -1464,56 +1438,33 @@ class DynamicOpulenceCoordinator:
         
     
     async def _determine_component_type(self, component_name: str, preferred_gpu: Optional[int] = None) -> str:
-        """Safely determine component type with fallback logic"""
-        try:
-            # First try simple heuristics
-            name_lower = component_name.lower()
+        """Use LLM to determine component type with dynamic GPU allocation"""
+        prompt = f"""
+        Analyze the component name '{component_name}' and determine its type.
+        
+        Types:
+        - file: Data file or dataset
+        - table: DB2 table
+        - program: COBOL program
+        - jcl: JCL job or procedure
+        
+        Based on naming conventions, determine the most likely type.
+        Respond with only the type name.
+        """
+        
+        sampling_params = SamplingParams(
+            temperature=0.1,
+            max_tokens=50,
+            stop=["\n"]
+        )
+        
+        # Use dynamic GPU allocation for component type determination
+        async with self.get_agent_with_gpu("logic_analyzer", preferred_gpu) as (agent, gpu_id):
+            # Get the LLM engine from the agent
+            engine = await self.get_or_create_llm_engine(gpu_id)
+            result = await engine.generate(prompt, sampling_params)
             
-            # File patterns
-            if any(pattern in name_lower for pattern in ['file', 'dat', 'txt', 'csv']):
-                return "file"
-            
-            # Table patterns
-            if any(pattern in name_lower for pattern in ['tbl', 'table', 'tab']):
-                return "table"
-            
-            # Program patterns
-            if any(pattern in name_lower for pattern in ['prog', 'pgm', 'program']):
-                return "program"
-            
-            # JCL patterns
-            if any(pattern in name_lower for pattern in ['jcl', 'job', 'proc']):
-                return "jcl"
-            
-            # If heuristics fail, try LLM
-            prompt = f"""
-            Analyze the component name '{component_name}' and determine its type.
-            
-            Types:
-            - file: Data file or dataset
-            - table: DB2 table
-            - program: COBOL program
-            - jcl: JCL job or procedure
-            
-            Based on naming conventions, determine the most likely type.
-            Respond with only the type name.
-            """
-            
-            sampling_params = SamplingParams(temperature=0.1, max_tokens=20, stop=["\n"])
-            
-            # Use safe GPU allocation
-            async with self.get_agent_with_gpu("logic_analyzer", preferred_gpu) as (agent, gpu_id):
-                if hasattr(agent, 'llm_engine') and agent.llm_engine:
-                    result = await self._safe_llm_generate(agent.llm_engine, prompt, sampling_params)
-                    if result and result.lower() in ['file', 'table', 'program', 'jcl']:
-                        return result.lower()
-            
-            # Final fallback
-            return "file"  # Default to file
-            
-        except Exception as e:
-            self.logger.warning(f"Component type determination failed: {e}")
-            return "file"  # Safe fallback
+            return result.outputs[0].text.strip().lower()
     
     async def _analyze_lifecycle(self, component_name: str, component_type: str, 
                                 preferred_gpu: Optional[int] = None) -> Dict[str, Any]:
