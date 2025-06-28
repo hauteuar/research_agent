@@ -390,6 +390,38 @@ def get_conservative_config() -> Dict[str, Any]:
             'retry_attempts': 2
         }
     }
+def get(self, key_path: str, default: Any = None) -> Any:
+        """Get configuration value using dot notation"""
+        keys = key_path.split('.')
+        value = self.config
+        
+        try:
+            for key in keys:
+                value = value[key]
+            return value
+        except (KeyError, TypeError):
+            return default
+    
+def set(self, key_path: str, value: Any) -> bool:
+        """Set configuration value using dot notation"""
+        keys = key_path.split('.')
+        config = self.config
+        
+        try:
+            # Navigate to parent of target key
+            for key in keys[:-1]:
+                if key not in config:
+                    config[key] = {}
+                config = config[key]
+            
+            # Set the value
+            config[keys[-1]] = value
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to set config {key_path}: {str(e)}")
+            return False
+    
 
 def apply_config_template(template_name: str) -> bool:
     """Apply a configuration template"""
