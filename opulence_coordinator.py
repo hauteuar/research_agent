@@ -35,12 +35,8 @@ from agents.lineage_analyzer_agent import LineageAnalyzerAgent
 from agents.logic_analyzer_agent import LogicAnalyzerAgent
 from agents.documentation_agent import DocumentationAgent
 from agents.db2_comparator_agent import DB2ComparatorAgent
-from utils.gpu_manager import ImprovedDynamicGPUManager, SafeGPUContext
-from gpu_force_fix import EnhancedGPUForcer
-from utils.dynamic_config_manager import DynamicConfigManager, get_dynamic_config, GPUConfig
-from utils.health_monitor import HealthMonitor
-from utils.cache_manager import CacheManager
-
+from utils.gpu_manager import ImprovedDynamicGPUManager, SafeGPUContext, GPUHardwareInterface, GPUEnvironmentManager
+from utils.config_manager import ConfigManager, GPUConfig, SystemConfig, AgentConfig
 def _ensure_airgap_environment(self):
     """Ensure no external connections are possible"""
     import os
@@ -97,13 +93,15 @@ class DynamicOpulenceCoordinator:
         self._ensure_airgap_environment()
         
         # Initialize configuration manager first
-        self.config_manager = DynamicConfigManager()
-        
-        # Use provided config or create from config manager
+        self.config_manager = ConfigManager()
         if config is None:
-            runtime_config = self.config_manager.create_runtime_config()
-            self.config = OpulenceConfig(**{k: v for k, v in runtime_config.items() 
-                                          if k in OpulenceConfig.__dataclass_fields__})
+            system_config = self.config_manager.get_system_config()
+            self.config = OpulenceConfig(
+                model_name=system_config.model_name,
+                max_tokens=system_config.max_tokens,
+                temperature=system_config.temperature,
+                total_gpu_count=self.config_manager.get_gpu_config().total_gpu_count
+            )
         else:
             self.config = config
             
@@ -111,23 +109,22 @@ class DynamicOpulenceCoordinator:
         
         # Get GPU configuration from config manager
         gpu_config = self.config_manager.get_gpu_config()
-        
-        # Initialize dynamic GPU manager with config
         self.gpu_manager = ImprovedDynamicGPUManager(
             total_gpu_count=gpu_config.total_gpu_count,
             memory_threshold=gpu_config.memory_threshold,
             utilization_threshold=gpu_config.utilization_threshold
         )
+        # Start monitoring
+        self.gpu_manager.start_monitoring(interval=30)
         
-        self.health_monitor = HealthMonitor()
+        
         self._request_semaphore = asyncio.Semaphore(2)
         self._last_request_time = 0
         self._min_request_interval = 0.5
         self._active_llm_requests = 0
         
-        # Get cache configuration
-        cache_ttl = self.config_manager.get("system.cache_ttl", 3600)
-        self.cache_manager = CacheManager(cache_ttl)
+        
+        
         
         # Initialize SQLite database
         self.db_path = "opulence_data.db"
@@ -385,7 +382,7 @@ class DynamicOpulenceCoordinator:
                             engine_key = f"gpu_{gpu_id}"
                     
                     # Check memory before creation
-                    memory_info = EnhancedGPUForcer.check_gpu_memory(gpu_id)
+                    memory_info = GPUHardwareInterface.check_gpu_memory(gpu_id)
                     free_gb = memory_info['free_gb']
                     
                     if free_gb < 1.5:
@@ -394,7 +391,7 @@ class DynamicOpulenceCoordinator:
                     self.logger.info(f"Creating LLM engine on GPU {gpu_id} with {free_gb:.1f}GB available")
                     
                     # Force GPU environment safely
-                    success = EnhancedGPUForcer.safe_force_gpu_environment(
+                    success = GPUEnvironmentManager.safe_force_gpu_environment(
                         gpu_id, cleanup_first=True, verify_success=True
                     )
                     
@@ -402,7 +399,7 @@ class DynamicOpulenceCoordinator:
                         raise RuntimeError(f"Failed to force GPU environment for GPU {gpu_id}")
                     
                     # Create conservative engine args
-                    engine_args = EnhancedGPUForcer.create_conservative_vllm_args(
+                    engine_args = GPUEnvironmentManager.create_conservative_vllm_args(
                         self.config.model_name,
                         self.config.max_tokens
                     )
@@ -412,7 +409,7 @@ class DynamicOpulenceCoordinator:
                     self.llm_engine_pool[engine_key] = engine
                     
                     # Verify final state
-                    final_memory = EnhancedGPUForcer.check_gpu_memory(gpu_id)
+                    final_memory = GPUHardwareInterface.check_gpu_memory(gpu_id)
                     used_gb = free_gb - final_memory['free_gb']
                     
                     self.logger.info(f"✅ LLM engine created on GPU {gpu_id}. "
@@ -428,7 +425,7 @@ class DynamicOpulenceCoordinator:
                     del self.llm_engine_pool[engine_key]
                 
                 # Perform cleanup
-                EnhancedGPUForcer.aggressive_gpu_cleanup(gpu_id)
+                GPUHardwareInterface.aggressive_gpu_cleanup(gpu_id)
                 
                 raise
     
@@ -574,7 +571,7 @@ class DynamicOpulenceCoordinator:
                 gpu_id = int(engine_key.split('_')[1])
                 
                 try:
-                    memory_info = EnhancedGPUForcer.check_gpu_memory(gpu_id)
+                    memory_info = GPUHardwareInterface.check_gpu_memory(gpu_id)
                     if memory_info.get('can_share', False):
                         self.logger.info(f"Sharing existing LLM engine on GPU {gpu_id} for {agent_type}")
                         return gpu_id
@@ -621,7 +618,7 @@ class DynamicOpulenceCoordinator:
                 engine = self.llm_engine_pool.pop(engine_key, None)
                 
                 # Use enhanced cleanup
-                success = EnhancedGPUForcer.aggressive_gpu_cleanup(gpu_id)
+                success = GPUHardwareInterface.aggressive_gpu_cleanup(gpu_id)
                 
                 # Release from GPU manager
                 try:
@@ -685,7 +682,7 @@ class DynamicOpulenceCoordinator:
             gpu_status = {}
             for gpu_id in range(self.config.total_gpu_count):
                 try:
-                    memory_info = EnhancedGPUForcer.check_gpu_memory(gpu_id)
+                    memory_info = GPUHardwareInterface.check_gpu_memory(gpu_id)
                     gpu_status[f"gpu_{gpu_id}"] = {
                         "healthy": memory_info.get('is_healthy', False),
                         "available": memory_info.get('is_available', False),
@@ -1368,11 +1365,7 @@ class DynamicOpulenceCoordinator:
             self.logger.info(f"Starting analysis for component: {component_name}, type: {component_type}")
             
             # Check cache first
-            cache_key = f"analyze_{component_name}_{component_type}"
-            cached_result = self.cache_manager.get(cache_key)
-            if cached_result:
-                self.logger.info(f"Returning cached result for {component_name}")
-                return cached_result
+            
             
             # Determine component type if not specified
             if not component_type:
@@ -1443,7 +1436,7 @@ class DynamicOpulenceCoordinator:
             analysis_result["status"] = "completed"
             
             # Cache the result
-            self.cache_manager.set(cache_key, analysis_result)
+            
             
             processing_time = time.time() - start_time
             self.logger.info(f"Component analysis completed for {component_name} in {processing_time:.2f}s")
@@ -1715,7 +1708,7 @@ class DynamicOpulenceCoordinator:
             # Check all GPUs for errors
             for gpu_id in range(self.config.total_gpu_count):
                 try:
-                    memory_info = EnhancedGPUForcer.check_gpu_memory(gpu_id)
+                    memory_info = GPUHardwareInterface.check_gpu_memory(gpu_id)
                     if 'error' in memory_info or not memory_info.get('is_healthy', False):
                         self.logger.info(f"Attempting recovery for GPU {gpu_id}")
                         
@@ -1726,7 +1719,7 @@ class DynamicOpulenceCoordinator:
                         success = EnhancedGPUForcer.aggressive_gpu_cleanup(gpu_id)
                         
                         # Re-check GPU state
-                        final_memory = EnhancedGPUForcer.check_gpu_memory(gpu_id)
+                        final_memory = GPUHardwareInterface.check_gpu_memory(gpu_id)
                         
                         recovery_results[f"gpu_{gpu_id}"] = {
                             "attempted": True,
