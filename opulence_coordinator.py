@@ -39,7 +39,7 @@ from agents.db2_comparator_agent import DB2ComparatorAgent
 from utils.gpu_manager import ImprovedDynamicGPUManager, SafeGPUContext, GPUHardwareInterface, GPUEnvironmentManager
 from utils.config_manager import ConfigManager, GPUConfig, SystemConfig
 from utils.cache_manager import CacheManager
-
+from utils.health_monitor import HealthMonitor
 
 
 @dataclass
@@ -118,6 +118,7 @@ class DynamicOpulenceCoordinator:
             "failed_allocations": 0
         }
         
+        self.health_monitor = HealthMonitor()
         self.logger.info("Dynamic Opulence Coordinator initialized with configuration management")
 
     def _ensure_airgap_environment(self):
