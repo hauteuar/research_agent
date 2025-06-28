@@ -109,11 +109,7 @@ class LineageAnalyzerAgent:
             # Try global coordinator as fallback
             if not self._engine_created:
                 try:
-                    from opulence_coordinator import get_dynamic_coordinator, initialize_dynamic_system
-                    COORDINATOR_AVAILABLE = True
-                except ImportError as e:
-                    COORDINATOR_AVAILABLE = False
-                    #st.session_state.import_error = str(e)
+                    from opulence_coordinator import get_dynamic_coordinator
                     global_coordinator = get_dynamic_coordinator()
                     
                     # Try to share existing engines first

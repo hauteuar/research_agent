@@ -56,7 +56,7 @@ initialize_session_state()
 
 # Try to import coordinator with error handling
 try:
-    from opulence_coordinator import get_coordinator, initialize_system
+    from opulence_coordinator import get_dynamic_coordinator, initialize_dynamic_system
     COORDINATOR_AVAILABLE = True
 except ImportError as e:
     COORDINATOR_AVAILABLE = False
