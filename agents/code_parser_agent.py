@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 from dataclasses import dataclass
 import hashlib
-from datetime import datetime
+from datetime import datetime, time
 import logging
 
 import torch
@@ -72,6 +72,20 @@ class CompleteEnhancedCodeParserAgent:
         self._engine_created = False
         self._using_coordinator_llm = False
         self._processed_files = set()  # Duplicate prevention
+        self._request_semaphore = asyncio.Semaphore(1)  # Prevent request flooding
+        self._last_request_time = 0
+        self._min_request_interval = 1.0  # Minimum 1 second between LLM requests
+        
+        self.processing_stats = {
+            "files_processed": 0,
+            "chunks_created": 0,
+            "errors_encountered": 0,
+            "llm_calls_made": 0,
+            "fallback_used": 0
+        }
+        
+        # Initialize database first
+        self._init_database()
         
         # COMPLETE COBOL PATTERNS
         self.cobol_patterns = {
@@ -260,6 +274,52 @@ class CompleteEnhancedCodeParserAgent:
         
         # Initialize database
         self._init_database()
+        self._disable_external_connections()
+    
+    def get_processing_statistics(self) -> Dict[str, Any]:
+        """Get processing statistics"""
+        return {
+            "processing_stats": self.processing_stats.copy(),
+            "error_count": self.error_count,
+            "last_error": self.last_error,
+            "llm_available": self._llm_available,
+            "initialized": self._initialized,
+            "gpu_used": self.gpu_id,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    def _disable_external_connections(self):
+        """Completely disable external connections for airgap mode"""
+        import os
+        import socket
+        
+        # Set environment variables
+        os.environ.update({
+            'NO_PROXY': '*',
+            'DISABLE_TELEMETRY': '1',
+            'TOKENIZERS_PARALLELISM': 'false',
+            'TRANSFORMERS_OFFLINE': '1',
+            'HF_HUB_OFFLINE': '1',
+            'REQUESTS_CA_BUNDLE': '',
+            'CURL_CA_BUNDLE': ''
+        })
+        
+        # Block socket connections
+        original_socket = socket.socket
+        def blocked_socket(*args, **kwargs):
+            raise OSError("Network connections disabled in airgap mode")
+        socket.socket = blocked_socket
+        
+        # Block requests library
+        try:
+            import requests
+            def blocked_request(*args, **kwargs):
+                raise requests.exceptions.ConnectionError("External connections disabled")
+            requests.request = blocked_request
+            requests.get = blocked_request
+            requests.post = blocked_request
+        except ImportError:
+            pass
 
     def _init_database(self):
         """Initialize database with enhanced schema"""
@@ -455,39 +515,56 @@ class CompleteEnhancedCodeParserAgent:
             raise
 
     async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
-        """Generate text with LLM - handles async generator properly"""
-        try:
-            if self.llm_engine is None:
-                return ""
-            
-            request_id = str(uuid.uuid4())
-            
+        """Generate text with LLM - FIXED async generator handling"""
+        
+        # Rate limiting to prevent request flooding
+        current_time = time.time()
+        time_since_last = current_time - self._last_request_time
+        if time_since_last < self._min_request_interval:
+            await asyncio.sleep(self._min_request_interval - time_since_last)
+        
+        async with self._request_semaphore:  # Prevent concurrent requests
             try:
-                # Get async generator from vLLM
-                result_generator = self.llm_engine.generate(
-                    prompt, sampling_params, request_id=request_id
-                )
+                if self.llm_engine is None:
+                    self.logger.warning("LLM engine not available, using fallback")
+                    self.processing_stats["fallback_used"] += 1
+                    return ""
                 
-                # Properly iterate through async generator
-                async for result in result_generator:
-                    if result and hasattr(result, 'outputs') and len(result.outputs) > 0:
-                        return result.outputs[0].text.strip()
-                    break  # Take first result
+                request_id = str(uuid.uuid4())
+                self._last_request_time = time.time()
+                
+                try:
+                    # FIXED: Use async for instead of await
+                    result_generator = self.llm_engine.generate(
+                        prompt, sampling_params, request_id=request_id
+                    )
                     
-            except TypeError as e:
-                if "request_id" in str(e):
-                    # Fallback to old API
-                    result_generator = self.llm_engine.generate(prompt, sampling_params)
+                    # Properly iterate through async generator
                     async for result in result_generator:
                         if result and hasattr(result, 'outputs') and len(result.outputs) > 0:
+                            self.processing_stats["llm_calls_made"] += 1
                             return result.outputs[0].text.strip()
-                        break
+                        break  # Take first result only
                         
-            return ""
-            
-        except Exception as e:
-            self.logger.error(f"LLM generation failed: {str(e)}")
-            return ""
+                except TypeError as e:
+                    if "request_id" in str(e):
+                        # Fallback to old API
+                        result_generator = self.llm_engine.generate(prompt, sampling_params)
+                        async for result in result_generator:
+                            if result and hasattr(result, 'outputs') and len(result.outputs) > 0:
+                                self.processing_stats["llm_calls_made"] += 1
+                                return result.outputs[0].text.strip()
+                            break
+                    else:
+                        raise e
+                
+                return ""
+                
+            except Exception as e:
+                self.logger.error(f"LLM generation failed: {str(e)}")
+                self.processing_stats["fallback_used"] += 1
+                return ""
+
         
     def _extract_program_name(self, content: str, file_path: Path) -> str:
         """Extract program name more robustly from content or filename"""
@@ -530,125 +607,108 @@ class CompleteEnhancedCodeParserAgent:
             result['using_coordinator_llm'] = self._using_coordinator_llm
         return result
 
-    async def process_file(self, file_path: Path) -> Dict[str, Any]:
-        """Process a single code file with enhanced error handling and verification"""
+    async def process_file(self, file_path) -> Dict[str, Any]:
+        """Process file with enhanced error handling and type safety"""
         try:
-            await self._ensure_llm_engine()
+            # FIXED: Ensure proper type handling
+            if isinstance(file_path, str):
+                file_path = Path(file_path)
+            elif not isinstance(file_path, Path):
+                return self._create_error_result(
+                    f"Invalid file path type: {type(file_path)}", 
+                    str(file_path)
+                )
             
-            # Debug logging
-            self.logger.info(f"Processing file: {file_path}")
-            self.logger.info(f"File exists: {file_path.exists()}")
-            
+            # Validate file exists
             if not file_path.exists():
-                return self._add_processing_info({
-                    "status": "error",
-                    "file_name": str(file_path.name),
-                    "error": "File not found"
-                })
+                return self._create_error_result("File does not exist", str(file_path.name))
             
-            # Enhanced file reading
-            try:
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    content = f.read()
-                self.logger.info(f"File content read: {len(content)} characters")
-            except UnicodeDecodeError:
-                for encoding in ['cp1252', 'latin1', 'ascii']:
-                    try:
-                        with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
-                            content = f.read()
-                        break
-                    except UnicodeDecodeError:
-                        continue
-                else:
-                    return self._add_processing_info({
-                        "status": "error",
-                        "file_name": file_path.name,
-                        "error": "Unable to decode file with any encoding"
-                    })
+            if not file_path.is_file():
+                return self._create_error_result("Path is not a file", str(file_path.name))
+            
+            # FIXED: Safe file reading with multiple encodings
+            content = None
+            encodings = ['utf-8', 'utf-8-sig', 'cp1252', 'latin1', 'ascii']
+            
+            for encoding in encodings:
+                try:
+                    with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
+                        content = f.read()
+                    self.logger.debug(f"Successfully read file with {encoding} encoding")
+                    break
+                except (UnicodeDecodeError, UnicodeError):
+                    continue
+            
+            if content is None:
+                return self._create_error_result("Could not read file with any encoding", str(file_path.name))
             
             if not content.strip():
-                return self._add_processing_info({
-                    "status": "error",
-                    "file_name": str(file_path.name),
-                    "error": "File is empty"
-                })
-
+                return self._create_error_result("File is empty or contains only whitespace", str(file_path.name))
+            
+            # FIXED: Ensure all strings are properly converted
+            file_name_str = str(file_path.name)
+            content_str = str(content)
+            
             # Check for duplicates
-            if self._is_duplicate_file(file_path, content):
-                return self._add_processing_info({
-                    "status": "skipped",
-                    "file_name": str(file_path.name),
-                    "message": "File already processed (duplicate detected)"
-                })
+            file_hash = self._generate_file_hash(content_str, file_path)
+            if self._is_duplicate_file(file_path, content_str):
+                return self._create_success_result(
+                    file_name_str, "skipped", 0, 
+                    message="File already processed (duplicate detected)"
+                )
             
-            file_type = self._detect_file_type(content, file_path.suffix)
-            self.logger.info(f"Detected file type: {file_type}")
+            # Detect file type
+            file_type = self._detect_file_type(content_str, str(file_path.suffix))
             
-            # Parse based on file type
-            if file_type == 'cobol':
-                chunks = await self._parse_cobol_complete(content, str(file_path.name))
-            elif file_type == 'jcl':
-                chunks = await self._parse_jcl_complete(content, str(file_path.name))
-            elif file_type == 'copybook':
-                chunks = await self._parse_copybook_complete(content, str(file_path.name))
-            elif file_type == 'bms':
-                chunks = await self._parse_bms_complete(content, str(file_path.name))
-            elif file_type == 'cics':
-                chunks = await self._parse_cics_complete(content, str(file_path.name))
-            else:
-                chunks = await self._parse_generic(content, str(file_path.name))
-            
-            self.logger.info(f"Generated {len(chunks)} chunks")
+            # Parse based on file type with fallback
+            chunks = []
+            try:
+                if file_type == 'cobol':
+                    chunks = await self._parse_cobol_safe(content_str, file_name_str)
+                elif file_type == 'jcl':
+                    chunks = await self._parse_jcl_safe(content_str, file_name_str)
+                elif file_type == 'copybook':
+                    chunks = await self._parse_copybook_complete(content, str(file_path.name))
+                elif file_type == 'bms':
+                    chunks = await self._parse_bms_complete(content, str(file_path.name))
+                elif file_type == 'cics':
+                    chunks = await self._parse_cics_complete(content, str(file_path.name))
+                elif file_type == 'sql':
+                    chunks = await self._parse_sql_blocks_complete(content_str, file_name_str)   
+                else:
+                    chunks = await self._parse_generic_safe(content_str, file_name_str)
+            except Exception as parse_error:
+                self.logger.error(f"Parsing failed for {file_name_str}: {str(parse_error)}")
+                # Create fallback chunk
+                chunks = [self._create_fallback_chunk(content_str, file_name_str, file_type)]
             
             if not chunks:
-                return self._add_processing_info({
-                    "status": "warning",
-                    "file_name": str(file_path.name),
-                    "file_type": file_type,
-                    "chunks_created": 0,
-                    "message": "No chunks were created from this file"
-                })
+                # Create fallback chunk if no chunks were created
+                chunks = [self._create_fallback_chunk(content_str, file_name_str, file_type)]
             
-            # Add file hash to all chunks
-            file_hash = self._generate_file_hash(content, file_path)
-            for chunk in chunks:
-                chunk.metadata['file_hash'] = file_hash
-            await self._store_chunks_enhanced(chunks, file_hash)
-            # After generating chunks, before storing:
-# Convert CodeChunk objects to tuples for vector agent compatibility
+            # Store chunks safely
+            try:
+                await self._store_chunks_safe(chunks, file_hash)
+                self.processing_stats["files_processed"] += 1
+                self.processing_stats["chunks_created"] += len(chunks)
+            except Exception as store_error:
+                self.logger.error(f"Failed to store chunks: {str(store_error)}")
+                return self._create_error_result(f"Storage failed: {str(store_error)}", file_name_str)
             
-                # Store chunks with verification
-            await self._store_chunks_enhanced(chunks, file_hash)
-            
-            # Verify chunks were stored
-            stored_chunks = await self._verify_chunks_stored(self._extract_program_name(content, file_path))
-            
-            # Generate metadata
-            metadata = await self._generate_metadata_enhanced(chunks, file_type)
-
-            lineage_records = await self._generate_field_lineage(file_path.stem, chunks)
-            await self._store_field_lineage(lineage_records)
-            
-            result = {
-                "status": "success",
-                "file_name": str(file_path.name),
-                "file_type": file_type,
-                "chunks_created": len(chunks),
-                "chunks_verified": stored_chunks,
-                "metadata": metadata,
-                "processing_timestamp": datetime.now().isoformat(),
-                "file_hash": file_hash
-            }
-            
-            return self._add_processing_info(result)
+            return self._create_success_result(
+                file_name_str, "success", len(chunks),
+                file_type=file_type, file_hash=file_hash
+            )
             
         except Exception as e:
-            self.logger.error(f"Processing failed for {file_path}: {str(e)}")
-            return self._add_processing_info({
-                "status": "error",
-                "file_name": file_path.name,
-                "error": str(e)
-            })
+            self.error_count += 1
+            self.last_error = str(e)
+            self.processing_stats["errors_encountered"] += 1
+            
+            file_name_safe = str(file_path.name) if hasattr(file_path, 'name') else str(file_path)
+            self.logger.error(f"Processing failed for {file_name_safe}: {str(e)}")
+            
+            return self._create_error_result(str(e), file_name_safe)
 
     def _detect_file_type(self, content: str, suffix: str) -> str:
         """Detect the type of mainframe file with enhanced detection"""
@@ -687,6 +747,80 @@ class CompleteEnhancedCodeParserAgent:
             return 'bms'
         else:
             return 'unknown'
+
+    def _create_error_result(self, error_msg: str, file_name: str) -> Dict[str, Any]:
+        """Create standardized error result"""
+        return {
+            "status": "error",
+            "file_name": str(file_name),
+            "error": str(error_msg),
+            "processing_timestamp": datetime.now().isoformat(),
+            "agent_type": "enhanced_code_parser",
+            "gpu_used": self.gpu_id
+        }
+
+    def _create_success_result(self, file_name: str, status: str, chunks_count: int, 
+                            **kwargs) -> Dict[str, Any]:
+        """Create standardized success result"""
+        result = {
+            "status": str(status),
+            "file_name": str(file_name),
+            "chunks_created": int(chunks_count),
+            "processing_timestamp": datetime.now().isoformat(),
+            "agent_type": "enhanced_code_parser",
+            "gpu_used": self.gpu_id
+        }
+        result.update(kwargs)
+        return result
+
+    def _create_fallback_chunk(self, content: str, file_name: str, file_type: str) -> CodeChunk:
+        """Create fallback chunk when parsing fails"""
+        program_name = self._extract_program_name_safe(content, file_name)
+        
+        return CodeChunk(
+            program_name=str(program_name),
+            chunk_id=f"{program_name}_FULL_FILE",
+            chunk_type="full_file_fallback",
+            content=str(content)[:2000],  # Limit content size
+            metadata={
+                "fallback": True,
+                "file_type": str(file_type),
+                "reason": "Parsing failed, created fallback chunk",
+                "content_length": len(content)
+            },
+            line_start=0,
+            line_end=len(content.split('\n'))
+        )
+
+    def _extract_program_name_safe(self, content: str, file_name: str) -> str:
+        """Safely extract program name with fallbacks"""
+        try:
+            # Try PROGRAM-ID first
+            if hasattr(self, 'cobol_patterns') and 'program_id' in self.cobol_patterns:
+                program_match = self.cobol_patterns['program_id'].search(content)
+                if program_match:
+                    return str(program_match.group(1)).strip()
+            
+            # Try JOB name
+            if hasattr(self, 'jcl_patterns') and 'job_card' in self.jcl_patterns:
+                job_match = self.jcl_patterns['job_card'].search(content)
+                if job_match:
+                    return str(job_match.group(1)).strip()
+            
+            # Fallback to filename
+            if isinstance(file_name, (str, Path)):
+                name = str(Path(file_name).stem)
+                # Remove common extensions
+                for ext in ['.cbl', '.cob', '.jcl', '.copy', '.cpy']:
+                    if name.lower().endswith(ext.lower()):
+                        name = name[:-len(ext)]
+                return name or "UNKNOWN_PROGRAM"
+            
+            return "UNKNOWN_PROGRAM"
+            
+        except Exception as e:
+            self.logger.warning(f"Program name extraction failed: {str(e)}")
+            return "UNKNOWN_PROGRAM"
 
     async def _parse_cobol_complete(self, content: str, filename: str) -> List[CodeChunk]:
         """Complete COBOL parsing with all structures"""
