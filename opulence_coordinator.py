@@ -28,6 +28,7 @@ import pandas as pd
 
 # Import our agents
 from agents.code_parser_agent import CodeParserAgent
+from agents.chat_agent import OpulenceChatAgent
 from agents.vector_index_agent import VectorIndexAgent  
 from agents.data_loader_agent import DataLoaderAgent
 from agents.lineage_analyzer_agent import LineageAnalyzerAgent
@@ -687,6 +688,14 @@ class DynamicOpulenceCoordinator:
                 max_rows=self.config.max_db_rows,
                 coordinator=self  # ADD coordinator reference
             )
+        elif agent_type == "chat_agent":  # ADD THIS
+            return OpulenceChatAgent(
+                    coordinator=self,
+                    llm_engine=llm_engine,
+                    db_path=self.db_path,
+                    gpu_id=gpu_id,
+                    coordinator=self # ADD coordinator reference
+                )
         else:
             raise ValueError(f"Unknown agent type: {agent_type}")
     
@@ -1083,31 +1092,215 @@ class DynamicOpulenceCoordinator:
         except Exception as e:
             self.logger.error(f"Failed to get database stats: {str(e)}")
             return {"error": str(e)}
-    async def process_regular_chat_query(self, query: str) -> str:
-        """Process regular chat query without vector search"""
+    
+    async def process_chat_query(self, query: str, conversation_history: List[Dict] = None) -> Dict[str, Any]:
+        """Process chat query using the chat agent"""
         try:
-            # Determine query type and route to appropriate agent
-            query_lower = query.lower()
-            
-            if any(word in query_lower for word in ['lifecycle', 'lineage', 'trace', 'impact']):
-                # Extract component name from query
-                component_name = self._extract_component_name(query)
-                if component_name:
-                    result = await self.analyze_component(component_name)
-                    return self._format_analysis_response(result)
-                else:
-                    return "Could you please specify which component (file, table, program, or field) you'd like me to analyze?"
-            
-            elif any(word in query_lower for word in ['compare', 'difference', 'db2']):
-                return "For data comparison, please use the DB2 Comparison tab to select specific components."
-            
-            else:
-                # General query - provide helpful guidance
-                return self._generate_general_response(query)
-        
+            async with self.get_agent_with_gpu("chat_agent") as (chat_agent, gpu_id):
+                result = await chat_agent.process_chat_query(query, conversation_history)
+                result["gpu_used"] = gpu_id
+                
+                # Update statistics
+                self.stats["total_queries"] += 1
+                
+                return result
+                
         except Exception as e:
-            return f"❌ Error processing query: {str(e)}"
+            self.logger.error(f"Chat query processing failed: {str(e)}")
+            return {
+                "response": f"I encountered an error processing your query: {str(e)}",
+                "response_type": "error",
+                "suggestions": ["Try rephrasing your question", "Check if the system is properly initialized"]
+            }
 
+    async def get_chat_agent_status(self) -> Dict[str, Any]:
+        """Get chat agent status and capabilities"""
+        try:
+            async with self.get_agent_with_gpu("chat_agent") as (chat_agent, gpu_id):
+                return {
+                    "status": "available",
+                    "gpu_id": gpu_id,
+                    "capabilities": [
+                        "Component analysis conversations",
+                        "Lineage tracing discussions", 
+                        "Code pattern searches",
+                        "Impact analysis explanations",
+                        "Technical documentation assistance"
+                    ],
+                    "supported_queries": [
+                        "Natural language component analysis",
+                        "Conversational lineage tracing",
+                        "Interactive code exploration",
+                        "Guided impact assessment"
+                    ]
+                }
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+        
+    async def process_regular_chat_query(self, query: str, conversation_history: List[Dict] = None) -> str:
+        """Process regular chat query using the intelligent chat agent"""
+        try:
+            result = await self.process_chat_query(query, conversation_history)
+            
+            if isinstance(result, dict):
+                response = result.get("response", "")
+                
+                # Add suggestions if available
+                suggestions = result.get("suggestions", [])
+                if suggestions:
+                    response += "\n\n💡 **Suggestions:**\n"
+                    for suggestion in suggestions[:3]:
+                        response += f"• {suggestion}\n"
+                
+                return response
+            else:
+                return str(result)
+                
+        except Exception as e:
+            self.logger.error(f"Chat query processing failed: {str(e)}")
+            return f"❌ I encountered an error processing your query: {str(e)}"
+
+    # 5. Add enhanced chat capabilities
+
+    async def get_conversation_summary(self, conversation_history: List[Dict]) -> str:
+        """Generate a summary of the conversation using the chat agent"""
+        try:
+            if not conversation_history:
+                return "No conversation to summarize."
+            
+            # Create a summary query
+            summary_query = "Please summarize our conversation and the key points discussed."
+            
+            async with self.get_agent_with_gpu("chat_agent") as (chat_agent, gpu_id):
+                result = await chat_agent.process_chat_query(summary_query, conversation_history)
+                return result.get("response", "Unable to generate summary.")
+                
+        except Exception as e:
+            self.logger.error(f"Conversation summary failed: {str(e)}")
+            return f"Error generating summary: {str(e)}"
+
+    async def suggest_follow_up_questions(self, last_query: str, last_response: str) -> List[str]:
+        """Suggest follow-up questions based on the conversation"""
+        try:
+            # Use the chat agent to generate intelligent follow-ups
+            follow_up_query = f"Based on the previous question '{last_query}' and response, suggest 3 relevant follow-up questions a user might ask."
+            
+            conversation_context = [
+                {"role": "user", "content": last_query},
+                {"role": "assistant", "content": last_response}
+            ]
+            
+            async with self.get_agent_with_gpu("chat_agent") as (chat_agent, gpu_id):
+                result = await chat_agent.process_chat_query(follow_up_query, conversation_context)
+                
+                # Extract suggestions from response
+                response = result.get("response", "")
+                suggestions = result.get("suggestions", [])
+                
+                # If no structured suggestions, try to extract from response
+                if not suggestions and response:
+                    # Simple extraction of questions from response
+                    import re
+                    questions = re.findall(r'[0-9]+\.\s*([^?\n]+\?)', response)
+                    suggestions = questions[:3]
+                
+                return suggestions[:3] if suggestions else [
+                    "Tell me more about this component",
+                    "Show me the impact analysis", 
+                    "Find similar components"
+                ]
+                
+        except Exception as e:
+            self.logger.error(f"Follow-up suggestion failed: {str(e)}")
+            return ["Analyze another component", "Search for code patterns", "Check system status"]
+
+    # 6. Add chat-enhanced component analysis
+
+    async def chat_analyze_component(self, component_name: str, user_question: str = None, 
+                                    conversation_history: List[Dict] = None) -> Dict[str, Any]:
+        """Analyze component with chat-enhanced explanations"""
+        try:
+            # First get the regular analysis
+            analysis_result = await self.analyze_component(component_name, "auto-detect")
+            
+            # Then get chat-enhanced explanation
+            if user_question:
+                chat_query = f"Explain the analysis of {component_name}. {user_question}"
+            else:
+                chat_query = f"Provide a detailed explanation of {component_name} based on the analysis."
+            
+            # Create context with analysis results
+            enhanced_history = conversation_history or []
+            enhanced_history.append({
+                "role": "system",
+                "content": f"Analysis data for {component_name}: {json.dumps(analysis_result, default=str)}"
+            })
+            
+            chat_result = await self.process_chat_query(chat_query, enhanced_history)
+            
+            # Combine results
+            return {
+                "component_name": component_name,
+                "analysis": analysis_result,
+                "chat_explanation": chat_result.get("response", ""),
+                "suggestions": chat_result.get("suggestions", []),
+                "response_type": "enhanced_analysis"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Chat-enhanced analysis failed: {str(e)}")
+            return {
+                "component_name": component_name,
+                "analysis": analysis_result if 'analysis_result' in locals() else {},
+                "error": str(e),
+                "response_type": "error"
+            }
+
+    # 7. Add chat-enhanced search
+
+    async def chat_search_patterns(self, search_description: str, 
+                                conversation_history: List[Dict] = None) -> Dict[str, Any]:
+        """Search for code patterns with chat-enhanced results"""
+        try:
+            # Use vector search first
+            async with self.get_agent_with_gpu("vector_index") as (vector_agent, gpu_id):
+                search_results = await vector_agent.search_by_functionality(search_description, top_k=10)
+            
+            # Get chat explanation of results
+            chat_query = f"Explain these search results for '{search_description}' and help me understand what was found."
+            
+            # Create context with search results
+            search_context = [
+                {
+                    "role": "system", 
+                    "content": f"Search results for '{search_description}': {json.dumps(search_results[:5], default=str)}"
+                }
+            ]
+            if conversation_history:
+                search_context.extend(conversation_history)
+            
+            chat_result = await self.process_chat_query(chat_query, search_context)
+            
+            return {
+                "search_description": search_description,
+                "search_results": search_results,
+                "chat_explanation": chat_result.get("response", ""),
+                "total_found": len(search_results),
+                "suggestions": chat_result.get("suggestions", []),
+                "response_type": "enhanced_search"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Chat-enhanced search failed: {str(e)}")
+            return {
+                "search_description": search_description,
+                "search_results": [],
+                "error": str(e),
+                "response_type": "error"
+            }
     def _extract_component_name(self, query: str) -> str:
         """Extract component name from natural language query"""
         words = query.split()

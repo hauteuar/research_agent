@@ -205,48 +205,499 @@ def safe_run_async(coro):
         return {"error": str(e)}
 
 
-def process_chat_query(query: str) -> str:
-    """Process chat query and return response"""
+def process_chat_query(query: str) -> Dict[str, Any]:
+    """Process chat query and return structured response"""
     if not COORDINATOR_AVAILABLE:
-        return "❌ Coordinator not available. Please check the import error in debug mode."
+        return {
+            "response": "❌ Coordinator not available. Please check the import error in debug mode.",
+            "response_type": "error",
+            "suggestions": []
+        }
     
     if not st.session_state.coordinator:
-        return "❌ System not initialized. Please check system health."
+        return {
+            "response": "❌ System not initialized. Please check system health.",
+            "response_type": "error",
+            "suggestions": ["Initialize system in System Health tab"]
+        }
     
     try:
-        # Determine query type and route to appropriate agent
-        query_lower = query.lower()
+        # Get conversation history for context
+        conversation_history = st.session_state.chat_history[-5:] if st.session_state.chat_history else []
         
-        if any(word in query_lower for word in ['lifecycle', 'lineage', 'trace', 'impact']):
-            # Extract component name from query
-            component_name = extract_component_name(query)
-            if component_name:
-                result = safe_run_async(
-                    st.session_state.coordinator.analyze_component(component_name)
-                )
-                return format_analysis_response(result)
-            else:
-                return "Could you please specify which component (file, table, program, or field) you'd like me to analyze?"
+        # Process with the enhanced chat agent
+        result = safe_run_async(
+            st.session_state.coordinator.process_chat_query(query, conversation_history)
+        )
         
-        elif any(word in query_lower for word in ['compare', 'difference', 'db2']):
-            return "For data comparison, please use the DB2 Comparison tab to select specific components."
-        
-        elif any(word in query_lower for word in ['search', 'find', 'pattern']):
-            # Use semantic search
-            if hasattr(st.session_state.coordinator, 'agents') and st.session_state.coordinator.agents.get("vector_index"):
-                results = safe_run_async(
-                    st.session_state.coordinator.agents["vector_index"].search_code_by_pattern(query)
-                )
-                return format_search_results(results)
-            else:
-                return "Search functionality is not available. Please check if files have been processed."
-        
+        if isinstance(result, dict):
+            return result
         else:
-            # General query - try to provide helpful guidance
-            return generate_general_response(query)
+            return {
+                "response": str(result),
+                "response_type": "general",
+                "suggestions": []
+            }
     
     except Exception as e:
-        return f"❌ Error processing query: {str(e)}"
+        return {
+            "response": f"❌ Error processing query: {str(e)}",
+            "response_type": "error",
+            "suggestions": ["Try rephrasing your question", "Check system status"]
+        }
+
+def show_chat_analysis():
+    """Enhanced chat analysis interface with intelligent responses"""
+    st.markdown('<div class="sub-header">💬 Chat with Opulence</div>', unsafe_allow_html=True)
+    
+    # Chat status indicator
+    if st.session_state.coordinator:
+        try:
+            chat_status = safe_run_async(st.session_state.coordinator.get_chat_agent_status())
+            if chat_status.get("status") == "available":
+                st.success(f"🟢 Chat Agent Ready (GPU {chat_status.get('gpu_id', 'N/A')})")
+            else:
+                st.warning(f"🟡 Chat Agent: {chat_status.get('status', 'Unknown')}")
+        except:
+            st.info("🔵 Chat Agent: Status unknown")
+    
+    # Chat container with enhanced display
+    chat_container = st.container()
+    
+    with chat_container:
+        for i, message in enumerate(st.session_state.chat_history):
+            if message["role"] == "user":
+                with st.chat_message("user"):
+                    st.write(message["content"])
+            else:
+                with st.chat_message("assistant"):
+                    # Check if this is a structured response
+                    if isinstance(message.get("content"), dict):
+                        response_data = message["content"]
+                        st.write(response_data.get("response", ""))
+                        
+                        # Show suggestions if available
+                        suggestions = response_data.get("suggestions", [])
+                        if suggestions:
+                            st.markdown("**💡 Suggestions:**")
+                            cols = st.columns(min(len(suggestions), 3))
+                            for j, suggestion in enumerate(suggestions[:3]):
+                                with cols[j]:
+                                    if st.button(f"💬 {suggestion[:30]}...", key=f"suggestion_{i}_{j}"):
+                                        # Add suggestion as new user message
+                                        st.session_state.chat_history.append({
+                                            "role": "user",
+                                            "content": suggestion,
+                                            "timestamp": datetime.now().isoformat()
+                                        })
+                                        st.rerun()
+                    else:
+                        st.write(message["content"])
+    
+    # Enhanced chat input with processing
+    user_input = st.chat_input("Ask about your mainframe systems...")
+    
+    if user_input:
+        # Add user message to history
+        st.session_state.chat_history.append({
+            "role": "user",
+            "content": user_input,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        # Show processing indicator
+        with st.spinner("🧠 Opulence is thinking..."):
+            # Process query and generate response
+            response_data = process_chat_query(user_input)
+        
+        # Add assistant response to history
+        st.session_state.chat_history.append({
+            "role": "assistant",
+            "content": response_data,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        st.rerun()
+    
+    # Enhanced chat controls
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if st.button("🗑️ Clear Chat"):
+            st.session_state.chat_history = []
+            st.rerun()
+    
+    with col2:
+        if st.button("📄 Export Chat"):
+            export_chat_history()
+    
+    with col3:
+        if st.button("📊 Chat Summary"):
+            generate_chat_summary()
+    
+    with col4:
+        if st.session_state.chat_history:
+            if st.button("🔮 Suggest Questions"):
+                generate_follow_up_suggestions()
+
+
+def export_chat_history():
+    """Export chat history with enhanced formatting"""
+    if not st.session_state.chat_history:
+        st.warning("No chat history to export")
+        return
+    
+    # Create formatted export
+    export_data = {
+        "export_info": {
+            "timestamp": datetime.now().isoformat(),
+            "total_messages": len(st.session_state.chat_history),
+            "session_id": st.session_state.get("session_id", "unknown")
+        },
+        "conversation": []
+    }
+    
+    for message in st.session_state.chat_history:
+        if isinstance(message.get("content"), dict):
+            # Structured response
+            export_data["conversation"].append({
+                "role": message["role"],
+                "timestamp": message["timestamp"],
+                "response": message["content"].get("response", ""),
+                "response_type": message["content"].get("response_type", "unknown"),
+                "suggestions": message["content"].get("suggestions", []),
+                "metadata": message["content"]
+            })
+        else:
+            # Simple message
+            export_data["conversation"].append({
+                "role": message["role"],
+                "timestamp": message["timestamp"],
+                "content": message["content"]
+            })
+    
+    # Create download
+    export_json = json.dumps(export_data, indent=2)
+    st.download_button(
+        "📥 Download Enhanced Chat History",
+        export_json,
+        file_name=f"opulence_chat_enhanced_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+        mime="application/json"
+    )
+
+
+def generate_chat_summary():
+    """Generate an intelligent summary of the chat conversation"""
+    if not st.session_state.chat_history:
+        st.info("No conversation to summarize")
+        return
+    
+    if not st.session_state.coordinator:
+        st.error("System not initialized")
+        return
+    
+    with st.spinner("🔄 Generating conversation summary..."):
+        try:
+            summary = safe_run_async(
+                st.session_state.coordinator.get_conversation_summary(st.session_state.chat_history)
+            )
+            
+            # Display summary in a nice format
+            st.markdown("### 📋 Conversation Summary")
+            st.markdown(summary)
+            
+            # Add to chat history
+            st.session_state.chat_history.append({
+                "role": "assistant",
+                "content": {
+                    "response": f"**Conversation Summary:**\n\n{summary}",
+                    "response_type": "summary",
+                    "suggestions": ["Continue analysis", "Export summary", "Start new topic"]
+                },
+                "timestamp": datetime.now().isoformat()
+            })
+            
+        except Exception as e:
+            st.error(f"Failed to generate summary: {str(e)}")
+
+
+def generate_follow_up_suggestions():
+    """Generate intelligent follow-up question suggestions"""
+    if len(st.session_state.chat_history) < 2:
+        st.info("Need more conversation for suggestions")
+        return
+    
+    if not st.session_state.coordinator:
+        st.error("System not initialized")
+        return
+    
+    # Get last exchange
+    last_messages = st.session_state.chat_history[-2:]
+    if len(last_messages) >= 2:
+        last_query = last_messages[0].get("content", "")
+        last_response = last_messages[1].get("content", "")
+        
+        # Extract response text if structured
+        if isinstance(last_response, dict):
+            last_response = last_response.get("response", "")
+    else:
+        return
+    
+    with st.spinner("🔮 Generating suggestions..."):
+        try:
+            suggestions = safe_run_async(
+                st.session_state.coordinator.suggest_follow_up_questions(last_query, last_response)
+            )
+            
+            if suggestions:
+                st.markdown("### 💡 Suggested Follow-up Questions")
+                for i, suggestion in enumerate(suggestions):
+                    if st.button(f"❓ {suggestion}", key=f"followup_{i}"):
+                        # Add as new user message
+                        st.session_state.chat_history.append({
+                            "role": "user",
+                            "content": suggestion,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        st.rerun()
+            
+        except Exception as e:
+            st.error(f"Failed to generate suggestions: {str(e)}")
+
+
+def show_enhanced_component_analysis():
+    """Enhanced component analysis with chat integration"""
+    st.markdown('<div class="sub-header">🔍 Enhanced Component Analysis</div>', unsafe_allow_html=True)
+    
+    # Component selection
+    col1, col2, col3 = st.columns([2, 1, 1])
+    
+    with col1:
+        component_name = st.text_input("Component Name (file, table, program, field):")
+    
+    with col2:
+        component_type = st.selectbox(
+            "Component Type",
+            ["auto-detect", "file", "table", "program", "jcl", "field"]
+        )
+    
+    with col3:
+        chat_enhanced = st.checkbox("Use Chat Enhancement", value=True)
+    
+    # Optional user question
+    user_question = st.text_input("Specific question about this component (optional):")
+    
+    if st.button("🔍 Analyze Component") and component_name:
+        analyze_component_enhanced(component_name, component_type, user_question, chat_enhanced)
+    
+    # Display current analysis with chat integration
+    if st.session_state.current_analysis:
+        display_enhanced_component_analysis(st.session_state.current_analysis)
+
+
+def analyze_component_enhanced(component_name: str, component_type: str, user_question: str = None, chat_enhanced: bool = True):
+    """Enhanced component analysis with optional chat integration"""
+    if not st.session_state.coordinator:
+        st.error("System not initialized")
+        return
+    
+    with st.spinner(f"🧠 Analyzing {component_name}..."):
+        try:
+            if chat_enhanced and user_question:
+                # Use chat-enhanced analysis
+                result = safe_run_async(
+                    st.session_state.coordinator.chat_analyze_component(
+                        component_name, 
+                        user_question,
+                        st.session_state.chat_history[-3:] if st.session_state.chat_history else []
+                    )
+                )
+            else:
+                # Use regular analysis
+                component_type_param = None if component_type == "auto-detect" else component_type
+                result = safe_run_async(
+                    st.session_state.coordinator.analyze_component(
+                        component_name, 
+                        component_type_param
+                    )
+                )
+                
+                # Add chat explanation if requested
+                if chat_enhanced:
+                    chat_query = f"Explain the analysis results for {component_name} in a conversational way."
+                    chat_result = safe_run_async(
+                        st.session_state.coordinator.process_chat_query(chat_query, [])
+                    )
+                    result = {
+                        "component_name": component_name,
+                        "analysis": result,
+                        "chat_explanation": chat_result.get("response", ""),
+                        "suggestions": chat_result.get("suggestions", []),
+                        "response_type": "enhanced_analysis"
+                    }
+            
+            st.session_state.current_analysis = result
+            
+        except Exception as e:
+            st.error(f"Analysis failed: {str(e)}")
+
+
+def display_enhanced_component_analysis(analysis: dict):
+    """Display enhanced component analysis results"""
+    if isinstance(analysis, dict) and "error" in analysis:
+        st.error(f"Analysis error: {analysis['error']}")
+        return
+    
+    # Check if this is chat-enhanced
+    if analysis.get("response_type") == "enhanced_analysis":
+        component_name = analysis.get("component_name", "Unknown")
+        st.success(f"✅ Enhanced analysis completed for: **{component_name}**")
+        
+        # Show chat explanation first
+        if analysis.get("chat_explanation"):
+            st.markdown("### 🧠 AI Explanation")
+            st.markdown(analysis["chat_explanation"])
+        
+        # Show suggestions
+        suggestions = analysis.get("suggestions", [])
+        if suggestions:
+            st.markdown("### 💡 Suggested Actions")
+            cols = st.columns(min(len(suggestions), 3))
+            for i, suggestion in enumerate(suggestions[:3]):
+                with cols[i]:
+                    if st.button(suggestion, key=f"analysis_suggestion_{i}"):
+                        # Add to chat history
+                        st.session_state.chat_history.append({
+                            "role": "user",
+                            "content": f"For {component_name}: {suggestion}",
+                            "timestamp": datetime.now().isoformat()
+                        })
+        
+        # Show detailed analysis in tabs
+        tab1, tab2, tab3 = st.tabs(["📊 Technical Analysis", "💬 Chat View", "📋 Export"])
+        
+        with tab1:
+            # Display the underlying technical analysis
+            technical_analysis = analysis.get("analysis", {})
+            if technical_analysis:
+                display_component_analysis(technical_analysis)
+        
+        with tab2:
+            # Show this analysis in chat format
+            if st.button("💬 Add to Chat History"):
+                st.session_state.chat_history.extend([
+                    {
+                        "role": "user",
+                        "content": f"Analyze {component_name}",
+                        "timestamp": datetime.now().isoformat()
+                    },
+                    {
+                        "role": "assistant",
+                        "content": {
+                            "response": analysis.get("chat_explanation", "Analysis completed."),
+                            "response_type": "analysis",
+                            "suggestions": suggestions
+                        },
+                        "timestamp": datetime.now().isoformat()
+                    }
+                ])
+                st.success("Added to chat history!")
+        
+        with tab3:
+            # Export options
+            if st.button("📄 Export Enhanced Analysis"):
+                export_data = json.dumps(analysis, indent=2, default=str)
+                st.download_button(
+                    "Download Enhanced Analysis",
+                    export_data,
+                    file_name=f"enhanced_analysis_{component_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    mime="application/json"
+                )
+    
+    else:
+        # Regular analysis display
+        display_component_analysis(analysis)
+
+
+def show_enhanced_search():
+    """Enhanced search interface with chat integration"""
+    st.markdown('<div class="sub-header">🔍 Enhanced Code Search</div>', unsafe_allow_html=True)
+    
+    # Search input
+    search_query = st.text_input("Describe what you're looking for:")
+    
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        search_type = st.selectbox("Search Type", ["Functionality", "Code Pattern", "Business Logic", "Data Flow"])
+    
+    with col2:
+        result_count = st.selectbox("Max Results", [5, 10, 15, 20], index=1)
+    
+    if st.button("🔍 Search with Chat Enhancement") and search_query:
+        perform_enhanced_search(search_query, search_type, result_count)
+
+
+def perform_enhanced_search(search_query: str, search_type: str, result_count: int):
+    """Perform enhanced search with chat explanations"""
+    if not st.session_state.coordinator:
+        st.error("System not initialized")
+        return
+    
+    with st.spinner(f"🔍 Searching for '{search_query}'..."):
+        try:
+            # Use chat-enhanced search
+            result = safe_run_async(
+                st.session_state.coordinator.chat_search_patterns(
+                    f"{search_type}: {search_query}",
+                    st.session_state.chat_history[-3:] if st.session_state.chat_history else []
+                )
+            )
+            
+            # Display results
+            if result.get("response_type") == "enhanced_search":
+                st.success(f"✅ Found {result.get('total_found', 0)} results")
+                
+                # Show chat explanation
+                if result.get("chat_explanation"):
+                    st.markdown("### 🧠 Search Analysis")
+                    st.markdown(result["chat_explanation"])
+                
+                # Show search results
+                search_results = result.get("search_results", [])
+                if search_results:
+                    st.markdown("### 📋 Search Results")
+                    for i, search_result in enumerate(search_results[:result_count], 1):
+                        with st.expander(f"Result {i}: {search_result.get('metadata', {}).get('program_name', 'Unknown')}"):
+                            metadata = search_result.get('metadata', {})
+                            st.write(f"**Type:** {metadata.get('chunk_type', 'Unknown')}")
+                            st.write(f"**Similarity:** {search_result.get('similarity_score', 0):.3f}")
+                            st.code(search_result.get('content', '')[:500] + "...")
+                            
+                            if st.button(f"Analyze {metadata.get('program_name', 'Component')}", key=f"analyze_result_{i}"):
+                                # Trigger analysis of this component
+                                component_name = metadata.get('program_name', '')
+                                if component_name:
+                                    st.session_state.current_analysis = None  # Clear previous
+                                    analyze_component_enhanced(component_name, "auto-detect", f"Tell me about this component found in search for '{search_query}'", True)
+                
+                # Show suggestions
+                suggestions = result.get("suggestions", [])
+                if suggestions:
+                    st.markdown("### 💡 Suggestions")
+                    for suggestion in suggestions:
+                        if st.button(suggestion, key=f"search_suggestion_{hash(suggestion)}"):
+                            # Add to chat
+                            st.session_state.chat_history.append({
+                                "role": "user",
+                                "content": suggestion,
+                                "timestamp": datetime.now().isoformat()
+                            })
+            else:
+                st.error("Search failed or returned unexpected results")
+                
+        except Exception as e:
+            st.error(f"Enhanced search failed: {str(e)}")
+
 
 
 def extract_component_name(query: str) -> str:
@@ -1560,9 +2011,9 @@ def main():
         
         page = st.selectbox(
             "Navigation",
-            ["🏠 Dashboard", "📂 File Upload", "💬 Chat Analysis", "🔍 Component Analysis", 
-             "📊 Field Lineage", "🔄 DB2 Comparison", "📋 Documentation", "⚙️ System Health"]
-        )
+             ["🏠 Dashboard", "📂 File Upload", "💬 Enhanced Chat", "🔍 Enhanced Analysis", 
+            "🔍 Enhanced Search", "📊 Field Lineage", "🔄 DB2 Comparison", "📋 Documentation", "⚙️ System Health"]
+            )
         
         # Quick actions
         st.markdown("### Quick Actions")
@@ -1589,8 +2040,6 @@ def main():
             show_dashboard()
         elif page == "📂 File Upload":
             show_file_upload()
-        elif page == "💬 Chat Analysis":
-            show_chat_analysis()
         elif page == "🔍 Component Analysis":
             show_component_analysis()
         elif page == "📊 Field Lineage":
@@ -1601,6 +2050,12 @@ def main():
             show_documentation()
         elif page == "⚙️ System Health":
             show_system_health()
+        elif page == "💬 Enhanced Chat":
+            show_chat_analysis()
+        elif page == "🔍 Enhanced Analysis":
+            show_enhanced_component_analysis()
+        elif page == "🔍 Enhanced Search":
+            show_enhanced_search()
     except Exception as e:
         st.error(f"Error loading page: {str(e)}")
         st.exception(e)
