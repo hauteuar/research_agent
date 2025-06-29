@@ -584,7 +584,7 @@ class DynamicOpulenceCoordinator:
             
             if system_status.get('critical_load', False):
                 logger.warning("System under critical load, attempting cleanup before allocation...")
-                SafeGPUForcer.cleanup_zombie_processes()
+                SafeGPUForcer.safe_gpu_cleanup()
                 await asyncio.sleep(2)
             
             # Use enhanced GPU selection
