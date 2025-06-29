@@ -933,8 +933,10 @@ class DynamicOpulenceCoordinator:
                 return await self._process_cobol_file_with_storage(file_path)
             elif content.startswith('//') and 'JOB' in content:
                 return await self._process_jcl_file_with_storage(file_path)
-            elif re.search(r'^\s*\d+\s+[A-Z][A-Z0-9-]*\s+PIC', content.upper(), re.MULTILINE):  # ADD THIS LINE
-                return await self._process_csv_file_with_storage(file_path) 
+            elif file_path.suffix.lower() in ['.cpy', '.copy']:
+                return await self._process_csv_file_with_storage(file_path)
+            #elif re.search(r'^\s*\d+\s+[A-Z][A-Z0-9-]*\s+PIC', content.upper(), re.MULTILINE):  # ADD THIS LINE
+            #    return await self._process_csv_file_with_storage(file_path) 
             elif ',' in content and '\n' in content:
                 return await self._process_csv_file_with_storage(file_path)
             else:
