@@ -331,7 +331,7 @@ class DataLoaderAgent:
     
     def _clean_column_name(self, col_name: str) -> str:
         """Clean column name for SQLite compatibility"""
-        # Remove special characters and spaces
+        # Remove special characters and spaces, replace hyphens with underscores
         clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', str(col_name))
         clean_name = re.sub(r'_{2,}', '_', clean_name)  # Replace multiple underscores
         clean_name = clean_name.strip('_')
@@ -341,6 +341,7 @@ class DataLoaderAgent:
             clean_name = 'col_' + clean_name
         
         return clean_name or 'unnamed_column'
+
     
     async def _infer_csv_schema(self, df: pd.DataFrame, filename: str) -> List[Dict[str, Any]]:
         """Infer schema from CSV data using LLM assistance"""
@@ -551,31 +552,56 @@ class DataLoaderAgent:
     def _generate_table_name(self, filename: str) -> str:
         """Generate SQLite table name from filename"""
         base_name = Path(filename).stem
+        # Replace hyphens with underscores for SQL compatibility
         table_name = re.sub(r'[^a-zA-Z0-9_]', '_', base_name)
         table_name = re.sub(r'_{2,}', '_', table_name)
-        return table_name.lower().strip('_')
+        table_name = table_name.lower().strip('_')
+        
+        # Ensure it starts with letter or underscore
+        if table_name and table_name[0].isdigit():
+            table_name = 'tbl_' + table_name
+            
+        return table_name or 'unknown_table'
     
     async def _create_sqlite_table(self, table_name: str, schema: List[Dict[str, Any]]):
-        """Create SQLite table from schema"""
+        """Create SQLite table from schema with proper quoting"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Drop table if exists
-        cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
-        
-        # Create table
-        columns = []
-        for field in schema:
-            column_def = f"{field['name']} {field['type']}"
-            if not field.get('nullable', True):
-                column_def += " NOT NULL"
-            columns.append(column_def)
-        
-        create_sql = f"CREATE TABLE {table_name} ({', '.join(columns)})"
-        cursor.execute(create_sql)
-        
-        conn.commit()
-        conn.close()
+        try:
+            # Clean table name
+            clean_table_name = self._generate_table_name(table_name)
+            
+            # Drop table if exists
+            cursor.execute(f"DROP TABLE IF EXISTS `{clean_table_name}`")
+            
+            # Create table with quoted column names
+            columns = []
+            for field in schema:
+                field_name = field['name']
+                field_type = field['type']
+                
+                # Clean field name if not already cleaned
+                if '-' in field_name or ' ' in field_name:
+                    field_name = self._clean_column_name(field_name)
+                
+                column_def = f"`{field_name}` {field_type}"
+                if not field.get('nullable', True):
+                    column_def += " NOT NULL"
+                columns.append(column_def)
+            
+            create_sql = f"CREATE TABLE `{clean_table_name}` ({', '.join(columns)})"
+            self.logger.info(f"Creating table with SQL: {create_sql}")
+            cursor.execute(create_sql)
+            
+            conn.commit()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to create table {table_name}: {str(e)}")
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
     
     async def _store_table_schema(self, table_name: str, schema_type: str, 
                                 schema: List[Dict], source_file: str):
@@ -1052,16 +1078,19 @@ class DataLoaderAgent:
 
     # ADD THIS NEW METHOD
     async def _store_copybook_as_chunks(self, table_name: str, copybook_info: Dict, 
-                                    original_content: str, source_file: str):
+                                  original_content: str, source_file: str):
         """Store copybook information as chunks for vector indexing"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
+            # Clean table name for consistency
+            clean_table_name = self._generate_table_name(table_name)
+            
             # Create overall record structure chunk
             record_chunk = {
-                "program_name": table_name,
-                "chunk_id": f"{table_name}_RECORD_STRUCTURE",
+                "program_name": clean_table_name,
+                "chunk_id": f"{clean_table_name}_RECORD_STRUCTURE",
                 "chunk_type": "copybook_structure",
                 "content": original_content,
                 "metadata": json.dumps({
@@ -1092,13 +1121,17 @@ class DataLoaderAgent:
             
             # Create individual field chunks
             for i, field in enumerate(copybook_info['fields']):
+                # Use cleaned field name
+                field_name = self._clean_column_name(field['name'])
+                
                 field_chunk = {
-                    "program_name": table_name,
-                    "chunk_id": f"{table_name}_FIELD_{field['name']}",
+                    "program_name": clean_table_name,
+                    "chunk_id": f"{clean_table_name}_FIELD_{field_name}",
                     "chunk_type": "copybook_field",
-                    "content": f"{field['level']} {field['name']} {field.get('pic_clause', '')}",
+                    "content": f"{field['level']} {field_name} {field.get('pic_clause', '')}",
                     "metadata": json.dumps({
-                        "field_name": field['name'],
+                        "field_name": field_name,
+                        "original_field_name": field.get('original_name', field_name),
                         "field_type": field['type'],
                         "level": field.get('level', '05'),
                         "pic_clause": field.get('pic_clause', ''),
@@ -1128,10 +1161,11 @@ class DataLoaderAgent:
             conn.commit()
             conn.close()
             
-            self.logger.info(f"Stored {len(copybook_info['fields']) + 1} chunks for copybook {table_name}")
+            self.logger.info(f"Stored {len(copybook_info['fields']) + 1} chunks for copybook {clean_table_name}")
             
         except Exception as e:
             self.logger.error(f"Failed to store copybook chunks: {str(e)}")
+            raise
             
     async def _parse_copybook_structure(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
         """Parse COBOL copybook structure using LLM"""
@@ -1142,9 +1176,10 @@ class DataLoaderAgent:
         {content}
         
         Extract:
-        1. Main record name (01 level)
+        1. Main record name (01 level) - convert to SQL-safe name (no hyphens, spaces)
         2. Field definitions with levels, names, and PIC clauses
-        3. Convert COBOL data types to SQL equivalents
+        3. Convert field names to SQL-safe names (replace hyphens with underscores)
+        4. Convert COBOL data types to SQL equivalents
         
         COBOL to SQL type conversion:
         - PIC X(n) -> VARCHAR(n)
@@ -1158,10 +1193,12 @@ class DataLoaderAgent:
             "record_name": "RECORD_NAME",
             "structure_type": "flat|hierarchical",
             "fields": [
-                {{"name": "FIELD1", "type": "VARCHAR(30)", "level": "05", "pic_clause": "PIC X(30)", "nullable": true}},
-                {{"name": "FIELD2", "type": "INTEGER", "level": "05", "pic_clause": "PIC 9(6)", "nullable": false}}
+                {{"name": "FIELD_1", "type": "VARCHAR(30)", "level": "05", "pic_clause": "PIC X(30)", "nullable": true}},
+                {{"name": "FIELD_2", "type": "INTEGER", "level": "05", "pic_clause": "PIC 9(6)", "nullable": false}}
             ]
         }}
+        
+        IMPORTANT: Ensure all field names use underscores instead of hyphens.
         """
         
         sampling_params = SamplingParams(temperature=0.1, max_tokens=1500)
@@ -1171,14 +1208,27 @@ class DataLoaderAgent:
             if '{' in response_text:
                 json_start = response_text.find('{')
                 json_end = response_text.rfind('}') + 1
-                return json.loads(response_text[json_start:json_end])
+                parsed_result = json.loads(response_text[json_start:json_end])
+                
+                # Clean all field names to ensure SQL compatibility
+                if 'fields' in parsed_result:
+                    for field in parsed_result['fields']:
+                        if 'name' in field:
+                            field['name'] = self._clean_column_name(field['name'])
+                
+                # Clean record name
+                if 'record_name' in parsed_result:
+                    parsed_result['record_name'] = self._clean_column_name(parsed_result['record_name'])
+                
+                return parsed_result
+                
         except Exception as e:
             self.logger.warning(f"Copybook parsing failed: {str(e)}")
             # Fallback to regex parsing
             return self._parse_copybook_with_regex(content, filename)
         
         return None
-
+    
     def _parse_copybook_with_regex(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
         """Fallback copybook parsing using regex"""
         try:
