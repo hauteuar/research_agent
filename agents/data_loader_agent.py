@@ -564,31 +564,48 @@ class DataLoaderAgent:
         return table_name or 'unknown_table'
     
     async def _create_sqlite_table(self, table_name: str, schema: List[Dict[str, Any]]):
-        """Create SQLite table from schema with proper quoting"""
+        """Create SQLite table with enhanced COBOL field handling"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
-            # Clean table name
             clean_table_name = self._generate_table_name(table_name)
             
             # Drop table if exists
             cursor.execute(f"DROP TABLE IF EXISTS `{clean_table_name}`")
             
-            # Create table with quoted column names
+            # Filter out REDEFINES fields and prepare columns
             columns = []
             for field in schema:
+                # Skip REDEFINES fields (they overlay existing fields)
+                if field.get('redefines'):
+                    continue
+                    
                 field_name = field['name']
                 field_type = field['type']
                 
-                # Clean field name if not already cleaned
+                # Clean field name if needed
                 if '-' in field_name or ' ' in field_name:
                     field_name = self._clean_column_name(field_name)
                 
                 column_def = f"`{field_name}` {field_type}"
+                
+                # Add constraints
                 if not field.get('nullable', True):
                     column_def += " NOT NULL"
+                
+                # Add default values
+                if field.get('default_value'):
+                    default_val = field['default_value']
+                    if field_type.startswith('VARCHAR') or field_type.startswith('CHAR'):
+                        column_def += f" DEFAULT '{default_val}'"
+                    else:
+                        column_def += f" DEFAULT {default_val}"
+                
                 columns.append(column_def)
+            
+            if not columns:
+                raise ValueError(f"No valid columns found for table {clean_table_name}")
             
             create_sql = f"CREATE TABLE `{clean_table_name}` ({', '.join(columns)})"
             self.logger.info(f"Creating table with SQL: {create_sql}")
@@ -1168,40 +1185,52 @@ class DataLoaderAgent:
             raise
             
     async def _parse_copybook_structure(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
-        """Parse COBOL copybook structure using LLM"""
+        """Enhanced LLM parsing with COBOL constructs awareness"""
         await self._ensure_llm_engine()
         prompt = f"""
-        Parse this COBOL copybook file and extract the record structure:
+        Parse this COBOL copybook file and extract the record structure with proper handling of:
         
         {content}
         
-        Extract:
-        1. Main record name (01 level) - convert to SQL-safe name (no hyphens, spaces)
-        2. Field definitions with levels, names, and PIC clauses
-        3. Convert field names to SQL-safe names (replace hyphens with underscores)
-        4. Convert COBOL data types to SQL equivalents
+        Handle these COBOL constructs:
+        1. FILLER fields - create unique names like FILLER_001, FILLER_002, etc.
+        2. REDEFINES fields - mark them but don't create duplicate columns
+        3. OCCURS clauses - note array/table structures
+        4. VALUE clauses - capture default values
+        5. USAGE clauses - affect data type conversion
+        6. Group items vs elementary items
         
-        COBOL to SQL type conversion:
-        - PIC X(n) -> VARCHAR(n)
-        - PIC 9(n) -> INTEGER (if n <= 9) or BIGINT (if n > 9)
-        - PIC 9(n)V9(m) -> DECIMAL(n+m, m)
-        - PIC S9(n) COMP -> INTEGER
-        - PIC S9(n) COMP-3 -> DECIMAL(n, 0)
+        Convert to SQL-safe field names (underscores instead of hyphens).
+        
+        For FILLER fields, create sequential names: FILLER_001, FILLER_002, etc.
+        For REDEFINES fields, mark them as redefines but don't include in main table structure.
         
         Return as JSON:
         {{
             "record_name": "RECORD_NAME",
             "structure_type": "flat|hierarchical",
             "fields": [
-                {{"name": "FIELD_1", "type": "VARCHAR(30)", "level": "05", "pic_clause": "PIC X(30)", "nullable": true}},
-                {{"name": "FIELD_2", "type": "INTEGER", "level": "05", "pic_clause": "PIC 9(6)", "nullable": false}}
-            ]
+                {{
+                    "name": "FIELD_1",
+                    "original_name": "FIELD-1", 
+                    "type": "VARCHAR(30)",
+                    "level": "05",
+                    "pic_clause": "PIC X(30)",
+                    "nullable": true,
+                    "is_filler": false,
+                    "redefines": null,
+                    "default_value": null,
+                    "occurs": null,
+                    "usage": "DISPLAY"
+                }}
+            ],
+            "filler_count": 3,
+            "has_redefines": true,
+            "has_occurs": false
         }}
-        
-        IMPORTANT: Ensure all field names use underscores instead of hyphens.
         """
         
-        sampling_params = SamplingParams(temperature=0.1, max_tokens=1500)
+        sampling_params = SamplingParams(temperature=0.1, max_tokens=2000)
         
         try:
             response_text = await self._generate_with_llm(prompt, sampling_params)
@@ -1210,11 +1239,29 @@ class DataLoaderAgent:
                 json_end = response_text.rfind('}') + 1
                 parsed_result = json.loads(response_text[json_start:json_end])
                 
-                # Clean all field names to ensure SQL compatibility
+                # Ensure all field names are SQL-safe and FILLER names are unique
                 if 'fields' in parsed_result:
+                    filler_counter = 1
+                    seen_names = set()
+                    
                     for field in parsed_result['fields']:
                         if 'name' in field:
-                            field['name'] = self._clean_column_name(field['name'])
+                            if field['name'].upper().startswith('FILLER'):
+                                # Ensure unique FILLER names
+                                field['name'] = f"FILLER_{filler_counter:03d}"
+                                field['is_filler'] = True
+                                filler_counter += 1
+                            else:
+                                field['name'] = self._clean_column_name(field['name'])
+                            
+                            # Handle duplicate names (shouldn't happen but safety check)
+                            original_name = field['name']
+                            counter = 1
+                            while field['name'] in seen_names:
+                                field['name'] = f"{original_name}_{counter}"
+                                counter += 1
+                            
+                            seen_names.add(field['name'])
                 
                 # Clean record name
                 if 'record_name' in parsed_result:
@@ -1223,87 +1270,256 @@ class DataLoaderAgent:
                 return parsed_result
                 
         except Exception as e:
-            self.logger.warning(f"Copybook parsing failed: {str(e)}")
+            self.logger.warning(f"LLM copybook parsing failed: {str(e)}")
             # Fallback to regex parsing
             return self._parse_copybook_with_regex(content, filename)
         
         return None
     
     def _parse_copybook_with_regex(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
-        """Fallback copybook parsing using regex"""
+        """Enhanced copybook parsing with FILLER, REDEFINES, and other COBOL constructs"""
         try:
             fields = []
             record_name = None
+            filler_counter = 1  # Counter for FILLER fields
             
             # Find 01 level record name
             record_pattern = re.compile(r'^\s*01\s+([A-Z][A-Z0-9-]*)', re.MULTILINE)
             record_match = record_pattern.search(content)
             if record_match:
-                record_name = record_match.group(1)
+                record_name = self._clean_column_name(record_match.group(1))
             else:
-                # Use filename as record name
-                record_name = Path(filename).stem.upper().replace('-', '_')
+                record_name = self._generate_table_name(filename)
             
-            # Find field definitions
-            field_pattern = re.compile(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*)\s+PIC\s+([X9SVx]+(?:\([0-9,]+\))?)', re.MULTILINE | re.IGNORECASE)
+            # Enhanced field pattern to capture more COBOL constructs
+            field_pattern = re.compile(
+                r'^\s*(\d+)\s+'  # Level number
+                r'([A-Z][A-Z0-9-]*|FILLER)\s+'  # Field name or FILLER
+                r'(?:PIC\s+([X9AVSx]+(?:\([0-9,]+\))?)\s*)?'  # PIC clause (optional)
+                r'(.*?)$',  # Rest of line (for REDEFINES, VALUE, etc.)
+                re.MULTILINE | re.IGNORECASE
+            )
             
             for match in field_pattern.finditer(content):
                 level = match.group(1)
                 field_name = match.group(2)
-                pic_clause = match.group(3).upper()
+                pic_clause = match.group(3) if match.group(3) else None
+                rest_of_line = match.group(4).strip() if match.group(4) else ""
+                
+                # Handle FILLER fields
+                if field_name.upper() == 'FILLER':
+                    clean_field_name = f"FILLER_{filler_counter:03d}"
+                    filler_counter += 1
+                    is_filler = True
+                else:
+                    clean_field_name = self._clean_column_name(field_name)
+                    is_filler = False
+                
+                # Parse additional clauses
+                field_info = self._parse_field_clauses(rest_of_line, pic_clause)
+                
+                # Skip REDEFINES fields from table creation (they're overlays)
+                if field_info.get('redefines'):
+                    self.logger.info(f"Skipping REDEFINES field: {field_name}")
+                    continue
+                
+                # Skip group items without PIC clause unless they have special meaning
+                if not pic_clause and int(level) < 49:
+                    # This might be a group item - check if it should be included
+                    if not self._should_include_group_item(rest_of_line):
+                        continue
                 
                 # Convert PIC clause to SQL type
-                sql_type = self._convert_pic_to_sql(pic_clause)
+                if pic_clause:
+                    sql_type = self._convert_pic_to_sql(pic_clause)
+                else:
+                    # Group item or special field
+                    sql_type = "VARCHAR(1)"  # Placeholder for group items
                 
-                fields.append({
-                    "name": field_name,
+                field_data = {
+                    "name": clean_field_name,
+                    "original_name": field_name,
                     "type": sql_type,
                     "level": level,
-                    "pic_clause": f"PIC {pic_clause}",
-                    "nullable": True
-                })
+                    "pic_clause": f"PIC {pic_clause}" if pic_clause else "",
+                    "nullable": True,
+                    "is_filler": is_filler,
+                    **field_info  # Add parsed clauses
+                }
+                
+                fields.append(field_data)
             
             if fields:
                 return {
                     "record_name": record_name,
-                    "structure_type": "flat",
-                    "fields": fields
+                    "structure_type": self._determine_structure_type(content),
+                    "fields": fields,
+                    "filler_count": filler_counter - 1
                 }
         
         except Exception as e:
-            self.logger.error(f"Regex copybook parsing failed: {str(e)}")
+            self.logger.error(f"Enhanced copybook parsing failed: {str(e)}")
         
         return None
 
+    def _parse_field_clauses(self, rest_of_line: str, pic_clause: str) -> Dict[str, Any]:
+        """Parse additional COBOL field clauses"""
+        clauses = {}
+        line_upper = rest_of_line.upper()
+        
+        # REDEFINES clause
+        redefines_match = re.search(r'REDEFINES\s+([A-Z][A-Z0-9-]*)', line_upper)
+        if redefines_match:
+            clauses['redefines'] = redefines_match.group(1)
+        
+        # VALUE clause
+        value_match = re.search(r'VALUE\s+(?:IS\s+)?([\'"][^\'\"]*[\'"]|\S+)', line_upper)
+        if value_match:
+            clauses['default_value'] = value_match.group(1).strip('\'"')
+        
+        # OCCURS clause
+        occurs_match = re.search(r'OCCURS\s+(\d+)(?:\s+TO\s+(\d+))?\s+TIMES', line_upper)
+        if occurs_match:
+            min_occurs = int(occurs_match.group(1))
+            max_occurs = int(occurs_match.group(2)) if occurs_match.group(2) else min_occurs
+            clauses['occurs'] = {
+                'min': min_occurs,
+                'max': max_occurs,
+                'is_variable': max_occurs != min_occurs
+            }
+        
+        # DEPENDING ON clause
+        depending_match = re.search(r'DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*)', line_upper)
+        if depending_match:
+            clauses['depending_on'] = depending_match.group(1)
+        
+        # USAGE clause
+        usage_match = re.search(r'USAGE\s+(?:IS\s+)?(COMP(?:-[0-9])?|BINARY|DISPLAY|PACKED-DECIMAL|INDEX)', line_upper)
+        if usage_match:
+            clauses['usage'] = usage_match.group(1)
+            # Adjust SQL type based on usage
+            if pic_clause and usage_match.group(1) in ['COMP-3', 'PACKED-DECIMAL']:
+                clauses['adjusted_type'] = 'DECIMAL'
+        
+        # SYNC/SYNCHRONIZED clause
+        if 'SYNC' in line_upper or 'SYNCHRONIZED' in line_upper:
+            clauses['synchronized'] = True
+        
+        # JUSTIFIED clause
+        if 'JUSTIFIED' in line_upper or 'JUST' in line_upper:
+            clauses['justified'] = True
+        
+        return clauses
+
+    def _should_include_group_item(self, rest_of_line: str) -> bool:
+        """Determine if a group item should be included in the table"""
+        # Don't include group items that are just containers
+        # Include them if they have VALUE or special clauses
+        line_upper = rest_of_line.upper()
+        
+        # Include if it has a VALUE clause
+        if 'VALUE' in line_upper:
+            return True
+        
+        # Include if it's a special type (like dates, counters)
+        special_indicators = ['DATE', 'TIME', 'COUNT', 'TOTAL', 'FLAG']
+        if any(indicator in line_upper for indicator in special_indicators):
+            return True
+        
+        return False
+    
+    def _determine_structure_type(self, content: str) -> str:
+        """Determine if the copybook has hierarchical or flat structure"""
+        lines = content.split('\n')
+        level_counts = {}
+        
+        for line in lines:
+            level_match = re.match(r'^\s*(\d+)\s+', line)
+            if level_match:
+                level = int(level_match.group(1))
+                level_counts[level] = level_counts.get(level, 0) + 1
+        
+        # If we have multiple levels beyond 01, it's hierarchical
+        significant_levels = [level for level in level_counts.keys() if level > 1]
+        
+        if len(significant_levels) > 2:  # More than just 01 and one sub-level
+            return "hierarchical"
+        else:
+            return "flat"
+
     def _convert_pic_to_sql(self, pic_clause: str) -> str:
-        """Convert COBOL PIC clause to SQL type"""
+        """Enhanced PIC clause to SQL type conversion"""
         pic_upper = pic_clause.upper()
         
         # Extract numbers from parentheses
-        numbers = re.findall(r'\((\d+)\)', pic_clause)
+        numbers = re.findall(r'\((\d+(?:,\d+)?)\)', pic_clause)
         
         if 'X' in pic_upper:
             # Alphanumeric
-            length = int(numbers[0]) if numbers else 255
-            return f"VARCHAR({length})"
+            if numbers:
+                # Handle X(n) format
+                length = int(numbers[0].replace(',', ''))
+            else:
+                # Count X's manually
+                length = pic_upper.count('X')
+            return f"VARCHAR({min(length, 4000)})"  # Cap at reasonable size
+        
         elif 'V' in pic_upper:
-            # Decimal
-            total_digits = pic_upper.count('9')
-            decimal_places = pic_upper.split('V')[1].count('9') if 'V' in pic_upper else 0
-            return f"DECIMAL({total_digits}, {decimal_places})"
+            # Decimal with implied decimal point
+            parts = pic_upper.split('V')
+            integer_part = parts[0].count('9') if parts[0] else 0
+            decimal_part = parts[1].count('9') if len(parts) > 1 else 0
+            
+            # Handle parentheses format like 9(5)V9(2)
+            if numbers:
+                if len(numbers) >= 2:
+                    integer_part = int(numbers[0])
+                    decimal_part = int(numbers[1])
+                elif 'V' in pic_upper and numbers:
+                    # Might be 9(7)V99 format
+                    integer_part = int(numbers[0])
+                    decimal_part = parts[1].count('9')
+            
+            total_digits = integer_part + decimal_part
+            return f"DECIMAL({total_digits}, {decimal_part})"
+        
         elif '9' in pic_upper:
             # Numeric
-            digit_count = pic_upper.count('9')
             if numbers:
-                digit_count = int(numbers[0])
+                digit_count = int(numbers[0].replace(',', ''))
+            else:
+                digit_count = pic_upper.count('9')
             
-            if digit_count <= 9:
+            # Check for signed
+            is_signed = 'S' in pic_upper
+            
+            if digit_count <= 4:
+                return "SMALLINT" if is_signed else "INTEGER"
+            elif digit_count <= 9:
                 return "INTEGER"
             elif digit_count <= 18:
                 return "BIGINT"
             else:
                 return f"DECIMAL({digit_count}, 0)"
+        
+        elif 'A' in pic_upper:
+            # Alphabetic
+            if numbers:
+                length = int(numbers[0])
+            else:
+                length = pic_upper.count('A')
+            return f"VARCHAR({length})"
+        
+        elif 'N' in pic_upper:
+            # National (Unicode)
+            if numbers:
+                length = int(numbers[0])
+            else:
+                length = pic_upper.count('N')
+            return f"NVARCHAR({length})"
+        
         else:
+            # Default for unknown formats
             return "VARCHAR(255)"
 
 
