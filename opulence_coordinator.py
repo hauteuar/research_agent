@@ -15,6 +15,8 @@ if not tracemalloc.is_tracing():
     print("✅ Tracemalloc enabled")
 
 os.environ['PYTHONTRACEMALLOC'] = '25'
+os.environ['CUDA_LAUNCH_BLOCKING'] = '0'  # Don't block
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 
 import asyncio
 import logging
@@ -47,10 +49,11 @@ from agents.lineage_analyzer_agent import LineageAnalyzerAgent
 from agents.logic_analyzer_agent import LogicAnalyzerAgent
 from agents.documentation_agent import DocumentationAgent
 from agents.db2_comparator_agent import DB2ComparatorAgent
-from utils.gpu_manager import DynamicGPUManager, GPUContext
+from utils.gpu_manager import OptimizedGPUManager, SafeGPUForcer, GPUContext
 from utils.dynamic_config_manager import DynamicConfigManager, get_dynamic_config, GPUConfig
 from utils.health_monitor import HealthMonitor
 from utils.cache_manager import CacheManager
+
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -95,7 +98,7 @@ class MemoryTracker:
         
         return usage
     
-    def force_cleanup(self):
+    async def force_cleanup(self):
         """Force garbage collection and cleanup"""
         before = self._get_memory_usage()
         
@@ -109,8 +112,8 @@ class MemoryTracker:
             for gpu_id in range(torch.cuda.device_count()):
                 try:
                     with torch.cuda.device(gpu_id):
-                        torch.cuda.empty_cache()
-                        torch.cuda.synchronize()
+                        await asyncio.to_thread(torch.cuda.empty_cache)
+                        await asyncio.to_thread(torch.cuda.synchronize)
                 except:
                     pass
         
@@ -120,215 +123,19 @@ class MemoryTracker:
         logger.info(f"Memory cleanup: freed {freed_mb:.1f}MB, collected {collected} objects")
         return {'freed_mb': freed_mb, 'collected': collected}
 
-class RequestManager:
-    """Manage LLM requests to prevent overload"""
+class SimpleRequestManager:
+    def __init__(self, max_concurrent: int = 4):  # Reduced from 6
+        self.semaphore = asyncio.Semaphore(max_concurrent)
     
-    def __init__(self, max_concurrent_requests: int = 6):  # Reduced default
-        self.max_concurrent_requests = max_concurrent_requests
-        self.active_requests = {}
-        self.request_queue = asyncio.Queue()
-        self.request_lock = asyncio.Lock()
-        self.request_counter = 0
-        
-    async def acquire_request_slot(self, request_id: str = None) -> str:
-        """Acquire a slot for request processing"""
-        if request_id is None:
-            request_id = f"req_{self.request_counter}"
-            self.request_counter += 1
-        
-        async with self.request_lock:
-            while len(self.active_requests) >= self.max_concurrent_requests:
-                logger.warning(f"Request queue full ({len(self.active_requests)}/{self.max_concurrent_requests}), waiting...")
-                await asyncio.sleep(0.1)
-            
-            self.active_requests[request_id] = time.time()
-            logger.debug(f"Acquired request slot {request_id} ({len(self.active_requests)} active)")
-            return request_id
+    async def acquire_request_slot(self):
+        await self.semaphore.acquire()
+        return "req_id"
     
     async def release_request_slot(self, request_id: str):
-        """Release a request slot"""
-        async with self.request_lock:
-            if request_id in self.active_requests:
-                duration = time.time() - self.active_requests[request_id]
-                del self.active_requests[request_id]
-                logger.debug(f"Released request slot {request_id} after {duration:.2f}s ({len(self.active_requests)} active)")
-    
-    def get_stats(self) -> Dict:
-        """Get request manager statistics"""
-        return {
-            "active_requests": len(self.active_requests),
-            "max_concurrent": self.max_concurrent_requests,
-            "queue_utilization": len(self.active_requests) / self.max_concurrent_requests
-        }
+        self.semaphore.release()
 
-class SystemRecoveryManager:
-    """Manage system recovery and resource cleanup"""
     
-    def __init__(self, coordinator):
-        self.coordinator = coordinator
-        self.recovery_in_progress = False
-        self.last_recovery_time = 0
-        
-    async def check_system_health(self) -> Dict[str, Any]:
-        """Comprehensive system health check"""
-        try:
-            # Basic system metrics
-            cpu_percent = psutil.cpu_percent()
-            memory = psutil.virtual_memory()
-            process_count = len(psutil.pids())
-            
-            # Memory tracker info
-            memory_usage = self.coordinator.memory_tracker._get_memory_usage()
-            
-            # GPU status (basic check)
-            gpu_issues = []
-            if torch.cuda.is_available():
-                for gpu_id in range(min(4, torch.cuda.device_count())):
-                    try:
-                        with torch.cuda.device(gpu_id):
-                            allocated = torch.cuda.memory_allocated(gpu_id)
-                            if allocated > 20 * 1024**3:  # Over 20GB
-                                gpu_issues.append(f"gpu_{gpu_id}_high_memory")
-                    except:
-                        gpu_issues.append(f"gpu_{gpu_id}_error")
-            
-            # Request manager status
-            request_status = {}
-            if hasattr(self.coordinator, 'request_manager'):
-                request_status = self.coordinator.request_manager.get_stats()
-            
-            # Determine critical issues
-            critical_issues = []
-            
-            if cpu_percent > 90:
-                critical_issues.append("high_cpu")
-            if memory.percent > 90:
-                critical_issues.append("high_memory")
-            if process_count > 1500:
-                critical_issues.append("excessive_processes")
-            if memory_usage['process_mb'] > 8000:
-                critical_issues.append("high_process_memory")
-            if request_status.get('queue_utilization', 0) > 0.9:
-                critical_issues.append("request_queue_full")
-            
-            critical_issues.extend(gpu_issues)
-            
-            return {
-                "overall_health": "critical" if len(critical_issues) > 2 else "healthy",
-                "critical_issues": critical_issues,
-                "system_status": {
-                    "cpu_percent": cpu_percent,
-                    "memory_percent": memory.percent,
-                    "process_count": process_count,
-                    "process_memory_mb": memory_usage['process_mb']
-                },
-                "request_status": request_status,
-                "recovery_needed": len(critical_issues) > 2
-            }
-            
-        except Exception as e:
-            logger.error(f"Health check failed: {e}")
-            return {
-                "overall_health": "error",
-                "critical_issues": ["health_check_failed"],
-                "error": str(e),
-                "recovery_needed": True
-            }
     
-    async def emergency_recovery(self) -> bool:
-        """Perform emergency system recovery"""
-        if self.recovery_in_progress:
-            logger.warning("Recovery already in progress, skipping...")
-            return False
-        
-        current_time = time.time()
-        if current_time - self.last_recovery_time < 300:  # Don't recover more than once per 5 minutes
-            logger.warning("Recent recovery performed, skipping...")
-            return False
-        
-        self.recovery_in_progress = True
-        self.last_recovery_time = current_time
-        
-        try:
-            logger.critical("🚨 Starting emergency system recovery...")
-            
-            # Step 1: Clear all LLM engines
-            logger.info("Step 1: Clearing all LLM engines...")
-            engines_to_clear = list(self.coordinator.llm_engine_pool.keys())
-            for engine_key in engines_to_clear:
-                try:
-                    gpu_id = int(engine_key.split('_')[1])
-                    await self.coordinator._cleanup_gpu_engine_enhanced(gpu_id)
-                except Exception as e:
-                    logger.error(f"Failed to cleanup engine {engine_key}: {e}")
-            
-            self.coordinator.llm_engine_pool.clear()
-            
-            # Step 2: Clear all agents
-            logger.info("Step 2: Clearing all agents...")
-            self.coordinator.agents.clear()
-            
-            # Step 3: System cleanup
-            logger.info("Step 3: System-wide cleanup...")
-            self._cleanup_zombie_processes()
-            
-            # Step 4: Memory cleanup
-            logger.info("Step 4: Memory cleanup...")
-            cleanup_result = self.coordinator.memory_tracker.force_cleanup()
-            
-            # Step 5: Reset request manager
-            logger.info("Step 5: Resetting request manager...")
-            if hasattr(self.coordinator, 'request_manager'):
-                self.coordinator.request_manager = RequestManager(max_concurrent_requests=4)  # Very conservative
-            
-            # Step 6: Wait for system to stabilize
-            logger.info("Step 6: Waiting for system stabilization...")
-            await asyncio.sleep(10)
-            
-            # Step 7: Health check
-            logger.info("Step 7: Post-recovery health check...")
-            health_status = await self.check_system_health()
-            
-            recovery_success = health_status["overall_health"] != "critical"
-            
-            if recovery_success:
-                logger.info("✅ Emergency recovery completed successfully")
-                self.coordinator.stats["emergency_recoveries"] += 1
-            else:
-                logger.error("❌ Emergency recovery failed, system still critical")
-                logger.error(f"Remaining issues: {health_status['critical_issues']}")
-            
-            return recovery_success
-            
-        except Exception as e:
-            logger.error(f"❌ Emergency recovery failed with exception: {e}")
-            return False
-            
-        finally:
-            self.recovery_in_progress = False
-    
-    def _cleanup_zombie_processes(self):
-        """Clean up zombie processes"""
-        try:
-            # Kill zombie Python processes
-            for proc in psutil.process_iter(['pid', 'name', 'status']):
-                try:
-                    if (proc.info['status'] == psutil.STATUS_ZOMBIE and 
-                        'python' in proc.info['name'].lower()):
-                        logger.warning(f"Killing zombie process {proc.info['pid']}")
-                        proc.kill()
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-            
-            # Kill hanging CUDA processes
-            try:
-                subprocess.run(['pkill', '-f', 'vllm'], capture_output=True, timeout=5)
-                subprocess.run(['pkill', '-f', 'cuda'], capture_output=True, timeout=5)
-            except:
-                pass
-                
-        except Exception as e:
-            logger.error(f"Zombie cleanup failed: {e}")
 
 @dataclass
 class OpulenceConfig:
@@ -378,24 +185,21 @@ class DynamicOpulenceCoordinator:
         gpu_config = self.config_manager.get_gpu_config()
         
         # Initialize dynamic GPU manager with config
-        self.gpu_manager = DynamicGPUManager(
+        self.gpu_manager = OptimizedGPUManager(
             total_gpu_count=gpu_config.total_gpu_count,
             memory_threshold=gpu_config.memory_threshold,
             utilization_threshold=gpu_config.utilization_threshold
         )
         
-        self.health_monitor = HealthMonitor()
+        #self.health_monitor = HealthMonitor()
         
         # Get cache configuration
         cache_ttl = self.config_manager.get("system.cache_ttl", 3600)
         self.cache_manager = CacheManager(cache_ttl)
         
         # Initialize request manager with conservative settings
-        self.request_manager = RequestManager(max_concurrent_requests=4)  # Very conservative
-        
-        # Initialize recovery manager
-        self.recovery_manager = SystemRecoveryManager(self)
-        
+        self.request_manager = SimpleRequestManager(max_concurrent=4)  # Very conservative
+              
         # Initialize SQLite database
         self.db_path = "opulence_data.db"
         self._init_database()
@@ -411,26 +215,17 @@ class DynamicOpulenceCoordinator:
         self.stats = {
             "total_files_processed": 0,
             "total_queries": 0,
-            "avg_response_time": 0,
-            "cache_hit_rate": 0,
-            "gpu_utilization": {},
-            "dynamic_allocations": 0,
-            "failed_allocations": 0,
-            "emergency_recoveries": 0,
-            "request_timeouts": 0,
-            "engine_recreations": 0
-        }
-        
-        # Start background health monitoring (FIXED)
-        self.health_monitoring_task = None
-        self._start_health_monitoring()
+            "successful_operations": 0,
+            "failed_operations": 0
+            }
+                
         
         # Take final snapshot
         self.memory_tracker.take_snapshot("coordinator_init_complete")
         
         self.logger.info("Enhanced Opulence Coordinator initialized with memory tracking and recovery management")
     
-    def _emergency_cleanup_if_needed(self):
+    async def _emergency_cleanup_if_needed(self):
         """Emergency cleanup if system is in bad state"""
         try:
             # Check if system is overloaded
@@ -451,8 +246,8 @@ class DynamicOpulenceCoordinator:
                     for gpu_id in range(torch.cuda.device_count()):
                         try:
                             with torch.cuda.device(gpu_id):
-                                torch.cuda.empty_cache()
-                                torch.cuda.synchronize()
+                                await asyncio.to_thread(torch.cuda.empty_cache)
+                                await asyncio.to_thread(torch.cuda.synchronize)
                         except:
                             pass
                 
@@ -461,44 +256,7 @@ class DynamicOpulenceCoordinator:
         except Exception as e:
             logger.error(f"Emergency cleanup failed: {e}")
 
-    def _start_health_monitoring(self):
-        """Start background health monitoring task (FIXED)"""
-        
-        async def health_monitor_loop():
-            """Health monitoring loop"""
-            while True:
-                try:
-                    await asyncio.sleep(60)  # Check every minute
-                    
-                    # Take memory snapshot
-                    self.memory_tracker.take_snapshot("health_check")
-                    
-                    # Check system health
-                    health_status = await self.recovery_manager.check_system_health()
-                    
-                    if health_status["overall_health"] == "critical":
-                        logger.warning(f"🚨 Critical system health detected: {health_status['critical_issues']}")
-                        
-                        if health_status.get("recovery_needed", False):
-                            logger.critical("Initiating emergency recovery...")
-                            recovery_success = await self.recovery_manager.emergency_recovery()
-                            
-                            if not recovery_success:
-                                logger.critical("❌ Emergency recovery failed!")
-                    
-                    # Memory cleanup if needed
-                    current_usage = self.memory_tracker._get_memory_usage()
-                    if current_usage['process_mb'] > 6000:  # Over 6GB
-                        logger.warning("High memory usage detected, performing cleanup...")
-                        self.memory_tracker.force_cleanup()
-                
-                except Exception as e:
-                    logger.error(f"Health monitoring error: {e}")
-                    await asyncio.sleep(30)  # Wait longer on error
-        
-        # Create and store the task (FIXED)
-        self.health_monitoring_task = asyncio.create_task(health_monitor_loop())
-        logger.info("✅ Health monitoring started")
+    
         
     def _setup_logging(self) -> logging.Logger:
         """Setup logging configuration"""
@@ -667,10 +425,10 @@ class DynamicOpulenceCoordinator:
             
             try:
                 # Use enhanced GPU forcer
-                from gpu_force_fix import EnhancedGPUForcer
+                
                 
                 # Check system resources first
-                system_status = EnhancedGPUForcer.check_system_resources()
+                system_status = SafeGPUForcer.check_system_resources()
                 if system_status.get('critical_load', False):
                     raise RuntimeError(f"System under critical load: {system_status}")
                 
@@ -718,7 +476,7 @@ class DynamicOpulenceCoordinator:
                     
                     # Initialize request manager for this engine if not exists
                     if not hasattr(self, 'request_manager'):
-                        self.request_manager = RequestManager(max_concurrent_requests=8)
+                        self.request_manager = SimpleRequestManager(max_concurrent_requests=8)
                     
                     self.llm_engine_pool[engine_key] = engine
                     
@@ -784,21 +542,15 @@ class DynamicOpulenceCoordinator:
                         await self.request_manager.release_request_slot(request_id)
                 
                 # Force cleanup using enhanced forcer
-                from gpu_force_fix import EnhancedGPUForcer
+                
                 
                 # Set GPU environment for cleanup
                 original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
                 try:
-                    EnhancedGPUForcer.force_gpu_environment_safe(gpu_id, cleanup_first=False)
+                    SafeGPUForcer.force_gpu_environment_safe(gpu_id, cleanup_first=False)
                     
-                    # Advanced GPU cleanup
-                    cleanup_success = EnhancedGPUForcer.aggressive_gpu_cleanup(gpu_id)
+                   
                     
-                    if not cleanup_success:
-                        logger.warning(f"Standard cleanup failed for GPU {gpu_id}, trying emergency cleanup...")
-                        # Emergency: kill all processes on GPU
-                        subprocess.run(['nvidia-smi', '--gpu-reset', f'-i {gpu_id}'], 
-                                    capture_output=True, timeout=10)
                         
                 finally:
                     # Restore environment
@@ -827,25 +579,25 @@ class DynamicOpulenceCoordinator:
         
         try:
             # Check system resources first
-            from gpu_force_fix import EnhancedGPUForcer
-            system_status = EnhancedGPUForcer.check_system_resources()
+            
+            system_status = SafeGPUForcer.check_system_resources()
             
             if system_status.get('critical_load', False):
                 logger.warning("System under critical load, attempting cleanup before allocation...")
-                EnhancedGPUForcer.cleanup_zombie_processes()
+                SafeGPUForcer.cleanup_zombie_processes()
                 await asyncio.sleep(2)
             
             # Use enhanced GPU selection
             if preferred_gpu is not None:
                 # Check if preferred GPU is actually available
-                memory_info = EnhancedGPUForcer.check_gpu_memory_detailed(preferred_gpu)
+                memory_info = SafeGPUForcer.check_gpu_memory_detailed(preferred_gpu)
                 if memory_info['is_available']:
                     allocated_gpu = preferred_gpu
                 else:
                     logger.warning(f"Preferred GPU {preferred_gpu} not available, finding alternative...")
             
             if allocated_gpu is None:
-                allocated_gpu = EnhancedGPUForcer.find_optimal_gpu(
+                allocated_gpu = SafeGPUForcer.find_optimal_gpu(
                     min_free_gb=2.0,  # Reduced requirement
                     exclude_gpu_0=True
                 )
@@ -907,14 +659,14 @@ class DynamicOpulenceCoordinator:
     def _is_gpu_available(self, gpu_id: int) -> bool:
         """Check if GPU is actually available for use"""
         try:
-            from gpu_force_fix import GPUForcer
+            
             
             # Check if GPU exists
             if not torch.cuda.is_available() or gpu_id >= torch.cuda.device_count():
                 return False
             
             # Check GPU memory using GPUForcer
-            memory_info = GPUForcer.check_gpu_memory(gpu_id)
+            memory_info = SafeGPUForcer.check_gpu_memory(gpu_id)
             free_gb = memory_info.get('free_gb', 0)
             
             # Get status from our GPU manager
@@ -953,17 +705,17 @@ class DynamicOpulenceCoordinator:
             raise RuntimeError("System under critical load - rejecting new tasks")
         
         # Use enhanced GPU forcer
-        from gpu_force_fix_enhanced import EnhancedGPUForcer
+        
         
         # Find optimal GPU avoiding GPU 0
-        best_gpu = EnhancedGPUForcer.find_optimal_gpu(
+        best_gpu = SafeGPUForcer.find_optimal_gpu(
             min_free_gb=3.0,  # Higher requirement
             exclude_gpu_0=True
         )
         
         if best_gpu is None:
             # Emergency: try GPU 0 with lower requirement
-            best_gpu = EnhancedGPUForcer.find_optimal_gpu(
+            best_gpu = SafeGPUForcer.find_optimal_gpu(
                 min_free_gb=2.0,
                 exclude_gpu_0=False
             )
@@ -984,18 +736,17 @@ class DynamicOpulenceCoordinator:
                 # Remove from pool first
                 engine = self.llm_engine_pool.pop(engine_key, None)
                 
-                # Force GPU cleanup using GPUForcer
-                from gpu_force_fix import GPUForcer
+             
                 
                 # Set GPU environment for cleanup
                 original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
                 try:
-                    GPUForcer.force_gpu_environment(gpu_id)
+                    SafeGPUForcer.force_gpu_environment(gpu_id)
                     
                     if torch.cuda.is_available():
                         with torch.cuda.device(0):  # 0 now maps to our target GPU
-                            torch.cuda.empty_cache()
-                            torch.cuda.synchronize()
+                            await asyncio.to_thread(torch.cuda.empty_cache)
+                            await asyncio.to_thread(torch.cuda.synchronize)
                             
                 finally:
                     # Restore original environment
@@ -1046,10 +797,10 @@ class DynamicOpulenceCoordinator:
         
         for gpu_id in range(self.config.total_gpu_count):
             try:
-                from gpu_force_fix import GPUForcer
+                
                 
                 # Get memory info from GPUForcer
-                memory_info = GPUForcer.check_gpu_memory(gpu_id)
+                memory_info = SafeGPUForcer.check_gpu_memory(gpu_id)
                 
                 # Get status from GPU manager
                 gpu_key = f"gpu_{gpu_id}"
@@ -2441,48 +2192,88 @@ class DynamicOpulenceCoordinator:
         ) / 2
     
     def get_health_status(self) -> Dict[str, Any]:
-        """Get comprehensive system health status with recovery information"""
+        """Get system health status (fixed - no recursion)"""
         try:
-            # Get base health status
-            base_status = self.get_health_status()
+            # Get basic system metrics directly
+            process = psutil.Process(os.getpid())
+            memory = psutil.virtual_memory()
             
-            # Add enhanced information
+            # Basic status
+            base_status = {
+                "system": {
+                    "cpu_percent": psutil.cpu_percent(),
+                    "memory_percent": memory.percent,
+                    "process_memory_mb": process.memory_info().rss / (1024 * 1024),
+                    "available_memory_gb": memory.available / (1024**3)
+                },
+                "timestamp": dt.now().isoformat(),
+                "status": "healthy"
+            }
+            
+            # Request management info (simplified)
+            request_info = {}
+            if hasattr(self, 'request_manager'):
+                if hasattr(self.request_manager, 'semaphore'):
+                    # For SimpleRequestManager
+                    request_info = {
+                        "active_requests": self.request_manager.max_concurrent - self.request_manager.semaphore._value,
+                        "max_concurrent": self.request_manager.max_concurrent,
+                        "queue_utilization": (self.request_manager.max_concurrent - self.request_manager.semaphore._value) / self.request_manager.max_concurrent
+                    }
+                else:
+                    # For old RequestManager (fallback)
+                    request_info = {
+                        "active_requests": len(getattr(self.request_manager, 'active_requests', {})),
+                        "max_concurrent": getattr(self.request_manager, 'max_concurrent_requests', 0),
+                        "queue_utilization": 0
+                    }
+            
+            # GPU status (lightweight)
+            gpu_info = {}
+            if hasattr(self, 'gpu_manager'):
+                try:
+                    gpu_info = {
+                        "gpu_count": self.gpu_manager.gpu_count,
+                        "engines_loaded": len(self.llm_engine_pool),
+                        "available_gpus": len([gpu for gpu in self.gpu_manager.gpu_stats.values() if gpu.is_available])
+                    }
+                except:
+                    gpu_info = {"error": "GPU status unavailable"}
+            
+            # Enhanced status
             enhanced_status = {
                 **base_status,
-                "request_management": {
-                    "active_requests": len(self.request_manager.active_requests) if hasattr(self, 'request_manager') else 0,
-                    "max_concurrent": self.request_manager.max_concurrent_requests if hasattr(self, 'request_manager') else 0,
-                    "queue_utilization": self.request_manager.get_stats()["queue_utilization"] if hasattr(self, 'request_manager') else 0
-                },
-                "recovery_status": {
-                    "recovery_manager_active": hasattr(self, 'recovery_manager'),
-                    "last_recovery_time": self.recovery_manager.last_recovery_time if hasattr(self, 'recovery_manager') else 0,
-                    "recovery_in_progress": self.recovery_manager.recovery_in_progress if hasattr(self, 'recovery_manager') else False
-                },
-                "enhanced_stats": {
-                    "emergency_recoveries": self.stats.get("emergency_recoveries", 0),
-                    "request_timeouts": self.stats.get("request_timeouts", 0),
-                    "engine_recreations": self.stats.get("engine_recreations", 0),
-                    "success_rate": (self.stats.get("total_queries", 1) - self.stats.get("request_timeouts", 0)) / max(self.stats.get("total_queries", 1), 1)
+                "request_management": request_info,
+                "gpu_status": gpu_info,
+                "stats": {
+                    "total_queries": self.stats.get("total_queries", 0),
+                    "successful_operations": self.stats.get("successful_operations", 0),
+                    "failed_operations": self.stats.get("failed_operations", 0),
+                    "files_processed": self.stats.get("total_files_processed", 0)
                 }
             }
             
-            # Add system resource information
-            try:
-                from gpu_force_fix  import EnhancedGPUForcer
-                system_resources = EnhancedGPUForcer.check_system_resources()
-                enhanced_status["system_resources"] = system_resources
-            except Exception as e:
-                enhanced_status["system_resources"] = {"error": str(e)}
+            # Determine overall health
+            if (memory.percent > 90 or 
+                process.memory_info().rss / (1024**3) > 8 or  # > 8GB process memory
+                self.stats.get("failed_operations", 0) > self.stats.get("successful_operations", 1)):
+                enhanced_status["status"] = "warning"
+            
+            if memory.percent > 95:
+                enhanced_status["status"] = "critical"
             
             return enhanced_status
             
         except Exception as e:
-            logger.error(f"Enhanced health status failed: {e}")
+            logger.error(f"Health status check failed: {e}")
             return {
                 "status": "error",
                 "error": str(e),
-                "fallback_status": self.get_health_status() if hasattr(self, 'get_health_status') else {}
+                "timestamp": dt.now().isoformat(),
+                "basic_info": {
+                    "process_exists": True,
+                    "coordinator_active": True
+                }
             }
     
     def get_gpu_utilization_stats(self) -> Dict[str, Any]:

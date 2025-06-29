@@ -25,73 +25,18 @@ class EnhancedGPUForcer:
                 cls._gpu_locks[i] = threading.Lock()
     
     @staticmethod
-    def check_system_resources() -> Dict:
-        """Check overall system resource usage"""
+    def check_system_resources_light():
+        """Lightweight system check"""
         try:
-            # Check CPU and memory
-            cpu_percent = psutil.cpu_percent(interval=1)
             memory = psutil.virtual_memory()
-            process_count = len(psutil.pids())
-            
-            # Check for zombie processes
-            zombie_count = 0
-            python_processes = 0
-            cuda_processes = 0
-            
-            for proc in psutil.process_iter(['pid', 'name', 'status', 'cpu_percent']):
-                try:
-                    if proc.info['status'] == psutil.STATUS_ZOMBIE:
-                        zombie_count += 1
-                    if 'python' in proc.info['name'].lower():
-                        python_processes += 1
-                    if 'cuda' in proc.info['name'].lower():
-                        cuda_processes += 1
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-            
             return {
-                'cpu_percent': cpu_percent,
                 'memory_percent': memory.percent,
-                'process_count': process_count,
-                'zombie_processes': zombie_count,
-                'python_processes': python_processes,
-                'cuda_processes': cuda_processes,
-                'critical_load': process_count > 1000 or memory.percent > 90 or cpu_percent > 95
+                'critical_load': memory.percent > 95  # Only critical check
             }
-        except Exception as e:
-            logger.error(f"System resource check failed: {e}")
-            return {'critical_load': True, 'error': str(e)}
+        except:
+            return {'critical_load': False}
     
-    @staticmethod
-    def cleanup_zombie_processes():
-        """Clean up zombie processes"""
-        try:
-            # Kill zombie Python processes related to CUDA/torch
-            for proc in psutil.process_iter(['pid', 'name', 'status', 'cmdline']):
-                try:
-                    if (proc.info['status'] == psutil.STATUS_ZOMBIE and 
-                        'python' in proc.info['name'].lower()):
-                        logger.warning(f"Killing zombie process {proc.info['pid']}")
-                        proc.kill()
-                        
-                    # Also kill hanging CUDA processes
-                    if (proc.info['name'] and 
-                        any(cuda_term in proc.info['name'].lower() 
-                            for cuda_term in ['cuda', 'nvidia', 'vllm']) and
-                        proc.info.get('cmdline')):
-                        # Check if process is consuming too much CPU without progress
-                        if proc.cpu_percent() > 50:
-                            logger.warning(f"Killing high-CPU CUDA process {proc.info['pid']}")
-                            proc.terminate()
-                            time.sleep(2)
-                            if proc.is_running():
-                                proc.kill()
-                                
-                except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
-                    continue
-                    
-        except Exception as e:
-            logger.error(f"Zombie cleanup failed: {e}")
+    
     
     @staticmethod
     def check_gpu_memory_detailed(gpu_id: int) -> Dict:
@@ -174,69 +119,22 @@ class EnhancedGPUForcer:
     
     @staticmethod
     def aggressive_gpu_cleanup(gpu_id: int) -> bool:
-        """Aggressive GPU cleanup including process termination"""
-        logger.info(f"Starting aggressive cleanup for GPU {gpu_id}")
-        
+        """safe cleanup including process termination"""
+
         try:
-            # 1. Get current processes on GPU
-            memory_info = EnhancedGPUForcer.check_gpu_memory_detailed(gpu_id)
-            processes = memory_info.get('processes', [])
-            
-            # 2. Kill hanging processes
-            killed_processes = []
-            for proc_info in processes:
-                try:
-                    pid = proc_info['pid']
-                    proc = psutil.Process(pid)
-                    
-                    # Check if process is hanging (high memory, low CPU for extended time)
-                    cpu_percent = proc.cpu_percent()
-                    if cpu_percent < 1.0 and proc_info['memory_mb'] > 500:
-                        logger.warning(f"Killing hanging GPU process PID {pid}: {proc_info['process_name']}")
-                        proc.terminate()
-                        killed_processes.append(pid)
-                        
-                        # Wait and force kill if needed
-                        time.sleep(2)
-                        if proc.is_running():
-                            proc.kill()
-                            
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-                except Exception as e:
-                    logger.warning(f"Error killing process {pid}: {e}")
-            
-            # 3. Clear Python/PyTorch memory
             if torch.cuda.is_available():
-                try:
-                    with torch.cuda.device(gpu_id):
-                        torch.cuda.empty_cache()
-                        torch.cuda.synchronize()
-                        torch.cuda.reset_peak_memory_stats(gpu_id)
-                        torch.cuda.reset_accumulated_memory_stats(gpu_id)
-                        
-                        # Force garbage collection
-                        gc.collect()
-                        
-                except Exception as e:
-                    logger.warning(f"PyTorch cleanup failed for GPU {gpu_id}: {e}")
-            
-            # 4. System-level cleanup
-            gc.collect()
-            
-            # 5. Wait and verify cleanup
-            time.sleep(3)
-            new_memory_info = EnhancedGPUForcer.check_gpu_memory_detailed(gpu_id)
-            cleanup_success = new_memory_info['free_gb'] > memory_info['free_gb']
-            
-            logger.info(f"GPU {gpu_id} cleanup: {memory_info['free_gb']:.1f}GB -> {new_memory_info['free_gb']:.1f}GB free")
-            logger.info(f"Killed processes: {killed_processes}")
-            
-            return cleanup_success
-            
+                current_device = torch.cuda.current_device()
+                torch.cuda.set_device(gpu_id)
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                torch.cuda.set_device(current_device)
+                gc.collect()
+            return True
         except Exception as e:
-            logger.error(f"Aggressive GPU cleanup failed for GPU {gpu_id}: {e}")
+            logger.error(f"Safe cleanup failed: {e}")
             return False
+            
+          
     
     @staticmethod
     def find_optimal_gpu(min_free_gb: float = 6.0, exclude_gpu_0: bool = True) -> Optional[int]:
@@ -248,7 +146,7 @@ class EnhancedGPUForcer:
         if system_status.get('critical_load', False):
             logger.warning("System under critical load, attempting cleanup...")
             EnhancedGPUForcer.cleanup_zombie_processes()
-            time.sleep(2)
+            time.sleep(10)
         
         gpu_candidates = []
         gpu_info = {}
