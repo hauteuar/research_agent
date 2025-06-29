@@ -1,16 +1,23 @@
-# utils/gpu_manager.py
+# optimized_gpu_manager.py
 """
-GPU Manager for distributing workloads across multiple GPUs
+Optimized GPU Manager safe for shared servers
+Removes dangerous process killing and reduces monitoring overhead
 """
 
 import torch
-import psutil
 import logging
-from typing import Dict, List, Optional, Any
+import subprocess
 import time
+import gc
+import psutil
+import os
+import asyncio
+from typing import Optional, Dict, List
 import threading
 from dataclasses import dataclass
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class GPUStatus:
@@ -20,77 +27,249 @@ class GPUStatus:
     used_memory: int
     free_memory: int
     utilization: float
-    temperature: float
     is_available: bool
+    our_processes_only: bool = True  # Only track our own processes
 
-class GPUManager:
-    """Manages GPU resources and workload distribution"""
+class SafeGPUForcer:
+    """Safe GPU forcing without killing other users' processes"""
     
-    def __init__(self, gpu_count: int = 3):
-        self.gpu_count = gpu_count
+    _gpu_locks = {}
+    _our_process_pids = set()  # Track only our PIDs
+    
+    @classmethod
+    def init_gpu_locks(cls, gpu_count: int = 4):
+        """Initialize locks for each GPU"""
+        for i in range(gpu_count):
+            if i not in cls._gpu_locks:
+                cls._gpu_locks[i] = threading.RLock()  # Use RLock for nested calls
+    
+    @staticmethod
+    def check_system_resources_light() -> Dict:
+        """Lightweight system resource check"""
+        try:
+            # Quick checks only
+            memory = psutil.virtual_memory()
+            process = psutil.Process(os.getpid())
+            
+            return {
+                'memory_percent': memory.percent,
+                'our_process_memory_mb': process.memory_info().rss / (1024 * 1024),
+                'critical_load': memory.percent > 95,  # Only critical threshold
+                'available_memory_gb': memory.available / (1024**3)
+            }
+        except Exception as e:
+            logger.error(f"System resource check failed: {e}")
+            return {'critical_load': True, 'error': str(e)}
+    
+    @staticmethod
+    def check_gpu_memory_safe(gpu_id: int) -> Dict:
+        """Safe GPU memory checking without process details"""
+        try:
+            # Basic memory info only - no process inspection
+            result = subprocess.run([
+                'nvidia-smi', f'--id={gpu_id}',
+                '--query-gpu=memory.total,memory.used,memory.free,utilization.gpu',
+                '--format=csv,noheader,nounits'
+            ], capture_output=True, text=True, check=True, timeout=5)  # Reduced timeout
+            
+            line = result.stdout.strip()
+            if line:
+                total, used, free, utilization = map(int, line.split(','))
+                
+                return {
+                    'total_mb': total,
+                    'used_mb': used,
+                    'free_mb': free,
+                    'free_gb': free / 1024,
+                    'total_gb': total / 1024,
+                    'utilization_percent': utilization,
+                    'is_available': free > 2000 and utilization < 85,  # Conservative threshold
+                }
+        except subprocess.TimeoutExpired:
+            logger.warning(f"nvidia-smi timeout for GPU {gpu_id}")
+        except Exception as e:
+            logger.warning(f"Failed to get GPU {gpu_id} memory: {e}")
+        
+        return {
+            'total_mb': 0, 'used_mb': 0, 'free_mb': 0, 
+            'free_gb': 0, 'total_gb': 0, 'utilization_percent': 100,
+            'is_available': False
+        }
+    
+    @staticmethod
+    def safe_gpu_cleanup(gpu_id: int) -> bool:
+        """Safe GPU cleanup - only our own PyTorch memory"""
+        logger.info(f"Safe cleanup for GPU {gpu_id} (our process only)")
+        
+        try:
+            # Only clean up OUR PyTorch allocations
+            if torch.cuda.is_available() and gpu_id < torch.cuda.device_count():
+                # Save current device
+                current_device = torch.cuda.current_device()
+                
+                try:
+                    # Set to target GPU and clean only our allocations
+                    torch.cuda.set_device(gpu_id)
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    
+                    # Reset our memory stats only
+                    if hasattr(torch.cuda, 'reset_peak_memory_stats'):
+                        torch.cuda.reset_peak_memory_stats(gpu_id)
+                    if hasattr(torch.cuda, 'reset_accumulated_memory_stats'):
+                        torch.cuda.reset_accumulated_memory_stats(gpu_id)
+                        
+                finally:
+                    # Restore original device
+                    torch.cuda.set_device(current_device)
+                
+                # Our own garbage collection
+                gc.collect()
+                
+                logger.info(f"Safe cleanup completed for GPU {gpu_id}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Safe GPU cleanup failed for GPU {gpu_id}: {e}")
+            return False
+    
+    @staticmethod
+    def find_optimal_gpu_safe(min_free_gb: float = 4.0, exclude_gpu_0: bool = True) -> Optional[int]:
+        """Find optimal GPU safely without affecting other users"""
+        
+        gpu_candidates = []
+        
+        # Check available GPUs
+        start_gpu = 1 if exclude_gpu_0 else 0
+        for gpu_id in range(start_gpu, min(4, torch.cuda.device_count() if torch.cuda.is_available() else 0)):
+            memory_info = SafeGPUForcer.check_gpu_memory_safe(gpu_id)
+            
+            # Simple scoring based on available memory
+            free_gb = memory_info['free_gb']
+            utilization = memory_info['utilization_percent']
+            
+            if memory_info['is_available'] and free_gb >= min_free_gb:
+                # Simple score: more free memory = better
+                score = free_gb - (utilization / 100.0)
+                gpu_candidates.append((gpu_id, score, memory_info))
+        
+        # Sort by score
+        gpu_candidates.sort(key=lambda x: x[1], reverse=True)
+        
+        if gpu_candidates:
+            best_gpu = gpu_candidates[0][0]
+            best_info = gpu_candidates[0][2]
+            logger.info(f"Selected GPU {best_gpu}: {best_info['free_gb']:.1f}GB free")
+            return best_gpu
+        
+        # Fallback to GPU 0 with lower requirements
+        if exclude_gpu_0:
+            gpu_0_info = SafeGPUForcer.check_gpu_memory_safe(0)
+            if gpu_0_info['free_gb'] >= min_free_gb / 2:
+                logger.warning(f"Using GPU 0 as fallback: {gpu_0_info['free_gb']:.1f}GB free")
+                return 0
+        
+        logger.error("No suitable GPU found")
+        return None
+    
+    @staticmethod
+    def force_gpu_environment_safe(gpu_id: int, cleanup_first: bool = False):
+        """Safely set GPU environment"""
+        SafeGPUForcer.init_gpu_locks()
+        
+        with SafeGPUForcer._gpu_locks[gpu_id]:
+            if cleanup_first:
+                SafeGPUForcer.safe_gpu_cleanup(gpu_id)
+            
+            # Set environment variables
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+            os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+            
+            # Conservative memory settings
+            os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+            
+            # Set PyTorch device safely
+            if torch.cuda.is_available():
+                torch.cuda.set_device(0)  # 0 maps to our target GPU
+                
+            logger.info(f"GPU environment set to GPU {gpu_id}")
+
+class OptimizedGPUManager:
+    """Optimized GPU manager with minimal overhead"""
+    
+    def __init__(self, gpu_count: int = 4):
+        self.gpu_count = min(gpu_count, torch.cuda.device_count() if torch.cuda.is_available() else 0)
         self.logger = logging.getLogger(__name__)
         self.gpu_stats = {}
         self.workload_queue = defaultdict(list)
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         
-        self._initialize_gpu_monitoring()
+        # Lightweight monitoring
+        self._last_update = 0
+        self._update_interval = 30  # Update every 30 seconds instead of 10
+        self._initialize_monitoring()
     
-    def _initialize_gpu_monitoring(self):
-        """Initialize GPU monitoring"""
+    def _initialize_monitoring(self):
+        """Initialize lightweight monitoring"""
         if not torch.cuda.is_available():
-            self.logger.warning("CUDA not available. GPU management disabled.")
+            self.logger.warning("CUDA not available")
             return
-        
-        available_gpus = torch.cuda.device_count()
-        self.gpu_count = min(self.gpu_count, available_gpus)
         
         self.logger.info(f"Initialized GPU manager with {self.gpu_count} GPUs")
         
-        # Start monitoring thread
-        self.monitoring_thread = threading.Thread(target=self._monitor_gpus, daemon=True)
+        # Start lightweight monitoring thread
+        self.monitoring_thread = threading.Thread(target=self._lightweight_monitor, daemon=True)
         self.monitoring_thread.start()
     
-    def _monitor_gpus(self):
-        """Monitor GPU status continuously"""
+    def _lightweight_monitor(self):
+        """Lightweight GPU monitoring"""
         while True:
             try:
+                current_time = time.time()
+                
+                # Only update if enough time has passed
+                if current_time - self._last_update < self._update_interval:
+                    time.sleep(5)
+                    continue
+                
                 if torch.cuda.is_available():
+                    # Quick update for each GPU
                     for gpu_id in range(self.gpu_count):
-                        with torch.cuda.device(gpu_id):
-                            # Get memory info
-                            memory_info = torch.cuda.mem_get_info()
-                            free_memory = memory_info[0]
-                            total_memory = memory_info[1]
-                            used_memory = total_memory - free_memory
+                        try:
+                            memory_info = SafeGPUForcer.check_gpu_memory_safe(gpu_id)
                             
-                            # Get utilization (simplified)
-                            utilization = (used_memory / total_memory) * 100
-                            
-                            # Get GPU properties
+                            # Get GPU properties once (cached by PyTorch)
                             props = torch.cuda.get_device_properties(gpu_id)
                             
                             self.gpu_stats[gpu_id] = GPUStatus(
                                 gpu_id=gpu_id,
                                 name=props.name,
-                                total_memory=total_memory,
-                                used_memory=used_memory,
-                                free_memory=free_memory,
-                                utilization=utilization,
-                                temperature=0,  # Would need nvidia-ml-py for real temperature
-                                is_available=utilization < 90  # Consider available if < 90% used
+                                total_memory=memory_info['total_mb'] * 1024 * 1024,
+                                used_memory=memory_info['used_mb'] * 1024 * 1024,
+                                free_memory=memory_info['free_mb'] * 1024 * 1024,
+                                utilization=memory_info['utilization_percent'],
+                                is_available=memory_info['is_available']
                             )
+                        except Exception as e:
+                            self.logger.warning(f"GPU {gpu_id} monitoring error: {e}")
                 
-                time.sleep(10)  # Update every 10 seconds
+                self._last_update = current_time
+                time.sleep(self._update_interval)  # Longer sleep
                 
             except Exception as e:
-                self.logger.error(f"GPU monitoring error: {str(e)}")
-                time.sleep(30)  # Wait longer on error
+                self.logger.error(f"GPU monitoring error: {e}")
+                time.sleep(60)  # Wait longer on error
     
     def get_available_gpu(self) -> Optional[int]:
-        """Get the most available GPU"""
+        """Get available GPU with caching"""
         with self.lock:
+            # Use cached data if recent
+            if time.time() - self._last_update > self._update_interval:
+                # Force a quick update
+                self._force_quick_update()
+            
             if not self.gpu_stats:
-                return 0  # Default to GPU 0 if no stats available
+                return SafeGPUForcer.find_optimal_gpu_safe(min_free_gb=2.0)
             
             available_gpus = [
                 (gpu_id, status) for gpu_id, status in self.gpu_stats.items()
@@ -99,252 +278,79 @@ class GPUManager:
             
             if not available_gpus:
                 # Return least utilized GPU
-                return min(self.gpu_stats.keys(), 
-                          key=lambda x: self.gpu_stats[x].utilization)
+                if self.gpu_stats:
+                    return min(self.gpu_stats.keys(), 
+                              key=lambda x: self.gpu_stats[x].utilization)
+                return None
             
             # Return GPU with most free memory
             return min(available_gpus, key=lambda x: x[1].used_memory)[0]
     
-    def get_gpu_status(self) -> Dict[str, Any]:
-        """Get status of all GPUs"""
+    def _force_quick_update(self):
+        """Force a quick update of GPU stats"""
+        try:
+            for gpu_id in range(self.gpu_count):
+                memory_info = SafeGPUForcer.check_gpu_memory_safe(gpu_id)
+                if gpu_id in self.gpu_stats:
+                    # Update existing status
+                    status = self.gpu_stats[gpu_id]
+                    status.used_memory = memory_info['used_mb'] * 1024 * 1024
+                    status.free_memory = memory_info['free_mb'] * 1024 * 1024
+                    status.utilization = memory_info['utilization_percent']
+                    status.is_available = memory_info['is_available']
+        except Exception as e:
+            self.logger.warning(f"Quick update failed: {e}")
+    
+    def get_gpu_status_detailed(self) -> Dict[str, Any]:
+        """Get detailed GPU status"""
         return {
             f"gpu_{gpu_id}": {
                 "name": status.name,
-                "utilization": status.utilization,
+                "utilization_percent": status.utilization,
                 "memory_used_gb": status.used_memory / (1024**3),
                 "memory_total_gb": status.total_memory / (1024**3),
                 "memory_free_gb": status.free_memory / (1024**3),
-                "is_available": status.is_available
+                "is_available": status.is_available,
+                "active_workloads": len(self.workload_queue.get(gpu_id, []))
             }
             for gpu_id, status in self.gpu_stats.items()
         }
     
-    def assign_workload(self, workload_type: str, gpu_preference: int = None) -> int:
-        """Assign workload to optimal GPU"""
-        if gpu_preference is not None and gpu_preference < self.gpu_count:
-            if self.gpu_stats.get(gpu_preference, {}).is_available:
-                return gpu_preference
-        
-        # Find optimal GPU
-        optimal_gpu = self.get_available_gpu()
-        
-        # Track workload assignment
+    def reserve_gpu_for_workload(self, workload_type: str, preferred_gpu: int = None, 
+                                duration_estimate: int = 300, allow_sharing: bool = True) -> bool:
+        """Reserve GPU for workload"""
         with self.lock:
-            self.workload_queue[optimal_gpu].append({
-                "type": workload_type,
-                "timestamp": time.time()
-            })
-        
-        return optimal_gpu
-
-
-# utils/health_monitor.py
-"""
-System Health Monitor
-"""
-
-import psutil
-import logging
-import time
-import threading
-from typing import Dict, List, Any
-from datetime import datetime, timedelta
-from collections import deque
-
-class HealthMonitor:
-    """Monitors system health and performance"""
-    
-    def __init__(self, history_size: int = 100):
-        self.logger = logging.getLogger(__name__)
-        self.history_size = history_size
-        
-        # Health metrics history
-        self.cpu_history = deque(maxlen=history_size)
-        self.memory_history = deque(maxlen=history_size)
-        self.disk_history = deque(maxlen=history_size)
-        
-        # System alerts
-        self.alerts = []
-        self.alert_thresholds = {
-            "cpu_percent": 80,
-            "memory_percent": 85,
-            "disk_percent": 90,
-            "response_time": 30  # seconds
-        }
-        
-        # Start monitoring
-        self.monitoring_active = True
-        self.monitor_thread = threading.Thread(target=self._monitor_system, daemon=True)
-        self.monitor_thread.start()
-    
-    def _monitor_system(self):
-        """Continuously monitor system metrics"""
-        while self.monitoring_active:
-            try:
-                timestamp = datetime.now()
-                
-                # CPU metrics
-                cpu_percent = psutil.cpu_percent(interval=1)
-                self.cpu_history.append((timestamp, cpu_percent))
-                
-                # Memory metrics
-                memory = psutil.virtual_memory()
-                self.memory_history.append((timestamp, memory.percent))
-                
-                # Disk metrics
-                disk = psutil.disk_usage('/')
-                disk_percent = (disk.used / disk.total) * 100
-                self.disk_history.append((timestamp, disk_percent))
-                
-                # Check thresholds and generate alerts
-                self._check_thresholds(cpu_percent, memory.percent, disk_percent)
-                
-                time.sleep(60)  # Monitor every minute
-                
-            except Exception as e:
-                self.logger.error(f"Health monitoring error: {str(e)}")
-                time.sleep(60)
-    
-    def _check_thresholds(self, cpu_percent: float, memory_percent: float, disk_percent: float):
-        """Check if metrics exceed thresholds"""
-        alerts = []
-        
-        if cpu_percent > self.alert_thresholds["cpu_percent"]:
-            alerts.append({
-                "type": "cpu_high",
-                "message": f"CPU usage high: {cpu_percent:.1f}%",
-                "severity": "warning" if cpu_percent < 95 else "critical",
-                "timestamp": datetime.now()
-            })
-        
-        if memory_percent > self.alert_thresholds["memory_percent"]:
-            alerts.append({
-                "type": "memory_high",
-                "message": f"Memory usage high: {memory_percent:.1f}%",
-                "severity": "warning" if memory_percent < 95 else "critical",
-                "timestamp": datetime.now()
-            })
-        
-        if disk_percent > self.alert_thresholds["disk_percent"]:
-            alerts.append({
-                "type": "disk_high",
-                "message": f"Disk usage high: {disk_percent:.1f}%",
-                "severity": "critical",
-                "timestamp": datetime.now()
-            })
-        
-        # Add new alerts
-        self.alerts.extend(alerts)
-        
-        # Keep only recent alerts (last 24 hours)
-        cutoff_time = datetime.now() - timedelta(hours=24)
-        self.alerts = [
-            alert for alert in self.alerts 
-            if alert["timestamp"] > cutoff_time
-        ]
-    
-    def get_current_status(self) -> Dict[str, Any]:
-        """Get current system health status"""
-        try:
-            # Current metrics
-            cpu_percent = psutil.cpu_percent()
-            memory = psutil.virtual_memory()
-            disk = psutil.disk_usage('/')
+            if preferred_gpu is not None and preferred_gpu in self.gpu_stats:
+                target_gpu = preferred_gpu
+            else:
+                target_gpu = self.get_available_gpu()
             
-            # Process count
-            process_count = len(psutil.pids())
+            if target_gpu is not None:
+                self.workload_queue[target_gpu].append({
+                    "type": workload_type,
+                    "timestamp": time.time(),
+                    "duration_estimate": duration_estimate
+                })
+                return True
             
-            # Network I/O
-            network = psutil.net_io_counters()
-            
-            return {
-                "cpu": {
-                    "percent": cpu_percent,
-                    "count": psutil.cpu_count(),
-                    "status": "normal" if cpu_percent < 80 else "high"
-                },
-                "memory": {
-                    "total_gb": memory.total / (1024**3),
-                    "used_gb": memory.used / (1024**3),
-                    "percent": memory.percent,
-                    "status": "normal" if memory.percent < 85 else "high"
-                },
-                "disk": {
-                    "total_gb": disk.total / (1024**3),
-                    "used_gb": disk.used / (1024**3),
-                    "percent": (disk.used / disk.total) * 100,
-                    "status": "normal" if (disk.used / disk.total) * 100 < 90 else "high"
-                },
-                "processes": process_count,
-                "network": {
-                    "bytes_sent": network.bytes_sent,
-                    "bytes_recv": network.bytes_recv
-                },
-                "alerts_count": len([a for a in self.alerts if a["timestamp"] > datetime.now() - timedelta(hours=1)])
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Failed to get system status: {str(e)}")
-            return {"error": str(e)}
+            return False
     
-    def get_memory_usage(self) -> Dict[str, Any]:
-        """Get detailed memory usage information"""
-        try:
-            memory = psutil.virtual_memory()
-            swap = psutil.swap_memory()
-            
-            return {
-                "virtual": {
-                    "total": memory.total,
-                    "used": memory.used,
-                    "available": memory.available,
-                    "percent": memory.percent
-                },
-                "swap": {
-                    "total": swap.total,
-                    "used": swap.used,
-                    "free": swap.free,
-                    "percent": swap.percent
-                }
-            }
-            
-        except Exception as e:
-            return {"error": str(e)}
+    def release_gpu_workload(self, gpu_id: int, workload_type: str):
+        """Release GPU workload"""
+        with self.lock:
+            if gpu_id in self.workload_queue:
+                # Remove matching workload
+                self.workload_queue[gpu_id] = [
+                    w for w in self.workload_queue[gpu_id] 
+                    if w.get("type") != workload_type
+                ]
     
-    def get_alerts(self, severity: str = None, hours: int = 24) -> List[Dict[str, Any]]:
-        """Get system alerts"""
-        cutoff_time = datetime.now() - timedelta(hours=hours)
-        
-        filtered_alerts = [
-            alert for alert in self.alerts
-            if alert["timestamp"] > cutoff_time
-        ]
-        
-        if severity:
-            filtered_alerts = [
-                alert for alert in filtered_alerts
-                if alert["severity"] == severity
-            ]
-        
-        return sorted(filtered_alerts, key=lambda x: x["timestamp"], reverse=True)
-    
-    def get_performance_trends(self, hours: int = 24) -> Dict[str, List]:
-        """Get performance trends over time"""
-        cutoff_time = datetime.now() - timedelta(hours=hours)
-        
-        # Filter recent data
-        recent_cpu = [(ts, val) for ts, val in self.cpu_history if ts > cutoff_time]
-        recent_memory = [(ts, val) for ts, val in self.memory_history if ts > cutoff_time]
-        recent_disk = [(ts, val) for ts, val in self.disk_history if ts > cutoff_time]
-        
-        return {
-            "cpu": recent_cpu,
-            "memory": recent_memory,
-            "disk": recent_disk
-        }
-
-
-
-
-
-
+    def cleanup_completed_workloads(self):
+        """Clean up old workloads"""
+        current_time = time.time()
+        with self.lock:
+            for gpu_id in self.workload_queue:
+                self.workload_queue[gpu_id] = [
+                    w for w in self.workload_queue[gpu_id]
+                    if current_time - w.get("timestamp", 0) < w.get("duration_estimate", 300)
+                ]
