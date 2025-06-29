@@ -693,8 +693,8 @@ class DynamicOpulenceCoordinator:
                     coordinator=self,
                     llm_engine=llm_engine,
                     db_path=self.db_path,
-                    gpu_id=gpu_id,
-                    coordinator=self # ADD coordinator reference
+                    gpu_id=gpu_id
+                    
                 )
         else:
             raise ValueError(f"Unknown agent type: {agent_type}")
