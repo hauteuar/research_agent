@@ -11,7 +11,7 @@ import uuid
 import re
 import os
 from typing import Dict, List, Optional, Any, Tuple, Set
-from datetime import datetime, timedelta
+from datetime import datetime as dt, timedelta
 import logging
 from dataclasses import dataclass
 import networkx as nx
@@ -1646,7 +1646,7 @@ class LineageAnalyzerAgent:
                 "executive_summary": executive_summary,
                 "detailed_analysis": analysis,
                 "dependencies": dependencies,
-                "summary_generated": datetime.now().isoformat(),
+                "summary_generated": dt.now().isoformat(),
                 "status": "success"
             }
             

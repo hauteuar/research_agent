@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 import re
 import logging
-from datetime import datetime
+from datetime import datetime as dt
 import zipfile
 import uuid
 import hashlib
@@ -630,7 +630,7 @@ class DataLoaderAgent:
             INSERT OR REPLACE INTO table_schemas 
             (table_name, schema_type, field_definitions, source_file, last_modified)
             VALUES (?, ?, ?, ?, ?)
-        """, (table_name, schema_type, json.dumps(schema), source_file, datetime.now()))
+        """, (table_name, schema_type, json.dumps(schema), source_file, dt.now()))
         
         # Store individual field information
         cursor.execute("DELETE FROM field_catalog WHERE table_name = ?", (table_name,))

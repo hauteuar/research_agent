@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 from dataclasses import dataclass
 import hashlib
-from datetime import datetime
+from datetime import datetime as dt
 import logging
 
 import torch
@@ -611,7 +611,7 @@ class CompleteEnhancedCodeParserAgent:
                 "chunks_created": len(chunks),
                 "chunks_verified": stored_chunks,
                 "metadata": metadata,
-                "processing_timestamp": datetime.now().isoformat(),
+                "processing_timestamp": dt.now().isoformat(),
                 "file_hash": file_hash
             }
             
@@ -3276,7 +3276,7 @@ class CompleteEnhancedCodeParserAgent:
             "file_type": file_type,
             "chunk_types": {},
             "complexity_metrics": {},
-            "processing_timestamp": datetime.now().isoformat()
+            "processing_timestamp": dt.now().isoformat()
         }
         
         # Count chunk types
@@ -3487,7 +3487,7 @@ class CompleteEnhancedCodeParserAgent:
                         'paragraph': str(chunk_id),
                         'operation': str(field_op.get('operation', '')),
                         'source_file': str(field_op.get('source_file', '')),
-                        'last_used': datetime.now().isoformat(),
+                        'last_used': dts.now().isoformat(),
                         'read_in': str(program_name) if field_op.get('operation') == 'READ' else '',
                         'updated_in': str(program_name) if field_op.get('operation') in ['WRITE', 'UPDATE'] else '',
                         'purged_in': str(program_name) if field_op.get('operation') == 'DELETE' else ''
@@ -3748,7 +3748,7 @@ class CompleteEnhancedCodeParserAgent:
                 "failed": len(results["failed_files"]),
                 "skipped": len(results["skipped_files"]),
                 "total_chunks_created": results["total_chunks"],
-                "processing_timestamp": datetime.now().isoformat()
+                "processing_timestamp": dt.now().isoformat()
             }
             
             return self._add_processing_info(results)
@@ -3971,7 +3971,7 @@ class CompleteEnhancedCodeParserAgent:
             
             export_data = {
                 "program_name": program_name,
-                "export_timestamp": datetime.now().isoformat(),
+                "export_timestamp": dt.now().isoformat(),
                 "overview": overview,
                 "analysis": analysis,
                 "all_chunks": chunks.get("chunks", []),
@@ -4047,7 +4047,7 @@ class CompleteEnhancedCodeParserAgent:
                 "backup_path": backup_path,
                 "original_size_mb": original_size / (1024 * 1024),
                 "backup_size_mb": backup_size / (1024 * 1024),
-                "backup_timestamp": datetime.now().isoformat()
+                "backup_timestamp": dt.now().isoformat()
             }
             
         except Exception as e:

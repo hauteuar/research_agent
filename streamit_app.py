@@ -12,7 +12,7 @@ from pathlib import Path
 import zipfile
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime as dt
 from typing import Dict, Any
 import plotly.express as px
 import plotly.graph_objects as go
@@ -289,7 +289,7 @@ def show_chat_analysis():
                                         st.session_state.chat_history.append({
                                             "role": "user",
                                             "content": suggestion,
-                                            "timestamp": datetime.now().isoformat()
+                                            "timestamp": dt.now().isoformat()
                                         })
                                         st.rerun()
                     else:
@@ -303,7 +303,7 @@ def show_chat_analysis():
         st.session_state.chat_history.append({
             "role": "user",
             "content": user_input,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": dt.now().isoformat()
         })
         
         # Show processing indicator
@@ -315,7 +315,7 @@ def show_chat_analysis():
         st.session_state.chat_history.append({
             "role": "assistant",
             "content": response_data,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": dt.now().isoformat()
         })
         
         st.rerun()
@@ -351,7 +351,7 @@ def export_chat_history():
     # Create formatted export
     export_data = {
         "export_info": {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": dt.now().isoformat(),
             "total_messages": len(st.session_state.chat_history),
             "session_id": st.session_state.get("session_id", "unknown")
         },
@@ -382,7 +382,7 @@ def export_chat_history():
     st.download_button(
         "📥 Download Enhanced Chat History",
         export_json,
-        file_name=f"opulence_chat_enhanced_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+        file_name=f"opulence_chat_enhanced_{dt.now().strftime('%Y%m%d_%H%M%S')}.json",
         mime="application/json"
     )
 
@@ -415,7 +415,7 @@ def generate_chat_summary():
                     "response_type": "summary",
                     "suggestions": ["Continue analysis", "Export summary", "Start new topic"]
                 },
-                "timestamp": datetime.now().isoformat()
+                "timestamp": dt.now().isoformat()
             })
             
         except Exception as e:
@@ -458,7 +458,7 @@ def generate_follow_up_suggestions():
                         st.session_state.chat_history.append({
                             "role": "user",
                             "content": suggestion,
-                            "timestamp": datetime.now().isoformat()
+                            "timestamp": dt.now().isoformat()
                         })
                         st.rerun()
             
@@ -571,7 +571,7 @@ def display_enhanced_component_analysis(analysis: dict):
                         st.session_state.chat_history.append({
                             "role": "user",
                             "content": f"For {component_name}: {suggestion}",
-                            "timestamp": datetime.now().isoformat()
+                            "timestamp": dt.now().isoformat()
                         })
         
         # Show detailed analysis in tabs
@@ -590,7 +590,7 @@ def display_enhanced_component_analysis(analysis: dict):
                     {
                         "role": "user",
                         "content": f"Analyze {component_name}",
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": dt.now().isoformat()
                     },
                     {
                         "role": "assistant",
@@ -599,7 +599,7 @@ def display_enhanced_component_analysis(analysis: dict):
                             "response_type": "analysis",
                             "suggestions": suggestions
                         },
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": dt.now().isoformat()
                     }
                 ])
                 st.success("Added to chat history!")
@@ -611,7 +611,7 @@ def display_enhanced_component_analysis(analysis: dict):
                 st.download_button(
                     "Download Enhanced Analysis",
                     export_data,
-                    file_name=f"enhanced_analysis_{component_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    file_name=f"enhanced_analysis_{component_name}_{dt.now().strftime('%Y%m%d_%H%M%S')}.json",
                     mime="application/json"
                 )
     
@@ -691,7 +691,7 @@ def perform_enhanced_search(search_query: str, search_type: str, result_count: i
                             st.session_state.chat_history.append({
                                 "role": "user",
                                 "content": suggestion,
-                                "timestamp": datetime.now().isoformat()
+                                "timestamp": dt.now().isoformat()
                             })
             else:
                 st.error("Search failed or returned unexpected results")
@@ -815,14 +815,14 @@ def show_example_queries():
             st.session_state.chat_history.append({
                 "role": "user",
                 "content": example,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": dt.now().isoformat()
             })
             # Process the example query
             response = process_chat_query(example)
             st.session_state.chat_history.append({
                 "role": "assistant", 
                 "content": response,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": dt.now().isoformat()
             })
             st.rerun()
 
@@ -844,7 +844,7 @@ def show_footer():
     
     with col3:
         st.markdown("**🕐 System Time**")
-        st.markdown(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        st.markdown(f"{dt.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 
 def show_dashboard():
@@ -1030,7 +1030,7 @@ def process_uploaded_files(uploaded_files):
         
         # Update processing history
         st.session_state.processing_history.append({
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": dt.now().strftime("%Y-%m-%d %H:%M:%S"),
             "files_count": len(uploaded_files),
             "status": result.get("status", "error") if isinstance(result, dict) else "error",
             "processing_time": result.get("processing_time", 0) if isinstance(result, dict) else 0
@@ -1125,7 +1125,7 @@ def show_chat_analysis():
         st.session_state.chat_history.append({
             "role": "user",
             "content": user_input,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": dt.now().isoformat()
         })
         
         # Process query and generate response
@@ -1135,7 +1135,7 @@ def show_chat_analysis():
         st.session_state.chat_history.append({
             "role": "assistant",
             "content": response,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": dt.now().isoformat()
         })
         
         st.rerun()
@@ -1153,7 +1153,7 @@ def show_chat_analysis():
             st.download_button(
                 "Download Chat History",
                 chat_export,
-                file_name=f"opulence_chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                file_name=f"opulence_chat_{dt.now().strftime('%Y%m%d_%H%M%S')}.json",
                 mime="application/json"
             )
 
@@ -1593,7 +1593,7 @@ def show_analysis_report(analysis: dict):
         st.download_button(
             "📄 Download Report",
             report_content,
-            file_name=f"opulence_analysis_{component_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+            file_name=f"opulence_analysis_{component_name}_{dt.now().strftime('%Y%m%d_%H%M%S')}.md",
             mime="text/markdown"
         )
     
@@ -1813,7 +1813,7 @@ def display_generated_documentation(result: dict):
         st.download_button(
             "📄 Download Documentation",
             result["documentation"],
-            file_name=f"opulence_documentation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+            file_name=f"opulence_documentation_{dt.now().strftime('%Y%m%d_%H%M%S')}.md",
             mime="text/markdown"
         )
 
@@ -1983,7 +1983,7 @@ def export_system_logs():
             st.download_button(
                 "📥 Download System Logs",
                 log_content,
-                file_name=f"opulence_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log",
+                file_name=f"opulence_logs_{dt.now().strftime('%Y%m%d_%H%M%S')}.log",
                 mime="text/plain"
             )
         else:

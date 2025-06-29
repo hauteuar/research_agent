@@ -12,7 +12,7 @@ import os
 import uuid
 import re
 from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime
+from datetime import datetime as dt
 import json
 import hashlib
 from contextlib import asynccontextmanager
@@ -315,7 +315,7 @@ class DB2ComparatorAgent:
     async def _db2_connection(self):
         """Async context manager for DB2 connections"""
         connection = None
-        start_time = datetime.now()
+        start_time = dt.now()
         
         try:
             if not DB2_AVAILABLE:
@@ -334,13 +334,13 @@ class DB2ComparatorAgent:
             conn = ibm_db.connect(dsn, "", "")
             connection = ibm_db_dbi.Connection(conn)
             
-            response_time = (datetime.now() - start_time).total_seconds() * 1000
+            response_time = (dt.now() - start_time).total_seconds() * 1000
             self._log_connection_attempt(True, response_time_ms=int(response_time))
             
             yield connection
             
         except Exception as e:
-            response_time = (datetime.now() - start_time).total_seconds() * 1000
+            response_time = (dt.now() - start_time).total_seconds() * 1000
             self.logger.error(f"DB2 connection failed: {str(e)}")
             self._log_connection_attempt(False, str(e), int(response_time))
             yield None
@@ -674,7 +674,7 @@ class DB2ComparatorAgent:
                 "validation_results": validation_results,
                 "quality_score": quality_score,
                 "quality_report": quality_report,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": dt.now().isoformat()
             }
             
         except Exception as e:
@@ -1095,7 +1095,7 @@ class DB2ComparatorAgent:
     async def test_db2_connection(self) -> Dict[str, Any]:
         """Test DB2 connection"""
         try:
-            start_time = datetime.now()
+            start_time = dt.now()
             
             async with self._db2_connection() as conn:
                 if conn:
@@ -1103,7 +1103,7 @@ class DB2ComparatorAgent:
                     test_query = "SELECT 1 FROM SYSIBM.SYSDUMMY1"
                     result = pd.read_sql(test_query, conn)
                     
-                    response_time = (datetime.now() - start_time).total_seconds() * 1000
+                    response_time = (dt.now() - start_time).total_seconds() * 1000
                     
                     return {
                         "status": "success", 
@@ -1115,11 +1115,11 @@ class DB2ComparatorAgent:
                     return {
                         "status": "failed", 
                         "message": "Failed to establish DB2 connection",
-                        "response_time_ms": (datetime.now() - start_time).total_seconds() * 1000
+                        "response_time_ms": (dt.now() - start_time).total_seconds() * 1000
                     }
                     
         except Exception as e:
-            response_time = (datetime.now() - start_time).total_seconds() * 1000
+            response_time = (dt.now() - start_time).total_seconds() * 1000
             self.logger.error(f"DB2 connection test failed: {str(e)}")
             return {
                 "status": "error", 
@@ -1199,7 +1199,7 @@ class DB2ComparatorAgent:
                 return {
                     "comparison_records_deleted": records_to_delete,
                     "connection_logs_deleted": connection_logs_deleted,
-                    "cleanup_date": datetime.now().isoformat(),
+                    "cleanup_date": dt.now().isoformat(),
                     "days_kept": days_to_keep
                 }
                 

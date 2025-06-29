@@ -15,7 +15,7 @@ import logging
 from pathlib import Path
 import pickle
 import hashlib
-from datetime import datetime
+from datetime import datetime as dt
 import uuid
 import torch
 from transformers import AutoTokenizer, AutoModel
@@ -1368,7 +1368,7 @@ class VectorIndexAgent:
                     "total_count": 0,
                     "vector_dimension": self.vector_dim,
                     "model_path": self.local_model_path,
-                    "export_timestamp": datetime.now().isoformat()
+                    "export_timestamp": dt.now().isoformat()
                 }
             }
             

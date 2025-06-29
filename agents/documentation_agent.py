@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 from dataclasses import dataclass
 import logging
-from datetime import datetime
+from datetime import datetime as dt
 import markdown
 from jinja2 import Template
 
@@ -177,7 +177,7 @@ class DocumentationAgent:
             # Render documentation
             documentation = self.templates['program'].render(
                 program_name=program_name,
-                generation_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                generation_date=dt.now().strftime("%Y-%m-%d %H:%M:%S"),
                 **sections
             )
             
@@ -194,7 +194,7 @@ class DocumentationAgent:
                 "documentation": documentation,
                 "format": format_type,
                 "sections_generated": len(sections),
-                "generation_timestamp": datetime.now().isoformat()
+                "generation_timestamp": dt.now().isoformat()
             }
             
         except Exception as e:
@@ -225,7 +225,7 @@ class DocumentationAgent:
             # Render documentation
             documentation = self.templates['system'].render(
                 system_name=system_name,
-                generation_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                generation_date=dt.now().strftime("%Y-%m-%d %H:%M:%S"),
                 **sections
             )
             
@@ -234,7 +234,7 @@ class DocumentationAgent:
                 "system_name": system_name,
                 "documentation": documentation,
                 "components_analyzed": len(system_components),
-                "generation_timestamp": datetime.now().isoformat()
+                "generation_timestamp": dt.now().isoformat()
             }
             
         except Exception as e:
@@ -262,7 +262,7 @@ class DocumentationAgent:
             # Render documentation
             documentation = self.templates['lineage'].render(
                 field_name=field_name,
-                generation_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                generation_date=dt.now().strftime("%Y-%m-%d %H:%M:%S"),
                 **sections
             )
             
@@ -270,7 +270,7 @@ class DocumentationAgent:
                 "status": "success",
                 "field_name": field_name,
                 "documentation": documentation,
-                "generation_timestamp": datetime.now().isoformat()
+                "generation_timestamp": dt.now().isoformat()
             }
             
         except Exception as e:

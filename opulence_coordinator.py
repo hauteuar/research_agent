@@ -16,7 +16,7 @@ from pathlib import Path
 import json
 import uuid
 import sqlite3
-from datetime import datetime
+from datetime import datetime as dt
 from contextlib import asynccontextmanager
 import re
 import streamlit as st
@@ -624,7 +624,7 @@ class DynamicOpulenceCoordinator:
                 "file_stats": file_stats.to_dict('records') if not file_stats.empty else [],
                 "gpu_stats": self.get_gpu_utilization_stats(),
                 "database_stats": await self._get_database_stats(),
-                "timestamp": datetime.now().isoformat()
+                "timestamp": dt.now().isoformat()
             }
             
         except Exception as e:
@@ -993,7 +993,7 @@ class DynamicOpulenceCoordinator:
                     file_path.name,
                     file_type,
                     result.get("status", "processed"),
-                    datetime.now().isoformat()
+                    dt.now().isoformat()
                 ))
             
                 # Verify chunks were stored
@@ -1440,7 +1440,7 @@ class DynamicOpulenceCoordinator:
                 "component_type": component_type,
                 "status": "processing",
                 "chunks_found": chunk_count,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": dt.now().isoformat(),
                 "debug_info": {
                     "available_tables": tables,
                     "chunk_count": chunk_count,
@@ -1650,7 +1650,7 @@ class DynamicOpulenceCoordinator:
                 "file_info": file_info,
                 "found_in_chunks": len(chunk_info) > 0,
                 "found_in_files": len(file_info) > 0,
-                "analysis_timestamp": datetime.now().isoformat()
+                "analysis_timestamp": dt.now().isoformat()
             }
             
         except Exception as e:
