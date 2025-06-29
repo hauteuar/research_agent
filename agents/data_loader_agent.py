@@ -220,6 +220,8 @@ class DataLoaderAgent:
                 result = await self._process_ddl_file(file_path, file_content)
             elif 'dclgen' in file_path.name.lower() or file_extension == '.dcl':
                 result = await self._process_dclgen_file(file_path, file_content)
+            elif file_extension in ['.cpy', '.copy']:  # ADD THIS
+                result = await self._process_copybook_file(file_path, file_content)  # ADD THIS
             elif file_extension == '.json':
                 result = await self._process_layout_json(file_path, file_content)
             elif file_extension == '.zip':
@@ -281,6 +283,8 @@ class DataLoaderAgent:
             # Store in SQLite
             await self._store_table_schema(table_name, 'csv_layout', schema, file_path.name)
             await self._store_sample_data(table_name, sample_df, file_path.name)
+            await self._store_csv_as_chunks(table_name, schema, sample_df, file_path.name)
+        
             
             # Analyze data quality
             quality_score = await self._analyze_data_quality(sample_df)
@@ -296,7 +300,8 @@ class DataLoaderAgent:
                 "record_count": len(df),
                 "sample_count": sample_size,
                 "data_quality_score": quality_score,
-                "field_descriptions": field_descriptions
+                "field_descriptions": field_descriptions,
+                "chunks_created": len(schema) + 1 
             }
             
         except Exception as e:
@@ -377,6 +382,82 @@ class DataLoaderAgent:
         enhanced_schema = await self._enhance_schema_with_llm(schema, filename)
         
         return enhanced_schema
+    
+    async def _store_csv_as_chunks(self, table_name: str, schema: List[Dict], 
+                                sample_df: pd.DataFrame, source_file: str):
+        """Store CSV information as chunks for vector indexing"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Create table structure chunk
+            table_chunk = {
+                "program_name": table_name,
+                "chunk_id": f"{table_name}_TABLE_STRUCTURE", 
+                "chunk_type": "csv_structure",
+                "content": f"Table: {table_name}\nColumns: {', '.join([f['name'] for f in schema])}",
+                "metadata": json.dumps({
+                    "table_name": table_name,
+                    "column_count": len(schema),
+                    "record_count": len(sample_df),
+                    "source_file": source_file,
+                    "file_type": "csv"
+                })
+            }
+            
+            cursor.execute("""
+                INSERT OR REPLACE INTO program_chunks 
+                (program_name, chunk_id, chunk_type, content, metadata, line_start, line_end)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                table_chunk["program_name"],
+                table_chunk["chunk_id"],
+                table_chunk["chunk_type"], 
+                table_chunk["content"],
+                table_chunk["metadata"],
+                0, 1
+            ))
+            
+            # Create field chunks
+            for i, field in enumerate(schema):
+                field_content = f"Field: {field['name']}, Type: {field['type']}"
+                if field.get('sample_values'):
+                    field_content += f", Sample: {field['sample_values'][:3]}"
+                    
+                field_chunk = {
+                    "program_name": table_name,
+                    "chunk_id": f"{table_name}_FIELD_{field['name']}",
+                    "chunk_type": "csv_field",
+                    "content": field_content,
+                    "metadata": json.dumps({
+                        "field_name": field['name'],
+                        "field_type": field['type'], 
+                        "nullable": field.get('nullable', True),
+                        "sample_values": field.get('sample_values', [])[:5],
+                        "table_name": table_name,
+                        "source_file": source_file,
+                        "file_type": "csv"
+                    })
+                }
+                
+                cursor.execute("""
+                    INSERT OR REPLACE INTO program_chunks 
+                    (program_name, chunk_id, chunk_type, content, metadata, line_start, line_end)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    field_chunk["program_name"],
+                    field_chunk["chunk_id"],
+                    field_chunk["chunk_type"],
+                    field_chunk["content"], 
+                    field_chunk["metadata"],
+                    i + 1, i + 2
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store CSV chunks: {str(e)}")
     
     async def _enhance_schema_with_llm(self, schema: List[Dict], filename: str) -> List[Dict[str, Any]]:
         """Use LLM to enhance schema with business context - FIXED"""
@@ -922,6 +1003,9 @@ class DataLoaderAgent:
             return await self._process_ddl_file(file_path, content)
         elif 'DECLARE' in content_upper and 'TABLE' in content_upper:
             return await self._process_dclgen_file(file_path, content)
+        elif re.search(r'^\s*\d+\s+[A-Z][A-Z0-9-]*\s+PIC', content_upper, re.MULTILINE):  # ADD THIS
+        # Looks like a COBOL copybook
+            return await self._process_copybook_file(file_path, content)
         elif ',' in content and '\n' in content:
             # Likely CSV
             return await self._process_csv_file(file_path, content)
@@ -932,6 +1016,247 @@ class DataLoaderAgent:
                 "message": "Could not determine file format"
             }
     
+    async def _process_copybook_file(self, file_path: Path, content: str) -> Dict[str, Any]:
+        """Process COBOL copybook file"""
+        try:
+            # Parse copybook structure using LLM
+            copybook_info = await self._parse_copybook_structure(content, file_path.name)
+            
+            if copybook_info:
+                table_name = copybook_info['record_name']
+                schema = copybook_info['fields']
+                
+                # Create SQLite table from copybook fields
+                await self._create_sqlite_table(table_name, schema)
+                
+                # Store schema metadata (existing)
+                await self._store_table_schema(table_name, 'copybook', schema, file_path.name)
+                
+                # ADD THIS: Store as chunks for vector indexing
+                await self._store_copybook_as_chunks(table_name, copybook_info, content, file_path.name)
+                
+                return {
+                    "status": "success",
+                    "file_name": file_path.name,
+                    "table_name": table_name,
+                    "field_count": len(schema),
+                    "record_structure": copybook_info.get('structure_type', 'flat'),
+                    "chunks_created": len(schema) + 1  # +1 for the record structure chunk
+                }
+            else:
+                return {"status": "error", "error": "Could not parse copybook structure"}
+                
+        except Exception as e:
+            self.logger.error(f"Copybook processing failed: {str(e)}")
+            return {"status": "error", "error": str(e)}
+
+    # ADD THIS NEW METHOD
+    async def _store_copybook_as_chunks(self, table_name: str, copybook_info: Dict, 
+                                    original_content: str, source_file: str):
+        """Store copybook information as chunks for vector indexing"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Create overall record structure chunk
+            record_chunk = {
+                "program_name": table_name,
+                "chunk_id": f"{table_name}_RECORD_STRUCTURE",
+                "chunk_type": "copybook_structure",
+                "content": original_content,
+                "metadata": json.dumps({
+                    "record_name": copybook_info['record_name'],
+                    "structure_type": copybook_info.get('structure_type', 'flat'),
+                    "total_fields": len(copybook_info['fields']),
+                    "source_file": source_file,
+                    "file_type": "copybook"
+                }),
+                "line_start": 0,
+                "line_end": len(original_content.split('\n'))
+            }
+            
+            # Insert record structure chunk
+            cursor.execute("""
+                INSERT OR REPLACE INTO program_chunks 
+                (program_name, chunk_id, chunk_type, content, metadata, line_start, line_end)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                record_chunk["program_name"],
+                record_chunk["chunk_id"], 
+                record_chunk["chunk_type"],
+                record_chunk["content"],
+                record_chunk["metadata"],
+                record_chunk["line_start"],
+                record_chunk["line_end"]
+            ))
+            
+            # Create individual field chunks
+            for i, field in enumerate(copybook_info['fields']):
+                field_chunk = {
+                    "program_name": table_name,
+                    "chunk_id": f"{table_name}_FIELD_{field['name']}",
+                    "chunk_type": "copybook_field",
+                    "content": f"{field['level']} {field['name']} {field.get('pic_clause', '')}",
+                    "metadata": json.dumps({
+                        "field_name": field['name'],
+                        "field_type": field['type'],
+                        "level": field.get('level', '05'),
+                        "pic_clause": field.get('pic_clause', ''),
+                        "nullable": field.get('nullable', True),
+                        "record_name": copybook_info['record_name'],
+                        "source_file": source_file,
+                        "file_type": "copybook"
+                    }),
+                    "line_start": i,
+                    "line_end": i + 1
+                }
+                
+                cursor.execute("""
+                    INSERT OR REPLACE INTO program_chunks 
+                    (program_name, chunk_id, chunk_type, content, metadata, line_start, line_end)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    field_chunk["program_name"],
+                    field_chunk["chunk_id"],
+                    field_chunk["chunk_type"], 
+                    field_chunk["content"],
+                    field_chunk["metadata"],
+                    field_chunk["line_start"],
+                    field_chunk["line_end"]
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"Stored {len(copybook_info['fields']) + 1} chunks for copybook {table_name}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store copybook chunks: {str(e)}")
+            
+    async def _parse_copybook_structure(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
+        """Parse COBOL copybook structure using LLM"""
+        await self._ensure_llm_engine()
+        prompt = f"""
+        Parse this COBOL copybook file and extract the record structure:
+        
+        {content}
+        
+        Extract:
+        1. Main record name (01 level)
+        2. Field definitions with levels, names, and PIC clauses
+        3. Convert COBOL data types to SQL equivalents
+        
+        COBOL to SQL type conversion:
+        - PIC X(n) -> VARCHAR(n)
+        - PIC 9(n) -> INTEGER (if n <= 9) or BIGINT (if n > 9)
+        - PIC 9(n)V9(m) -> DECIMAL(n+m, m)
+        - PIC S9(n) COMP -> INTEGER
+        - PIC S9(n) COMP-3 -> DECIMAL(n, 0)
+        
+        Return as JSON:
+        {{
+            "record_name": "RECORD_NAME",
+            "structure_type": "flat|hierarchical",
+            "fields": [
+                {{"name": "FIELD1", "type": "VARCHAR(30)", "level": "05", "pic_clause": "PIC X(30)", "nullable": true}},
+                {{"name": "FIELD2", "type": "INTEGER", "level": "05", "pic_clause": "PIC 9(6)", "nullable": false}}
+            ]
+        }}
+        """
+        
+        sampling_params = SamplingParams(temperature=0.1, max_tokens=1500)
+        
+        try:
+            response_text = await self._generate_with_llm(prompt, sampling_params)
+            if '{' in response_text:
+                json_start = response_text.find('{')
+                json_end = response_text.rfind('}') + 1
+                return json.loads(response_text[json_start:json_end])
+        except Exception as e:
+            self.logger.warning(f"Copybook parsing failed: {str(e)}")
+            # Fallback to regex parsing
+            return self._parse_copybook_with_regex(content, filename)
+        
+        return None
+
+    def _parse_copybook_with_regex(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
+        """Fallback copybook parsing using regex"""
+        try:
+            fields = []
+            record_name = None
+            
+            # Find 01 level record name
+            record_pattern = re.compile(r'^\s*01\s+([A-Z][A-Z0-9-]*)', re.MULTILINE)
+            record_match = record_pattern.search(content)
+            if record_match:
+                record_name = record_match.group(1)
+            else:
+                # Use filename as record name
+                record_name = Path(filename).stem.upper().replace('-', '_')
+            
+            # Find field definitions
+            field_pattern = re.compile(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*)\s+PIC\s+([X9SVx]+(?:\([0-9,]+\))?)', re.MULTILINE | re.IGNORECASE)
+            
+            for match in field_pattern.finditer(content):
+                level = match.group(1)
+                field_name = match.group(2)
+                pic_clause = match.group(3).upper()
+                
+                # Convert PIC clause to SQL type
+                sql_type = self._convert_pic_to_sql(pic_clause)
+                
+                fields.append({
+                    "name": field_name,
+                    "type": sql_type,
+                    "level": level,
+                    "pic_clause": f"PIC {pic_clause}",
+                    "nullable": True
+                })
+            
+            if fields:
+                return {
+                    "record_name": record_name,
+                    "structure_type": "flat",
+                    "fields": fields
+                }
+        
+        except Exception as e:
+            self.logger.error(f"Regex copybook parsing failed: {str(e)}")
+        
+        return None
+
+    def _convert_pic_to_sql(self, pic_clause: str) -> str:
+        """Convert COBOL PIC clause to SQL type"""
+        pic_upper = pic_clause.upper()
+        
+        # Extract numbers from parentheses
+        numbers = re.findall(r'\((\d+)\)', pic_clause)
+        
+        if 'X' in pic_upper:
+            # Alphanumeric
+            length = int(numbers[0]) if numbers else 255
+            return f"VARCHAR({length})"
+        elif 'V' in pic_upper:
+            # Decimal
+            total_digits = pic_upper.count('9')
+            decimal_places = pic_upper.split('V')[1].count('9') if 'V' in pic_upper else 0
+            return f"DECIMAL({total_digits}, {decimal_places})"
+        elif '9' in pic_upper:
+            # Numeric
+            digit_count = pic_upper.count('9')
+            if numbers:
+                digit_count = int(numbers[0])
+            
+            if digit_count <= 9:
+                return "INTEGER"
+            elif digit_count <= 18:
+                return "BIGINT"
+            else:
+                return f"DECIMAL({digit_count}, 0)"
+        else:
+            return "VARCHAR(255)"
+
+
     async def get_component_info(self, component_name: str) -> Dict[str, Any]:
         """Get detailed information about a data component"""
         try:
