@@ -3487,7 +3487,7 @@ class CompleteEnhancedCodeParserAgent:
                         'paragraph': str(chunk_id),
                         'operation': str(field_op.get('operation', '')),
                         'source_file': str(field_op.get('source_file', '')),
-                        'last_used': dts.now().isoformat(),
+                        'last_used': dt.now().isoformat(),
                         'read_in': str(program_name) if field_op.get('operation') == 'READ' else '',
                         'updated_in': str(program_name) if field_op.get('operation') in ['WRITE', 'UPDATE'] else '',
                         'purged_in': str(program_name) if field_op.get('operation') == 'DELETE' else ''
