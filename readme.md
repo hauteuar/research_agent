@@ -311,3 +311,16 @@ MIT License - see LICENSE file for details
 ---
 
 **Opulence Deep Research Mainframe Agent** - Transforming legacy system analysis with AI-powered insights.
+
+### Make sure to add the metadat tag to you copy if your logical file name is different from copybook name
+*================================================================
+* COPYBOOK: TMSCOTHI  
+* PURPOSE: TMS092THO RECORD LAYOUT
+* FILE: TMS092THO
+* OPERATIONS: READ/WRITE/UPDATE
+* LAYOUT_TYPE: UNIVERSAL
+*================================================================
+
+# copybook_metadata_updater.py -- run this seperately so that the script will update the copybook meta data
+
+# also make sure to change your model name in co-ordinator to use othermodels
