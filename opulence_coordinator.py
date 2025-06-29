@@ -178,17 +178,20 @@ class DynamicOpulenceCoordinator:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     program_name TEXT NOT NULL,
                     chunk_id TEXT NOT NULL,
-                    chunk_type TEXT,
-                    content TEXT,
+                    chunk_type TEXT NOT NULL,
+                    content TEXT NOT NULL,
                     metadata TEXT,
                     embedding_id TEXT,
-                    created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    file_hash TEXT,
+                    created_timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                    line_start INTEGER,
+                    line_end INTEGER,
                     UNIQUE(program_name, chunk_id)
                 );
                 
                 CREATE INDEX IF NOT EXISTS idx_program_chunks_name ON program_chunks(program_name);
                 CREATE INDEX IF NOT EXISTS idx_program_chunks_type ON program_chunks(chunk_type);
-                CREATE INDEX IF NOT EXISTS idx_program_chunks_id ON program_chunks(chunk_id);
+                CREATE INDEX IF NOT EXISTS idx_file_hash ON program_chunks(file_hash);
                 
                 CREATE TABLE IF NOT EXISTS processing_stats (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
