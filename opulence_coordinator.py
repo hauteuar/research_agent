@@ -49,7 +49,7 @@ from agents.lineage_analyzer_agent import LineageAnalyzerAgent
 from agents.logic_analyzer_agent import LogicAnalyzerAgent
 from agents.documentation_agent import DocumentationAgent
 from agents.db2_comparator_agent import DB2ComparatorAgent
-from utils.gpu_manager import OptimizedGPUManager, SafeGPUForcer, GPUContext
+from utils.gpu_manager import OptimizedDynamicGPUManager, SafeGPUForcer
 from utils.dynamic_config_manager import DynamicConfigManager, get_dynamic_config, GPUConfig
 from utils.health_monitor import HealthMonitor
 from utils.cache_manager import CacheManager
@@ -185,11 +185,11 @@ class DynamicOpulenceCoordinator:
         gpu_config = self.config_manager.get_gpu_config()
         
         # Initialize dynamic GPU manager with config
-        self.gpu_manager = OptimizedGPUManager(
-            total_gpu_count=gpu_config.total_gpu_count,
-            memory_threshold=gpu_config.memory_threshold,
-            utilization_threshold=gpu_config.utilization_threshold
-        )
+        self._gpu_manager = OptimizedDynamicGPUManager(
+                total_gpu_count=None,  # Auto-detect
+                memory_threshold=0.8,  # Conservative
+                utilization_threshold=80.0  # Conservative
+            )
         
         #self.health_monitor = HealthMonitor()
         
