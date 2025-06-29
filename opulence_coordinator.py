@@ -18,7 +18,7 @@ import uuid
 import sqlite3
 from datetime import datetime
 from contextlib import asynccontextmanager
-
+import re
 import streamlit as st
 import torch
 from vllm import AsyncLLMEngine, AsyncEngineArgs, SamplingParams
@@ -933,6 +933,8 @@ class DynamicOpulenceCoordinator:
                 return await self._process_cobol_file_with_storage(file_path)
             elif content.startswith('//') and 'JOB' in content:
                 return await self._process_jcl_file_with_storage(file_path)
+            elif re.search(r'^\s*\d+\s+[A-Z][A-Z0-9-]*\s+PIC', content.upper(), re.MULTILINE):  # ADD THIS LINE
+                return await self._process_csv_file_with_storage(file_path) 
             elif ',' in content and '\n' in content:
                 return await self._process_csv_file_with_storage(file_path)
             else:
