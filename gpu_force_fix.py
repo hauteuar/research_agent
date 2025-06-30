@@ -408,10 +408,17 @@ class EnhancedGPUForcer:
         try:
             from vllm import AsyncEngineArgs
             
+            # Ensure max_num_batched_tokens is at least equal to max_model_len
+            # Use the smaller of max_tokens or a conservative limit
+            conservative_max_len = min(max_tokens, 2048)  # Cap at 2048 for memory efficiency
+            max_batched_tokens = max(conservative_max_len, max_tokens)  # Must be >= max_model_len
+            
+            logger.info(f"vLLM config: max_model_len={conservative_max_len}, max_num_batched_tokens={max_batched_tokens}")
+            
             return AsyncEngineArgs(
                 model=model_name,
                 tensor_parallel_size=1,
-                max_model_len=max_tokens,
+                max_model_len=conservative_max_len,  # Use conservative length
                 gpu_memory_utilization=0.45,  # Very conservative
                 device="cuda:0",
                 trust_remote_code=True,
@@ -423,7 +430,7 @@ class EnhancedGPUForcer:
                 seed=42,
                 swap_space=4,  # 4GB swap space
                 max_num_seqs=16,  # Small batch size
-                max_num_batched_tokens=2048,  # Conservative token batching
+                max_num_batched_tokens=max_batched_tokens,  # Must be >= max_model_len
                 enable_prefix_caching=False,  # Disable to save memory
             )
             
