@@ -41,29 +41,36 @@ class OptimizedDynamicGPUManager:
     """Optimized GPU Manager with proper GPU detection and shared system safety"""
     
     def __init__(self, total_gpu_count: Optional[int] = None, 
-                 memory_threshold: float = 0.7, 
-                 utilization_threshold: float = 70.0):
+             memory_threshold: float = 0.7, 
+             utilization_threshold: float = 70.0):
         """Initialize with auto-detection and safety for shared systems"""
         
+        # STEP 1: Initialize critical attributes FIRST
+        self._refreshing = False
+        self._status_lock = threading.Lock()
+        self._last_refresh = 0
+        self._refresh_interval = 120
+        self._cache_duration = 60
+        
+        # STEP 2: Set basic config
         self.memory_threshold = memory_threshold
         self.utilization_threshold = utilization_threshold
         
-        # Auto-detect GPU count if not provided
-        self.total_gpu_count = self._detect_gpu_count() if total_gpu_count is None else total_gpu_count
+        # STEP 3: Initialize total_gpu_count safely
+        if total_gpu_count is not None:
+            self.total_gpu_count = total_gpu_count
+        else:
+            self.total_gpu_count = self._detect_gpu_count()
+        
+        # STEP 4: Get available GPU count (after total_gpu_count is set)
         self.available_gpu_count = self._get_available_gpu_count()
         
-        # GPU status tracking
+        # STEP 5: Initialize collections
         self.gpu_status: Dict[int, GPUStatus] = {}
-        self._status_lock = threading.Lock()
-        self._last_refresh = 0
-        self._refresh_interval = 120  # Increase from 30 to 120 seconds
-        self._cache_duration = 60
-        
-        # Workload tracking
         self.active_workloads: Dict[int, List[str]] = {}
         self.workload_history: List[Dict] = []
         
-        # Initialize GPU status
+        # STEP 6: Initialize GPU status (everything is ready now)
         self._initialize_gpu_status()
         
         logger.info(f"✅ Optimized GPU Manager: {self.available_gpu_count}/{self.total_gpu_count} GPUs available")
