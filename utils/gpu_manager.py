@@ -520,7 +520,7 @@ class SafeGPUForcer:
             return False
     
     @staticmethod
-    def find_optimal_gpu_safe(min_free_gb: float = 4.0, exclude_gpu_0: bool = True) -> Optional[int]:
+    def find_optimal_gpu(min_free_gb: float = 4.0, exclude_gpu_0: bool = True) -> Optional[int]:
         """Find optimal GPU safely without affecting other users"""
         
         gpu_candidates = []
@@ -559,7 +559,7 @@ class SafeGPUForcer:
         return None
     
     @staticmethod
-    def force_gpu_environment_safe(gpu_id: int, cleanup_first: bool = False):
+    def force_gpu_environment(gpu_id: int, cleanup_first: bool = False):
         """Safely set GPU environment"""
         SafeGPUForcer.init_gpu_locks()
         

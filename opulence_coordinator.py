@@ -556,7 +556,7 @@ class DynamicOpulenceCoordinator:
         try:
             # Check system resources first
             
-            system_status = SafeGPUForcer.check_system_resources()
+            system_status = SafeGPUForcer.check_system_resources_lite()
             
             if system_status.get('critical_load', False):
                 logger.warning("System under critical load, attempting cleanup before allocation...")
@@ -566,7 +566,7 @@ class DynamicOpulenceCoordinator:
             # Use enhanced GPU selection
             if preferred_gpu is not None:
                 # Check if preferred GPU is actually available
-                memory_info = SafeGPUForcer.check_gpu_memory_detailed(preferred_gpu)
+                memory_info = SafeGPUForcer.check_gpu_memory_safe(preferred_gpu)
                 if memory_info['is_available']:
                     allocated_gpu = preferred_gpu
                 else:
