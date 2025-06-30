@@ -161,7 +161,7 @@ async def init_coordinator():
         
     if st.session_state.coordinator is None:
         try:
-            st.session_state.coordinator = await initialize_system()
+            st.session_state.coordinator = await initialize_dynamic_system()
             st.session_state.initialization_status = "completed"
             return True
         except Exception as e:

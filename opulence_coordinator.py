@@ -164,10 +164,7 @@ class DynamicOpulenceCoordinator:
         self.memory_tracker.take_snapshot("coordinator_init_start")
         
         # Emergency cleanup if needed
-        try:
-            self._emergency_cleanup_if_needed()
-        except Exception as e:
-            logger.warning(f"Emergency cleanup failed: {e}")
+       
         
         # Initialize configuration manager
         self.config_manager = DynamicConfigManager()
@@ -234,37 +231,7 @@ class DynamicOpulenceCoordinator:
         
         self.logger.info("Enhanced Opulence Coordinator initialized with memory tracking and recovery management")
     
-    async def _emergency_cleanup_if_needed(self):
-        """Emergency cleanup if system is in bad state"""
-        try:
-            # Check if system is overloaded
-            cpu_percent = psutil.cpu_percent()
-            memory_percent = psutil.virtual_memory().percent
-            process_count = len(psutil.pids())
-            
-            if cpu_percent > 95 or memory_percent > 95 or process_count > 1500:
-                logger.warning(f"System overloaded: CPU {cpu_percent}%, Memory {memory_percent}%, Processes {process_count}")
-                
-                # Force garbage collection
-                for i in range(3):
-                    collected = gc.collect()
-                    logger.info(f"GC pass {i+1}: collected {collected} objects")
-                
-                # GPU cleanup
-                if torch.cuda.is_available():
-                    for gpu_id in range(torch.cuda.device_count()):
-                        try:
-                            with torch.cuda.device(gpu_id):
-                                await asyncio.to_thread(torch.cuda.empty_cache)
-                                await asyncio.to_thread(torch.cuda.synchronize)
-                        except:
-                            pass
-                
-                time.sleep(2)  # Give system time to stabilize
-                
-        except Exception as e:
-            logger.error(f"Emergency cleanup failed: {e}")
-
+    
     
         
     def _setup_logging(self) -> logging.Logger:
