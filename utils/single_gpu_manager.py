@@ -231,7 +231,7 @@ class SingleGPUManager:
             engine_args = AsyncEngineArgs(
                 model=model_name,
                 tensor_parallel_size=1,
-                max_model_len=min(max_tokens, 1024),  # Conservative max length
+                max_model_len=min(max_tokens, 3000),  # Conservative max length
                 gpu_memory_utilization=memory_utilization,
                 device="cuda:0",  # Maps to our selected GPU
                 trust_remote_code=True,

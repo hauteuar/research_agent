@@ -467,13 +467,29 @@ class DataLoaderAgent:
             self.logger.error(f"Failed to store CSV chunks: {str(e)}")
     
     async def _enhance_schema_with_llm(self, schema: List[Dict], filename: str) -> List[Dict[str, Any]]:
-        """Use LLM to enhance schema with business context - FIXED"""
+        """Use LLM to enhance schema with business context using chunking"""
         await self._ensure_llm_engine()
+        
+        # Process schema in chunks if it's large
+        if len(schema) > 10:
+            schema_chunks = self._chunk_field_content(schema, max_fields_per_chunk=8)
+            enhanced_schemas = []
+            
+            for chunk in schema_chunks:
+                chunk_result = await self._enhance_schema_chunk(chunk, filename)
+                enhanced_schemas.extend(chunk_result)
+            
+            return enhanced_schemas
+        else:
+            return await self._enhance_schema_chunk(schema, filename)
+    
+    async def _enhance_schema_chunk(self, schema_chunk: List[Dict], filename: str) -> List[Dict[str, Any]]:
+        """Enhance a single chunk of schema fields"""
         prompt = f"""
         Analyze this database schema for file "{filename}" and enhance it with business context:
         
         Schema:
-        {json.dumps(schema, indent=2)}
+        {json.dumps(schema_chunk, indent=2)}
         
         For each field, provide:
         1. Business meaning/purpose
@@ -491,7 +507,6 @@ class DataLoaderAgent:
         sampling_params = SamplingParams(temperature=0.2, max_tokens=1500)
         
         try:
-            # FIX: Use the helper method instead of direct LLM call
             response_text = await self._generate_with_llm(prompt, sampling_params)
             if '{' in response_text:
                 json_start = response_text.find('[') if '[' in response_text else response_text.find('{')
@@ -499,17 +514,16 @@ class DataLoaderAgent:
                 enhanced_data = json.loads(response_text[json_start:json_end])
                 
                 # Merge enhanced data with original schema
-                if isinstance(enhanced_data, list) and len(enhanced_data) == len(schema):
+                if isinstance(enhanced_data, list) and len(enhanced_data) == len(schema_chunk):
                     for i, enhancement in enumerate(enhanced_data):
                         if isinstance(enhancement, dict):
-                            schema[i].update(enhancement)
+                            schema_chunk[i].update(enhancement)
                 
         except Exception as e:
             self.logger.warning(f"Failed to parse LLM schema enhancement: {str(e)}")
         
-        return schema
+        return schema_chunk
 
-    
     async def _parse_ddl_statements(self, ddl_content: str) -> List[Dict[str, Any]]:
         """Parse DDL statements to extract table definitions - FIXED"""
         await self._ensure_llm_engine()
@@ -1198,12 +1212,13 @@ class DataLoaderAgent:
             raise
             
     async def _parse_copybook_structure(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
-        """Enhanced LLM parsing with COBOL constructs awareness - FIXED"""
+        """Enhanced LLM parsing with chunking support"""
         await self._ensure_llm_engine()
-        prompt = f"""
+        
+        prompt_template = """
         Parse this COBOL copybook file and extract the record structure with proper handling of:
         
-        {content}
+        {CONTENT}
         
         Handle these COBOL constructs:
         1. FILLER fields - create unique names like FILLER_001, FILLER_002, etc.
@@ -1246,8 +1261,10 @@ class DataLoaderAgent:
         sampling_params = SamplingParams(temperature=0.1, max_tokens=2000)
         
         try:
-            # FIX: Use the helper method instead of direct LLM call
-            response_text = await self._generate_with_llm(prompt, sampling_params)
+            # Use chunked generation
+            response_text = await self._generate_with_llm_chunked(
+                prompt_template, content, sampling_params, "{CONTENT}"
+            )
             
             if '{' in response_text:
                 json_start = response_text.find('{')
@@ -1290,7 +1307,6 @@ class DataLoaderAgent:
             return self._parse_copybook_with_regex(content, filename)
         
         return None
-
     
     def _parse_copybook_with_regex(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
         """Enhanced copybook parsing with FILLER, REDEFINES, and other COBOL constructs"""
@@ -1705,3 +1721,115 @@ class DataLoaderAgent:
             
         except Exception as e:
             return {"error": str(e)}
+    
+    def _estimate_token_count(self, text: str) -> int:
+        """Rough token estimation: 1 token ≈ 4 characters"""
+        return len(text) // 4
+
+    def _chunk_copybook_content(self, content: str, max_chunk_tokens: int = 600) -> List[str]:
+        """Split copybook content into chunks that fit within token limits"""
+        lines = content.split('\n')
+        chunks = []
+        current_chunk = []
+        current_tokens = 0
+        
+        base_instructions_tokens = 400  # Estimated tokens for instructions
+        
+        for line in lines:
+            line_tokens = self._estimate_token_count(line)
+            
+            # If adding this line would exceed limit, start new chunk
+            if current_tokens + line_tokens + base_instructions_tokens > max_chunk_tokens:
+                if current_chunk:  # Don't create empty chunks
+                    chunks.append('\n'.join(current_chunk))
+                    current_chunk = []
+                    current_tokens = 0
+            
+            current_chunk.append(line)
+            current_tokens += line_tokens
+        
+        # Add final chunk if it has content
+        if current_chunk:
+            chunks.append('\n'.join(current_chunk))
+        
+        return chunks
+
+    def _chunk_field_content(self, fields_data: List[Dict], max_fields_per_chunk: int = 8) -> List[List[Dict]]:
+        """Split field data into smaller chunks for processing"""
+        chunks = []
+        for i in range(0, len(fields_data), max_fields_per_chunk):
+            chunk = fields_data[i:i + max_fields_per_chunk]
+            chunks.append(chunk)
+        return chunks
+
+    async def _generate_with_llm_chunked(self, prompt_template: str, content: str, 
+                                    sampling_params, content_placeholder: str = "{CONTENT}") -> str:
+        """Generate text with LLM using chunking if content is too large"""
+        
+        # First, try with full content
+        full_prompt = prompt_template.replace(content_placeholder, content)
+        estimated_tokens = self._estimate_token_count(full_prompt)
+        
+        if estimated_tokens <= 900:  # Safe margin below 1024
+            return await self._generate_with_llm(full_prompt, sampling_params)
+        
+        # Need to chunk the content
+        self.logger.info(f"Prompt too large ({estimated_tokens} tokens), chunking content...")
+        
+        if "copybook" in prompt_template.lower():
+            chunks = self._chunk_copybook_content(content)
+        else:
+            # For other content types, split by lines
+            lines = content.split('\n')
+            chunk_size = len(lines) // ((estimated_tokens // 900) + 1)
+            chunks = ['\n'.join(lines[i:i + chunk_size]) for i in range(0, len(lines), chunk_size)]
+        
+        # Process each chunk
+        all_results = []
+        for i, chunk in enumerate(chunks):
+            chunk_prompt = prompt_template.replace(content_placeholder, chunk)
+            chunk_prompt += f"\n\nNote: This is chunk {i+1} of {len(chunks)}. Maintain consistent formatting."
+            
+            try:
+                result = await self._generate_with_llm(chunk_prompt, sampling_params)
+                all_results.append(result)
+            except Exception as e:
+                self.logger.error(f"Failed to process chunk {i+1}: {str(e)}")
+                all_results.append("")
+        
+        # Combine results
+        return self._combine_chunked_results(all_results)
+
+    def _combine_chunked_results(self, results: List[str]) -> str:
+        """Combine multiple LLM results into a single coherent response"""
+        combined_fields = []
+        
+        for result in results:
+            if not result.strip():
+                continue
+                
+            try:
+                # Extract JSON from each result
+                if '{' in result:
+                    json_start = result.find('{')
+                    json_end = result.rfind('}') + 1
+                    chunk_json = json.loads(result[json_start:json_end])
+                    
+                    if 'fields' in chunk_json and isinstance(chunk_json['fields'], list):
+                        combined_fields.extend(chunk_json['fields'])
+                    elif isinstance(chunk_json, list):
+                        combined_fields.extend(chunk_json)
+                        
+            except Exception as e:
+                self.logger.warning(f"Failed to parse chunked result: {str(e)}")
+        
+        # Return combined result in expected format
+        if combined_fields:
+            return json.dumps({
+                "record_name": "COMBINED_RECORD",
+                "structure_type": "flat",
+                "fields": combined_fields,
+                "chunked_processing": True
+            })
+        else:
+            return ""
