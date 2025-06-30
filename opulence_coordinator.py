@@ -95,6 +95,8 @@ class DynamicOpulenceCoordinator:
     
     def __init__(self, config: OpulenceConfig = None):
         """Enhanced coordinator initialization with memory tracking"""
+        # Initialize logging
+        self.logger = self._setup_logging()
         # Initialize configuration manager
         self.config_manager = DynamicConfigManager()
         
@@ -106,8 +108,41 @@ class DynamicOpulenceCoordinator:
         else:
             self.config = config
             
-        self.logger = self._setup_logging()
+
+        self.stats = {
+            "total_files_processed": 0,
+            "total_queries": 0,
+            "successful_operations": 0,
+            "failed_operations": 0,
+            "avg_response_time": 0.0,
+            "response_count": 0,
+            "dynamic_allocations": 0,
+            "failed_allocations": 0,
+            "memory_usage_mb": 0.0,
+            "peak_memory_mb": 0.0,
+            "gpu_allocation_failures": 0,
+            "last_operation_time": None
+        }
         
+        
+        # FIX: Initialize ALL attributes BEFORE use
+        self._refreshing = False  # ADD THIS LINE
+        
+        self._last_refresh = 0
+        self._refresh_interval = 120
+        self._cache_duration = 60
+        
+        # Auto-detect GPU count if not provided
+        self.total_gpu_count = self._detect_gpu_count() if total_gpu_count is None else total_gpu_count
+        self.available_gpu_count = self._get_available_gpu_count()
+        
+        # Initialize collections
+        self.gpu_status: Dict[int, GPUStatus] = {}
+        self.active_workloads: Dict[int, List[str]] = {}
+        self.workload_history: List[Dict] = []
+        
+        # Initialize GPU status
+        self._initialize_gpu_status()          
         # Get GPU configuration from config manager
         gpu_config = self.config_manager.get_gpu_config()
         
@@ -148,22 +183,7 @@ class DynamicOpulenceCoordinator:
         # Agent instances - will be created with dynamic GPU allocation
         self.agents = {}
         
-        # Processing statistics with enhanced tracking
-        self.stats = {
-            "total_files_processed": 0,
-            "total_queries": 0,
-            "successful_operations": 0,
-            "failed_operations": 0,
-            "avg_response_time": 0.0,
-            "response_count": 0,
-            "dynamic_allocations": 0,
-            "failed_allocations": 0,
-            "memory_usage_mb": 0.0,
-            "peak_memory_mb": 0.0,
-            "gpu_allocation_failures": 0,
-            "last_operation_time": None
-        }
-             
+                   
         
         self.logger.info("Enhanced Opulence Coordinator initialized with memory tracking and recovery management")
     
@@ -406,20 +426,19 @@ class DynamicOpulenceCoordinator:
         
     @asynccontextmanager
     async def get_agent_with_gpu(self, agent_type: str, preferred_gpu: Optional[int] = None):
-        """FIXED: Enhanced agent allocation with highest memory GPU selection"""
+        """FIXED: Enhanced agent allocation with proper cleanup"""
         start_time = time.time()
         allocated_gpu = None
+        agent_key = None
         
         try:
-            # FIXED: Use GPU manager to find best GPU (highest memory)
+            # GPU allocation logic (existing code)
             if preferred_gpu is not None:
-                # Check if preferred GPU is available
                 memory_info = SafeGPUForcer.check_gpu_memory_safe(preferred_gpu)
                 if memory_info['is_available'] and memory_info['free_gb'] >= 2.0:
                     allocated_gpu = preferred_gpu
             
             if allocated_gpu is None:
-                # FIXED: Use GPU manager to get optimal GPU (highest memory)
                 allocated_gpu = self.gpu_manager.get_optimal_gpu(
                     workload_type=agent_type,
                     min_memory_gb=2.0
@@ -428,7 +447,7 @@ class DynamicOpulenceCoordinator:
             if allocated_gpu is None:
                 raise RuntimeError("No suitable GPU available")
             
-            # FIXED: Proper GPU manager reservation
+            # Reserve GPU
             success = self.gpu_manager.reserve_gpu_for_workload(
                 workload_type=f"{agent_type}_agent",
                 preferred_gpu=allocated_gpu,
@@ -437,39 +456,39 @@ class DynamicOpulenceCoordinator:
             )
             
             if not success:
-                logger.warning(f"GPU manager reservation failed for GPU {allocated_gpu}")
+                self.logger.warning(f"GPU manager reservation failed for GPU {allocated_gpu}")
             
             # Get or create LLM engine
             llm_engine = await self.get_or_create_llm_engine(allocated_gpu)
             
-            # FIXED: Reuse agents instead of creating new ones
+            # Create/reuse agent
             agent_key = f"{agent_type}_gpu_{allocated_gpu}"
             
             if agent_key not in self.agents:
                 self.agents[agent_key] = self._create_agent(agent_type, llm_engine, allocated_gpu)
-                logger.info(f"🆕 Created agent {agent_key}")
+                self.logger.info(f"🆕 Created agent {agent_key}")
             else:
-                logger.info(f"♻️ Reusing agent {agent_key}")
+                self.logger.info(f"♻️ Reusing agent {agent_key}")
             
             self.stats["dynamic_allocations"] += 1
-            logger.info(f"✅ Allocated GPU {allocated_gpu} for {agent_type}")
+            self.logger.info(f"✅ Allocated GPU {allocated_gpu} for {agent_type}")
             
             yield self.agents[agent_key], allocated_gpu
             
         except Exception as e:
             self.stats["failed_allocations"] += 1
-            logger.error(f"❌ GPU allocation failed for {agent_type}: {e}")
+            self.logger.error(f"❌ GPU allocation failed for {agent_type}: {e}")
             raise
             
         finally:
-            # Clean up resources
+            # FIX: ALWAYS cleanup resources, even on exception
             if allocated_gpu is not None:
                 try:
                     self.gpu_manager.release_gpu_workload(allocated_gpu, f"{agent_type}_agent")
                     allocation_duration = time.time() - start_time
-                    logger.info(f"Released GPU {allocated_gpu} after {allocation_duration:.2f}s")
-                except Exception as e:
-                    logger.warning(f"GPU release failed: {e}")
+                    self.logger.info(f"Released GPU {allocated_gpu} after {allocation_duration:.2f}s")
+                except Exception as cleanup_error:
+                    self.logger.warning(f"GPU cleanup failed: {cleanup_error}")
     
   
     
@@ -1410,6 +1429,13 @@ class DynamicOpulenceCoordinator:
                             preferred_gpu: Optional[int] = None) -> Dict[str, Any]:
         """Enhanced component analysis with detailed logging and debugging"""
         start_time = time.time()
+        analysis_result = {
+        "component_name": component_name,
+        "component_type": component_type or "unknown",
+        "status": "initializing",
+        "timestamp": dt.now().isoformat(),
+        "processing_time": 0.0
+        }
         
         try:
             self.logger.info(f"🔍 Starting analysis for component: {component_name}, type: {component_type}")

@@ -172,6 +172,8 @@ async def init_coordinator():
 
 def safe_run_async(coro):
     """Safely run async functions in Streamlit"""
+    if not hasattr(coro, '__await__'):
+        return coro
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
@@ -857,7 +859,7 @@ def show_dashboard():
     
     # Get system statistics
     try:
-        stats = st.session_state.coordinator.get_statistics()
+        stats = safe_run_async(st.session_state.coordinator.get_statistics())
         health = st.session_state.coordinator.get_health_status()
         
         # Key metrics
