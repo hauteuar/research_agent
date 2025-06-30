@@ -2302,16 +2302,25 @@ def get_dynamic_coordinator() -> DynamicOpulenceCoordinator:
     return coordinator
 
 async def initialize_dynamic_system():
-    """Initialize the dynamic Opulence system with ConfigManager integration"""
+    """Initialize the dynamic Opulence system with proper config management"""
     global coordinator
     if coordinator is None:
         try:
             # Import ConfigManager
             from utils.config_manager import config_manager
             
-            # Use the runtime config method (if you added it)
-            runtime_config = config_manager.create_runtime_config()
-            config = OpulenceConfig(**runtime_config)
+            # Create config from ConfigManager instead of defaults
+            config = OpulenceConfig(
+                model_name=config_manager.system.model_name,
+                max_tokens=config_manager.system.max_tokens,
+                temperature=config_manager.system.temperature,
+                total_gpu_count=config_manager.system.total_gpu_count,  # CRITICAL FIX
+                max_processing_time=config_manager.system.max_processing_time,
+                batch_size=config_manager.system.batch_size,
+                vector_dim=config_manager.system.vector_dim,
+                max_db_rows=config_manager.system.max_db_rows,
+                cache_ttl=config_manager.system.cache_ttl
+            )
             
             coordinator = DynamicOpulenceCoordinator(config)
             
@@ -2322,7 +2331,6 @@ async def initialize_dynamic_system():
             coordinator = DynamicOpulenceCoordinator(config)
     
     return coordinator
-
 # Utility functions for easy access
 async def process_with_auto_gpu(operation: str, **kwargs) -> Dict[str, Any]:
     """Process operation with automatic GPU selection"""
