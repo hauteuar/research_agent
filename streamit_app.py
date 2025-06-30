@@ -2010,7 +2010,7 @@ def main():
     
     # Sidebar navigation
     with st.sidebar:
-        st.image("https://via.placeholder.com/150x50/1e3a8a/ffffff?text=OPULENCE", use_column_width=True)
+        st.image("https://via.placeholder.com/150x50/1e3a8a/ffffff?text=OPULENCE", use_container_width=True)
         
         page = st.selectbox(
             "Navigation",
