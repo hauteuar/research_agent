@@ -2302,11 +2302,25 @@ def get_dynamic_coordinator() -> DynamicOpulenceCoordinator:
     return coordinator
 
 async def initialize_dynamic_system():
-    """Initialize the dynamic Opulence system"""
+    """Initialize the dynamic Opulence system with ConfigManager integration"""
     global coordinator
     if coordinator is None:
-        config = OpulenceConfig()
-        coordinator = DynamicOpulenceCoordinator(config)
+        try:
+            # Import ConfigManager
+            from utils.config_manager import config_manager
+            
+            # Use the runtime config method (if you added it)
+            runtime_config = config_manager.create_runtime_config()
+            config = OpulenceConfig(**runtime_config)
+            
+            coordinator = DynamicOpulenceCoordinator(config)
+            
+        except Exception as e:
+            # Fallback to defaults if ConfigManager fails
+            logging.error(f"ConfigManager failed, using defaults: {e}")
+            config = OpulenceConfig()
+            coordinator = DynamicOpulenceCoordinator(config)
+    
     return coordinator
 
 # Utility functions for easy access
