@@ -10,13 +10,13 @@ import gc
 import psutil
 
 # CRITICAL: Enable tracemalloc BEFORE any other imports
-if not tracemalloc.is_tracing():
-    tracemalloc.start(25)
-    print("✅ Tracemalloc enabled")
+#if not tracemalloc.is_tracing():
+#    tracemalloc.start(25)
+#    print("✅ Tracemalloc enabled")
 
-os.environ['PYTHONTRACEMALLOC'] = '25'
-os.environ['CUDA_LAUNCH_BLOCKING'] = '0'  # Don't block
-os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+#os.environ['PYTHONTRACEMALLOC'] = '25'
+#os.environ['CUDA_LAUNCH_BLOCKING'] = '0'  # Don't block
+#os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 
 import asyncio
 import logging
