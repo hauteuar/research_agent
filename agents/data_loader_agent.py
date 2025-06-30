@@ -1774,7 +1774,7 @@ class DataLoaderAgent:
         estimated_tokens = self._estimate_token_count(full_prompt)
         
         if estimated_tokens <= 900:  # Safe margin below 1024
-            return await self._generate_with_llm(full_prompt, sampling_params)
+            return await self.coordinator.safe_generate(full_prompt, sampling_params)
         
         # Need to chunk the content
         self.logger.info(f"Prompt too large ({estimated_tokens} tokens), chunking content...")
