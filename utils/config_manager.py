@@ -18,7 +18,7 @@ class SystemConfig:
     model_name: str = "codellama/CodeLlama-7b-Instruct-hf"
     max_tokens: int = 4096
     temperature: float = 0.1
-    gpu_count: int = 3
+    total_gpu_count: int = 4
     max_processing_time: int = 900
     batch_size: int = 32
     vector_dim: int = 768

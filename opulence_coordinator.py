@@ -125,6 +125,8 @@ class DynamicOpulenceCoordinator:
         }
         
         
+        self._refreshing = False
+        
         # FIX: Initialize ALL attributes BEFORE use
         self._refreshing = False  # ADD THIS LINE
         
