@@ -713,12 +713,13 @@ class SingleGPUOpulenceCoordinator:
             self.gpu_manager.finish_task(task_id)
     
     async def search_code_patterns(self, query: str, limit: int = 10) -> Dict[str, Any]:
-        """Search code patterns using single GPU"""
+        """Search code patterns using single GPU - FIXED"""
         task_id = self.gpu_manager.start_task("pattern_search")
         
         try:
+            # FIX: Use single GPU coordinator approach
             vector_agent = self.get_agent("vector_index")
-            results = await vector_agent.search_code_by_pattern(query, limit=limit)
+            results = await vector_agent.semantic_search(query, top_k=limit)
             
             return {
                 "status": "success",
@@ -738,6 +739,7 @@ class SingleGPUOpulenceCoordinator:
             }
         finally:
             self.gpu_manager.finish_task(task_id)
+
     
     def _update_processing_stats(self, operation: str, duration: float):
         """Update processing statistics"""
@@ -968,11 +970,13 @@ class SingleGPUChatEnhancer:
             }
     
     async def chat_search_patterns(self, search_description: str, 
-                                  conversation_history: List[Dict] = None) -> Dict[str, Any]:
-        """Search patterns with chat-enhanced results"""
+                              conversation_history: List[Dict] = None) -> Dict[str, Any]:
+        """Search patterns with chat-enhanced results - FIXED"""
         try:
-            # Use vector search
-            search_results = await self.coordinator.search_code_patterns(search_description, limit=10)
+            # Use vector search - FIXED
+            # FIX: Use single GPU coordinator approach
+            vector_agent = self.coordinator.get_agent("vector_index")
+            search_results = await vector_agent.semantic_search(search_description, top_k=10)
             
             # Get chat explanation
             chat_query = f"Explain these search results for '{search_description}' and help me understand what was found."
@@ -981,7 +985,7 @@ class SingleGPUChatEnhancer:
             search_context = [
                 {
                     "role": "system", 
-                    "content": f"Search results for '{search_description}': {json.dumps(search_results.get('results', [])[:5], default=str)}"
+                    "content": f"Search results for '{search_description}': {json.dumps(search_results[:5], default=str)}"
                 }
             ]
             if conversation_history:
@@ -991,9 +995,9 @@ class SingleGPUChatEnhancer:
             
             return {
                 "search_description": search_description,
-                "search_results": search_results.get('results', []),
+                "search_results": search_results,
                 "chat_explanation": chat_result.get("response", ""),
-                "total_found": len(search_results.get('results', [])),
+                "total_found": len(search_results),
                 "suggestions": chat_result.get("suggestions", []),
                 "response_type": "enhanced_search",
                 "gpu_used": self.coordinator.selected_gpu

@@ -485,6 +485,7 @@ class DataLoaderAgent:
         sampling_params = SamplingParams(temperature=0.2, max_tokens=1500)
         
         try:
+            # FIX: Use the helper method instead of direct LLM call
             response_text = await self._generate_with_llm(prompt, sampling_params)
             if '{' in response_text:
                 json_start = response_text.find('[') if '[' in response_text else response_text.find('{')
@@ -536,6 +537,7 @@ class DataLoaderAgent:
         sampling_params = SamplingParams(temperature=0.1, max_tokens=2000)
         
         try:
+            # FIX: Use the helper method instead of direct LLM call
             response_text = await self._generate_with_llm(prompt, sampling_params)
             if '[' in response_text:
                 json_start = response_text.find('[')
@@ -744,6 +746,7 @@ class DataLoaderAgent:
             sampling_params = SamplingParams(temperature=0.3, max_tokens=800)
             
             try:
+                # FIX: Use the helper method instead of direct LLM call
                 response_text = await self._generate_with_llm(prompt, sampling_params)
                 if '{' in response_text:
                     json_start = response_text.find('{')
@@ -935,6 +938,7 @@ class DataLoaderAgent:
         sampling_params = SamplingParams(temperature=0.1, max_tokens=1500)
         
         try:
+            # FIX: Use the helper method instead of direct LLM call
             response_text = await self._generate_with_llm(prompt, sampling_params)
             if '{' in response_text:
                 json_start = response_text.find('{')
@@ -1185,7 +1189,7 @@ class DataLoaderAgent:
             raise
             
     async def _parse_copybook_structure(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
-        """Enhanced LLM parsing with COBOL constructs awareness"""
+        """Enhanced LLM parsing with COBOL constructs awareness - FIXED"""
         await self._ensure_llm_engine()
         prompt = f"""
         Parse this COBOL copybook file and extract the record structure with proper handling of:
@@ -1233,7 +1237,9 @@ class DataLoaderAgent:
         sampling_params = SamplingParams(temperature=0.1, max_tokens=2000)
         
         try:
+            # FIX: Use the helper method instead of direct LLM call
             response_text = await self._generate_with_llm(prompt, sampling_params)
+            
             if '{' in response_text:
                 json_start = response_text.find('{')
                 json_end = response_text.rfind('}') + 1
@@ -1275,6 +1281,7 @@ class DataLoaderAgent:
             return self._parse_copybook_with_regex(content, filename)
         
         return None
+
     
     def _parse_copybook_with_regex(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
         """Enhanced copybook parsing with FILLER, REDEFINES, and other COBOL constructs"""
@@ -1631,6 +1638,7 @@ class DataLoaderAgent:
                 sampling_params = SamplingParams(temperature=0.3, max_tokens=800)
                 
                 try:
+                    # FIX: Use the helper method instead of direct LLM call
                     result_text = await self._generate_with_llm(prompt, sampling_params)
                 except Exception as e:
                     result_text = f"Analysis failed: {str(e)}"

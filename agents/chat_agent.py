@@ -224,7 +224,7 @@ class OpulenceChatAgent:
         }
     
     async def _handle_lineage_query(self, context: ChatContext) -> Dict[str, Any]:
-        """Handle lineage-type queries"""
+        """Handle lineage-type queries - FIXED"""
         if not context.relevant_components:
             return {
                 "response": "To trace lineage, please specify a field, file, or data element you'd like me to trace.",
@@ -238,33 +238,35 @@ class OpulenceChatAgent:
         
         component = context.relevant_components[0]
         
-        # Perform lineage analysis
+        # Perform lineage analysis - FIXED
         try:
-            async with self.coordinator.get_agent_with_gpu("lineage_analyzer") as (lineage_agent, gpu_id):
-                lineage_result = await lineage_agent.analyze_field_lineage(component)
-                
-                response = await self._generate_lineage_response(component, lineage_result, context.user_query)
-                
-                return {
-                    "response": response,
-                    "response_type": "lineage",
-                    "component": component,
-                    "lineage_data": lineage_result,
-                    "suggestions": [
-                        f"Show impact analysis for {component}",
-                        f"Find programs that modify {component}",
-                        f"Trace {component} dependencies"
-                    ]
-                }
+            # FIX: Use single GPU coordinator approach
+            lineage_agent = self.coordinator.get_agent("lineage_analyzer")
+            lineage_result = await lineage_agent.analyze_field_lineage(component)
+            
+            response = await self._generate_lineage_response(component, lineage_result, context.user_query)
+            
+            return {
+                "response": response,
+                "response_type": "lineage",
+                "component": component,
+                "lineage_data": lineage_result,
+                "suggestions": [
+                    f"Show impact analysis for {component}",
+                    f"Find programs that modify {component}",
+                    f"Trace {component} dependencies"
+                ]
+            }
         except Exception as e:
             return {
                 "response": f"I couldn't trace the lineage for '{component}': {str(e)}",
                 "response_type": "error",
                 "suggestions": ["Try a different component name", "Check if the component exists in the processed files"]
             }
+
     
     async def _handle_search_query(self, context: ChatContext) -> Dict[str, Any]:
-        """Handle search-type queries"""
+        """Handle search-type queries - FIXED"""
         # Extract search terms
         search_terms = self._extract_search_terms(context.user_query)
         
@@ -279,24 +281,25 @@ class OpulenceChatAgent:
                 ]
             }
         
-        # Perform vector search
+        # Perform vector search - FIXED
         try:
-            async with self.coordinator.get_agent_with_gpu("vector_index") as (vector_agent, gpu_id):
-                search_results = await vector_agent.search_code_by_pattern(" ".join(search_terms), limit=10)
-                
-                response = await self._generate_search_response(search_terms, search_results, context.user_query)
-                
-                return {
-                    "response": response,
-                    "response_type": "search",
-                    "search_terms": search_terms,
-                    "search_results": search_results,
-                    "suggestions": [
-                        "Refine search with more specific terms",
-                        "Analyze one of the found components",
-                        "Search for related patterns"
-                    ]
-                }
+            # FIX: Use single GPU coordinator approach
+            vector_agent = self.coordinator.get_agent("vector_index")
+            search_results = await vector_agent.semantic_search(" ".join(search_terms), top_k=10)
+            
+            response = await self._generate_search_response(search_terms, search_results, context.user_query)
+            
+            return {
+                "response": response,
+                "response_type": "search",
+                "search_terms": search_terms,
+                "search_results": search_results,
+                "suggestions": [
+                    "Refine search with more specific terms",
+                    "Analyze one of the found components",
+                    "Search for related patterns"
+                ]
+            }
         except Exception as e:
             return {
                 "response": f"Search failed: {str(e)}",
@@ -448,7 +451,7 @@ class OpulenceChatAgent:
         return suggestions[:3]  # Return top 3
     
     async def _generate_analysis_response(self, component: str, analysis: Dict, user_query: str) -> str:
-        """Generate intelligent analysis response using LLM with retrieved context"""
+        """Generate intelligent analysis response using LLM with retrieved context - FIXED"""
         await self._ensure_llm_engine()
         
         # Prepare context from analysis results
@@ -482,17 +485,18 @@ class OpulenceChatAgent:
                     total_refs = usage_stats.get("total_references", 0)
                     context_parts.append(f"Total references: {total_refs}")
         
-        # Get semantic search results for additional context
+        # Get semantic search results for additional context - FIXED
         search_context = ""
         try:
-            async with self.coordinator.get_agent_with_gpu("vector_index") as (vector_agent, gpu_id):
-                search_results = await vector_agent.semantic_search(f"{component} {user_query}", top_k=3)
-                if search_results:
-                    search_context = "\n\nRelated code patterns found:\n"
-                    for i, result in enumerate(search_results[:2], 1):
-                        metadata = result.get('metadata', {})
-                        search_context += f"{i}. {metadata.get('program_name', 'Unknown')} ({metadata.get('chunk_type', 'code')})\n"
-                        search_context += f"   Content: {result.get('content', '')[:150]}...\n"
+            # FIX: Use single GPU coordinator approach
+            vector_agent = self.coordinator.get_agent("vector_index")
+            search_results = await vector_agent.semantic_search(f"{component} {user_query}", top_k=3)
+            if search_results:
+                search_context = "\n\nRelated code patterns found:\n"
+                for i, result in enumerate(search_results[:2], 1):
+                    metadata = result.get('metadata', {})
+                    search_context += f"{i}. {metadata.get('program_name', 'Unknown')} ({metadata.get('chunk_type', 'code')})\n"
+                    search_context += f"   Content: {result.get('content', '')[:150]}...\n"
         except Exception as e:
             self.logger.warning(f"Could not get search context: {e}")
         
@@ -525,7 +529,7 @@ class OpulenceChatAgent:
         except Exception as e:
             self.logger.error(f"LLM response generation failed: {str(e)}")
             return f"I found information about {component}, but encountered an error generating the response. The analysis shows {len(context_parts)} key aspects of this component."
-    
+
     async def _generate_lineage_response(self, component: str, lineage_result: Dict, user_query: str) -> str:
         """Generate intelligent lineage response using LLM"""
         await self._ensure_llm_engine()

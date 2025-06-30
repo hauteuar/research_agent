@@ -497,9 +497,27 @@ class LineageAnalyzerAgent:
         
         return False
     
+    async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
+        """Generate text with LLM - handles both old and new vLLM API"""
+        try:
+            # Try new API first (with request_id)
+            request_id = str(uuid.uuid4())
+            result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
+            return result.outputs[0].text.strip()
+        except TypeError as e:
+            if "request_id" in str(e):
+                # Fallback to old API (without request_id)
+                result = await self.llm_engine.generate(prompt, sampling_params)
+                return result.outputs[0].text.strip()
+            else:
+                raise e
+        except Exception as e:
+            self.logger.error(f"LLM generation failed: {str(e)}")
+            return ""
+
     async def _analyze_field_reference_with_llm(self, field_name: str, content: str, 
-                                               chunk_type: str, program_name: str) -> Dict[str, Any]:
-        """Analyze how a field is referenced using LLM"""
+                                           chunk_type: str, program_name: str) -> Dict[str, Any]:
+        """Analyze how a field is referenced using LLM - FIXED"""
         await self._ensure_llm_engine()
         
         # Truncate content to avoid token limits
@@ -530,10 +548,10 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.2, max_tokens=400)
-            request_id = str(uuid.uuid4())
-            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
             
-            response_text = result.outputs[0].text.strip()
+            # FIX: Use helper method instead of direct LLM call
+            response_text = await self._generate_with_llm(prompt, sampling_params)
+            
             if '{' in response_text:
                 json_start = response_text.find('{')
                 json_end = response_text.rfind('}') + 1
@@ -708,7 +726,7 @@ class LineageAnalyzerAgent:
         }
     
     async def _analyze_usage_patterns_with_llm(self, field_name: str, usage_stats: Dict) -> str:
-        """Analyze usage patterns using LLM"""
+        """Analyze usage patterns using LLM - FIXED"""
         await self._ensure_llm_engine()
         
         stats_summary = {
@@ -736,12 +754,14 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.3, max_tokens=400)
-            request_id = str(uuid.uuid4())
-            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
-            return result.outputs[0].text.strip()
+            
+            # FIX: Use helper method instead of direct LLM call
+            response_text = await self._generate_with_llm(prompt, sampling_params)
+            return response_text
         except Exception as e:
             self.logger.warning(f"Failed to generate pattern analysis: {str(e)}")
             return f"Field {field_name} is used across {len(usage_stats['programs_using'])} programs with {usage_stats['total_references']} total references."
+
     
     def _calculate_usage_complexity(self, usage_stats: Dict) -> float:
         """Calculate complexity score based on usage patterns"""
@@ -786,7 +806,7 @@ class LineageAnalyzerAgent:
         return transformations
     
     async def _extract_mathematical_transformations(self, field_name: str, content: str, program_name: str) -> List[Dict]:
-        """Extract mathematical transformations from content"""
+        """Extract mathematical transformations from content - FIXED"""
         await self._ensure_llm_engine()
         
         content_preview = content[:400] if len(content) > 400 else content
@@ -814,10 +834,10 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.2, max_tokens=500)
-            request_id = str(uuid.uuid4())
-            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
             
-            response_text = result.outputs[0].text.strip()
+            # FIX: Use helper method instead of direct LLM call
+            response_text = await self._generate_with_llm(prompt, sampling_params)
+            
             if '[' in response_text:
                 json_start = response_text.find('[')
                 json_end = response_text.rfind(']') + 1
@@ -881,7 +901,7 @@ class LineageAnalyzerAgent:
         }
     
     async def _analyze_lifecycle_completeness(self, field_name: str, stages: Dict) -> str:
-        """Analyze lifecycle completeness using LLM"""
+        """Analyze lifecycle completeness using LLM - FIXED"""
         await self._ensure_llm_engine()
         
         # Summarize stages for prompt
@@ -907,13 +927,14 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.3, max_tokens=500)
-            request_id = str(uuid.uuid4())
-            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
-            return result.outputs[0].text.strip()
+            
+            # FIX: Use helper method instead of direct LLM call
+            response_text = await self._generate_with_llm(prompt, sampling_params)
+            return response_text
         except Exception as e:
             self.logger.warning(f"Failed to generate lifecycle analysis: {str(e)}")
             return f"Field {field_name} lifecycle analysis: {sum(stage_summary.values())} total operations across {len([s for s in stage_summary.values() if s > 0])} lifecycle stages."
-    
+        
     def _calculate_lifecycle_score(self, stages: Dict) -> float:
         """Calculate lifecycle completeness score"""
         stage_weights = {
@@ -976,7 +997,7 @@ class LineageAnalyzerAgent:
         return impact_analysis
     
     async def _generate_impact_assessment(self, field_name: str, impact_data: Dict) -> str:
-        """Generate detailed impact assessment using LLM"""
+        """Generate detailed impact assessment using LLM - FIXED"""
         await self._ensure_llm_engine()
         
         # Summarize impact data for prompt
@@ -1005,17 +1026,19 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.3, max_tokens=600)
-            request_id = str(uuid.uuid4())
-            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
-            return result.outputs[0].text.strip()
+            
+            # FIX: Use helper method instead of direct LLM call
+            response_text = await self._generate_with_llm(prompt, sampling_params)
+            return response_text
         except Exception as e:
             self.logger.warning(f"Failed to generate impact assessment: {str(e)}")
             return f"Impact assessment for {field_name}: {impact_summary['risk_level']} risk level with {impact_summary['affected_programs']} affected programs."
+
     
     async def _generate_field_lineage_report(self, field_name: str, lineage_graph: Dict,
-                                           usage_analysis: Dict, transformations: List,
-                                           lifecycle: Dict) -> str:
-        """Generate comprehensive field lineage report using LLM"""
+                                       usage_analysis: Dict, transformations: List,
+                                       lifecycle: Dict) -> str:
+        """Generate comprehensive field lineage report using LLM - FIXED"""
         await self._ensure_llm_engine()
         
         report_data = {
@@ -1053,12 +1076,14 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.2, max_tokens=1000)
-            request_id = str(uuid.uuid4())
-            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
-            return result.outputs[0].text.strip()
+            
+            # FIX: Use helper method instead of direct LLM call
+            response_text = await self._generate_with_llm(prompt, sampling_params)
+            return response_text
         except Exception as e:
             self.logger.warning(f"Failed to generate lineage report: {str(e)}")
             return f"Lineage Report for {field_name}: Field found in {report_data['programs_count']} programs with {report_data['total_references']} references."
+
     
     async def analyze_full_lifecycle(self, component_name: str, component_type: str) -> Dict[str, Any]:
         """Analyze complete lifecycle of a component (file, table, program)"""
@@ -1134,7 +1159,7 @@ class LineageAnalyzerAgent:
             return []
     
     async def _extract_dependencies_from_chunk(self, component_name: str, content: str, program_name: str) -> Set[str]:
-        """Extract dependencies from a code chunk"""
+        """Extract dependencies from a code chunk - FIXED"""
         await self._ensure_llm_engine()
         
         content_preview = content[:400] if len(content) > 400 else content
@@ -1158,10 +1183,10 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.2, max_tokens=200)
-            request_id = str(uuid.uuid4())
-            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
             
-            response_text = result.outputs[0].text.strip()
+            # FIX: Use helper method instead of direct LLM call
+            response_text = await self._generate_with_llm(prompt, sampling_params)
+            
             if '[' in response_text:
                 json_start = response_text.find('[')
                 json_end = response_text.rfind(']') + 1
@@ -1235,8 +1260,8 @@ class LineageAnalyzerAgent:
         return lifecycle_analysis
     
     async def _analyze_component_operation(self, component_name: str, content: str, 
-                                         program_name: str, chunk_type: str) -> Dict[str, Any]:
-        """Analyze what operation a program performs on a component"""
+                                     program_name: str, chunk_type: str) -> Dict[str, Any]:
+        """Analyze what operation a program performs on a component - FIXED"""
         await self._ensure_llm_engine()
         
         content_preview = content[:400] if len(content) > 400 else content
@@ -1267,10 +1292,10 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.2, max_tokens=300)
-            request_id = str(uuid.uuid4())
-            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
             
-            response_text = result.outputs[0].text.strip()
+            # FIX: Use helper method instead of direct LLM call
+            response_text = await self._generate_with_llm(prompt, sampling_params)
+            
             if '{' in response_text:
                 json_start = response_text.find('{')
                 json_end = response_text.rfind('}') + 1
@@ -1279,17 +1304,17 @@ class LineageAnalyzerAgent:
             self.logger.warning(f"Failed to parse component operation analysis: {str(e)}")
         
         return {
-            "operation_type": "READ",
+            "operation_type": "read",
             "business_purpose": "Component access detected",
             "data_transformations": [],
             "timing_frequency": "unknown",
             "dependencies": [],
             "confidence": 0.5
-        }
+        }    
     
     async def _generate_component_lifecycle_report(self, component_name: str, 
-                                                 lifecycle_data: Dict) -> str:
-        """Generate comprehensive component lifecycle report"""
+                                                lifecycle_data: Dict) -> str:
+        """Generate comprehensive component lifecycle report - FIXED"""
         await self._ensure_llm_engine()
         
         summary_data = {
@@ -1321,9 +1346,10 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.2, max_tokens=800)
-            request_id = str(uuid.uuid4())
-            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
-            return result.outputs[0].text.strip()
+            
+            # FIX: Use helper method instead of direct LLM call
+            response_text = await self._generate_with_llm(prompt, sampling_params)
+            return response_text
         except Exception as e:
             self.logger.warning(f"Failed to generate lifecycle report: {str(e)}")
             return f"Lifecycle report for {component_name}: {sum(summary_data.values())} total operations identified."
@@ -1444,7 +1470,7 @@ class LineageAnalyzerAgent:
         }
     
     async def _generate_program_lifecycle_report(self, program_name: str, analysis_data: Dict) -> str:
-        """Generate program lifecycle report"""
+        """Generate program lifecycle report - FIXED"""
         await self._ensure_llm_engine()
         
         report_summary = {
@@ -1476,9 +1502,10 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.2, max_tokens=800)
-            request_id = str(uuid.uuid4())
-            result = await self.llm_engine.generate(prompt, sampling_params,  request_id = request_id)
-            return result.outputs[0].text.strip()
+            
+            # FIX: Use helper method instead of direct LLM call
+            response_text = await self._generate_with_llm(prompt, sampling_params)
+            return response_text
         except Exception as e:
             self.logger.warning(f"Failed to generate program lifecycle report: {str(e)}")
             return f"Program lifecycle report for {program_name}: {report_summary['total_chunks']} chunks analyzed."
@@ -1522,7 +1549,7 @@ class LineageAnalyzerAgent:
         return jcl_analysis
     
     async def _analyze_jcl_step_lifecycle(self, step_content: str, step_id: str) -> Dict[str, Any]:
-        """Analyze individual JCL step lifecycle"""
+        """Analyze individual JCL step lifecycle - FIXED"""
         await self._ensure_llm_engine()
         
         content_preview = step_content[:400] if len(step_content) > 400 else step_content
@@ -1558,10 +1585,10 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.2, max_tokens=400)
-            request_id = str(uuid.uuid4())
-            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
             
-            response_text = result.outputs[0].text.strip()
+            # FIX: Use helper method instead of direct LLM call
+            response_text = await self._generate_with_llm(prompt, sampling_params)
+            
             if '{' in response_text:
                 json_start = response_text.find('{')
                 json_end = response_text.rfind('}') + 1
@@ -1581,7 +1608,7 @@ class LineageAnalyzerAgent:
         }
     
     async def _analyze_jcl_flow(self, jcl_name: str, step_details: List[Dict]) -> str:
-        """Analyze overall JCL job flow"""
+        """Analyze overall JCL job flow - FIXED"""
         await self._ensure_llm_engine()
         
         flow_summary = {
@@ -1610,9 +1637,10 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.3, max_tokens=600)
-            request_id = str(uuid.uuid4())
-            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
-            return result.outputs[0].text.strip()
+            
+            # FIX: Use helper method instead of direct LLM call
+            response_text = await self._generate_with_llm(prompt, sampling_params)
+            return response_text
         except Exception as e:
             self.logger.warning(f"Failed to generate JCL flow analysis: {str(e)}")
             return f"JCL flow analysis for {jcl_name}: {len(step_details)} steps analyzed."
@@ -1707,8 +1735,8 @@ class LineageAnalyzerAgent:
         return "unknown"
     
     async def _generate_executive_summary(self, component_name: str, component_type: str, 
-                                        analysis: Dict, dependencies: List[str]) -> str:
-        """Generate executive summary for lineage analysis"""
+                                    analysis: Dict, dependencies: List[str]) -> str:
+        """Generate executive summary for lineage analysis - FIXED"""
         await self._ensure_llm_engine()
         
         summary_data = {
@@ -1750,10 +1778,10 @@ class LineageAnalyzerAgent:
         
         try:
             sampling_params = SamplingParams(temperature=0.3, max_tokens=400)
-            request_id = str(uuid.uuid4())
-            result = await self.llm_engine.generate(prompt, sampling_params, request_id = request_id)
-            return result.outputs[0].text.strip()
+            
+            # FIX: Use helper method instead of direct LLM call
+            response_text = await self._generate_with_llm(prompt, sampling_params)
+            return response_text
         except Exception as e:
             self.logger.warning(f"Failed to generate executive summary: {str(e)}")
-            return f"Executive Summary: {component_type.title()} {component_name} analyzed with {len(dependencies)} dependencies found."
-        
+            return f"Executive Summary: {component_type.title()} {component_name} analyzed with {len(dependencies)} dependencies found."    

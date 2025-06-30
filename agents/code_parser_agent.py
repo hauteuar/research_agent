@@ -299,83 +299,21 @@ class CompleteEnhancedCodeParserAgent:
             return False
 
     async def _ensure_llm_engine(self):
-        """Ensure LLM engine is available with thread safety"""
-        async with self._engine_lock:
-            if self.llm_engine is not None:
-                return
-            
-            # Try coordinator first
-            if self.coordinator is not None:
-                try:
-                    existing_engines = list(self.coordinator.llm_engine_pool.keys())
-                    
-                    for engine_key in existing_engines:
-                        gpu_id = int(engine_key.split('_')[1])
-                        
-                        try:
-                            from gpu_force_fix import GPUForcer
-                            memory_info = GPUForcer.check_gpu_memory(gpu_id)
-                            free_gb = memory_info.get('free_gb', 0)
-                            
-                            if free_gb >= 1.0:
-                                self.llm_engine = self.coordinator.llm_engine_pool[engine_key]
-                                self.gpu_id = gpu_id
-                                self._using_coordinator_llm = True
-                                self.logger.info(f"CodeParser SHARING coordinator's LLM on GPU {gpu_id}")
-                                return
-                        except Exception as e:
-                            self.logger.warning(f"Error checking GPU {gpu_id} for sharing: {e}")
-                            continue
-                    
-                    best_gpu = await self.coordinator.get_available_gpu_for_agent("code_parser")
-                    if best_gpu is not None:
-                        engine = await self.coordinator.get_or_create_llm_engine(best_gpu)
-                        self.llm_engine = engine
-                        self.gpu_id = best_gpu
-                        self._using_coordinator_llm = True
-                        self.logger.info(f"CodeParser using coordinator's NEW LLM on GPU {best_gpu}")
-                        return
-                        
-                except Exception as e:
-                    self.logger.warning(f"Failed to get LLM from coordinator: {e}")
-            
-            # Try global coordinator as fallback
-            if not self._engine_created:
-                try:
-                    from opulence_coordinator import get_dynamic_coordinator
-                    global_coordinator = get_dynamic_coordinator()
-                    
-                    existing_engines = list(global_coordinator.llm_engine_pool.keys())
-                    for engine_key in existing_engines:
-                        gpu_id = int(engine_key.split('_')[1])
-                        try:
-                            from gpu_force_fix import GPUForcer
-                            memory_info = GPUForcer.check_gpu_memory(gpu_id)
-                            free_gb = memory_info.get('free_gb', 0)
-                            
-                            if free_gb >= 1.0:
-                                self.llm_engine = global_coordinator.llm_engine_pool[engine_key]
-                                self.gpu_id = gpu_id
-                                self._using_coordinator_llm = True
-                                self.logger.info(f"CodeParser SHARING global coordinator's LLM on GPU {gpu_id}")
-                                return
-                        except Exception as e:
-                            continue
-                    
-                    best_gpu = await global_coordinator.get_available_gpu_for_agent("code_parser")
-                    if best_gpu is not None:
-                        engine = await global_coordinator.get_or_create_llm_engine(best_gpu)
-                        self.llm_engine = engine
-                        self.gpu_id = best_gpu
-                        self._using_coordinator_llm = True
-                        self.logger.info(f"CodeParser using global coordinator's NEW LLM on GPU {best_gpu}")
-                        return
-                        
-                except Exception as e:
-                    self.logger.warning(f"Failed to get LLM from global coordinator: {e}")
-            
-            if not self._engine_created:
-                await self._create_fallback_llm_engine()
+        """Ensure LLM engine is available - FIXED for single GPU coordinator"""
+        if self.llm_engine is not None:
+            return
+        
+        # FIX: Use single GPU coordinator approach
+        try:
+            # The single GPU coordinator already has the LLM engine
+            self.llm_engine = self.coordinator.llm_engine
+            self.gpu_id = self.coordinator.selected_gpu
+            self.logger.info(f"Chat agent using coordinator's LLM on GPU {self.gpu_id}")
+            return
+        except Exception as e:
+            self.logger.error(f"Failed to get LLM engine from coordinator: {e}")
+            raise
+        
 
     async def _create_fallback_llm_engine(self):
         """Create own LLM engine as last resort"""
