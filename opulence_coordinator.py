@@ -36,11 +36,30 @@ from agents.lineage_analyzer_agent import LineageAnalyzerAgent
 from agents.logic_analyzer_agent import LogicAnalyzerAgent
 from agents.documentation_agent import DocumentationAgent
 from agents.db2_comparator_agent import DB2ComparatorAgent
-from utils.gpu_manager import DynamicGPUManager, GPUContext
+from utils.gpu_manager import DynamicGPUManager, OptimizedDynamicGPUManager
 from utils.dynamic_config_manager import DynamicConfigManager, get_dynamic_config, GPUConfig
 from utils.health_monitor import HealthMonitor
 from utils.cache_manager import CacheManager
 from gpu_force_fix import EnhancedGPUForcer
+import logging
+import sys
+
+# Set up logger FIRST before any other code
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('opulence.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+# Create the logger instance
+logger = logging.getLogger(__name__)
+
+# Make sure it's available globally
+def get_logger():
+    return logger
 
 class RequestManager:
     """Manage LLM requests to prevent overload"""
