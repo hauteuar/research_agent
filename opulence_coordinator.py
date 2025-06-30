@@ -125,6 +125,7 @@ class MemoryTracker:
 
 class SimpleRequestManager:
     def __init__(self, max_concurrent: int = 4):  # Reduced from 6
+        self.max_concurrent = max_concurrent  # ✅ Store as instance variable
         self.semaphore = asyncio.Semaphore(max_concurrent)
     
     async def acquire_request_slot(self):
@@ -216,8 +217,16 @@ class DynamicOpulenceCoordinator:
             "total_files_processed": 0,
             "total_queries": 0,
             "successful_operations": 0,
-            "failed_operations": 0
-            }
+            "failed_operations": 0,
+            "avg_response_time": 0.0,
+            "response_count": 0,
+            "dynamic_allocations": 0,
+            "failed_allocations": 0,
+            "memory_usage_mb": 0.0,
+            "peak_memory_mb": 0.0,
+            "gpu_allocation_failures": 0,
+            "last_operation_time": None
+        }
                 
         
         # Take final snapshot
@@ -2174,27 +2183,45 @@ class DynamicOpulenceCoordinator:
             return {"status": "error", "error": str(e)}
     
     def _update_processing_stats(self, operation: str, duration: float, gpu_id: int = None):
-        """Update processing statistics"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            INSERT INTO processing_stats (operation, duration, gpu_used, status)
-            VALUES (?, ?, ?, ?)
-        """, (operation, duration, gpu_id, "completed"))
-        
-        conn.commit()
-        conn.close()
-        
-        # Update in-memory stats
-        self.stats["avg_response_time"] = (
-            self.stats["avg_response_time"] + duration
-        ) / 2
+        """Update processing statistics with proper error handling"""
+        try:
+            # Database insertion
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT INTO processing_stats (operation, duration, gpu_used, status)
+                VALUES (?, ?, ?, ?)
+            """, (operation, duration, gpu_id, "completed"))
+            
+            conn.commit()
+            conn.close()
+            
+            # Update in-memory stats with proper initialization
+            if "avg_response_time" not in self.stats:
+                self.stats["avg_response_time"] = 0.0
+                self.stats["response_count"] = 0
+            
+            # Proper running average
+            self.stats["response_count"] += 1
+            count = self.stats["response_count"]
+            current_avg = self.stats["avg_response_time"]
+            self.stats["avg_response_time"] = ((current_avg * (count - 1)) + duration) / count
+            
+            # Update operation-specific stats
+            self.stats["successful_operations"] += 1
+            self.stats["last_operation_time"] = duration
+            
+            self.logger.debug(f"Stats updated: {operation} took {duration:.2f}s, avg now {self.stats['avg_response_time']:.2f}s")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to update processing stats: {e}")
+            self.stats["failed_operations"] += 1
     
     def get_health_status(self) -> Dict[str, Any]:
-        """Get system health status (fixed - no recursion)"""
+        """Get system health status with proper error handling"""
         try:
-            # Get basic system metrics directly
+            # Get basic system metrics
             process = psutil.Process(os.getpid())
             memory = psutil.virtual_memory()
             
@@ -2204,63 +2231,75 @@ class DynamicOpulenceCoordinator:
                     "cpu_percent": psutil.cpu_percent(),
                     "memory_percent": memory.percent,
                     "process_memory_mb": process.memory_info().rss / (1024 * 1024),
-                    "available_memory_gb": memory.available / (1024**3)
+                    "available_memory_gb": memory.available / (1024**3),
+                    "process_count": len(psutil.pids())
                 },
                 "timestamp": dt.now().isoformat(),
                 "status": "healthy"
             }
             
-            # Request management info (simplified)
-            request_info = {}
-            if hasattr(self, 'request_manager'):
-                if hasattr(self.request_manager, 'semaphore'):
-                    # For SimpleRequestManager
-                    request_info = {
-                        "active_requests": self.request_manager.max_concurrent - self.request_manager.semaphore._value,
-                        "max_concurrent": self.request_manager.max_concurrent,
-                        "queue_utilization": (self.request_manager.max_concurrent - self.request_manager.semaphore._value) / self.request_manager.max_concurrent
-                    }
-                else:
-                    # For old RequestManager (fallback)
-                    request_info = {
-                        "active_requests": len(getattr(self.request_manager, 'active_requests', {})),
-                        "max_concurrent": getattr(self.request_manager, 'max_concurrent_requests', 0),
-                        "queue_utilization": 0
-                    }
-            
-            # GPU status (lightweight)
-            gpu_info = {}
-            if hasattr(self, 'gpu_manager'):
+            # Request management info with error handling
+            request_info = {"error": "request_manager not available"}
+            if hasattr(self, 'request_manager') and self.request_manager:
                 try:
+                    if hasattr(self.request_manager, 'semaphore'):
+                        active_count = self.request_manager.max_concurrent - self.request_manager.semaphore._value
+                        request_info = {
+                            "active_requests": active_count,
+                            "max_concurrent": self.request_manager.max_concurrent,
+                            "queue_utilization": active_count / self.request_manager.max_concurrent
+                        }
+                except Exception as e:
+                    request_info = {"error": f"Request manager error: {e}"}
+            
+            # GPU status with proper error handling
+            gpu_info = {"error": "GPU manager not available"}
+            if hasattr(self, '_gpu_manager') and self._gpu_manager:
+                try:
+                    available_count = sum(1 for gpu in self._gpu_manager.gpu_status.values() if gpu.is_available)
                     gpu_info = {
-                        "gpu_count": self.gpu_manager.gpu_count,
-                        "engines_loaded": len(self.llm_engine_pool),
-                        "available_gpus": len([gpu for gpu in self.gpu_manager.gpu_stats.values() if gpu.is_available])
+                        "total_gpu_count": self._gpu_manager.total_gpu_count,
+                        "available_gpu_count": self._gpu_manager.available_gpu_count,
+                        "engines_loaded": len(self.llm_engine_pool) if hasattr(self, 'llm_engine_pool') else 0,
+                        "gpus_available_now": available_count,
+                        "gpu_manager_status": "active"
                     }
-                except:
-                    gpu_info = {"error": "GPU status unavailable"}
+                except Exception as e:
+                    gpu_info = {"error": f"GPU status error: {e}"}
+            
+            # Stats with safe access
+            safe_stats = {}
+            for key in ["total_queries", "successful_operations", "failed_operations", "total_files_processed", "avg_response_time", "response_count"]:
+                safe_stats[key] = self.stats.get(key, 0)
             
             # Enhanced status
             enhanced_status = {
                 **base_status,
                 "request_management": request_info,
                 "gpu_status": gpu_info,
-                "stats": {
-                    "total_queries": self.stats.get("total_queries", 0),
-                    "successful_operations": self.stats.get("successful_operations", 0),
-                    "failed_operations": self.stats.get("failed_operations", 0),
-                    "files_processed": self.stats.get("total_files_processed", 0)
+                "stats": safe_stats,
+                "coordinator": {
+                    "initialization_complete": True,
+                    "database_path": self.db_path,
+                    "config_loaded": hasattr(self, 'config') and self.config is not None
                 }
             }
             
-            # Determine overall health
-            if (memory.percent > 90 or 
-                process.memory_info().rss / (1024**3) > 8 or  # > 8GB process memory
-                self.stats.get("failed_operations", 0) > self.stats.get("successful_operations", 1)):
-                enhanced_status["status"] = "warning"
+            # Health determination
+            memory_critical = memory.percent > 95
+            process_memory_high = process.memory_info().rss / (1024**3) > 8  # > 8GB
+            operations_failing = safe_stats.get("failed_operations", 0) > safe_stats.get("successful_operations", 1)
             
-            if memory.percent > 95:
+            if memory_critical or operations_failing:
                 enhanced_status["status"] = "critical"
+                enhanced_status["issues"] = []
+                if memory_critical:
+                    enhanced_status["issues"].append("Critical memory usage")
+                if operations_failing:
+                    enhanced_status["issues"].append("High operation failure rate")
+            elif memory.percent > 85 or process_memory_high:
+                enhanced_status["status"] = "warning"
+                enhanced_status["warnings"] = ["High memory usage"]
             
             return enhanced_status
             
@@ -2272,7 +2311,7 @@ class DynamicOpulenceCoordinator:
                 "timestamp": dt.now().isoformat(),
                 "basic_info": {
                     "process_exists": True,
-                    "coordinator_active": True
+                    "coordinator_initialized": hasattr(self, 'config')
                 }
             }
     
