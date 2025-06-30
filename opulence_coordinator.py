@@ -2061,13 +2061,17 @@ class DynamicOpulenceCoordinator:
             
             # Get current status
             gpu_status = self.gpu_manager.get_gpu_status_detailed()
-            workload_distribution = self.gpu_manager.get_workload_distribution()
+            
+            # FIXED: Create workload distribution manually
+            workload_distribution = {}
+            for gpu_id, workloads in self.gpu_manager.active_workloads.items():
+                workload_distribution[f"gpu_{gpu_id}"] = workloads
             
             optimization_suggestions = []
             
             # Analyze GPU utilization patterns
-            for gpu_id, status in gpu_status.items():
-                gpu_num = int(gpu_id.split('_')[1])
+            for gpu_key, status in gpu_status.items():
+                gpu_num = int(gpu_key.split('_')[1])
                 
                 if status['utilization_percent'] > 90:
                     optimization_suggestions.append({
@@ -2088,15 +2092,16 @@ class DynamicOpulenceCoordinator:
             # Analyze workload distribution
             total_workloads = sum(len(workloads) for workloads in workload_distribution.values())
             if total_workloads > 0:
-                workload_balance = max(len(workloads) for workloads in workload_distribution.values()) - \
-                                 min(len(workloads) for workloads in workload_distribution.values())
-                
-                if workload_balance > 2:
-                    optimization_suggestions.append({
-                        "type": "workload_imbalance",
-                        "message": f"Workload distribution is unbalanced (difference: {workload_balance})",
-                        "recommendation": "Consider rebalancing workloads across GPUs"
-                    })
+                workload_counts = [len(workloads) for workloads in workload_distribution.values()]
+                if workload_counts:  # Check if list is not empty
+                    workload_balance = max(workload_counts) - min(workload_counts)
+                    
+                    if workload_balance > 2:
+                        optimization_suggestions.append({
+                            "type": "workload_imbalance",
+                            "message": f"Workload distribution is unbalanced (difference: {workload_balance})",
+                            "recommendation": "Consider rebalancing workloads across GPUs"
+                        })
             
             return {
                 "status": "success",

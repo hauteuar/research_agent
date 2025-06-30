@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime as dt
 import functools
 import os
+import gc
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,7 @@ class OptimizedDynamicGPUManager:
                 available += 1
         
         return available
-    # In _is_gpu_available method:
+
     
     def _is_gpu_usable(self, gpu_id: int) -> bool:
         """Check if GPU is usable (quick check)"""
@@ -371,6 +372,13 @@ class OptimizedDynamicGPUManager:
                 }
         
         return status_dict
+    
+    def get_workload_distribution(self) -> Dict[str, List]:
+        """Get workload distribution across GPUs"""
+        distribution = {}
+        for gpu_id, workloads in self.active_workloads.items():
+            distribution[f"gpu_{gpu_id}"] = workloads
+        return distribution
     
     def get_system_gpu_summary(self) -> Dict[str, Any]:
         """Get high-level GPU system summary"""
@@ -658,7 +666,7 @@ class SafeGPUForcer:
                     del os.environ['CUDA_VISIBLE_DEVICES']
                 raise e
 
-     @staticmethod
+    @staticmethod
     def is_gpu_physically_available(gpu_id: int) -> bool:
         """Check if GPU physically exists and is accessible"""
         try:
