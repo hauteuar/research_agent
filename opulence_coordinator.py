@@ -102,9 +102,15 @@ class DynamicOpulenceCoordinator:
         
         # Use provided config or create from config manager
         if config is None:
+                # FIX: Make sure total_gpu_count is properly mapped
             runtime_config = self.config_manager.create_runtime_config()
+            
+            # Ensure total_gpu_count is available
+            if 'total_gpu_count' not in runtime_config:
+                runtime_config['total_gpu_count'] = self.config_manager.system.total_gpu_count
+            
             self.config = OpulenceConfig(**{k: v for k, v in runtime_config.items() 
-                                          if k in OpulenceConfig.__dataclass_fields__})
+                                        if k in OpulenceConfig.__dataclass_fields__})
         else:
             self.config = config
             
