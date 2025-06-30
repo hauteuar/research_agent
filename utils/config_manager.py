@@ -18,7 +18,7 @@ class SystemConfig:
     model_name: str = "codellama/CodeLlama-7b-Instruct-hf"
     max_tokens: int = 4096
     temperature: float = 0.1
-    total_gpu_count: int = 4
+    gpu_count: int = 4
     max_processing_time: int = 900
     batch_size: int = 32
     vector_dim: int = 768
@@ -179,10 +179,10 @@ class ConfigManager:
         
         if os.getenv('OPULENCE_GPU_COUNT'):
             try:
-              self.system.total_gpu_count = int(os.getenv('OPULENCE_GPU_COUNT'))  # CORRECT ATTRIBUTE NAME
+                self.system.gpu_count = int(os.getenv('OPULENCE_GPU_COUNT'))
             except ValueError:
                 pass
-            
+        
         if os.getenv('OPULENCE_MAX_TOKENS'):
             try:
                 self.system.max_tokens = int(os.getenv('OPULENCE_MAX_TOKENS'))
@@ -325,7 +325,7 @@ class ConfigManager:
         issues = []
         
         # Validate system configuration
-        if self.system.total_gpu_count < 1:
+        if self.system.gpu_count < 1:
             issues.append("GPU count must be at least 1")
         
         if self.system.max_processing_time < 60:
@@ -377,17 +377,6 @@ class ConfigManager:
             issues.append("Health check interval should be at least 10 seconds")
         
         return issues
-    
-    def get_gpu_count(self) -> int:
-        """Get the configured GPU count"""
-        return self.system.total_gpu_count
-
-    def set_gpu_count(self, count: int) -> bool:
-        """Set the GPU count"""
-        if count >= 0:
-            self.system.total_gpu_count = count
-            return True
-        return False
     
     def export_config(self, export_path: str = None) -> str:
         """Export configuration to string or file"""
@@ -449,20 +438,6 @@ class ConfigManager:
         """Get cache directory path"""
         cache_dir = os.getenv('OPULENCE_CACHE_DIR', 'cache')
         return Path(cache_dir)
-
-    def create_runtime_config(self) -> Dict[str, Any]:
-        """Create runtime configuration dictionary"""
-        return {
-            'model_name': self.system.model_name,
-            'max_tokens': self.system.max_tokens,
-            'temperature': self.system.temperature,
-            'total_gpu_count': self.system.total_gpu_count,  # ENSURE THIS IS INCLUDED
-            'max_processing_time': self.system.max_processing_time,
-            'batch_size': self.system.batch_size,
-            'vector_dim': self.system.vector_dim,
-            'max_db_rows': self.system.max_db_rows,
-            'cache_ttl': self.system.cache_ttl
-        }
 
 
 # Global configuration instance
