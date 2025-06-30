@@ -155,6 +155,7 @@ class SingleGPUOpulenceCoordinator:
             "start_time": time.time()
         }
         
+        
         self.logger.info(f"✅ Single GPU Opulence Coordinator initialized on GPU {self.selected_gpu}")
     
     def _setup_logging(self) -> logging.Logger:

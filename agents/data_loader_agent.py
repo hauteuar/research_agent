@@ -1793,6 +1793,9 @@ class DataLoaderAgent:
             try:
                 result = await self._generate_with_llm(chunk_prompt, sampling_params)
                 all_results.append(result)
+                
+                if i < len(chunks) - 1:  # Don't wait after last chunk
+                    await asyncio.sleep(0.5)  # 500ms delay
             except Exception as e:
                 self.logger.error(f"Failed to process chunk {i+1}: {str(e)}")
                 all_results.append("")
