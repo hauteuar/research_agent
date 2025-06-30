@@ -80,7 +80,7 @@ class HealthMonitor:
             "gpu_memory_percent": {"warning": 85, "critical": 95},
             "gpu_temperature": {"warning": 80, "critical": 90},
             "response_time": {"warning": 30, "critical": 60},
-            "process_count": {"warning": 500, "critical": 1000}
+            "process_count": {"warning": 500, "critical": 2000}
         }
         
         # Component health tracking

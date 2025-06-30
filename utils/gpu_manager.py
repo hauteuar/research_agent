@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from datetime import datetime as dt
 import functools
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,8 @@ class OptimizedDynamicGPUManager:
         self.gpu_status: Dict[int, GPUStatus] = {}
         self._status_lock = threading.Lock()
         self._last_refresh = 0
-        self._refresh_interval = 30  # seconds
+        self._refresh_interval = 120  # Increase from 30 to 120 seconds
+        self._cache_duration = 60
         
         # Workload tracking
         self.active_workloads: Dict[int, List[str]] = {}
@@ -94,6 +96,7 @@ class OptimizedDynamicGPUManager:
                 available += 1
         
         return available
+    # In _is_gpu_available method:
     
     def _is_gpu_usable(self, gpu_id: int) -> bool:
         """Check if GPU is usable (quick check)"""
@@ -134,15 +137,22 @@ class OptimizedDynamicGPUManager:
         if not force and (current_time - self._last_refresh) < self._refresh_interval:
             return
         
-        with self._status_lock:
-            for gpu_id in self.gpu_status.keys():
-                try:
-                    self._update_gpu_status(gpu_id)
-                except Exception as e:
-                    logger.warning(f"Status update failed for GPU {gpu_id}: {e}")
-                    self.gpu_status[gpu_id].error_count += 1
+        if hasattr(self, '_refreshing') and self._refreshing:
+            return
+
+        self._refreshing = True
+        try:
+            with self._status_lock:
+                for gpu_id in self.gpu_status.keys():
+                    try:
+                        self._update_gpu_status(gpu_id)
+                    except Exception as e:
+                        logger.warning(f"Status update failed for GPU {gpu_id}: {e}")
+                        self.gpu_status[gpu_id].error_count += 1
             
-            self._last_refresh = current_time
+                self._last_refresh = current_time
+        finally:
+            self._refreshing = False
     
     def _update_gpu_status(self, gpu_id: int):
         """Update status for specific GPU"""
@@ -580,5 +590,165 @@ class SafeGPUForcer:
                 
             logger.info(f"GPU environment set to GPU {gpu_id}")
 
+    @staticmethod
+    def cleanup_gpu_memory_aggressive(gpu_id: int) -> bool:
+        """Aggressive GPU memory cleanup - LOW LEVEL ONLY"""
+        try:
+            logger.info(f"Aggressive GPU memory cleanup for GPU {gpu_id}")
+            
+            if torch.cuda.is_available() and gpu_id < torch.cuda.device_count():
+                current_device = torch.cuda.current_device()
+                
+                try:
+                    torch.cuda.set_device(gpu_id)
+                    
+                    # Multiple cleanup passes
+                    for _ in range(3):
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                    
+                    # Reset memory stats
+                    if hasattr(torch.cuda, 'reset_peak_memory_stats'):
+                        torch.cuda.reset_peak_memory_stats(gpu_id)
+                    if hasattr(torch.cuda, 'reset_accumulated_memory_stats'):
+                        torch.cuda.reset_accumulated_memory_stats(gpu_id)
+                        
+                finally:
+                    torch.cuda.set_device(current_device)
+                
+                # Force garbage collection
+                import gc
+                for _ in range(3):
+                    gc.collect()
+                
+                logger.info(f"Aggressive cleanup completed for GPU {gpu_id}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Aggressive GPU cleanup failed for GPU {gpu_id}: {e}")
+            return False
+    
+    @staticmethod
+    def force_gpu_environment_safe(gpu_id: int, cleanup_first: bool = True):
+        """Safe GPU environment forcing with optional cleanup"""
+        SafeGPUForcer.init_gpu_locks()
+        
+        with SafeGPUForcer._gpu_locks.get(gpu_id, threading.RLock()):
+            if cleanup_first:
+                SafeGPUForcer.safe_gpu_cleanup(gpu_id)
+            
+            # Set environment
+            original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
+            
+            try:
+                os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+                os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+                os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+                
+                if torch.cuda.is_available():
+                    torch.cuda.set_device(0)  # 0 maps to target GPU
+                    
+                logger.info(f"GPU environment safely set to GPU {gpu_id}")
+                
+            except Exception as e:
+                # Restore environment on error
+                if original_cuda_visible is not None:
+                    os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible
+                elif 'CUDA_VISIBLE_DEVICES' in os.environ:
+                    del os.environ['CUDA_VISIBLE_DEVICES']
+                raise e
+
+     @staticmethod
+    def is_gpu_physically_available(gpu_id: int) -> bool:
+        """Check if GPU physically exists and is accessible"""
+        try:
+            if not torch.cuda.is_available():
+                return False
+                
+            if gpu_id >= torch.cuda.device_count():
+                return False
+                
+            # Try to query basic info
+            result = subprocess.run([
+                'nvidia-smi', f'--id={gpu_id}',
+                '--query-gpu=name',
+                '--format=csv,noheader,nounits'
+            ], capture_output=True, text=True, timeout=3)
+            
+            return result.returncode == 0 and result.stdout.strip()
+            
+        except Exception as e:
+            logger.warning(f"Physical GPU check failed for GPU {gpu_id}: {e}")
+            return False
+    
+    @staticmethod
+    def get_gpu_basic_info(gpu_id: int) -> Dict[str, Any]:
+        """Get basic GPU info (memory, utilization, temperature)"""
+        try:
+            result = subprocess.run([
+                'nvidia-smi', f'--id={gpu_id}',
+                '--query-gpu=memory.total,memory.free,utilization.gpu,temperature.gpu,name',
+                '--format=csv,noheader,nounits'
+            ], capture_output=True, text=True, timeout=5)
+            
+            if result.returncode == 0 and result.stdout.strip():
+                total, free, util, temp, name = result.stdout.strip().split(',')
+                
+                return {
+                    'memory_total_mb': int(total),
+                    'memory_free_mb': int(free),
+                    'memory_free_gb': int(free) / 1024,
+                    'utilization_percent': int(util),
+                    'temperature': int(temp),
+                    'name': name.strip(),
+                    'is_responsive': True
+                }
+                
+        except Exception as e:
+            logger.warning(f"Failed to get basic GPU info for GPU {gpu_id}: {e}")
+        
+        return {
+            'memory_total_mb': 0,
+            'memory_free_mb': 0, 
+            'memory_free_gb': 0,
+            'utilization_percent': 100,
+            'temperature': 0,
+            'name': 'Unknown',
+            'is_responsive': False
+        }
+    
+    @staticmethod
+    def check_gpu_meets_requirements(gpu_id: int, min_memory_gb: float = 2.0, 
+                                   max_utilization: float = 85.0) -> Dict[str, Any]:
+        """Check if GPU meets specific requirements"""
+        info = SafeGPUForcer.get_gpu_basic_info(gpu_id)
+        
+        meets_memory = info['memory_free_gb'] >= min_memory_gb
+        meets_utilization = info['utilization_percent'] <= max_utilization
+        is_responsive = info['is_responsive']
+        
+        return {
+            'gpu_id': gpu_id,
+            'meets_requirements': meets_memory and meets_utilization and is_responsive,
+            'meets_memory': meets_memory,
+            'meets_utilization': meets_utilization,
+            'is_responsive': is_responsive,
+            'memory_free_gb': info['memory_free_gb'],
+            'utilization_percent': info['utilization_percent'],
+            'reason': SafeGPUForcer._get_availability_reason(info, min_memory_gb, max_utilization)
+        }
+    
+    @staticmethod
+    def _get_availability_reason(info: Dict, min_memory_gb: float, max_utilization: float) -> str:
+        """Get human-readable reason for availability status"""
+        if not info['is_responsive']:
+            return "GPU not responsive"
+        elif info['memory_free_gb'] < min_memory_gb:
+            return f"Insufficient memory: {info['memory_free_gb']:.1f}GB < {min_memory_gb}GB required"
+        elif info['utilization_percent'] > max_utilization:
+            return f"High utilization: {info['utilization_percent']}% > {max_utilization}% limit"
+        else:
+            return f"Available: {info['memory_free_gb']:.1f}GB free, {info['utilization_percent']}% util"
+        
 # For backward compatibility
 DynamicGPUManager = OptimizedDynamicGPUManager
