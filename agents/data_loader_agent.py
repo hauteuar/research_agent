@@ -87,12 +87,18 @@ class DataLoaderAgent:
         try:
             # Try new API first (with request_id)
             request_id = str(uuid.uuid4())
-            result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
+            #result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
+            async for output in self.llm_engine.generate(prompt, sampling_params, request_id=request_id):
+                result = output
+                break
             return result.outputs[0].text.strip()
         except TypeError as e:
             if "request_id" in str(e):
                 # Fallback to old API (without request_id)
-                result = await self.llm_engine.generate(prompt, sampling_params)
+                #result = await self.llm_engine.generate(prompt, sampling_params)
+                async for output in self.llm_engine.generate(prompt, sampling_params):
+                    result = output
+                    break
                 return result.outputs[0].text.strip()
             else:
                 raise e
@@ -826,8 +832,11 @@ class DataLoaderAgent:
         """
         
         sampling_params = SamplingParams(temperature=0.1, max_tokens=2000)
-        result = await self.llm_engine.generate(prompt, sampling_params)
-        
+        #result = await self.llm_engine.generate(prompt, sampling_params)
+        async for output in self.llm_engine.generate(prompt, sampling_params):
+            result = output
+            break
+
         try:
             response_text = result.outputs[0].text.strip()
             if '[' in response_text:
