@@ -187,7 +187,7 @@ class VectorIndexAgent:
             # Try new API first (with request_id)
             request_id = str(uuid.uuid4())
             #async_generator = self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
-            async_generator = self.coordinator.safe_generate(prompt, sampling_params, request_id=request_id)
+            async_generator = await self.coordinator.safe_generate(prompt, sampling_params, request_id=request_id)
 
             # Properly handle the async generator
             async for result in async_generator:
@@ -197,7 +197,7 @@ class VectorIndexAgent:
             if "request_id" in str(e):
                 # Fallback to old API (without request_id)
                 #async_generator = self.llm_engine.generate(prompt, sampling_params)
-                async_generator = self.coordinator.safe_generate(prompt, sampling_params)
+                async_generator = await self.coordinator.safe_generate(prompt, sampling_params)
                 async for result in async_generator:
                     return result.outputs[0].text.strip()
             else:

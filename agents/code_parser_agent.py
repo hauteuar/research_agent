@@ -378,7 +378,7 @@ class CompleteEnhancedCodeParserAgent:
             try:
                 # Get async generator from vLLM
                 #result_generator = self.llm_engine.generate(
-                result_generator = self.coordinator.safe_generate(
+                result_generator = await self.coordinator.safe_generate(
                     prompt, sampling_params, request_id=request_id
                 )
                 
