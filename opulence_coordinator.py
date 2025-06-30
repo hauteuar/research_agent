@@ -165,7 +165,13 @@ class SingleGPUOpulenceCoordinator:
         return logging.getLogger(__name__)
     
     async def _llm_worker(self):
+        """Worker to handle LLM requests in a queue"""
+      
+        print("🔁 LLM worker started")
         while True:
+            prompt, sampling_params, future = await self._llm_queue.get()
+            print(f"🧠 Generating for prompt: {prompt}")
+        
             task = await self._llm_queue.get()
             prompt, sampling_params, future = task
 
