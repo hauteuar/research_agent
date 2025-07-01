@@ -35,8 +35,8 @@ class ChatContext:
 class OpulenceChatAgent:
     """Enhanced chat agent for natural language interaction with mainframe analysis"""
     
-    class OpulenceChatAgent(BaseOpulenceAgent):
-        def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
+    
+    def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
                  gpu_id: int = None, coordinator=None ):
             super().__init__(coordinator, "chat_agent", db_path, gpu_id)
             self.coordinator = coordinator
@@ -83,7 +83,7 @@ class OpulenceChatAgent:
             }
         
         # Knowledge base for enhanced responses
-        self.knowledge_base = {
+            self.knowledge_base = {
             'cobol_concepts': {
                 'working_storage': 'WORKING-STORAGE SECTION contains variables and data structures used by the program',
                 'procedure_division': 'PROCEDURE DIVISION contains the executable code and business logic',
