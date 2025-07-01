@@ -1,540 +1,6 @@
-def enhanced_chat_query(self, question: str) -> str:
-        """Enhanced chat with LLM intelligence and business context"""
-        question_lower = question.lower()
-        cursor = self.conn.cursor()
-        
-        # Use LLM intelligence to understand the question intent
-        if 'business' in question_lower or 'purpose' in question_lower or 'why' in question_lower:
-            return self.get_business_analysis(question)
-        
-        # Complex analysis queries
-        if 'complexity' in question_lower or 'complex' in question_lower:
-            cursor.execute("""
-                SELECT program, COUNT(*) as complexity_count
-                FROM (
-                    SELECT program FROM cobol_fields WHERE redefines IS NOT NULL
-                    UNION ALL
-                    SELECT program FROM cobol_fields WHERE occurs_clause IS NOT NULL  
-                    UNION ALL
-                    SELECT program FROM vsam_operations
-                ) 
-                GROUP BY program
-                ORDER BY complexity_count DESC
-            """)
-            
-            results = cursor.fetchall()
-            if results:
-                response = "Programs ranked by complexity:\n\n"
-                for row in results:
-                    response += f"• {row[0]}: {row[1]} complex structures\n"
-                return response
-            else:
-                return "No complexity analysis available."
-        
-        # Smart file relationship queries
-        if 'relationship' in question_lower or 'flow' in question_lower:
-            return self.analyze_data_flow()
-        
-        # VSAM-specific queries with business context
-        if 'vsam' in question_lower or 'cics' in question_lower:
-            if 'operations' in question_lower:
-                cursor.execute("""
-                    SELECT program, operation, file_name, key_field, line_number
-                    FROM vsam_operations
-                    ORDER BY program, line_number
-                """)
-                
-                results = cursor.fetchall()
-                if results:
-                    response = "VSAM/CICS Operations with business context:\n\n"
-                    for row in results:
-                        business_context = self.get_business_context_for_file(row[2], row[1])
-                        response += f"• Program: {row[0]}\n"
-                        response += f"  Operation: {row[1]} on file {row[2]}\n"
-                        response += f"  Business Purpose: {business_context}\n"
-                        if row[3]:
-                            response += f"  Key Field: {row[3]}\n"
-                        response += f"  Line: {row[4]}\n\n"
-                    return response
-                else:
-                    return "No VSAM/CICS operations found in analyzed programs."
-        
-        # Smart recommendations
-        if 'recommend' in question_lower or 'suggest' in question_lower:
-            return self.get_intelligent_recommendations()
-        
-        # Enhanced field structure queries with LLM insights
-        if 'redefines' in question_lower:
-            cursor.execute("""
-                SELECT program, field_name, redefines, level, picture
-                FROM cobol_fields
-                WHERE redefines IS NOT NULL
-                ORDER BY program, field_name
-            """)
-            
-            results = cursor.fetchall()
-            if results:
-                response = "REDEFINES structures with business analysis:\n\n"
-                for row in results:
-                    business_reason = self.analyze_redefines_purpose(row[1], row[2])
-                    response += f"• {row[1]} REDEFINES {row[2]} (Level {row[3]})\n"
-                    response += f"  Program: {row[0]}\n"
-                    response += f"  Business Purpose: {business_reason}\n"
-                    if row[4]:
-                        response += f"  Picture: {row[4]}\n"
-                    response += "\n"
-                return response
-            else:
-                return "No REDEFINES structures found."
-        
-        if 'occurs' in question_lower or 'table' in question_lower:
-            cursor.execute("""
-                SELECT program, field_name, occurs_clause, depending_on, picture
-                FROM cobol_fields
-                WHERE occurs_clause IS NOT NULL
-                ORDER BY program, field_name
-            """)
-            
-            results = cursor.fetchall()
-            if results:
-                response = "OCCURS tables with intelligent analysis:\n\n"
-                for row in results:
-                    business_purpose = self.analyze_occurs_purpose(row[1], row[2])
-                    response += f"• {row[1]} OCCURS {row[2]} TIMES\n"
-                    response += f"  Program: {row[0]}\n"
-                    response += f"  Business Purpose: {business_purpose}\n"
-                    if row[3]:
-                        response += f"  DEPENDING ON: {row[3]} (Dynamic sizing)\n"
-                    if row[4]:
-                        response += f"  Picture: {row[4]}\n"
-                    response += "\n"
-                return response
-            else:
-                return "No OCCURS tables found."
-        
-        # Enhanced field definition with LLM context
-        if 'field' in question_lower and ('structure' in question_lower or 'definition' in question_lower):
-            field_pattern = r'field\s+([A-Z0-9\-]+)'
-            match = re.search(field_pattern, question.upper())
-            
-            if match:
-                field_name = match.group(1)
-                cursor.execute("""
-                    SELECT program, level, picture, field_value, occurs_clause, 
-                           depending_on, redefines, usage_clause, field_length, parent_field
-                    FROM cobol_fields
-                    WHERE field_name = ?
-                """, (field_name,))
-                
-                results = cursor.fetchall()
-                if results:
-                    response = f"Field {field_name} intelligent analysis:\n\n"
-                    for row in results:
-                        business_meaning = self.get_field_business_meaning(field_name, row[2])
-                        response += f"• Program: {row[0]}\n"
-                        response += f"  Level: {row[1]}\n"
-                        response += f"  Business Meaning: {business_meaning}\n"
-                        if row[2]:
-                            response += f"  Picture: {row[2]}\n"
-                        if row[3]:
-                            response += f"  Value: {row[3]}\n"
-                        if row[4]:
-                            response += f"  Occurs: {row[4]} times\n"
-                        if row[5]:
-                            response += f"  Depending On: {row[5]}\n"
-                        if row[6]:
-                            response += f"  Redefines: {row[6]}\n"
-                        if row[7]:
-                            response += f"  Usage: {row[7]}\n"
-                        if row[8]:
-                            response += f"  Length: {row[8]} bytes\n"
-                        if row[9]:
-                            response += f"  Parent: {row[9]}\n"
-                        response += "\n"
-                    return response
-                else:
-                    return f"Field {field_name} not found in analyzed programs."
-        
-        # Fall back to original chat logic
-        return self.chat_query(question)
-    
-    def get_business_analysis(self, question: str) -> str:
-        """Provide business-focused analysis using LLM intelligence"""
-        cursor = self.conn.cursor()
-        
-        # Analyze overall business patterns
-        cursor.execute("SELECT DISTINCT program FROM file_references")
-        programs = [row[0] for row in cursor.fetchall()]
-        
-        if not programs:
-            return "No programs analyzed yet for business context."
-        
-        analysis = f"Business Analysis Summary:\n\n"
-        
-        # File type distribution
-        cursor.execute("""
-            SELECT file_type, COUNT(*) 
-            FROM file_references 
-            GROUP BY file_type
-        """)
-        
-        file_types = cursor.fetchall()
-        analysis += "📊 System Architecture:\n"
-        for file_type, count in file_types:
-            if file_type == 'VSAM':
-                analysis += f"• VSAM files: {count} (Online transaction processing)\n"
-            else:
-                analysis += f"• Sequential files: {count} (Batch processing)\n"
-        
-        # Business patterns
-        cursor.execute("""
-            SELECT operation, COUNT(*) 
-            FROM file_references 
-            GROUP BY operation
-        """)
-        
-        operations = cursor.fetchall()
-        analysis += "\n💼 Business Operations:\n"
-        for op, count in operations:
-            if op in ['READ', 'OPEN']:
-                analysis += f"• Data access operations: {count} (Information retrieval)\n"
-            elif op in ['WRITE', 'CREATE']:
-                analysis += f"• Data creation operations: {count} (Record management)\n"
-            elif op == 'REWRITE':
-                analysis += f"• Data update operations: {count} (Maintenance processes)\n"
-        
-        return analysis
-    
-    def analyze_data_flow(self) -> str:
-        """Intelligent data flow analysis"""
-        cursor = self.conn.cursor()
-        
-        # Find data transformation patterns
-        cursor.execute("""
-            SELECT f1.file_name as input_file, f1.program, f2.file_name as output_file
-            FROM file_references f1
-            JOIN file_references f2 ON f1.program = f2.program
-            WHERE f1.operation IN ('READ', 'OPEN') 
-            AND f2.operation IN ('WRITE', 'CREATE')
-            AND f1.file_name != f2.file_name
-            ORDER BY f1.program
-        """)
-        
-        flows = cursor.fetchall()
-        if flows:
-            response = "Intelligent Data Flow Analysis:\n\n"
-            for input_file, program, output_file in flows:
-                response += f"🔄 {program}:\n"
-                response += f"   {input_file} → {output_file}\n"
-                
-                # Add business context
-                input_context = self.get_business_context_for_file(input_file, "READ")
-                output_context = self.get_business_context_for_file(output_file, "WRITE")
-                response += f"   Purpose: {input_context} → {output_context}\n\n"
-            
-            return response
-        else:
-            return "No data flow patterns identified in analyzed programs."
-    
-    def get_intelligent_recommendations(self) -> str:
-        """Provide intelligent recommendations based on analysis"""
-        cursor = self.conn.cursor()
-        
-        recommendations = "🎯 Intelligent Recommendations:\n\n"
-        
-        # Check for modernization opportunities
-        cursor.execute("SELECT COUNT(*) FROM vsam_operations")
-        vsam_count = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM file_references WHERE file_type = 'SEQUENTIAL'")
-        seq_count = cursor.fetchone()[0]
-        
-        if vsam_count > 0 and seq_count > vsam_count * 2:
-            recommendations += "📈 Modernization: Consider migrating sequential processing to VSAM for better performance\n\n"
-        
-        # Check for complex structures
-        cursor.execute("SELECT COUNT(*) FROM cobol_fields WHERE redefines IS NOT NULL")
-        redefines_count = cursor.fetchone()[0]
-        
-        if redefines_count > 10:
-            recommendations += "🔧 Architecture: High number of REDEFINES suggests data model modernization opportunity\n\n"
-        
-        # Performance recommendations
-        cursor.execute("""
-            SELECT program, COUNT(*) as file_count 
-            FROM file_references 
-            GROUP BY program 
-            HAVING COUNT(*) > 5
-        """)
-        
-        heavy_programs = cursor.fetchall()
-        if heavy_programs:
-            recommendations += "⚡ Performance: Programs with high file I/O:\n"
-            for program, count in heavy_programs:
-                recommendations += f"   • {program}: {count} file operations (consider optimization)\n"
-        
-        return recommendations
-    
-    def analyze_redefines_purpose(self, field_name: str, redefines_field: str) -> str:
-        """Analyze business purpose of REDEFINES"""
-        field_upper = field_name.upper()
-        redefines_upper = redefines_field.upper()
-        
-        if 'DATE' in field_upper and 'DATE' in redefines_upper:
-            return "Date format conversion (YYYYMMDD vs DD/MM/YYYY)"
-        elif 'AMOUNT' in field_upper or 'BALANCE' in field_upper:
-            return "Financial amount format conversion (signed vs unsigned)"
-        elif 'CODE' in field_upper:
-            return "Code interpretation (numeric vs character representation)"
-        else:
-            return "Data format transformation for different processing needs"
-    
-    def analyze_occurs_purpose(self, field_name: str, occurs_count: str) -> str:
-        """Analyze business purpose of OCCURS"""
-        field_upper = field_name.upper()
-        
-        if 'TRANSACTION' in field_upper or 'TXN' in field_upper:
-            return f"Transaction history array ({occurs_count} transactions max)"
-        elif 'BALANCE' in field_upper:
-            return f"Multi-currency or multi-account balance array ({occurs_count} entries)"
-        elif 'ADDRESS' in field_upper:
-            return f"Multiple address lines ({occurs_count} lines max)"
-        elif 'PHONE' in field_upper:
-            return f"Multiple phone numbers ({occurs_count} numbers max)"
-        else:
-            return f"Repeating data structure for bulk processing ({occurs_count} entries)"
-    
-    def get_field_business_meaning(self, field_name: str, picture: str) -> str:
-        """Get business meaning of field based on name and picture"""
-        field_upper = field_name.upper()
-        
-        if 'CUSTOMER' in field_upper and 'ID' in field_upper:
-            return "Customer identification for CRM and transaction tracking"
-        elif 'ACCOUNT' in field_upper and ('NUM' in field_upper or 'ID' in field_upper):
-            return "Account number for financial transaction processing"
-        elif 'BALANCE' in field_upper:
-            return "Financial balance for accounting and reporting"
-        elif 'DATE' in field_upper:
-            return "Date field for temporal tracking and reporting"
-        elif 'AMOUNT' in field_upper:
-            return "Monetary amount for financial calculations"
-        elif 'STATUS' in field_upper:
-            return "Status indicator for workflow and business rule processing"
-        elif 'NAME' in field_upper:
-            return "Name field for identification and correspondence"
-        elif picture and 'X' in picture:
-            return f"Text/character data ({self.calculate_field_length(picture)} chars max)"
-        elif picture and '9' in picture:
-            return f"Numeric data for calculations and processing"
-        else:
-            return "Business data field for operational processing"
 
-    def store_enhanced_analysis(self, analysis: Dict[str, Any], program_name: str):
-        """Store enhanced analysis results with LLM insights"""
-        cursor = self.conn.cursor()
-        
-        # Store LLM analysis insights
-        if 'llm_insights' in analysis:
-            insights = analysis['llm_insights']
-            
-            # Store business patterns
-            if 'business_patterns' in insights:
-                patterns = insights['business_patterns']
-                cursor.execute("""
-                    INSERT INTO llm_analysis 
-                    (program, analysis_type, business_context, technical_details, complexity_score)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (
-                    program_name, 'BUSINESS_PATTERNS',
-                    json.dumps(patterns), 
-                    f"Patterns: {', '.join([k for k, v in patterns.items() if v])}",
-                    len([k for k, v in patterns.items() if v])
-                ))
-            
-            # Store file operation insights
-            if 'file_operations' in insights:
-                for op in insights['file_operations']:
-                    cursor.execute("""
-                        INSERT INTO llm_analysis 
-                        (program, analysis_type, business_context, technical_details)
-                        VALUES (?, ?, ?, ?)
-                    """, (
-                        program_name, 'FILE_OPERATION',
-                        op.get('business_context', ''),
-                        f"{op.get('operation', '')} on {op.get('file', '')}"
-                    ))
-        
-        # Store COBOL fields (existing logic)
-        for field_name, field_obj in analysis.get('copybook_fields', {}).items():
-            cursor.execute("""
-                INSERT INTO cobol_fields 
-                (program, field_name, level, picture, field_value, occurs_clause, 
-                 depending_on, redefines, usage_clause, is_filler, field_length, 
-                 parent_field, qualified_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                program_name, field_name, field_obj.level, field_obj.picture,
-                field_obj.value, field_obj.occurs, field_obj.depending_on,
-                field_obj.redefines, field_obj.usage, field_obj.is_filler,
-                field_obj.length, field_obj.parent, 
-                f"{field_obj.parent}.{field_name}" if field_obj.parent else field_name
-            ))
-        
-        # Store VSAM operations
-        for vsam_op in analysis.get('vsam_operations', []):
-            cursor.execute("""
-                INSERT INTO vsam_operations 
-                (program, operation, file_name, key_field, record_area, response_code, line_number)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                vsam_op.program, vsam_op.operation, vsam_op.file_name,
-                vsam_op.key_field, vsam_op.record_area, vsam_op.response_code,
-                vsam_op.line_number
-            ))
-        
-        # Store file references with enhanced info
-        for file_ref in analysis.get('file_operations', []):
-            cursor.execute("""
-                INSERT INTO file_references 
-                (file_name, program, operation, fields_used, line_number, file_type, access_method)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                file_ref.file_name, file_ref.program, file_ref.operation,
-                json.dumps(file_ref.fields_used), file_ref.line_number,
-                file_ref.file_type, file_ref.access_method
-            ))
-        
-        self.conn.commit()
 
-    def calculate_field_length(self, picture: str) -> int:
-        """Calculate field length from PICTURE clause"""
-        if not picture:
-            return 0
-            
-        # Remove formatting characters
-        pic_clean = re.sub(r'[V\.\-\+S]', '', picture)
-        
-        # Handle repeated characters like X(10) or 9(5)
-        total_length = 0
-        
-        # Pattern for X(n) or 9(n)
-        repeat_pattern = r'([X9])(\((\d+)\))?'
-        matches = re.findall(repeat_pattern, pic_clean)
-        
-        for match in matches:
-            char_type = match[0]
-            repeat_count = int(match[2]) if match[2] else 1
-            total_length += repeat_count
-        
-        # Handle simple patterns like XXX or 999
-        simple_chars = re.sub(r'[X9]\(\d+\)', '', pic_clean)
-        total_length += len(simple_chars)
-        
-        return total_length
-
-    def analyze_uploaded_files(self, uploaded_files: List) -> Dict[str, Any]:
-        """Enhanced file analysis with LLM intelligence"""
-        results = {
-            'programs_analyzed': 0,
-            'files_found': set(),
-            'vsam_files': set(),
-            'db2_files': set(),
-            'field_definitions': {},
-            'file_lineage': {},
-            'redefines_found': 0,
-            'occurs_found': 0,
-            'cics_operations': 0,
-            'business_insights': {},
-            'complexity_score': 0
-        }
-        
-        total_complexity = 0
-        
-        for uploaded_file in uploaded_files:
-            content = str(uploaded_file.read(), "utf-8")
-            filename = uploaded_file.name
-            
-            if filename.endswith(('.cbl', '.cob', '.cobol', '.cpy')):
-                analysis = self.parse_cobol_file(content, filename)
-                
-                # Count complex structures
-                for field_name, field_obj in analysis.get('copybook_fields', {}).items():
-                    if field_obj.redefines:
-                        results['redefines_found'] += 1
-                        total_complexity += 2
-                    if field_obj.occurs:
-                        results['occurs_found'] += 1
-                        total_complexity += 1
-                
-                results['cics_operations'] += len(analysis.get('vsam_operations', []))
-                total_complexity += len(analysis.get('vsam_operations', [])) * 3
-                
-                # Extract business insights from LLM analysis
-                if 'llm_insights' in analysis:
-                    insights = analysis['llm_insights']
-                    if 'business_patterns' in insights:
-                        results['business_insights'][filename] = insights['business_patterns']
-                
-                # Store enhanced analysis
-                self.store_enhanced_analysis(analysis, filename)
-                
-            elif filename.endswith(('.jcl', '.proc')):
-                analysis = self.parse_jcl_file(content, filename)
-            else:
-                continue
-            
-            # Process results
-            for file_op in analysis.get('file_operations', []):
-                results['files_found'].add(file_op.file_name)
-                if file_op.file_type == 'VSAM':
-                    results['vsam_files'].add(file_op.file_name)
-            
-            for vsam_op in analysis.get('vsam_operations', []):
-                results['vsam_files'].add(vsam_op.file_name)
-            
-            results['programs_analyzed'] += 1
-        
-        results['complexity_score'] = total_complexity
-        return results
-
-    def get_llm_summary(self) -> str:
-        """Generate LLM-powered summary of the entire codebase"""
-        cursor = self.conn.cursor()
-        
-        # Get overall statistics
-        cursor.execute("SELECT COUNT(DISTINCT program) FROM file_references")
-        total_programs = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(DISTINCT file_name) FROM file_references")
-        total_files = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM cobol_fields WHERE redefines IS NOT NULL")
-        redefines_count = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM vsam_operations")
-        cics_count = cursor.fetchone()[0]
-        
-        # Generate intelligent summary
-        summary = f"""
-🤖 **LLM Intelligence Summary**
-
-**System Architecture Analysis:**
-• Analyzed {total_programs} programs with {total_files} data files
-• Complexity Level: {'High' if redefines_count > 10 else 'Medium' if redefines_count > 5 else 'Low'}
-• CICS/Online Processing: {'Extensive' if cics_count > 20 else 'Moderate' if cics_count > 5 else 'Minimal'}
-
-**Business Pattern Recognition:**
-• Processing Type: {'Mixed Batch/Online' if cics_count > 0 else 'Batch-Oriented'}
-• Data Complexity: {'High (Legacy)' if redefines_count > 15 else 'Standard'}
-• Architecture: {'Mainframe Legacy' if cics_count > 0 else 'Traditional Batch'}
-
-**Modernization Readiness:**
-• Legacy Debt: {'High' if redefines_count > 20 else 'Moderate'}
-• Migration Complexity: {'Complex' if cics_count > 10 else 'Standard'}
-• Recommended Approach: {'Phased Migration' if cics_count > 0 else 'Direct Migration'}
-        """
-        
-        return summaryimport streamlit as st
+import streamlit as st
 import pandas as pd
 import sqlite3
 import os
@@ -1117,6 +583,20 @@ class MainframeAnalyzer:
             )
         """)
         
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS copybook_db2_comparison (
+                id INTEGER PRIMARY KEY,
+                copybook_name TEXT,
+                table_name TEXT,
+                field_name TEXT,
+                copybook_type TEXT,
+                db2_type TEXT,
+                match_status TEXT,
+                copybook_length INTEGER,
+                db2_length INTEGER,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
         self.conn.commit()
 
     def parse_cobol_file(self, content: str, filename: str) -> Dict[str, Any]:
@@ -1637,6 +1117,544 @@ class MainframeAnalyzer:
         
         self.conn.commit()
         return comparison_results
+    
+    def enhanced_chat_query(self, question: str) -> str:
+        """Enhanced chat with LLM intelligence and business context"""
+        question_lower = question.lower()
+        cursor = self.conn.cursor()
+        
+        # Use LLM intelligence to understand the question intent
+        if 'business' in question_lower or 'purpose' in question_lower or 'why' in question_lower:
+            return self.get_business_analysis(question)
+        
+        # Complex analysis queries
+        if 'complexity' in question_lower or 'complex' in question_lower:
+            cursor.execute("""
+                SELECT program, COUNT(*) as complexity_count
+                FROM (
+                    SELECT program FROM cobol_fields WHERE redefines IS NOT NULL
+                    UNION ALL
+                    SELECT program FROM cobol_fields WHERE occurs_clause IS NOT NULL  
+                    UNION ALL
+                    SELECT program FROM vsam_operations
+                ) 
+                GROUP BY program
+                ORDER BY complexity_count DESC
+            """)
+            
+            results = cursor.fetchall()
+            if results:
+                response = "Programs ranked by complexity:\n\n"
+                for row in results:
+                    response += f"• {row[0]}: {row[1]} complex structures\n"
+                return response
+            else:
+                return "No complexity analysis available."
+        
+        # Smart file relationship queries
+        if 'relationship' in question_lower or 'flow' in question_lower:
+            return self.analyze_data_flow()
+        
+        # VSAM-specific queries with business context
+        if 'vsam' in question_lower or 'cics' in question_lower:
+            if 'operations' in question_lower:
+                cursor.execute("""
+                    SELECT program, operation, file_name, key_field, line_number
+                    FROM vsam_operations
+                    ORDER BY program, line_number
+                """)
+                
+                results = cursor.fetchall()
+                if results:
+                    response = "VSAM/CICS Operations with business context:\n\n"
+                    for row in results:
+                        business_context = self.get_business_context_for_file(row[2], row[1])
+                        response += f"• Program: {row[0]}\n"
+                        response += f"  Operation: {row[1]} on file {row[2]}\n"
+                        response += f"  Business Purpose: {business_context}\n"
+                        if row[3]:
+                            response += f"  Key Field: {row[3]}\n"
+                        response += f"  Line: {row[4]}\n\n"
+                    return response
+                else:
+                    return "No VSAM/CICS operations found in analyzed programs."
+        
+        # Smart recommendations
+        if 'recommend' in question_lower or 'suggest' in question_lower:
+            return self.get_intelligent_recommendations()
+        
+        # Enhanced field structure queries with LLM insights
+        if 'redefines' in question_lower:
+            cursor.execute("""
+                SELECT program, field_name, redefines, level, picture
+                FROM cobol_fields
+                WHERE redefines IS NOT NULL
+                ORDER BY program, field_name
+            """)
+            
+            results = cursor.fetchall()
+            if results:
+                response = "REDEFINES structures with business analysis:\n\n"
+                for row in results:
+                    business_reason = self.analyze_redefines_purpose(row[1], row[2])
+                    response += f"• {row[1]} REDEFINES {row[2]} (Level {row[3]})\n"
+                    response += f"  Program: {row[0]}\n"
+                    response += f"  Business Purpose: {business_reason}\n"
+                    if row[4]:
+                        response += f"  Picture: {row[4]}\n"
+                    response += "\n"
+                return response
+            else:
+                return "No REDEFINES structures found."
+        
+        if 'occurs' in question_lower or 'table' in question_lower:
+            cursor.execute("""
+                SELECT program, field_name, occurs_clause, depending_on, picture
+                FROM cobol_fields
+                WHERE occurs_clause IS NOT NULL
+                ORDER BY program, field_name
+            """)
+            
+            results = cursor.fetchall()
+            if results:
+                response = "OCCURS tables with intelligent analysis:\n\n"
+                for row in results:
+                    business_purpose = self.analyze_occurs_purpose(row[1], row[2])
+                    response += f"• {row[1]} OCCURS {row[2]} TIMES\n"
+                    response += f"  Program: {row[0]}\n"
+                    response += f"  Business Purpose: {business_purpose}\n"
+                    if row[3]:
+                        response += f"  DEPENDING ON: {row[3]} (Dynamic sizing)\n"
+                    if row[4]:
+                        response += f"  Picture: {row[4]}\n"
+                    response += "\n"
+                return response
+            else:
+                return "No OCCURS tables found."
+        
+        # Enhanced field definition with LLM context
+        if 'field' in question_lower and ('structure' in question_lower or 'definition' in question_lower):
+            field_pattern = r'field\s+([A-Z0-9\-]+)'
+            match = re.search(field_pattern, question.upper())
+            
+            if match:
+                field_name = match.group(1)
+                cursor.execute("""
+                    SELECT program, level, picture, field_value, occurs_clause, 
+                           depending_on, redefines, usage_clause, field_length, parent_field
+                    FROM cobol_fields
+                    WHERE field_name = ?
+                """, (field_name,))
+                
+                results = cursor.fetchall()
+                if results:
+                    response = f"Field {field_name} intelligent analysis:\n\n"
+                    for row in results:
+                        business_meaning = self.get_field_business_meaning(field_name, row[2])
+                        response += f"• Program: {row[0]}\n"
+                        response += f"  Level: {row[1]}\n"
+                        response += f"  Business Meaning: {business_meaning}\n"
+                        if row[2]:
+                            response += f"  Picture: {row[2]}\n"
+                        if row[3]:
+                            response += f"  Value: {row[3]}\n"
+                        if row[4]:
+                            response += f"  Occurs: {row[4]} times\n"
+                        if row[5]:
+                            response += f"  Depending On: {row[5]}\n"
+                        if row[6]:
+                            response += f"  Redefines: {row[6]}\n"
+                        if row[7]:
+                            response += f"  Usage: {row[7]}\n"
+                        if row[8]:
+                            response += f"  Length: {row[8]} bytes\n"
+                        if row[9]:
+                            response += f"  Parent: {row[9]}\n"
+                        response += "\n"
+                    return response
+                else:
+                    return f"Field {field_name} not found in analyzed programs."
+        
+        # Fall back to original chat logic
+        return self.chat_query(question)
+    
+    def get_business_analysis(self, question: str) -> str:
+        """Provide business-focused analysis using LLM intelligence"""
+        cursor = self.conn.cursor()
+        
+        # Analyze overall business patterns
+        cursor.execute("SELECT DISTINCT program FROM file_references")
+        programs = [row[0] for row in cursor.fetchall()]
+        
+        if not programs:
+            return "No programs analyzed yet for business context."
+        
+        analysis = f"Business Analysis Summary:\n\n"
+        
+        # File type distribution
+        cursor.execute("""
+            SELECT file_type, COUNT(*) 
+            FROM file_references 
+            GROUP BY file_type
+        """)
+        
+        file_types = cursor.fetchall()
+        analysis += "📊 System Architecture:\n"
+        for file_type, count in file_types:
+            if file_type == 'VSAM':
+                analysis += f"• VSAM files: {count} (Online transaction processing)\n"
+            else:
+                analysis += f"• Sequential files: {count} (Batch processing)\n"
+        
+        # Business patterns
+        cursor.execute("""
+            SELECT operation, COUNT(*) 
+            FROM file_references 
+            GROUP BY operation
+        """)
+        
+        operations = cursor.fetchall()
+        analysis += "\n💼 Business Operations:\n"
+        for op, count in operations:
+            if op in ['READ', 'OPEN']:
+                analysis += f"• Data access operations: {count} (Information retrieval)\n"
+            elif op in ['WRITE', 'CREATE']:
+                analysis += f"• Data creation operations: {count} (Record management)\n"
+            elif op == 'REWRITE':
+                analysis += f"• Data update operations: {count} (Maintenance processes)\n"
+        
+        return analysis
+    
+    def analyze_data_flow(self) -> str:
+        """Intelligent data flow analysis"""
+        cursor = self.conn.cursor()
+        
+        # Find data transformation patterns
+        cursor.execute("""
+            SELECT f1.file_name as input_file, f1.program, f2.file_name as output_file
+            FROM file_references f1
+            JOIN file_references f2 ON f1.program = f2.program
+            WHERE f1.operation IN ('READ', 'OPEN') 
+            AND f2.operation IN ('WRITE', 'CREATE')
+            AND f1.file_name != f2.file_name
+            ORDER BY f1.program
+        """)
+        
+        flows = cursor.fetchall()
+        if flows:
+            response = "Intelligent Data Flow Analysis:\n\n"
+            for input_file, program, output_file in flows:
+                response += f"🔄 {program}:\n"
+                response += f"   {input_file} → {output_file}\n"
+                
+                # Add business context
+                input_context = self.get_business_context_for_file(input_file, "READ")
+                output_context = self.get_business_context_for_file(output_file, "WRITE")
+                response += f"   Purpose: {input_context} → {output_context}\n\n"
+            
+            return response
+        else:
+            return "No data flow patterns identified in analyzed programs."
+    
+    def get_intelligent_recommendations(self) -> str:
+        """Provide intelligent recommendations based on analysis"""
+        cursor = self.conn.cursor()
+        
+        recommendations = "🎯 Intelligent Recommendations:\n\n"
+        
+        # Check for modernization opportunities
+        cursor.execute("SELECT COUNT(*) FROM vsam_operations")
+        vsam_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM file_references WHERE file_type = 'SEQUENTIAL'")
+        seq_count = cursor.fetchone()[0]
+        
+        if vsam_count > 0 and seq_count > vsam_count * 2:
+            recommendations += "📈 Modernization: Consider migrating sequential processing to VSAM for better performance\n\n"
+        
+        # Check for complex structures
+        cursor.execute("SELECT COUNT(*) FROM cobol_fields WHERE redefines IS NOT NULL")
+        redefines_count = cursor.fetchone()[0]
+        
+        if redefines_count > 10:
+            recommendations += "🔧 Architecture: High number of REDEFINES suggests data model modernization opportunity\n\n"
+        
+        # Performance recommendations
+        cursor.execute("""
+            SELECT program, COUNT(*) as file_count 
+            FROM file_references 
+            GROUP BY program 
+            HAVING COUNT(*) > 5
+        """)
+        
+        heavy_programs = cursor.fetchall()
+        if heavy_programs:
+            recommendations += "⚡ Performance: Programs with high file I/O:\n"
+            for program, count in heavy_programs:
+                recommendations += f"   • {program}: {count} file operations (consider optimization)\n"
+        
+        return recommendations
+    
+    def analyze_redefines_purpose(self, field_name: str, redefines_field: str) -> str:
+        """Analyze business purpose of REDEFINES"""
+        field_upper = field_name.upper()
+        redefines_upper = redefines_field.upper()
+        
+        if 'DATE' in field_upper and 'DATE' in redefines_upper:
+            return "Date format conversion (YYYYMMDD vs DD/MM/YYYY)"
+        elif 'AMOUNT' in field_upper or 'BALANCE' in field_upper:
+            return "Financial amount format conversion (signed vs unsigned)"
+        elif 'CODE' in field_upper:
+            return "Code interpretation (numeric vs character representation)"
+        else:
+            return "Data format transformation for different processing needs"
+    
+    def analyze_occurs_purpose(self, field_name: str, occurs_count: str) -> str:
+        """Analyze business purpose of OCCURS"""
+        field_upper = field_name.upper()
+        
+        if 'TRANSACTION' in field_upper or 'TXN' in field_upper:
+            return f"Transaction history array ({occurs_count} transactions max)"
+        elif 'BALANCE' in field_upper:
+            return f"Multi-currency or multi-account balance array ({occurs_count} entries)"
+        elif 'ADDRESS' in field_upper:
+            return f"Multiple address lines ({occurs_count} lines max)"
+        elif 'PHONE' in field_upper:
+            return f"Multiple phone numbers ({occurs_count} numbers max)"
+        else:
+            return f"Repeating data structure for bulk processing ({occurs_count} entries)"
+    
+    def get_field_business_meaning(self, field_name: str, picture: str) -> str:
+        """Get business meaning of field based on name and picture"""
+        field_upper = field_name.upper()
+        
+        if 'CUSTOMER' in field_upper and 'ID' in field_upper:
+            return "Customer identification for CRM and transaction tracking"
+        elif 'ACCOUNT' in field_upper and ('NUM' in field_upper or 'ID' in field_upper):
+            return "Account number for financial transaction processing"
+        elif 'BALANCE' in field_upper:
+            return "Financial balance for accounting and reporting"
+        elif 'DATE' in field_upper:
+            return "Date field for temporal tracking and reporting"
+        elif 'AMOUNT' in field_upper:
+            return "Monetary amount for financial calculations"
+        elif 'STATUS' in field_upper:
+            return "Status indicator for workflow and business rule processing"
+        elif 'NAME' in field_upper:
+            return "Name field for identification and correspondence"
+        elif picture and 'X' in picture:
+            return f"Text/character data ({self.cobol_parser.calculate_field_length(picture)} chars max)"
+        elif picture and '9' in picture:
+            return f"Numeric data for calculations and processing"
+        else:
+            return "Business data field for operational processing"
+
+    def store_enhanced_analysis(self, analysis: Dict[str, Any], program_name: str):
+        """Store enhanced analysis results with LLM insights"""
+        cursor = self.conn.cursor()
+        
+        # Store LLM analysis insights
+        if 'llm_insights' in analysis:
+            insights = analysis['llm_insights']
+            
+            # Store business patterns
+            if 'business_patterns' in insights:
+                patterns = insights['business_patterns']
+                cursor.execute("""
+                    INSERT INTO llm_analysis 
+                    (program, analysis_type, business_context, technical_details, complexity_score)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    program_name, 'BUSINESS_PATTERNS',
+                    json.dumps(patterns), 
+                    f"Patterns: {', '.join([k for k, v in patterns.items() if v])}",
+                    len([k for k, v in patterns.items() if v])
+                ))
+            
+            # Store file operation insights
+            if 'file_operations' in insights:
+                for op in insights['file_operations']:
+                    cursor.execute("""
+                        INSERT INTO llm_analysis 
+                        (program, analysis_type, business_context, technical_details)
+                        VALUES (?, ?, ?, ?)
+                    """, (
+                        program_name, 'FILE_OPERATION',
+                        op.get('business_context', ''),
+                        f"{op.get('operation', '')} on {op.get('file', '')}"
+                    ))
+        
+        # Store COBOL fields (existing logic)
+        for field_name, field_obj in analysis.get('copybook_fields', {}).items():
+            cursor.execute("""
+                INSERT INTO cobol_fields 
+                (program, field_name, level, picture, field_value, occurs_clause, 
+                 depending_on, redefines, usage_clause, is_filler, field_length, 
+                 parent_field, qualified_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                program_name, field_name, field_obj.level, field_obj.picture,
+                field_obj.value, field_obj.occurs, field_obj.depending_on,
+                field_obj.redefines, field_obj.usage, field_obj.is_filler,
+                field_obj.length, field_obj.parent, 
+                f"{field_obj.parent}.{field_name}" if field_obj.parent else field_name
+            ))
+        
+        # Store VSAM operations
+        for vsam_op in analysis.get('vsam_operations', []):
+            cursor.execute("""
+                INSERT INTO vsam_operations 
+                (program, operation, file_name, key_field, record_area, response_code, line_number)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                vsam_op.program, vsam_op.operation, vsam_op.file_name,
+                vsam_op.key_field, vsam_op.record_area, vsam_op.response_code,
+                vsam_op.line_number
+            ))
+        
+        # Store file references with enhanced info
+        for file_ref in analysis.get('file_operations', []):
+            cursor.execute("""
+                INSERT INTO file_references 
+                (file_name, program, operation, fields_used, line_number, file_type, access_method)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                file_ref.file_name, file_ref.program, file_ref.operation,
+                json.dumps(file_ref.fields_used), file_ref.line_number,
+                file_ref.file_type, file_ref.access_method
+            ))
+        
+        self.conn.commit()
+
+    def calculate_field_length(self, picture: str) -> int:
+        """Calculate field length from PICTURE clause"""
+        if not picture:
+            return 0
+            
+        # Remove formatting characters
+        pic_clean = re.sub(r'[V\.\-\+S]', '', picture)
+        
+        # Handle repeated characters like X(10) or 9(5)
+        total_length = 0
+        
+        # Pattern for X(n) or 9(n)
+        repeat_pattern = r'([X9])(\((\d+)\))?'
+        matches = re.findall(repeat_pattern, pic_clean)
+        
+        for match in matches:
+            char_type = match[0]
+            repeat_count = int(match[2]) if match[2] else 1
+            total_length += repeat_count
+        
+        # Handle simple patterns like XXX or 999
+        simple_chars = re.sub(r'[X9]\(\d+\)', '', pic_clean)
+        total_length += len(simple_chars)
+        
+        return total_length
+
+    def analyze_uploaded_files(self, uploaded_files: List) -> Dict[str, Any]:
+        """Enhanced file analysis with LLM intelligence"""
+        results = {
+            'programs_analyzed': 0,
+            'files_found': set(),
+            'vsam_files': set(),
+            'db2_files': set(),
+            'field_definitions': {},
+            'file_lineage': {},
+            'redefines_found': 0,
+            'occurs_found': 0,
+            'cics_operations': 0,
+            'business_insights': {},
+            'complexity_score': 0
+        }
+        
+        total_complexity = 0
+        
+        for uploaded_file in uploaded_files:
+            content = str(uploaded_file.read(), "utf-8")
+            filename = uploaded_file.name
+            
+            if filename.endswith(('.cbl', '.cob', '.cobol', '.cpy')):
+                analysis = self.parse_cobol_file(content, filename)
+                
+                # Count complex structures
+                for field_name, field_obj in analysis.get('copybook_fields', {}).items():
+                    if field_obj.redefines:
+                        results['redefines_found'] += 1
+                        total_complexity += 2
+                    if field_obj.occurs:
+                        results['occurs_found'] += 1
+                        total_complexity += 1
+                
+                results['cics_operations'] += len(analysis.get('vsam_operations', []))
+                total_complexity += len(analysis.get('vsam_operations', [])) * 3
+                
+                # Extract business insights from LLM analysis
+                if 'llm_insights' in analysis:
+                    insights = analysis['llm_insights']
+                    if 'business_patterns' in insights:
+                        results['business_insights'][filename] = insights['business_patterns']
+                
+                # Store enhanced analysis
+                self.store_enhanced_analysis(analysis, filename)
+                
+            elif filename.endswith(('.jcl', '.proc')):
+                analysis = self.parse_jcl_file(content, filename)
+            else:
+                continue
+            
+            # Process results
+            for file_op in analysis.get('file_operations', []):
+                results['files_found'].add(file_op.file_name)
+                if file_op.file_type == 'VSAM':
+                    results['vsam_files'].add(file_op.file_name)
+            
+            for vsam_op in analysis.get('vsam_operations', []):
+                results['vsam_files'].add(vsam_op.file_name)
+            
+            results['programs_analyzed'] += 1
+        
+        results['complexity_score'] = total_complexity
+        return results
+
+    def get_llm_summary(self) -> str:
+        """Generate LLM-powered summary of the entire codebase"""
+        cursor = self.conn.cursor()
+        
+        # Get overall statistics
+        cursor.execute("SELECT COUNT(DISTINCT program) FROM file_references")
+        total_programs = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(DISTINCT file_name) FROM file_references")
+        total_files = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM cobol_fields WHERE redefines IS NOT NULL")
+        redefines_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM vsam_operations")
+        cics_count = cursor.fetchone()[0]
+        
+        # Generate intelligent summary
+        summary = f"""
+🤖 **LLM Intelligence Summary**
+
+**System Architecture Analysis:**
+• Analyzed {total_programs} programs with {total_files} data files
+• Complexity Level: {'High' if redefines_count > 10 else 'Medium' if redefines_count > 5 else 'Low'}
+• CICS/Online Processing: {'Extensive' if cics_count > 20 else 'Moderate' if cics_count > 5 else 'Minimal'}
+
+**Business Pattern Recognition:**
+• Processing Type: {'Mixed Batch/Online' if cics_count > 0 else 'Batch-Oriented'}
+• Data Complexity: {'High (Legacy)' if redefines_count > 15 else 'Standard'}
+• Architecture: {'Mainframe Legacy' if cics_count > 0 else 'Traditional Batch'}
+
+**Modernization Readiness:**
+• Legacy Debt: {'High' if redefines_count > 20 else 'Moderate'}
+• Migration Complexity: {'Complex' if cics_count > 10 else 'Standard'}
+• Recommended Approach: {'Phased Migration' if cics_count > 0 else 'Direct Migration'}
+        """
+        
+        return summary
 
 # Initialize the enhanced analyzer
 if 'analyzer' not in st.session_state:
