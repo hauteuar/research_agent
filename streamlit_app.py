@@ -25,7 +25,7 @@ import sqlite3
 
 # Set page config FIRST - before any other Streamlit commands
 st.set_page_config(
-    page_title="Opulence - Single GPU Deep Research Agent",
+    page_title="Opulence - Deep Research Agent",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -57,10 +57,10 @@ initialize_session_state()
 # Try to import single GPU coordinator with error handling
 try:
     from opulence_coordinator import (
-        SingleGPUOpulenceCoordinator,
-        SingleGPUOpulenceConfig,
-        SingleGPUChatEnhancer,
-        create_single_gpu_coordinator,
+        DualGPUOpulenceCoordinator,         # Changed from SingleGPUOpulenceCoordinator
+        DualGPUOpulenceConfig,              # Changed from SingleGPUOpulenceConfig
+        SingleGPUChatEnhancer,              # Keep same - works with dual GPU
+        create_dual_gpu_coordinator,        # Changed from create_single_gpu_coordinator
         create_shared_server_coordinator,
         create_dedicated_server_coordinator,
         get_global_coordinator
@@ -122,9 +122,11 @@ st.markdown("""
         color: white;
     }
     
-    /* GPU indicator styling */
-    .gpu-indicator {
-        background: linear-gradient(45deg, #3b82f6, #1d4ed8);
+    st.markdown("""
+<style>
+    /* Add dual GPU indicator styling */
+    .dual-gpu-indicator {
+        background: linear-gradient(45deg, #3b82f6, #1d4ed8, #6366f1);
         color: white;
         padding: 0.5rem 1rem;
         border-radius: 8px;
@@ -132,8 +134,23 @@ st.markdown("""
         text-align: center;
         margin-bottom: 1rem;
     }
+    
+    .gpu-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        margin: 1rem 0;
+    }
+    
+    .gpu-card {
+        background-color: #f8fafc;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border-left: 4px solid #3b82f6;
+    }
 </style>
 """, unsafe_allow_html=True)
+
 
 
 def show_debug_info():
@@ -164,8 +181,8 @@ def show_debug_info():
         st.sidebar.json(debug_info)
 
 
-async def init_single_gpu_coordinator():
-    """Initialize the single GPU coordinator"""
+async def init_dual_gpu_coordinator():  # Changed function name
+    """Initialize the dual GPU coordinator"""
     if not COORDINATOR_AVAILABLE:
         return False
         
@@ -178,14 +195,13 @@ async def init_single_gpu_coordinator():
                 return True
             except Exception as e:
                 # Create new coordinator if global one fails
-                st.session_state.coordinator = create_single_gpu_coordinator()
+                st.session_state.coordinator = create_dual_gpu_coordinator(force_gpu_ids=[1, 2])  # Changed
                 st.session_state.initialization_status = "completed"
                 return True
         except Exception as e:
             st.session_state.initialization_status = f"error: {str(e)}"
             return False
     return True
-
 
 def safe_run_async(coro):
     """Safely run async functions in Streamlit"""
@@ -229,89 +245,65 @@ def process_chat_query(query: str) -> Dict[str, Any]:
     """Process chat query and return structured response"""
     if not COORDINATOR_AVAILABLE:
         return {
-            "response": "❌ Single GPU Coordinator not available. Please check the import error in debug mode.",
+            "response": "❌ Dual GPU Coordinator not available. Please check the import error in debug mode.",  # Changed
             "response_type": "error",
             "suggestions": []
         }
     
-    if not st.session_state.coordinator:
-        return {
-            "response": "❌ System not initialized. Please check system health.",
-            "response_type": "error",
-            "suggestions": ["Initialize system in System Health tab"]
-        }
-    
-    try:
-        # Get conversation history for context
-        conversation_history = st.session_state.chat_history[-5:] if st.session_state.chat_history else []
-        
-        # Process with the single GPU coordinator
-        result = safe_run_async(
-            st.session_state.coordinator.process_chat_query(query, conversation_history)
-        )
-        
-        if isinstance(result, dict):
-            # Add GPU info to response
-            if "gpu_used" not in result:
-                result["gpu_used"] = getattr(st.session_state.coordinator, 'selected_gpu', 'unknown')
-            return result
-        else:
-            return {
-                "response": str(result),
-                "response_type": "general",
-                "suggestions": [],
-                "gpu_used": getattr(st.session_state.coordinator, 'selected_gpu', 'unknown')
-            }
-    
-    except Exception as e:
-        return {
-            "response": f"❌ Error processing query: {str(e)}",
-            "response_type": "error",
-            "suggestions": ["Try rephrasing your question", "Check system status"],
-            "gpu_used": getattr(st.session_state.coordinator, 'selected_gpu', 'unknown')
-        }
-
+    # Add GPU info to response
+    if isinstance(result, dict):
+        if "gpus_used" not in result:  # Changed from gpu_used
+            result["gpus_used"] = getattr(st.session_state.coordinator, 'selected_gpus', 'unknown')
+        return result
 
 def show_gpu_status():
-    """Show current GPU status for single GPU system"""
+    """Show current GPU status for dual GPU system"""
     if st.session_state.coordinator:
         try:
             health = st.session_state.coordinator.get_health_status()
-            gpu_id = health.get('selected_gpu', 'Unknown')
-            gpu_status = health.get('gpu_status', {})
+            gpu_ids = health.get('selected_gpus', [])  # Changed from selected_gpu
             
-            # GPU indicator
+            # Dual GPU indicator
             st.markdown(f"""
-                <div class="gpu-indicator">
-                    🎯 Single GPU Mode: GPU {gpu_id} 
-                    {"🔒 Locked" if gpu_status.get('is_locked', False) else "🔓 Available"}
+                <div class="dual-gpu-indicator">
+                    🎯 Dual GPU Mode: GPUs {gpu_ids} 
+                    {"🔒 Locked" if health.get('status') == 'healthy' else "🔓 Available"}
                 </div>
             """, unsafe_allow_html=True)
             
-            # GPU metrics
-            col1, col2, col3, col4 = st.columns(4)
+            # GPU metrics for each GPU
+            if len(gpu_ids) >= 2:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown(f"### GPU {gpu_ids[0]} (Primary)")
+                    gpu_status_0 = st.session_state.coordinator.gpu_manager.get_gpu_status(gpu_ids[0])
+                    st.metric("Memory Used", f"{gpu_status_0.get('memory_usage_gb', 0):.1f}GB")
+                    st.metric("Active Tasks", gpu_status_0.get('active_tasks', 0))
+                
+                with col2:
+                    st.markdown(f"### GPU {gpu_ids[1]} (Secondary)")
+                    gpu_status_1 = st.session_state.coordinator.gpu_manager.get_gpu_status(gpu_ids[1])
+                    st.metric("Memory Used", f"{gpu_status_1.get('memory_usage_gb', 0):.1f}GB")
+                    st.metric("Active Tasks", gpu_status_1.get('active_tasks', 0))
             
+            # Combined metrics
+            col1, col2, col3 = st.columns(3)
             with col1:
-                memory_used = gpu_status.get('memory_usage_gb', 0)
-                st.metric("GPU Memory", f"{memory_used:.1f}GB")
+                total_tasks = sum(st.session_state.coordinator.gpu_manager.get_gpu_status(gpu_id).get('total_tasks_processed', 0) for gpu_id in gpu_ids)
+                st.metric("Total Tasks Completed", total_tasks)
             
             with col2:
-                active_tasks = gpu_status.get('active_tasks', 0)
-                st.metric("Active Tasks", active_tasks)
+                uptime = health.get('uptime_seconds', 0)
+                st.metric("System Uptime", f"{uptime:.0f}s")
             
             with col3:
-                total_tasks = gpu_status.get('total_tasks_processed', 0)
-                st.metric("Tasks Completed", total_tasks)
-            
-            with col4:
-                uptime = health.get('uptime_seconds', 0)
-                st.metric("Uptime", f"{uptime:.0f}s")
+                st.metric("Agent Distribution", f"{len(gpu_ids)} GPUs")
                 
         except Exception as e:
             st.error(f"Error getting GPU status: {str(e)}")
     else:
-        st.warning("🟡 Single GPU Coordinator not initialized")
-
+        st.warning("🟡 Dual GPU Coordinator not initialized")
 
 def show_enhanced_chat_analysis():
     """Enhanced chat analysis interface for single GPU"""
@@ -567,31 +559,23 @@ def analyze_component_single_gpu(component_name: str, component_type: str, user_
 
 
 def show_system_health():
-    """Show system health and statistics for single GPU system"""
-    st.markdown('<div class="sub-header">⚙️ Single GPU System Health & Statistics</div>', unsafe_allow_html=True)
+    """Show system health and statistics for dual GPU system"""
+    st.markdown('<div class="sub-header">⚙️ Dual GPU System Health & Statistics</div>', unsafe_allow_html=True)  # Changed
     
     if not COORDINATOR_AVAILABLE:
-        st.error("🔴 System Status: Single GPU Coordinator Not Available")
-        st.markdown("### Import Error")
-        st.code(st.session_state.get('import_error', 'Unknown import error'))
-        st.info("Please ensure the opulence_coordinator_single_gpu module is properly installed and configured.")
+        st.error("🔴 System Status: Dual GPU Coordinator Not Available")  # Changed
+        st.info("Please ensure the opulence_coordinator_dual_gpu module is properly installed and configured.")  # Changed
         return
     
     if not st.session_state.coordinator:
         st.warning("🟡 System Status: Not Initialized")
-        if st.button("🔄 Initialize Single GPU System"):
-            with st.spinner("Initializing single GPU system..."):
+        if st.button("🔄 Initialize Dual GPU System"):  # Changed
+            with st.spinner("Initializing dual GPU system..."):  # Changed
                 try:
-                    success = safe_run_async(init_single_gpu_coordinator())
+                    success = safe_run_async(init_dual_gpu_coordinator())  # Changed function call
                     if success and not isinstance(success, dict):
-                        st.success("✅ Single GPU system initialized successfully")
+                        st.success("✅ Dual GPU system initialized successfully")  # Changed
                         st.rerun()
-                    else:
-                        error_msg = success.get('error') if isinstance(success, dict) else st.session_state.initialization_status
-                        st.error(f"❌ Initialization failed: {error_msg}")
-                except Exception as e:
-                    st.error(f"❌ Initialization failed: {str(e)}")
-        return
     
     try:
         # Get health status
@@ -1749,22 +1733,24 @@ def main():
         )
         
         # Quick actions
-        st.markdown("### Quick Actions")
-        if st.button("🔄 Refresh System"):
-            st.rerun()
-        
-        # System status indicator with GPU info
-        if COORDINATOR_AVAILABLE and st.session_state.coordinator:
-            try:
-                health = st.session_state.coordinator.get_health_status()
-                gpu_id = health.get('selected_gpu', 'Unknown')
-                st.success(f"🟢 System Healthy (GPU {gpu_id})")
-            except:
-                st.success("🟢 System Healthy")
-        elif COORDINATOR_AVAILABLE:
-            st.warning("🟡 System Not Initialized")
-        else:
-            st.error("🔴 Demo Mode")
+        with st.sidebar:
+    # Quick actions with dual GPU context
+    st.markdown("### Quick Actions")
+    if st.button("🔄 Refresh Dual GPU System"):  # Changed
+        st.rerun()
+    
+    # System status indicator with dual GPU info
+    if COORDINATOR_AVAILABLE and st.session_state.coordinator:
+        try:
+            health = st.session_state.coordinator.get_health_status()
+            gpu_ids = health.get('selected_gpus', [])
+            st.success(f"🟢 Dual GPU System Healthy (GPUs {gpu_ids})")  # Changed
+        except:
+            st.success("🟢 Dual GPU System Healthy")  # Changed
+    elif COORDINATOR_AVAILABLE:
+        st.warning("🟡 Dual GPU System Not Initialized")  # Changed
+    else:
+        st.error("🔴 Demo Mode")
         
         # Show example queries
         show_example_queries()
