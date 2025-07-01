@@ -45,43 +45,23 @@ class DataLoaderAgent:
         if self.llm_engine is not None:
             return
         
-        if self.coordinator is not None:
+        if self.coordinator and hasattr(self.coordinator, 'get_shared_llm_engine'):
             try:
-                # Get assigned GPU for data_loader agent
                 assigned_gpu = self.coordinator.agent_gpu_assignments.get("data_loader")
                 if assigned_gpu is not None:
+                    self.llm_engine = self.coordinator.get_shared_llm_engine(assigned_gpu)
                     self.gpu_id = assigned_gpu
-                    self.llm_engine = self.coordinator.gpu_manager.get_llm_engine(assigned_gpu)
-                    self._using_coordinator_llm = True
-                    self.logger.info(f"DataLoader using assigned GPU {assigned_gpu}")
+                    self._using_shared_engine = True
+                    self.logger.info(f"✅ DataLoader using shared engine on GPU {assigned_gpu}")
                     return
             except Exception as e:
-                self.logger.warning(f"Failed to get assigned GPU: {e}")
+                self.logger.warning(f"Failed to get shared engine: {e}")
         
-        # Fallback to any available GPU
+        # Fallback to creating own engine (not recommended for dual GPU)
         if not self._engine_created:
+            self.logger.warning("⚠️ Creating fallback engine - this may cause duplicate model loading")
             await self._create_fallback_engine()
-        
-        # Try to get from global coordinator
-        if not self._engine_created:
-            try:
-                from opulence_coordinator import get_dynamic_coordinator
-                global_coordinator = get_dynamic_coordinator()
-                
-                best_gpu = await global_coordinator.get_available_gpu_for_agent("data_loader")
-                if best_gpu is not None:
-                    engine = await global_coordinator.get_or_create_llm_engine(best_gpu)
-                    self.llm_engine = engine
-                    self.gpu_id = best_gpu
-                    self._using_coordinator_llm = True
-                    self.logger.info(f"DataLoader using global coordinator's LLM on GPU {best_gpu}")
-                    return
-            except Exception as e:
-                self.logger.warning(f"Failed to get LLM from global coordinator: {e}")
-        
-        # Last resort: create own engine
-        if not self._engine_created:
-            await self._create_llm_engine()
+
 
     async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
         """Generate text with LLM - handles both old and new vLLM API"""
@@ -90,7 +70,7 @@ class DataLoaderAgent:
                 await self._ensure_llm_engine()
 
             await asyncio.sleep(0.1)
-            
+
             # Try new API first (with request_id)
             request_id = str(uuid.uuid4())
             #result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
