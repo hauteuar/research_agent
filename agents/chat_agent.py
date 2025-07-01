@@ -32,27 +32,16 @@ class ChatContext:
     chat_type: str  # 'general', 'analysis', 'search', 'comparison'
 
 
-class OpulenceChatAgent:
+class OpulenceChatAgent(BaseOpulenceAgent):  # ✅ FIXED: Proper inheritance
     """Enhanced chat agent for natural language interaction with mainframe analysis"""
     
-    
-    def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
-                 gpu_id: int = None, coordinator=None ):
-            super().__init__(coordinator, "chat_agent", db_path, gpu_id)
-            self.coordinator = coordinator
-            # REMOVE: self.llm_engine = llm_engine
-            self._engine = None  # Cached engine reference (starts as None)
-            
-            self.db_path = db_path
-            self.gpu_id = gpu_id
-            self.logger = logging.getLogger(__name__)
-            
-            # NEW: Lazy loading tracking
-            self._engine_loaded = False
-            self._using_shared_engine = False
-            
+    def __init__(self, coordinator, llm_engine: AsyncLLMEngine = None, 
+                 db_path: str = "opulence_data.db", gpu_id: int = 0):
+        
+        # ✅ FIXED: Proper super().__init__() call first
+        super().__init__(coordinator, "chat_agent", db_path, gpu_id)      
             # Chat patterns for different types of queries
-            self.query_patterns = {
+        self.query_patterns = {
                 'analysis': [
                     r'analyze|analysis|examine|investigate|study',
                     r'what (is|are|does)|how (does|is|are)',
@@ -83,8 +72,8 @@ class OpulenceChatAgent:
             }
         
         # Knowledge base for enhanced responses
-            self.knowledge_base = {
-            'cobol_concepts': {
+        self.knowledge_base = {
+                'cobol_concepts': {
                 'working_storage': 'WORKING-STORAGE SECTION contains variables and data structures used by the program',
                 'procedure_division': 'PROCEDURE DIVISION contains the executable code and business logic',
                 'identification_division': 'IDENTIFICATION DIVISION identifies the program and provides metadata',
@@ -103,35 +92,13 @@ class OpulenceChatAgent:
             }
         }
     
-    # NEW: Lazy loading engine getter (matching other agents)
-    async def get_engine(self):
-        """Get LLM engine with lazy loading and sharing"""
-        if self._engine is None and self.coordinator:
-            try:
-                # Get assigned GPU for chat_agent type
-                assigned_gpu = self.coordinator.agent_gpu_assignments.get("chat_agent")
-                if assigned_gpu is not None:
-                    # Get shared engine from coordinator
-                    self._engine = await self.coordinator.get_shared_llm_engine(assigned_gpu)
-                    self.gpu_id = assigned_gpu
-                    self._using_shared_engine = True
-                    self._engine_loaded = True
-                    self.logger.info(f"✅ ChatAgent using shared engine on GPU {assigned_gpu}")
-                else:
-                    raise ValueError("No GPU assigned for chat_agent type")
-            except Exception as e:
-                self.logger.error(f"❌ Failed to get shared engine: {e}")
-                raise
-        
-        return self._engine
-
     async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
-        """Generate text with LLM - lazy loading version"""
+        """Generate text with LLM using base class engine management"""
         try:
-            # LAZY LOAD: Get engine only when needed
-            engine = await self.get_engine()
+            # Use current engine from context (set by base class context manager)
+            engine = self._engine
             if engine is None:
-                raise RuntimeError("No LLM engine available")
+                raise RuntimeError("No LLM engine available in current context")
 
             await asyncio.sleep(0.1)
 
@@ -155,60 +122,61 @@ class OpulenceChatAgent:
             self.logger.error(f"LLM generation failed: {str(e)}")
             return ""
     
-    # ADD this helper method
-    def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        """Add processing information to results"""
-        if isinstance(result, dict):
-            result['gpu_used'] = self.gpu_id
-            result['agent_type'] = 'chat_agent'
-            result['using_shared_engine'] = self._using_shared_engine
-            result['engine_loaded_lazily'] = self._engine_loaded
-        return result
-    
     async def process_chat_query(self, query: str, conversation_history: List[Dict] = None) -> Dict[str, Any]:
-        """Process a chat query and return intelligent response"""
-        try:
-            # Create chat context
-            context = ChatContext(
-                conversation_id=str(uuid.uuid4()),
-                user_query=query,
-                conversation_history=conversation_history or [],
-                relevant_components=[],
-                analysis_results={},
-                chat_type=self._classify_query_type(query)
-            )
-            
-            # Extract components mentioned in query
-            context.relevant_components = self._extract_components_from_query(query)
-            
-            # Get relevant analysis results if components found
-            if context.relevant_components:
-                context.analysis_results = await self._get_relevant_analysis(context.relevant_components)
-            
-            # Generate response based on query type
-            if context.chat_type == 'analysis':
-                result = await self._handle_analysis_query(context)
-            elif context.chat_type == 'lineage':
-                result = await self._handle_lineage_query(context)
-            elif context.chat_type == 'comparison':
-                result = await self._handle_comparison_query(context)
-            elif context.chat_type == 'search':
-                result = await self._handle_search_query(context)
-            elif context.chat_type == 'impact':
-                result = await self._handle_impact_query(context)
-            else:
-                result = await self._handle_general_query(context)
-            
-            # CHANGE: Use helper method to add processing info
-            return self._add_processing_info(result)
+        """Process a chat query using base class context manager"""
+        
+        # ✅ FIXED: Use base class context manager for automatic engine management
+        async with self.get_engine_context() as engine:
+            try:
+                # Create chat context
+                context = ChatContext(
+                    conversation_id=str(uuid.uuid4()),
+                    user_query=query,
+                    conversation_history=conversation_history or [],
+                    relevant_components=[],
+                    analysis_results={},
+                    chat_type=self._classify_query_type(query)
+                )
                 
-        except Exception as e:
-            self.logger.error(f"Chat query processing failed: {str(e)}")
-            return self._add_processing_info({
-                "response": f"I encountered an error processing your query: {str(e)}",
-                "response_type": "error",
-                "suggestions": ["Try rephrasing your question", "Check if the component name is correct"]
-            })
+                # Extract components mentioned in query
+                context.relevant_components = self._extract_components_from_query(query)
+                
+                # Get relevant analysis results if components found
+                if context.relevant_components:
+                    context.analysis_results = await self._get_relevant_analysis(context.relevant_components)
+                
+                # Generate response based on query type
+                if context.chat_type == 'analysis':
+                    result = await self._handle_analysis_query(context)
+                elif context.chat_type == 'lineage':
+                    result = await self._handle_lineage_query(context)
+                elif context.chat_type == 'comparison':
+                    result = await self._handle_comparison_query(context)
+                elif context.chat_type == 'search':
+                    result = await self._handle_search_query(context)
+                elif context.chat_type == 'impact':
+                    result = await self._handle_impact_query(context)
+                else:
+                    result = await self._handle_general_query(context)
+                
+                # Add processing info
+                result['gpu_used'] = self.gpu_id
+                result['agent_type'] = self.agent_type
+                result['using_shared_engine'] = self._using_shared_engine
+                result['engine_loaded_lazily'] = self._engine_loaded
+                
+                return result
+                    
+            except Exception as e:
+                self.logger.error(f"Chat query processing failed: {str(e)}")
+                return {
+                    "response": f"I encountered an error processing your query: {str(e)}",
+                    "response_type": "error",
+                    "suggestions": ["Try rephrasing your question", "Check if the component name is correct"],
+                    'gpu_used': self.gpu_id,
+                    'agent_type': self.agent_type
+                }
+        # Engine automatically released when exiting context manager
     
     def _classify_query_type(self, query: str) -> str:
         """Classify the type of query based on patterns"""
@@ -300,7 +268,7 @@ class OpulenceChatAgent:
         }
     
     async def _handle_lineage_query(self, context: ChatContext) -> Dict[str, Any]:
-        """Handle lineage-type queries - FIXED for dual GPU coordinator"""
+        """Handle lineage-type queries"""
         if not context.relevant_components:
             return {
                 "response": "To trace lineage, please specify a field, file, or data element you'd like me to trace.",
@@ -314,9 +282,8 @@ class OpulenceChatAgent:
         
         component = context.relevant_components[0]
         
-        # Perform lineage analysis - FIXED for dual GPU coordinator
+        # Perform lineage analysis
         try:
-            # FIX: Use dual GPU coordinator approach
             lineage_agent = self.coordinator.get_agent("lineage_analyzer")
             lineage_result = await lineage_agent.analyze_field_lineage(component)
             
@@ -341,7 +308,7 @@ class OpulenceChatAgent:
             }
     
     async def _handle_search_query(self, context: ChatContext) -> Dict[str, Any]:
-        """Handle search-type queries - FIXED for dual GPU coordinator"""
+        """Handle search-type queries"""
         # Extract search terms
         search_terms = self._extract_search_terms(context.user_query)
         
@@ -356,9 +323,8 @@ class OpulenceChatAgent:
                 ]
             }
         
-        # Perform vector search - FIXED for dual GPU coordinator
+        # Perform vector search
         try:
-            # FIX: Use dual GPU coordinator approach
             vector_agent = self.coordinator.get_agent("vector_index")
             search_results = await vector_agent.semantic_search(" ".join(search_terms), top_k=10)
             
@@ -912,18 +878,6 @@ Just describe what you'd like to know about your mainframe systems!
         
         self.logger.info("✅ ChatAgent resources cleaned up")
     
-    def get_agent_status(self) -> Dict[str, Any]:
-        """Get current agent status"""
-        return {
-            "agent_type": "chat_agent",
-            "gpu_id": self.gpu_id,
-            "engine_loaded": self._engine_loaded,
-            "using_shared_engine": self._using_shared_engine,
-            "engine_available": self._engine is not None,
-            "coordinator_connected": self.coordinator is not None,
-            "knowledge_base_loaded": len(self.knowledge_base) > 0,
-            "query_patterns_loaded": len(self.query_patterns) > 0
-        }
     
     def __repr__(self):
         return (f"OpulenceChatAgent("
@@ -931,9 +885,4 @@ Just describe what you'd like to know about your mainframe systems!
                 f"engine_loaded={self._engine_loaded}, "
                 f"shared_engine={self._using_shared_engine})")
     
-    def __del__(self):
-        """Destructor to ensure cleanup"""
-        try:
-            self.cleanup()
-        except:
-            pass  # Ignore cleanup errors during destruction
+    
