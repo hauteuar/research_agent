@@ -433,7 +433,7 @@ class VectorIndexAgent(BaseOpulenceAgent):  # ✅ INHERIT FROM BASE CLASS
     async def search_similar_components(self, component_name: str, top_k: int = 5) -> Dict[str, Any]:
         """Search for components similar to the given component name"""
         try:
-            await self._ensure_initialized()
+            await self._ensure_vector_initialized()
             
             # Create search query based on component name
             search_query = f"component {component_name} similar functionality"
@@ -475,7 +475,7 @@ class VectorIndexAgent(BaseOpulenceAgent):  # ✅ INHERIT FROM BASE CLASS
     async def rebuild_index_from_chunks(self, chunks: List[tuple]) -> Dict[str, Any]:
         """Rebuild index from provided chunks"""
         try:
-            await self._ensure_initialized()
+            await self._ensure_vector_initialized()
             
             # Clear existing indices
             self.faiss_index = faiss.IndexFlatIP(self.vector_dim)
@@ -527,7 +527,7 @@ class VectorIndexAgent(BaseOpulenceAgent):  # ✅ INHERIT FROM BASE CLASS
     async def process_batch_embeddings(self, limit: int = None) -> Dict[str, Any]:
         """Process all unembedded chunks in batch"""
         try:
-            await self._ensure_initialized()
+            await self._ensure_vector_initialized()
             # Get chunks that need embedding
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -664,7 +664,7 @@ class VectorIndexAgent(BaseOpulenceAgent):  # ✅ INHERIT FROM BASE CLASS
     async def semantic_search(self, query: str, top_k: int = 10, 
                         filter_metadata: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         try:
-            await self._ensure_initialized()
+            await self._ensure_vector_initialized()
             
             if self.faiss_index.ntotal == 0:
                 return []
@@ -871,8 +871,8 @@ class VectorIndexAgent(BaseOpulenceAgent):  # ✅ INHERIT FROM BASE CLASS
     
     async def _calculate_relevance_score(self, query: str, content: str, metadata: Dict) -> float:
         """Calculate relevance score using LLM"""
-        await self._ensure_initialized()
-        await self._ensure_llm_engine()
+        await self._ensure_vector_initialized()
+        #await self._ensure_llm_engine()
         
         prompt = f"""
         Rate the relevance of this code chunk to the query on a scale of 0.0 to 1.0:
@@ -1167,7 +1167,7 @@ class VectorIndexAgent(BaseOpulenceAgent):  # ✅ INHERIT FROM BASE CLASS
                                      enhance_query: bool = True) -> List[Dict[str, Any]]:
         """Advanced semantic search with query enhancement and result reranking"""
         try:
-            await self._ensure_initialized()
+            await self._ensure_vector_initialized()
             
             # Enhance query if requested
             search_query = query
@@ -1193,7 +1193,7 @@ class VectorIndexAgent(BaseOpulenceAgent):  # ✅ INHERIT FROM BASE CLASS
     async def find_code_dependencies(self, program_name: str) -> Dict[str, Any]:
         """Find code dependencies for a given program using embeddings"""
         try:
-            await self._ensure_initialized()
+            await self._ensure_vector_initialized()
             
             # Search for chunks related to this program
             program_chunks = await self.semantic_search(
@@ -1249,7 +1249,7 @@ class VectorIndexAgent(BaseOpulenceAgent):  # ✅ INHERIT FROM BASE CLASS
                                     top_k: int = 10) -> List[Dict[str, Any]]:
         """Search for code chunks by functionality description"""
         try:
-            await self._ensure_initialized()
+            await self._ensure_vector_initialized()
             
             # Create multiple search variations
             search_queries = [
@@ -1283,7 +1283,7 @@ class VectorIndexAgent(BaseOpulenceAgent):  # ✅ INHERIT FROM BASE CLASS
     async def export_embeddings(self, output_path: str) -> Dict[str, Any]:
         """Export embeddings and metadata to file"""
         try:
-            await self._ensure_initialized()
+            await self._ensure_vector_initialized()
             
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -1342,8 +1342,7 @@ class VectorIndexAgent(BaseOpulenceAgent):  # ✅ INHERIT FROM BASE CLASS
     async def import_embeddings(self, input_path: str) -> Dict[str, Any]:
         """Import embeddings from file"""
         try:
-            await self._ensure_initialized()
-            
+            await self._ensure_vector_initialized()
             with open(input_path, 'r') as f:
                 import_data = json.load(f)
             
