@@ -19,12 +19,14 @@ from datetime import datetime as dt
 import uuid
 import torch
 from transformers import AutoTokenizer, AutoModel
-from typing import Dict, List, Optional, Any, Tuple, Union
+#from typing import Dict, List, Optional, Any, Tuple, Union
 import faiss
 import chromadb
 from chromadb.api.types import EmbeddingFunction, Embeddings, Documents
 from vllm import AsyncLLMEngine, SamplingParams
+from agents.base_agent import BaseOpulenceAgent
 from typing import Dict, List, Optional, Any, Tuple, Union, TYPE_CHECKING
+
 
 if TYPE_CHECKING:
     from .code_parser_agent import CodeChunk
@@ -139,19 +141,16 @@ class LocalCodeBERTEmbeddingFunction(EmbeddingFunction):
         except Exception as e:
             raise RuntimeError(f"Embedding generation failed: {e}")
 
-class VectorIndexAgent:
-    """Agent for building and managing vector indices - Airgap compatible"""
+class VectorIndexAgent(BaseOpulenceAgent):  # ✅ INHERIT FROM BASE CLASS
+    """Agent for building and managing vector indices - with automatic resource management"""
     
-    def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
-                 gpu_id: int = None, coordinator=None, local_model_path: str = None):
-        self.llm_engine = llm_engine
-        self.db_path = db_path or "opulence_data.db"
-        self.gpu_id = gpu_id
-        self.coordinator = coordinator
-        self.logger = logging.getLogger(__name__)
-        self._initialized = False
-        self._engine_created = False
-        self._using_coordinator_llm = False
+    def __init__(self, coordinator, llm_engine: AsyncLLMEngine = None, 
+                 db_path: str = "opulence_data.db", gpu_id: int = 0, 
+                 local_model_path: str = None):
+        
+        # ✅ CALL BASE CLASS CONSTRUCTOR FIRST
+        super().__init__(coordinator, "vector_index", db_path, gpu_id)
+ 
         
         # Local model configuration
         self.local_model_path = local_model_path or "./models/microsoft-codebert-base"
@@ -175,33 +174,39 @@ class VectorIndexAgent:
         # Initialize components
         asyncio.create_task(self._initialize_components())
 
-    async def _ensure_initialized(self):
-        """Ensure components are initialized before use"""
-        if not self._initialized:
+
+    async def _ensure_vector_initialized(self):
+        """Ensure vector components are initialized before use"""
+        if not self._vector_initialized:
             await self._initialize_components()
-            self._initialized = True
+            self._vector_initialized = True
 
     async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
-        """Generate text with LLM - handles both old and new vLLM API"""
+        """Generate text with LLM using base class engine management"""
         try:
+            # Use current engine from context (set by base class context manager)
+            engine = self._engine
+            if engine is None:
+                raise RuntimeError("No LLM engine available in current context")
+
+            await asyncio.sleep(0.1)
+
             # Try new API first (with request_id)
             request_id = str(uuid.uuid4())
-            #async_generator = self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
-            async_generator = await self.coordinator.safe_generate(prompt, sampling_params, request_id=request_id)
-
-            # Properly handle the async generator
-            async for result in async_generator:
+            try:
+                async for output in engine.generate(prompt, sampling_params, request_id=request_id):
+                    result = output
+                    break
                 return result.outputs[0].text.strip()
-                
-        except TypeError as e:
-            if "request_id" in str(e):
-                # Fallback to old API (without request_id)
-                #async_generator = self.llm_engine.generate(prompt, sampling_params)
-                async_generator = await self.coordinator.safe_generate(prompt, sampling_params)
-                async for result in async_generator:
+            except TypeError as e:
+                if "request_id" in str(e):
+                    # Fallback to old API (without request_id)
+                    async for output in engine.generate(prompt, sampling_params):
+                        result = output
+                        break
                     return result.outputs[0].text.strip()
-            else:
-                raise e
+                else:
+                    raise e
         except Exception as e:
             self.logger.error(f"LLM generation failed: {str(e)}")
             return ""
@@ -217,99 +222,6 @@ class VectorIndexAgent:
         except (json.JSONDecodeError, TypeError):
             return {}
 
-    async def _ensure_llm_engine(self):
-        """Ensure LLM engine is available - use coordinator first, fallback to own"""
-        if self.llm_engine is not None:
-            return  # Already have engine
-        
-        # Try to get from coordinator first
-        if self.coordinator is not None:
-            try:
-                # Get available GPU from coordinator
-                best_gpu = await self.coordinator.get_available_gpu_for_agent("vector_index")
-                if best_gpu is not None:
-                    # Get shared LLM engine from coordinator
-                    engine = await self.coordinator.get_or_create_llm_engine(best_gpu)
-                    self.llm_engine = engine
-                    self.gpu_id = best_gpu
-                    self._using_coordinator_llm = True
-                    self.logger.info(f"VectorIndex using coordinator's LLM on GPU {best_gpu}")
-                    return
-            except Exception as e:
-                self.logger.warning(f"Failed to get LLM from coordinator: {e}")
-        
-        # Try to get from global coordinator
-        if not self._engine_created:
-            try:
-                from opulence_coordinator import get_dynamic_coordinator
-                global_coordinator = get_dynamic_coordinator()
-                
-                best_gpu = await global_coordinator.get_available_gpu_for_agent("vector_index")
-                if best_gpu is not None:
-                    engine = await global_coordinator.get_or_create_llm_engine(best_gpu)
-                    self.llm_engine = engine
-                    self.gpu_id = best_gpu
-                    self._using_coordinator_llm = True
-                    self.logger.info(f"VectorIndex using global coordinator's LLM on GPU {best_gpu}")
-                    return
-            except Exception as e:
-                self.logger.warning(f"Failed to get LLM from global coordinator: {e}")
-        
-        # Last resort: create own engine
-        if not self._engine_created:
-            await self._create_llm_engine()
-    
-    async def _create_llm_engine(self):
-        """Create own LLM engine as fallback (smaller memory footprint)"""
-        try:
-            from gpu_force_fix import GPUForcer
-            
-            best_gpu = GPUForcer.find_best_gpu_with_memory(1.5)  # Lower requirement
-            if best_gpu is None:
-                raise RuntimeError("No suitable GPU found for fallback LLM engine")
-            
-            self.logger.warning(f"VectorIndex creating fallback LLM on GPU {best_gpu}")
-            
-            original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
-            
-            try:
-                GPUForcer.force_gpu_environment(best_gpu)
-                
-                # Create smaller engine to avoid conflicts
-                engine_args = GPUForcer.create_vllm_engine_args(
-                    "codellama/CodeLlama-7b-Instruct-hf",
-                    2048  # Smaller context
-                )
-                engine_args.gpu_memory_utilization = 0.3  # Use less memory
-                
-                from vllm import AsyncLLMEngine
-                self.llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
-                self.gpu_id = best_gpu
-                self._engine_created = True
-                self._using_coordinator_llm = False
-                
-                self.logger.info(f"✅ VectorIndex fallback LLM created on GPU {best_gpu}")
-                
-            finally:
-                if original_cuda_visible is not None:
-                    os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible
-                elif 'CUDA_VISIBLE_DEVICES' in os.environ:
-                    del os.environ['CUDA_VISIBLE_DEVICES']
-                    
-        except Exception as e:
-            self.logger.error(f"Failed to create fallback LLM engine: {str(e)}")
-            raise
-
-    def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        """Add processing information to results"""
-        if isinstance(result, dict):
-            result['gpu_used'] = self.gpu_id
-            result['agent_type'] = 'vector_index'
-            result['using_coordinator_llm'] = self._using_coordinator_llm
-            result['using_local_model'] = True
-            result['model_path'] = self.local_model_path
-        return result
-    
     async def _initialize_components(self):
         """Initialize embedding model and vector databases"""
         try:
@@ -365,6 +277,8 @@ class VectorIndexAgent:
                     metadata={"description": "Opulence mainframe code chunks - local embeddings"}
                 )
                 self.logger.info("Created new ChromaDB collection with local embeddings")
+            
+            self._vector_initialized = True
             
         except Exception as e:
             self.logger.error(f"Failed to initialize vector components: {str(e)}")
@@ -424,90 +338,97 @@ class VectorIndexAgent:
         return " | ".join(text_parts)
 
     async def create_embeddings_for_chunks(self, chunks: List[Union[tuple, 'CodeChunk']]) -> Dict[str, Any]:
-        """Create embeddings for a list of chunks"""
-        try:
-            await self._ensure_initialized()
-            
-            embeddings_created = 0
-            
-            for chunk_data in chunks:
-                try:
-                    if isinstance(chunk_data, tuple):
-                        chunk_id, program_name, chunk_id_str, chunk_type, content, metadata_str = chunk_data
-                        metadata = json.loads(metadata_str) if metadata_str else {}
-                    else:  # It's a CodeChunk object
-                        chunk_id = getattr(chunk_data, 'chunk_id', str(uuid.uuid4()))
-                        program_name = chunk_data.program_name
-                        chunk_id_str = chunk_data.chunk_id
-                        chunk_type = chunk_data.chunk_type
-                        content = chunk_data.content
-                        metadata = chunk_data.metadata if chunk_data.metadata else {}
-                    
-                    # Ensure metadata is a dictionary
-                    if not isinstance(metadata, dict):
-                        metadata = {}
-                    
-                    # Generate embedding using local model
-                    embedding = await self.embed_code_chunk(content, metadata)
-                    
-                    # Store in FAISS
-                    faiss_id = self.faiss_index.ntotal
-                    self.faiss_index.add(embedding.reshape(1, -1).astype('float32'))
-                    
-                    # Store in ChromaDB (will use local embedding function automatically)
-                    chroma_metadata = {
-                        "program_name": program_name,
-                        "chunk_id": chunk_id_str,
-                        "chunk_type": chunk_type,
-                        "faiss_id": faiss_id
-                    }
-                    
-                    # Add other metadata safely
-                    for key, value in metadata.items():
-                        if isinstance(value, (str, int, float, bool)):
-                            chroma_metadata[key] = value
-                        elif isinstance(value, list):
-                            chroma_metadata[key] = json.dumps(value)
-                        elif isinstance(value, dict):
-                            chroma_metadata[key] = json.dumps(value)
-                        else:
-                            chroma_metadata[key] = str(value)
-                    
-                    self.collection.add(
-                        documents=[content],
-                        metadatas=[chroma_metadata],
-                        ids=[f"{program_name}_{chunk_id_str}"]
-                    )
-                    
-                    # Store embedding reference in SQLite
-                    embedding_id = f"{program_name}_{chunk_id_str}_embed"
-                    await self._store_embedding_reference(
-                        chunk_id if isinstance(chunk_id, int) else hash(chunk_id_str), 
-                        embedding_id, 
-                        faiss_id, 
-                        embedding.tolist()
-                    )
-                    
-                    embeddings_created += 1
-                    
-                except Exception as e:
-                    self.logger.error(f"Failed to process chunk {chunk_id_str}: {str(e)}")
-                    continue
-            
-            # Save FAISS index
-            await self._save_faiss_index()
-            
-            result = {
-                "status": "success",
-                "embeddings_created": embeddings_created,
-                "total_chunks": len(chunks)
-            }
-            
-            return self._add_processing_info(result)
-            
-        except Exception as e:
-            self.logger.error(f"Chunk embedding creation failed: {str(e)}")
-            return self._add_processing_info({"status": "error", "error": str(e)})
+        """Create embeddings for a list of chunks with automatic engine management"""
+        
+        # ✅ USE BASE CLASS CONTEXT MANAGER
+        async with self.get_engine_context() as engine:
+            try:
+                await self._ensure_vector_initialized()
+                
+                embeddings_created = 0
+                
+                for chunk_data in chunks:
+                    try:
+                        if isinstance(chunk_data, tuple):
+                            chunk_id, program_name, chunk_id_str, chunk_type, content, metadata_str = chunk_data
+                            metadata = json.loads(metadata_str) if metadata_str else {}
+                        else:  # It's a CodeChunk object
+                            chunk_id = getattr(chunk_data, 'chunk_id', str(uuid.uuid4()))
+                            program_name = chunk_data.program_name
+                            chunk_id_str = chunk_data.chunk_id
+                            chunk_type = chunk_data.chunk_type
+                            content = chunk_data.content
+                            metadata = chunk_data.metadata if chunk_data.metadata else {}
+                        
+                        # Ensure metadata is a dictionary
+                        if not isinstance(metadata, dict):
+                            metadata = {}
+                        
+                        # Generate embedding using local model
+                        embedding = await self.embed_code_chunk(content, metadata)
+                        
+                        # Store in FAISS
+                        faiss_id = self.faiss_index.ntotal
+                        self.faiss_index.add(embedding.reshape(1, -1).astype('float32'))
+                        
+                        # Store in ChromaDB (will use local embedding function automatically)
+                        chroma_metadata = {
+                            "program_name": program_name,
+                            "chunk_id": chunk_id_str,
+                            "chunk_type": chunk_type,
+                            "faiss_id": faiss_id
+                        }
+                        
+                        # Add other metadata safely
+                        for key, value in metadata.items():
+                            if isinstance(value, (str, int, float, bool)):
+                                chroma_metadata[key] = value
+                            elif isinstance(value, list):
+                                chroma_metadata[key] = json.dumps(value)
+                            elif isinstance(value, dict):
+                                chroma_metadata[key] = json.dumps(value)
+                            else:
+                                chroma_metadata[key] = str(value)
+                        
+                        self.collection.add(
+                            documents=[content],
+                            metadatas=[chroma_metadata],
+                            ids=[f"{program_name}_{chunk_id_str}"]
+                        )
+                        
+                        # Store embedding reference in SQLite
+                        embedding_id = f"{program_name}_{chunk_id_str}_embed"
+                        await self._store_embedding_reference(
+                            chunk_id if isinstance(chunk_id, int) else hash(chunk_id_str), 
+                            embedding_id, 
+                            faiss_id, 
+                            embedding.tolist()
+                        )
+                        
+                        embeddings_created += 1
+                        
+                    except Exception as e:
+                        self.logger.error(f"Failed to process chunk {chunk_id_str}: {str(e)}")
+                        continue
+                
+                         
+                # Final save
+                await self._save_faiss_index()
+                
+                result = {
+                    "status": "success",
+                    "total_chunks": len(chunks),
+                    "embeddings_created": embeddings_created,
+                    "faiss_index_size": self.faiss_index.ntotal,
+                    'gpu_used': self.gpu_id,
+                    'agent_type': self.agent_type
+                }
+                
+                return result
+                
+            except Exception as e:
+                    self.logger.error(f"Batch embedding processing failed: {str(e)}")
+                    return {"status": "error", "error": str(e)}
 
     async def search_similar_components(self, component_name: str, top_k: int = 5) -> Dict[str, Any]:
         """Search for components similar to the given component name"""
@@ -693,10 +614,10 @@ class VectorIndexAgent:
             self.logger.error(f"Batch embedding processing failed: {str(e)}")
             return self._add_processing_info({"status": "error", "error": str(e)})
     
-    async def _store_embedding_reference(self, chunk_id: int, embedding_id: str, 
+     async def _store_embedding_reference(self, chunk_id: int, embedding_id: str, 
                                        faiss_id: int, embedding_vector: List[float]):
         """Store embedding reference in SQLite"""
-        await self._ensure_initialized()
+        await self._ensure_vector_initialized()
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -798,74 +719,74 @@ class VectorIndexAgent:
             return []
     
     async def find_similar_code_patterns(self, reference_chunk_id: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        """Find similar code patterns to a reference chunk"""
-        try:
-            await self._ensure_initialized()
-            # Get reference chunk embedding
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT ve.embedding_vector, pc.content, pc.metadata
-                FROM vector_embeddings ve
-                JOIN program_chunks pc ON ve.chunk_id = pc.id
-                WHERE pc.chunk_id = ?
-            """, (reference_chunk_id,))
-            
-            result = cursor.fetchone()
-            conn.close()
-            
-            if not result:
-                return []
-            
-            ref_embedding = np.array(json.loads(result[0]))
-            ref_content = result[1]
-            ref_metadata = json.loads(result[2]) if result[2] else {}
-            
-            # Search for similar patterns
-            scores, indices = self.faiss_index.search(
-                ref_embedding.reshape(1, -1).astype('float32'), 
-                top_k + 1  # +1 because reference will be included
-            )
-            
-            similar_patterns = []
-            for score, idx in zip(scores[0], indices[0]):
-                if idx == -1:
-                    continue
+            """Find similar code patterns to a reference chunk"""
+            try:
+                await self._ensure_vector_initialized()
+                # Get reference chunk embedding
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
                 
-                # Get chunk data using local embeddings
-                chroma_results = self.collection.query(
-                    query_texts=[ref_content],  # Use local embedding function
-                    where={"faiss_id": int(idx)},
-                    n_results=1
+                cursor.execute("""
+                    SELECT ve.embedding_vector, pc.content, pc.metadata
+                    FROM vector_embeddings ve
+                    JOIN program_chunks pc ON ve.chunk_id = pc.id
+                    WHERE pc.chunk_id = ?
+                """, (reference_chunk_id,))
+                
+                result = cursor.fetchone()
+                conn.close()
+                
+                if not result:
+                    return []
+                
+                ref_embedding = np.array(json.loads(result[0]))
+                ref_content = result[1]
+                ref_metadata = json.loads(result[2]) if result[2] else {}
+                
+                # Search for similar patterns
+                scores, indices = self.faiss_index.search(
+                    ref_embedding.reshape(1, -1).astype('float32'), 
+                    top_k + 1  # +1 because reference will be included
                 )
                 
-                if chroma_results['documents']:
-                    metadata = chroma_results['metadatas'][0][0]
-                    
-                    # Skip if this is the reference chunk itself
-                    if metadata.get('chunk_id') == reference_chunk_id:
+                similar_patterns = []
+                for score, idx in zip(scores[0], indices[0]):
+                    if idx == -1:
                         continue
                     
-                    similar_patterns.append({
-                        "content": chroma_results['documents'][0][0],
-                        "metadata": metadata,
-                        "similarity_score": float(score),
-                        "pattern_type": await self._analyze_pattern_similarity(
-                            ref_content, chroma_results['documents'][0][0]
-                        )
-                    })
-            
-            return similar_patterns[:top_k]
-            
-        except Exception as e:
-            self.logger.error(f"Pattern search failed: {str(e)}")
-            return []
+                    # Get chunk data using local embeddings
+                    chroma_results = self.collection.query(
+                        query_texts=[ref_content],  # Use local embedding function
+                        where={"faiss_id": int(idx)},
+                        n_results=1
+                    )
+                    
+                    if chroma_results['documents']:
+                        metadata = chroma_results['metadatas'][0][0]
+                        
+                        # Skip if this is the reference chunk itself
+                        if metadata.get('chunk_id') == reference_chunk_id:
+                            continue
+                        
+                        similar_patterns.append({
+                            "content": chroma_results['documents'][0][0],
+                            "metadata": metadata,
+                            "similarity_score": float(score),
+                            "pattern_type": await self._analyze_pattern_similarity(
+                                ref_content, chroma_results['documents'][0][0]
+                            )
+                        })
+                
+                return similar_patterns[:top_k]
+                
+            except Exception as e:
+                self.logger.error(f"Pattern search failed: {str(e)}")
+                return []
     
     async def _analyze_pattern_similarity(self, ref_code: str, similar_code: str) -> str:
         """Analyze what makes two code patterns similar"""
-        await self._ensure_llm_engine()
-        await self._ensure_initialized()
+        
+        await self._ensure_vector_initialized()
         
         prompt = f"""
         Compare these two code patterns and identify the similarity type:
@@ -893,8 +814,8 @@ class VectorIndexAgent:
 
     async def _enhance_search_query(self, pattern_description: str) -> str:
         """Use LLM to enhance search query"""
-        await self._ensure_llm_engine()
-        await self._ensure_initialized()
+        
+        await self._ensure_vector_initialized()
         
         prompt = f"""
         Convert this natural language pattern description into a technical search query for mainframe COBOL/JCL code:
@@ -920,8 +841,6 @@ class VectorIndexAgent:
 
     async def _rank_search_results(self, original_query: str, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Use LLM to rank search results by relevance"""
-        await self._ensure_llm_engine()
-        await self._ensure_initialized()
         
         if not results:
             return results
@@ -939,7 +858,7 @@ class VectorIndexAgent:
         
         results.sort(key=combined_score, reverse=True)
         return results
-
+    
     async def _calculate_relevance_score(self, query: str, content: str, metadata: Dict) -> float:
         """Calculate relevance score using LLM"""
         await self._ensure_initialized()
@@ -975,7 +894,7 @@ class VectorIndexAgent:
     async def build_code_knowledge_graph(self) -> Dict[str, Any]:
         """Build a knowledge graph of code relationships"""
         try:
-            await self._ensure_initialized()
+            await self._ensure_vector_initialized()
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
@@ -1138,7 +1057,7 @@ class VectorIndexAgent:
     async def get_embedding_statistics(self) -> Dict[str, Any]:
         """Get statistics about the embedding index"""
         try:
-            await self._ensure_initialized()
+            await self._ensure_vector_initialized()
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
@@ -1177,19 +1096,21 @@ class VectorIndexAgent:
                 "vector_dimension": self.vector_dim,
                 "index_file_exists": Path(self.faiss_index_path).exists(),
                 "local_model_path": self.local_model_path,
-                "airgap_compatible": True
+                "airgap_compatible": True,
+                'gpu_used': self.gpu_id,
+                'agent_type': self.agent_type
             }
             
-            return self._add_processing_info(result)
+            return result
             
         except Exception as e:
             self.logger.error(f"Failed to get embedding statistics: {str(e)}")
-            return self._add_processing_info({})
+            return {'gpu_used': self.gpu_id, 'agent_type': self.agent_type}
     
     async def rebuild_index(self) -> Dict[str, Any]:
         """Rebuild the entire vector index from scratch"""
         try:
-            await self._ensure_initialized()
+            await self._ensure_vector_initialized()
             # Clear existing indices
             self.faiss_index = faiss.IndexFlatIP(self.vector_dim)
             
@@ -1224,11 +1145,12 @@ class VectorIndexAgent:
                 **result
             }
             
-            return self._add_processing_info(final_result)
+            return final_result
             
         except Exception as e:
             self.logger.error(f"Index rebuild failed: {str(e)}")
-            return self._add_processing_info({"status": "error", "error": str(e)})
+            return {"status": "error", "error": str(e)}
+
 
     async def advanced_semantic_search(self, query: str, top_k: int = 10, 
                                      use_reranking: bool = True,
