@@ -37,6 +37,9 @@ class LineageEdge:
     properties: Dict[str, Any]
     confidence_score: float = 1.0
 
+
+class LineageAnalyzerAgent:
+    """Agent to analyze field lineage, data flow, and component lifecycle"""
     def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
                  gpu_id: int = None, coordinator=None):
         # REMOVE: self.llm_engine = llm_engine
