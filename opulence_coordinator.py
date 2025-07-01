@@ -1035,15 +1035,6 @@ def create_dual_gpu_coordinator(
         return DualGPUOpulenceCoordinator(config)
 
 
-# Global coordinator instance for easy access
-_global_coordinator = None
-
-def get_global_coordinator() -> DualGPUOpulenceCoordinator:
-    """Get or create global coordinator instance"""
-    global _global_coordinator
-    if _global_coordinator is None:
-        _global_coordinator = create_dual_gpu_coordinator(force_gpu_ids=[1, 2]) 
-    return _global_coordinator
 
 
 def reset_global_coordinator():
@@ -1079,3 +1070,61 @@ def get_system_status() -> Dict[str, Any]:
     coordinator = get_global_coordinator()
     return coordinator.get_health_status()
 
+# Add these functions to your opulence_coordinator.py file
+
+def create_shared_server_coordinator() -> DualGPUOpulenceCoordinator:
+    """Create coordinator optimized for shared server environments"""
+    
+    config = DualGPUOpulenceConfig(
+        model_name="microsoft/DialoGPT-medium",  # Smaller model for shared environments
+        exclude_gpu_0=True,  # Don't compete with others on GPU 0
+        min_memory_gb=4.0,   # Lower memory requirement per GPU
+        max_tokens=512,      # Smaller context window
+        auto_cleanup=True,
+        force_gpu_ids=None,  # Auto-select best available GPUs
+        batch_size=4         # Smaller batch size per GPU
+    )
+    
+    return DualGPUOpulenceCoordinator(config)
+
+
+def create_dedicated_server_coordinator() -> DualGPUOpulenceCoordinator:
+    """Create coordinator optimized for dedicated servers"""
+    
+    config = DualGPUOpulenceConfig(
+        model_name="codellama/CodeLlama-7b-Instruct-hf",
+        exclude_gpu_0=False,  # Can use any GPU on dedicated server
+        min_memory_gb=8.0,    # Higher memory requirement per GPU
+        max_tokens=2048,      # Larger context window
+        auto_cleanup=True,
+        force_gpu_ids=None,   # Auto-select best available GPUs
+        batch_size=8          # Larger batch size per GPU
+    )
+    
+    return DualGPUOpulenceCoordinator(config)
+
+
+# Also update the get_global_coordinator function
+def get_global_coordinator() -> DualGPUOpulenceCoordinator:
+    """Get or create global coordinator instance"""
+    global _global_coordinator
+    if _global_coordinator is None:
+        _global_coordinator = create_dual_gpu_coordinator(force_gpu_ids=[1, 2])
+    return _global_coordinator
+
+
+# Update the __all__ export list at the bottom of the file
+__all__ = [
+    'DualGPUOpulenceCoordinator',
+    'DualGPUOpulenceConfig', 
+    'SingleGPUChatEnhancer',           # Note: keeping same name as it works with dual GPU
+    'create_dual_gpu_coordinator',
+    'create_shared_server_coordinator',    # Add this
+    'create_dedicated_server_coordinator', # Add this
+    'get_global_coordinator',
+    'quick_file_processing',
+    'quick_component_analysis',
+    'quick_chat_query',
+    'get_system_status',
+    'ProductionCoordinatorManager'
+]
