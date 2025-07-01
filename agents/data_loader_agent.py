@@ -1247,7 +1247,252 @@ class DataLoaderAgent:
         except Exception as e:
             self.logger.error(f"Failed to store copybook chunks: {str(e)}")
             raise
+    
+        
+    
+    async def _parse_copybook_chunked(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
+        """Parse large copybook files by processing them in chunks"""
+        try:
+            self.logger.info(f"📦 Processing large copybook {filename} in chunks...")
             
+            # Split content into logical chunks (preserve record structure)
+            chunks = self._chunk_copybook_by_structure(content)
+            
+            if not chunks:
+                self.logger.warning("No valid chunks created from copybook content")
+                return None
+            
+            self.logger.info(f"Created {len(chunks)} chunks for processing")
+            
+            # Process each chunk
+            all_fields = []
+            record_name = None
+            chunk_results = []
+            
+            for i, chunk in enumerate(chunks):
+                self.logger.info(f"Processing chunk {i+1}/{len(chunks)}")
+                
+                # Create chunk-specific prompt
+                prompt = f"""
+                You are a COBOL expert. Parse this copybook chunk and extract field definitions.
+                
+                COPYBOOK CHUNK {i+1} of {len(chunks)}:
+                {chunk}
+                
+                Extract field definitions with these rules:
+                1. Only include elementary items (fields with PIC clauses)
+                2. Convert COBOL names to SQL-safe names (replace hyphens with underscores)
+                3. Handle FILLER fields by giving them unique names
+                4. Skip REDEFINES fields (they're overlays)
+                5. Convert PIC clauses to appropriate SQL types
+                6. If this is chunk 1, also extract the record name from 01 level
+                
+                Return ONLY valid JSON in this exact format:
+                {{
+                    "record_name": "RECORD_NAME" (only if found in this chunk),
+                    "fields": [
+                        {{
+                            "name": "FIELD_NAME",
+                            "type": "VARCHAR(50)",
+                            "level": "05",
+                            "pic_clause": "PIC X(50)",
+                            "nullable": true
+                        }}
+                    ],
+                    "chunk_number": {i+1}
+                }}
+                """
+                
+                sampling_params = SamplingParams(temperature=0.1, max_tokens=1500)
+                
+                try:
+                    response_text = await self._generate_with_llm(prompt, sampling_params)
+                    chunk_result = self._extract_json_from_response(response_text)
+                    
+                    if chunk_result:
+                        # Extract record name from first chunk if available
+                        if i == 0 and 'record_name' in chunk_result and chunk_result['record_name']:
+                            record_name = chunk_result['record_name']
+                        
+                        # Collect fields from this chunk
+                        if 'fields' in chunk_result and isinstance(chunk_result['fields'], list):
+                            chunk_fields = chunk_result['fields']
+                            self.logger.info(f"Chunk {i+1} yielded {len(chunk_fields)} fields")
+                            all_fields.extend(chunk_fields)
+                            
+                        chunk_results.append({
+                            'chunk_number': i+1,
+                            'field_count': len(chunk_result.get('fields', [])),
+                            'success': True
+                        })
+                    else:
+                        self.logger.warning(f"Failed to parse chunk {i+1}")
+                        chunk_results.append({
+                            'chunk_number': i+1,
+                            'field_count': 0,
+                            'success': False,
+                            'error': 'JSON parsing failed'
+                        })
+                    
+                    # Small delay between chunks to avoid overwhelming the LLM
+                    if i < len(chunks) - 1:
+                        await asyncio.sleep(0.3)
+                        
+                except Exception as e:
+                    self.logger.error(f"Error processing chunk {i+1}: {str(e)}")
+                    chunk_results.append({
+                        'chunk_number': i+1,
+                        'field_count': 0,
+                        'success': False,
+                        'error': str(e)
+                    })
+            
+            # Combine results
+            if not all_fields:
+                self.logger.error("No fields extracted from any chunks")
+                return None
+            
+            # Use filename-based record name if not found in chunks
+            if not record_name:
+                record_name = self._generate_table_name(filename)
+            
+            # Clean up field names and ensure uniqueness
+            processed_fields = self._deduplicate_and_clean_fields(all_fields)
+            
+            self.logger.info(f"✅ Chunked parsing complete: {len(processed_fields)} total fields")
+            
+            result = {
+                "record_name": record_name,
+                "structure_type": "flat",
+                "fields": processed_fields,
+                "parsing_method": "chunked_llm",
+                "chunk_count": len(chunks),
+                "chunk_results": chunk_results,
+                "total_fields_found": len(all_fields),
+                "final_field_count": len(processed_fields)
+            }
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Chunked copybook parsing failed: {str(e)}")
+            return None
+
+    def _chunk_copybook_by_structure(self, content: str) -> List[str]:
+        """Split copybook content into logical chunks preserving structure"""
+        lines = content.split('\n')
+        chunks = []
+        current_chunk = []
+        current_size = 0
+        max_chunk_size = 3000  # Characters per chunk (safe for LLM context)
+        
+        # Always include 01 level record in first chunk
+        record_line = None
+        for i, line in enumerate(lines):
+            if re.match(r'^\s*01\s+[A-Z]', line, re.IGNORECASE):
+                record_line = line
+                break
+        
+        # Start first chunk with record line if found
+        if record_line:
+            current_chunk.append(record_line)
+            current_size = len(record_line)
+        
+        for line in lines:
+            line_length = len(line)
+            
+            # Skip the record line if we already added it
+            if record_line and line.strip() == record_line.strip():
+                continue
+            
+            # Check if adding this line would exceed chunk size
+            if current_size + line_length > max_chunk_size and current_chunk:
+                # Try to break at a logical boundary (level number)
+                if re.match(r'^\s*\d+\s+[A-Z]', line, re.IGNORECASE):
+                    # This line starts a new field, good place to break
+                    chunks.append('\n'.join(current_chunk))
+                    current_chunk = []
+                    current_size = 0
+                    
+                    # Include record line reference in subsequent chunks
+                    if record_line and len(chunks) > 1:
+                        current_chunk.append(f"* Record: {record_line.strip()}")
+                        current_size += len(current_chunk[0])
+            
+            current_chunk.append(line)
+            current_size += line_length
+        
+        # Add final chunk
+        if current_chunk:
+            chunks.append('\n'.join(current_chunk))
+        
+        # Filter out very small chunks (likely just comments)
+        meaningful_chunks = []
+        for chunk in chunks:
+            field_lines = [line for line in chunk.split('\n') 
+                        if re.match(r'^\s*\d+\s+[A-Z]', line, re.IGNORECASE)]
+            if len(field_lines) >= 2:  # At least 2 field definitions
+                meaningful_chunks.append(chunk)
+        
+        return meaningful_chunks
+
+    def _extract_json_from_response(self, response_text: str) -> Optional[Dict]:
+        """Extract and parse JSON from LLM response"""
+        try:
+            # Try to find JSON in the response
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group()
+                return json.loads(json_str)
+            else:
+                self.logger.warning("No JSON found in LLM response")
+                return None
+        except json.JSONDecodeError as e:
+            self.logger.error(f"JSON parsing error: {str(e)}")
+            self.logger.debug(f"Raw response: {response_text[:300]}...")
+            return None
+
+    def _deduplicate_and_clean_fields(self, fields: List[Dict]) -> List[Dict]:
+        """Remove duplicates and clean up field names"""
+        seen_names = set()
+        clean_fields = []
+        filler_counter = 1
+        
+        for field in fields:
+            if not isinstance(field, dict) or 'name' not in field:
+                continue
+            
+            original_name = field['name']
+            clean_name = self._clean_column_name(original_name)
+            
+            # Handle FILLER fields
+            if clean_name.upper().startswith('FILLER'):
+                clean_name = f"FILLER_{filler_counter:03d}"
+                filler_counter += 1
+            
+            # Ensure unique names
+            base_name = clean_name
+            counter = 1
+            while clean_name in seen_names:
+                clean_name = f"{base_name}_{counter}"
+                counter += 1
+            
+            seen_names.add(clean_name)
+            
+            # Update field with clean name
+            field['name'] = clean_name
+            if 'original_name' not in field:
+                field['original_name'] = original_name
+            
+            # Set defaults for missing properties
+            field.setdefault('nullable', True)
+            field.setdefault('level', '05')
+            field.setdefault('pic_clause', '')
+            field.setdefault('type', 'VARCHAR(50)')
+            
+            clean_fields.append(field)
+        
+        return clean_fields       
     async def _parse_copybook_structure_llm(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
         """LLM-based parsing with better error handling"""
         
