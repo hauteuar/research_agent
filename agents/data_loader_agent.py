@@ -22,46 +22,53 @@ import hashlib
 from vllm import AsyncLLMEngine, SamplingParams
 
 class DataLoaderAgent:
-    """Agent for loading and mapping data files and schemas"""
-    
     def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
                  gpu_id: int = None, coordinator=None):
-        self.llm_engine = llm_engine
-        self.db_path = db_path or "opulence_data.db"  # ADD default value
+        self.coordinator = coordinator
+        self.db_path = db_path or "opulence_data.db"
         self.gpu_id = gpu_id
-        self.coordinator = coordinator  # ADD this line
         self.logger = logging.getLogger(__name__)
         
-        # ADD these lines for coordinator integration
-        self._engine_created = False
-        self._using_coordinator_llm = False
+        # Don't load engine immediately - wait for first use
+        self.llm_engine = llm_engine
+        self._engine_loading = False
         
-        # Initialize SQLite tables for data mapping
         self._init_data_tables()
+        
+        if self.llm_engine:
+            self.logger.info(f"✅ DataLoader initialized with pre-loaded engine on GPU {gpu_id}")
+        else:
+            self.logger.info(f"💤 DataLoader initialized for GPU {gpu_id} (engine will load on first use)")
     
-    # ADD this new method
     async def _ensure_llm_engine(self):
-        """Get LLM engine from coordinator with GPU assignment"""
+        """Ensure LLM engine is available with lazy loading"""
         if self.llm_engine is not None:
+            return  # Already have engine
+        
+        if self._engine_loading:
+            # Wait for concurrent loading to complete
+            while self._engine_loading:
+                await asyncio.sleep(0.1)
             return
         
-        if self.coordinator and hasattr(self.coordinator, 'get_shared_llm_engine'):
-            try:
-                assigned_gpu = self.coordinator.agent_gpu_assignments.get("data_loader")
-                if assigned_gpu is not None:
-                    self.llm_engine = self.coordinator.get_shared_llm_engine(assigned_gpu)
-                    self.gpu_id = assigned_gpu
-                    self._using_shared_engine = True
-                    self.logger.info(f"✅ DataLoader using shared engine on GPU {assigned_gpu}")
-                    return
-            except Exception as e:
-                self.logger.warning(f"Failed to get shared engine: {e}")
+        self._engine_loading = True
         
-        # Fallback to creating own engine (not recommended for dual GPU)
-        if not self._engine_created:
-            self.logger.warning("⚠️ Creating fallback engine - this may cause duplicate model loading")
-            await self._create_fallback_engine()
-
+        try:
+            if self.coordinator and hasattr(self.coordinator, 'get_or_create_shared_engine'):
+                self.logger.info(f"🔧 Loading LLM engine on GPU {self.gpu_id}...")
+                
+                # Get shared engine with lazy loading
+                self.llm_engine = await self.coordinator.get_or_create_shared_engine(self.gpu_id)
+                
+                self.logger.info(f"✅ LLM engine ready on GPU {self.gpu_id}")
+            else:
+                raise RuntimeError("No coordinator available for engine loading")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Failed to load LLM engine: {e}")
+            raise
+        finally:
+            self._engine_loading = False
 
     async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
         """Generate text with LLM - handles both old and new vLLM API"""
