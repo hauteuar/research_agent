@@ -37,21 +37,22 @@ class LineageEdge:
     properties: Dict[str, Any]
     confidence_score: float = 1.0
 
-class LineageAnalyzerAgent:
-    """Agent for analyzing field lineage and component lifecycle"""
-    
     def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
                  gpu_id: int = None, coordinator=None):
-        self.llm_engine = llm_engine
+        # REMOVE: self.llm_engine = llm_engine
+        self._engine = None  # Cached engine reference (starts as None)
+        
         self.db_path = db_path or "opulence_data.db"
         self.gpu_id = gpu_id
-        self.coordinator = coordinator  # ADD coordinator reference
+        self.coordinator = coordinator
         self.logger = logging.getLogger(__name__)
         
-        # ADD these lines for coordinator integration
+        # NEW: Lazy loading tracking
+        self._engine_loaded = False
+        self._using_shared_engine = False
+        
+        # Thread safety
         self._engine_lock = asyncio.Lock()
-        self._engine_created = False
-        self._using_coordinator_llm = False
         
         # Initialize lineage tracking tables
         self._init_lineage_tables()
@@ -62,152 +63,40 @@ class LineageAnalyzerAgent:
         # Load existing lineage data (but don't use create_task in __init__)
         self._lineage_loaded = False
     
-    async def _ensure_llm_engine(self):
-        """Ensure LLM engine is available - use coordinator first, fallback to own"""
-        async with self._engine_lock:
-            if self.llm_engine is not None:
-                return  # Already have engine
-            
-            # Try to get SHARED engine from coordinator first
-            if self.coordinator is not None:
-                try:
-                    # Check if coordinator already has engines we can share
-                    existing_engines = list(self.coordinator.llm_engine_pool.keys())
-                    
-                    for engine_key in existing_engines:
-                        gpu_id = int(engine_key.split('_')[1])
-                        
-                        # Check if this GPU has enough memory for sharing
-                        try:
-                            from gpu_force_fix import GPUForcer
-                            memory_info = GPUForcer.check_gpu_memory(gpu_id)
-                            free_gb = memory_info.get('free_gb', 0)
-                            
-                            if free_gb >= 1.0:  # Can share this GPU
-                                self.llm_engine = self.coordinator.llm_engine_pool[engine_key]
-                                self.gpu_id = gpu_id
-                                self._using_coordinator_llm = True
-                                self.logger.info(f"LineageAnalyzer SHARING coordinator's LLM on GPU {gpu_id}")
-                                return
-                        except Exception as e:
-                            self.logger.warning(f"Error checking GPU {gpu_id} for sharing: {e}")
-                            continue
-                    
-                    # If no engine can be shared, get a new GPU
-                    best_gpu = await self.coordinator.get_available_gpu_for_agent("lineage_analyzer")
-                    if best_gpu is not None:
-                        engine = await self.coordinator.get_or_create_llm_engine(best_gpu)
-                        self.llm_engine = engine
-                        self.gpu_id = best_gpu
-                        self._using_coordinator_llm = True
-                        self.logger.info(f"LineageAnalyzer using coordinator's NEW LLM on GPU {best_gpu}")
-                        return
-                        
-                except Exception as e:
-                    self.logger.warning(f"Failed to get LLM from coordinator: {e}")
-            
-            # Try global coordinator as fallback
-            if not self._engine_created:
-                try:
-                    from opulence_coordinator import get_dynamic_coordinator
-                    global_coordinator = get_dynamic_coordinator()
-                    
-                    # Try to share existing engines first
-                    existing_engines = list(global_coordinator.llm_engine_pool.keys())
-                    for engine_key in existing_engines:
-                        gpu_id = int(engine_key.split('_')[1])
-                        try:
-                            from gpu_force_fix import GPUForcer
-                            memory_info = GPUForcer.check_gpu_memory(gpu_id)
-                            free_gb = memory_info.get('free_gb', 0)
-                            
-                            if free_gb >= 1.0:
-                                self.llm_engine = global_coordinator.llm_engine_pool[engine_key]
-                                self.gpu_id = gpu_id
-                                self._using_coordinator_llm = True
-                                self.logger.info(f"LineageAnalyzer SHARING global coordinator's LLM on GPU {gpu_id}")
-                                return
-                        except Exception as e:
-                            continue
-                    
-                    # If no sharing possible, get new GPU
-                    best_gpu = await global_coordinator.get_available_gpu_for_agent("lineage_analyzer")
-                    if best_gpu is not None:
-                        engine = await global_coordinator.get_or_create_llm_engine(best_gpu)
-                        self.llm_engine = engine
-                        self.gpu_id = best_gpu
-                        self._using_coordinator_llm = True
-                        self.logger.info(f"LineageAnalyzer using global coordinator's NEW LLM on GPU {best_gpu}")
-                        return
-                        
-                except Exception as e:
-                    self.logger.warning(f"Failed to get LLM from global coordinator: {e}")
-            
-            # Last resort: create own engine
-            if not self._engine_created:
-                await self._create_fallback_llm_engine()
-
-    async def _create_fallback_llm_engine(self):
-        """Create own LLM engine as last resort"""
-        try:
-            from gpu_force_fix import GPUForcer
-            
-            # Find GPU with most memory
-            best_gpu = None
-            best_memory = 0
-            
-            for gpu_id in range(4):  # Check all 4 GPUs
-                try:
-                    memory_info = GPUForcer.check_gpu_memory(gpu_id)
-                    free_gb = memory_info.get('free_gb', 0)
-                    if free_gb > best_memory:
-                        best_memory = free_gb
-                        best_gpu = gpu_id
-                except:
-                    continue
-            
-            if best_gpu is None or best_memory < 0.5:
-                raise RuntimeError(f"No GPU found with sufficient memory. Best: {best_memory:.1f}GB")
-            
-            self.logger.warning(f"LineageAnalyzer creating FALLBACK LLM on GPU {best_gpu} with {best_memory:.1f}GB")
-            
-            original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
-            
-            try:
-                GPUForcer.force_gpu_environment(best_gpu)
-                
-                # Create MINIMAL engine to reduce memory usage
-                engine_args = GPUForcer.create_vllm_engine_args(
-                    "microsoft/DialoGPT-small",  # Use smaller model as fallback
-                    1024  # Smaller context
-                )
-                engine_args.gpu_memory_utilization = 0.2  # Use even less memory
-                
-                from vllm import AsyncLLMEngine
-                self.llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
-                self.gpu_id = best_gpu
-                self._engine_created = True
-                self._using_coordinator_llm = False
-                
-                self.logger.info(f"✅ LineageAnalyzer fallback LLM created on GPU {best_gpu}")
-                
-            finally:
-                if original_cuda_visible is not None:
-                    os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible
-                elif 'CUDA_VISIBLE_DEVICES' in os.environ:
-                    del os.environ['CUDA_VISIBLE_DEVICES']
-                    
-        except Exception as e:
-            self.logger.error(f"Failed to create fallback LLM engine: {str(e)}")
-            raise
-
+    async def get_engine(self):
+        """Get LLM engine with lazy loading and sharing"""
+        if self._engine is None and self.coordinator:
+            async with self._engine_lock:  # Thread safety
+                # Double-check pattern
+                if self._engine is None:
+                    try:
+                        # Get assigned GPU for lineage_analyzer agent type
+                        assigned_gpu = self.coordinator.agent_gpu_assignments.get("lineage_analyzer")
+                        if assigned_gpu is not None:
+                            # Get shared engine from coordinator
+                            self._engine = await self.coordinator.get_shared_llm_engine(assigned_gpu)
+                            self.gpu_id = assigned_gpu
+                            self._using_shared_engine = True
+                            self._engine_loaded = True
+                            self.logger.info(f"✅ LineageAnalyzer using shared engine on GPU {assigned_gpu}")
+                        else:
+                            raise ValueError("No GPU assigned for lineage_analyzer agent type")
+                    except Exception as e:
+                        self.logger.error(f"❌ Failed to get shared engine: {e}")
+                        raise
+        
+        return self._engine
+    
+    # MODIFY: Add processing info with lazy loading context
     def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Add processing information to results"""
         if isinstance(result, dict):
             result['gpu_used'] = self.gpu_id
             result['agent_type'] = 'lineage_analyzer'
-            result['using_coordinator_llm'] = self._using_coordinator_llm
+            result['using_shared_engine'] = self._using_shared_engine
+            result['engine_loaded_lazily'] = self._engine_loaded
         return result
+    
     
     def _init_lineage_tables(self):
         """Initialize SQLite tables for lineage tracking"""
@@ -318,7 +207,7 @@ class LineageAnalyzerAgent:
     async def analyze_field_lineage(self, field_name: str) -> Dict[str, Any]:
         """Analyze complete lineage for a specific field"""
         try:
-            await self._ensure_llm_engine()  # Ensure engine is available
+            #await self._ensure_llm_engine()  # Ensure engine is available
             await self._load_existing_lineage()  # Load lineage data
             
             # Find all references to this field
@@ -498,27 +387,39 @@ class LineageAnalyzerAgent:
         return False
     
     async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
-        """Generate text with LLM - handles both old and new vLLM API"""
+        """Generate text with LLM - lazy loading version"""
         try:
+            # LAZY LOAD: Get engine only when needed
+            engine = await self.get_engine()
+            if engine is None:
+                self.logger.warning("No LLM engine available")
+                return ""
+            
             # Try new API first (with request_id)
             request_id = str(uuid.uuid4())
-            result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
-            return result.outputs[0].text.strip()
-        except TypeError as e:
-            if "request_id" in str(e):
-                # Fallback to old API (without request_id)
-                result = await self.llm_engine.generate(prompt, sampling_params)
-                return result.outputs[0].text.strip()
-            else:
-                raise e
+            try:
+                async for result in engine.generate(prompt, sampling_params, request_id=request_id):
+                    if result and hasattr(result, 'outputs') and len(result.outputs) > 0:
+                        return result.outputs[0].text.strip()
+                    break
+            except TypeError as e:
+                if "request_id" in str(e):
+                    # Fallback to old API (without request_id)
+                    async for result in engine.generate(prompt, sampling_params):
+                        if result and hasattr(result, 'outputs') and len(result.outputs) > 0:
+                            return result.outputs[0].text.strip()
+                        break
+            
+            return ""
+            
         except Exception as e:
             self.logger.error(f"LLM generation failed: {str(e)}")
             return ""
-
+        
     async def _analyze_field_reference_with_llm(self, field_name: str, content: str, 
                                            chunk_type: str, program_name: str) -> Dict[str, Any]:
         """Analyze how a field is referenced using LLM - FIXED"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         # Truncate content to avoid token limits
         content_preview = content[:600] if len(content) > 600 else content
@@ -727,7 +628,7 @@ class LineageAnalyzerAgent:
     
     async def _analyze_usage_patterns_with_llm(self, field_name: str, usage_stats: Dict) -> str:
         """Analyze usage patterns using LLM - FIXED"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         stats_summary = {
             "total_references": usage_stats["total_references"],
@@ -807,7 +708,7 @@ class LineageAnalyzerAgent:
     
     async def _extract_mathematical_transformations(self, field_name: str, content: str, program_name: str) -> List[Dict]:
         """Extract mathematical transformations from content - FIXED"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         content_preview = content[:400] if len(content) > 400 else content
         
@@ -902,7 +803,7 @@ class LineageAnalyzerAgent:
     
     async def _analyze_lifecycle_completeness(self, field_name: str, stages: Dict) -> str:
         """Analyze lifecycle completeness using LLM - FIXED"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         # Summarize stages for prompt
         stage_summary = {
@@ -998,7 +899,7 @@ class LineageAnalyzerAgent:
     
     async def _generate_impact_assessment(self, field_name: str, impact_data: Dict) -> str:
         """Generate detailed impact assessment using LLM - FIXED"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         # Summarize impact data for prompt
         impact_summary = {
@@ -1039,7 +940,7 @@ class LineageAnalyzerAgent:
                                        usage_analysis: Dict, transformations: List,
                                        lifecycle: Dict) -> str:
         """Generate comprehensive field lineage report using LLM - FIXED"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         report_data = {
             "field_name": field_name,
@@ -1088,7 +989,7 @@ class LineageAnalyzerAgent:
     async def analyze_full_lifecycle(self, component_name: str, component_type: str) -> Dict[str, Any]:
         """Analyze complete lifecycle of a component (file, table, program)"""
         try:
-            await self._ensure_llm_engine()
+            #await self._ensure_llm_engine()
             await self._load_existing_lineage()
             
             if component_type in ["file", "table"]:
@@ -1113,7 +1014,7 @@ class LineageAnalyzerAgent:
     async def find_dependencies(self, component_name: str) -> List[str]:
         """Find all dependencies for a component"""
         try:
-            await self._ensure_llm_engine()
+            #await self._ensure_llm_engine()
             
             dependencies = set()
             
@@ -1160,7 +1061,7 @@ class LineageAnalyzerAgent:
     
     async def _extract_dependencies_from_chunk(self, component_name: str, content: str, program_name: str) -> Set[str]:
         """Extract dependencies from a code chunk - FIXED"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         content_preview = content[:400] if len(content) > 400 else content
         
@@ -1262,7 +1163,7 @@ class LineageAnalyzerAgent:
     async def _analyze_component_operation(self, component_name: str, content: str, 
                                      program_name: str, chunk_type: str) -> Dict[str, Any]:
         """Analyze what operation a program performs on a component - FIXED"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         content_preview = content[:400] if len(content) > 400 else content
         
@@ -1315,7 +1216,7 @@ class LineageAnalyzerAgent:
     async def _generate_component_lifecycle_report(self, component_name: str, 
                                                 lifecycle_data: Dict) -> str:
         """Generate comprehensive component lifecycle report - FIXED"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         summary_data = {
             "component_name": component_name,
@@ -1419,7 +1320,7 @@ class LineageAnalyzerAgent:
     
     async def _analyze_program_call(self, called_program: str, content: str, caller_program: str) -> Dict[str, Any]:
         """Analyze how a program is called"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         content_preview = content[:300] if len(content) > 300 else content
         
@@ -1471,7 +1372,7 @@ class LineageAnalyzerAgent:
     
     async def _generate_program_lifecycle_report(self, program_name: str, analysis_data: Dict) -> str:
         """Generate program lifecycle report - FIXED"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         report_summary = {
             "program_name": program_name,
@@ -1550,7 +1451,7 @@ class LineageAnalyzerAgent:
     
     async def _analyze_jcl_step_lifecycle(self, step_content: str, step_id: str) -> Dict[str, Any]:
         """Analyze individual JCL step lifecycle - FIXED"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         content_preview = step_content[:400] if len(step_content) > 400 else step_content
         
@@ -1609,7 +1510,7 @@ class LineageAnalyzerAgent:
     
     async def _analyze_jcl_flow(self, jcl_name: str, step_details: List[Dict]) -> str:
         """Analyze overall JCL job flow - FIXED"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         flow_summary = {
             "jcl_name": jcl_name,
@@ -1648,7 +1549,7 @@ class LineageAnalyzerAgent:
     async def generate_lineage_summary(self, component_name: str) -> Dict[str, Any]:
         """Generate a comprehensive lineage summary for any component"""
         try:
-            await self._ensure_llm_engine()
+            #await self._ensure_llm_engine()
             await self._load_existing_lineage()
             
             # Determine component type
@@ -1737,7 +1638,7 @@ class LineageAnalyzerAgent:
     async def _generate_executive_summary(self, component_name: str, component_type: str, 
                                     analysis: Dict, dependencies: List[str]) -> str:
         """Generate executive summary for lineage analysis - FIXED"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         summary_data = {
             "component_name": component_name,
