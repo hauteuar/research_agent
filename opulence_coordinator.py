@@ -127,9 +127,12 @@ class DualGPUOpulenceCoordinator:
         
         # LAZY LOADING: Don't create engines during init
         # REMOVE: self._initialize_llm_engines()
-        self.llm_engines = {}  # Will be populated on demand
-        self.engine_reference_count = {}  # Track how many agents use each engine
+        #self.llm_engines = {}  # Will be populated on demand
+        #self.engine_reference_count = {}  # Track how many agents use each engine
         self.engine_lock = asyncio.Lock()  # Prevent concurrent engine creation
+        self.engine_reference_count = {}  # Track references per GPU
+        self.engine_lock = asyncio.Lock()
+        self.task_engine_mapping = {}     # {task_id: gpu_id} for cleanup
         
         # Agent storage with GPU assignment
         self.agents = {}
@@ -152,58 +155,65 @@ class DualGPUOpulenceCoordinator:
         
         self.logger.info(f"✅ Dual GPU Coordinator initialized on GPUs {self.selected_gpus} (LAZY LOADING)")
     
+    @property
+    def llm_engines(self):
+        """Access GPU manager's engine cache directly"""
+        return self.gpu_manager.gpu_engines
+    
     async def get_shared_llm_engine(self, gpu_id: int):
         """Get shared LLM engine - LAZY LOADING with reference counting"""
         async with self.engine_lock:  # Prevent concurrent creation
             
-            # Return existing engine if already loaded
-            if gpu_id in self.llm_engines:
-                self.engine_reference_count[gpu_id] += 1
-                self.logger.info(f"♻️ Reusing existing LLM engine on GPU {gpu_id} (refs: {self.engine_reference_count[gpu_id]})")
-                return self.llm_engines[gpu_id]
+            if self.gpu_manager.has_llm_engine(gpu_id):
+                # Increment reference count
+                self.engine_reference_count[gpu_id] = self.engine_reference_count.get(gpu_id, 0) + 1
+                self.logger.info(f"♻️ Reusing existing engine on GPU {gpu_id} (refs: {self.engine_reference_count[gpu_id]})")
+                return self.gpu_manager.gpu_engines[gpu_id]
             
-            # Create engine only when first requested
-            self.logger.info(f"🔧 LAZY LOADING: Creating LLM engine on GPU {gpu_id}...")
+            # Create new engine through GPU manager
+            self.logger.info(f"🔧 Creating new engine on GPU {gpu_id}...")
+            engine = self.gpu_manager.get_llm_engine(
+                gpu_id, 
+                self.config.model_name, 
+                self.config.max_tokens
+            )
             
-            try:
-                engine = self.gpu_manager.get_llm_engine(
-                    gpu_id, 
-                    self.config.model_name, 
-                    self.config.max_tokens
-                )
-                
-                # Cache the engine and initialize reference count
-                self.llm_engines[gpu_id] = engine
-                self.engine_reference_count[gpu_id] = 1
-                self.stats["engines_loaded"] += 1
-                
-                self.logger.info(f"✅ LLM engine created and cached on GPU {gpu_id} (refs: 1)")
-                return engine
-                
-            except Exception as e:
-                self.logger.error(f"❌ Failed to create LLM engine on GPU {gpu_id}: {e}")
-                raise
+            # Initialize reference count
+            self.engine_reference_count[gpu_id] = 1
+            self.stats["engines_loaded"] += 1
+            
+            self.logger.info(f"✅ Engine created on GPU {gpu_id} (refs: 1)")
+            return engine
 
+            
     # 3. ADD engine reference management
-    def release_engine_reference(self, gpu_id: int):
-        """Release reference to engine (for cleanup tracking)"""
+    def release_engine_reference(self, gpu_id: int, task_id: str = None):
+        """FIXED: Release engine reference with optional cleanup"""
         if gpu_id in self.engine_reference_count:
             self.engine_reference_count[gpu_id] -= 1
             self.logger.debug(f"📉 Released engine reference for GPU {gpu_id} (refs: {self.engine_reference_count[gpu_id]})")
             
-            # Optional: Remove engine if no references (aggressive cleanup)
+            # Remove task mapping if provided
+            if task_id and task_id in self.task_engine_mapping:
+                del self.task_engine_mapping[task_id]
+            
+            # Auto cleanup if no references and auto_cleanup enabled
             if self.engine_reference_count[gpu_id] <= 0 and self.config.auto_cleanup:
                 self._cleanup_unused_engine(gpu_id)
 
     def _cleanup_unused_engine(self, gpu_id: int):
-        """Clean up engine with no references"""
+        """FIXED: Clean up engine using GPU manager"""
         try:
-            if gpu_id in self.llm_engines:
-                self.logger.info(f"🗑️ Cleaning up unused engine on GPU {gpu_id}")
-                del self.llm_engines[gpu_id]
-                del self.engine_reference_count[gpu_id]
-                self.gpu_manager.cleanup_gpu_memory(gpu_id)
+            if self.gpu_manager.has_llm_engine(gpu_id):
+                self.logger.info(f"🗑️ Auto-cleaning unused engine on GPU {gpu_id}")
+                self.gpu_manager.remove_llm_engine(gpu_id)  # Use GPU manager's method
+                
+                # Clean up reference tracking
+                if gpu_id in self.engine_reference_count:
+                    del self.engine_reference_count[gpu_id]
+                    
                 self.stats["engines_loaded"] -= 1
+                
         except Exception as e:
             self.logger.error(f"❌ Engine cleanup failed for GPU {gpu_id}: {e}")
 
@@ -212,7 +222,50 @@ class DualGPUOpulenceCoordinator:
         """Setup logging configuration"""
         return logging.getLogger(__name__)
     
+    async def start_task_with_engine(self, task_name: str, agent_type: str, preferred_gpu: int = None) -> Tuple[str, Any, int]:
+        """NEW: Start task and get engine atomically"""
+        # Get assigned GPU for agent type or use preferred
+        if preferred_gpu and preferred_gpu in self.selected_gpus:
+            assigned_gpu = preferred_gpu
+        else:
+            assigned_gpu = self.agent_gpu_assignments.get(agent_type, self.selected_gpus[0])
+        
+        # Start task tracking
+        task_id = self.gpu_manager.start_task(task_name, assigned_gpu)
+        
+        try:
+            # Get engine for this task
+            engine = await self.get_shared_llm_engine(assigned_gpu)
+            
+            # Link task to engine for cleanup
+            self.task_engine_mapping[task_id] = assigned_gpu
+            
+            self.logger.info(f"🚀 Started task {task_id} with engine on GPU {assigned_gpu}")
+            return task_id, engine, assigned_gpu
+            
+        except Exception as e:
+            # Cleanup task if engine creation failed
+            self.gpu_manager.finish_task(task_id)
+            raise e
 
+    def finish_task_with_engine(self, task_id: str):
+        """NEW: Finish task and release engine reference"""
+        try:
+            # Get GPU from task mapping
+            gpu_id = self.task_engine_mapping.get(task_id)
+            
+            # Finish task in GPU manager
+            self.gpu_manager.finish_task(task_id)
+            
+            # Release engine reference
+            if gpu_id is not None:
+                self.release_engine_reference(gpu_id, task_id)
+            
+            self.logger.info(f"✅ Finished task {task_id} and released engine reference")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to finish task {task_id}: {e}")
+            
     # Fix 3: Add missing get_agent method
     def get_agent(self, agent_type: str):
         """Get agent - uses assigned GPU automatically"""
