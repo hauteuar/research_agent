@@ -1112,6 +1112,202 @@ def get_global_coordinator() -> DualGPUOpulenceCoordinator:
         _global_coordinator = create_dual_gpu_coordinator(force_gpu_ids=[1, 2])
     return _global_coordinator
 
+class DualGPUProductionCoordinatorManager:
+    """Production-ready dual GPU coordinator manager with monitoring and recovery"""
+    
+    def __init__(self, config: DualGPUOpulenceConfig = None):
+        self.config = config or DualGPUOpulenceConfig()
+        self.coordinator = None
+        self.health_check_interval = 60  # seconds
+        self.max_restart_attempts = 3
+        self.restart_count = 0
+        self.logger = logging.getLogger(__name__)
+        
+        # Dual GPU specific monitoring
+        self.gpu_failure_counts = {}  # Track failures per GPU
+        self.last_gpu_check = {}      # Last health check per GPU
+        
+    async def start(self):
+        """Start coordinator with health monitoring"""
+        try:
+            self.coordinator = DualGPUOpulenceCoordinator(self.config)
+            
+            # Initialize GPU monitoring
+            for gpu_id in self.coordinator.selected_gpus:
+                self.gpu_failure_counts[gpu_id] = 0
+                self.last_gpu_check[gpu_id] = time.time()
+            
+            # Start health monitoring
+            asyncio.create_task(self._health_monitor())
+            
+            self.logger.info(f"✅ Production coordinator started on GPUs {self.coordinator.selected_gpus}")
+            return self.coordinator
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to start coordinator: {e}")
+            raise
+    
+    async def _health_monitor(self):
+        """Monitor coordinator health and restart if needed"""
+        while self.coordinator is not None:
+            try:
+                await asyncio.sleep(self.health_check_interval)
+                
+                if self.coordinator is None:
+                    break
+                
+                # Check overall system status
+                status = self.coordinator.get_health_status()
+                
+                if status['status'] != 'healthy':
+                    self.logger.warning(f"⚠️ Unhealthy status: {status['status']}")
+                    
+                    # Check individual GPU health
+                    unhealthy_gpus = await self._check_individual_gpu_health()
+                    
+                    if unhealthy_gpus:
+                        self.logger.warning(f"⚠️ Unhealthy GPUs detected: {unhealthy_gpus}")
+                        
+                        # Try GPU-specific recovery first
+                        recovery_success = await self._attempt_gpu_recovery(unhealthy_gpus)
+                        
+                        if not recovery_success and self.restart_count < self.max_restart_attempts:
+                            await self._restart_coordinator()
+                        elif self.restart_count >= self.max_restart_attempts:
+                            self.logger.error("❌ Max restart attempts reached")
+                            break
+                
+            except Exception as e:
+                self.logger.error(f"❌ Health check failed: {e}")
+    
+    async def _check_individual_gpu_health(self) -> List[int]:
+        """Check health of individual GPUs"""
+        unhealthy_gpus = []
+        
+        try:
+            for gpu_id in self.coordinator.selected_gpus:
+                gpu_status = self.coordinator.gpu_manager.get_gpu_status(gpu_id)
+                
+                # Check GPU health criteria
+                if (gpu_status.get('memory_usage_gb', 0) > 20 or  # High memory usage
+                    gpu_status.get('active_tasks', 0) > 10 or      # Too many active tasks
+                    gpu_status.get('error_count', 0) > 5):         # Too many errors
+                    
+                    unhealthy_gpus.append(gpu_id)
+                    self.gpu_failure_counts[gpu_id] += 1
+                    
+                    self.logger.warning(f"⚠️ GPU {gpu_id} health issues detected")
+                
+                self.last_gpu_check[gpu_id] = time.time()
+                
+        except Exception as e:
+            self.logger.error(f"❌ GPU health check failed: {e}")
+        
+        return unhealthy_gpus
+    
+    async def _attempt_gpu_recovery(self, unhealthy_gpus: List[int]) -> bool:
+        """Attempt to recover specific GPUs without full restart"""
+        try:
+            self.logger.info(f"🔧 Attempting GPU recovery for GPUs: {unhealthy_gpus}")
+            
+            for gpu_id in unhealthy_gpus:
+                try:
+                    # Clean up GPU memory
+                    await self.coordinator.gpu_manager.cleanup_gpu_memory(gpu_id)
+                    
+                    # Reset GPU engine if needed
+                    if gpu_id in self.coordinator.gpu_manager.gpu_engines:
+                        del self.coordinator.gpu_manager.gpu_engines[gpu_id]
+                    
+                    # Recreate engine for this GPU
+                    self.coordinator.gpu_manager.get_llm_engine(gpu_id)
+                    
+                    self.logger.info(f"✅ GPU {gpu_id} recovery successful")
+                    
+                except Exception as e:
+                    self.logger.error(f"❌ GPU {gpu_id} recovery failed: {e}")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ GPU recovery failed: {e}")
+            return False
+    
+    async def _restart_coordinator(self):
+        """Restart entire coordinator"""
+        try:
+            self.logger.info("🔄 Restarting dual GPU coordinator...")
+            
+            if self.coordinator:
+                self.coordinator.shutdown()
+            
+            # Wait before restart
+            await asyncio.sleep(5)
+            
+            self.coordinator = DualGPUOpulenceCoordinator(self.config)
+            self.restart_count += 1
+            
+            # Reset GPU monitoring
+            for gpu_id in self.coordinator.selected_gpus:
+                self.gpu_failure_counts[gpu_id] = 0
+                self.last_gpu_check[gpu_id] = time.time()
+            
+            self.logger.info(f"✅ Coordinator restarted (attempt {self.restart_count}) on GPUs {self.coordinator.selected_gpus}")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Restart failed: {e}")
+    
+    def get_monitoring_stats(self) -> Dict[str, Any]:
+        """Get monitoring statistics"""
+        return {
+            "restart_count": self.restart_count,
+            "max_restart_attempts": self.max_restart_attempts,
+            "gpu_failure_counts": self.gpu_failure_counts.copy(),
+            "last_gpu_checks": self.last_gpu_check.copy(),
+            "health_check_interval": self.health_check_interval,
+            "coordinator_status": "running" if self.coordinator else "stopped"
+        }
+    
+    def stop(self):
+        """Stop coordinator"""
+        if self.coordinator:
+            self.coordinator.shutdown()
+            self.coordinator = None
+
+
+# Keep the old name for backward compatibility
+ProductionCoordinatorManager = DualGPUProductionCoordinatorManager
+
+
+# Alternative: Create a factory function for production managers
+def create_production_manager(
+    server_type: str = "dedicated",
+    force_gpu_ids: Optional[List[int]] = None
+) -> DualGPUProductionCoordinatorManager:
+    """Create production coordinator manager based on server type"""
+    
+    if server_type == "shared":
+        config = DualGPUOpulenceConfig(
+            model_name="microsoft/DialoGPT-medium",
+            exclude_gpu_0=True,
+            min_memory_gb=4.0,
+            max_tokens=512,
+            force_gpu_ids=force_gpu_ids,
+            auto_cleanup=True
+        )
+    else:  # dedicated
+        config = DualGPUOpulenceConfig(
+            model_name="codellama/CodeLlama-7b-Instruct-hf",
+            exclude_gpu_0=False,
+            min_memory_gb=8.0,
+            max_tokens=2048,
+            force_gpu_ids=force_gpu_ids,
+            auto_cleanup=True
+        )
+    
+    return DualGPUProductionCoordinatorManager(config)
+
 
 # Update the __all__ export list at the bottom of the file
 __all__ = [
