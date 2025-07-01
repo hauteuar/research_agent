@@ -1032,22 +1032,53 @@ class DataLoaderAgent:
             }
     
     async def _process_copybook_file(self, file_path: Path, content: str) -> Dict[str, Any]:
-        """Process COBOL copybook file"""
+        """Process COBOL copybook file with enhanced debugging"""
         try:
-            # Parse copybook structure using LLM
-            copybook_info = await self._parse_copybook_structure(content, file_path.name)
+            self.logger.info(f"🔍 Processing copybook: {file_path.name}")
+            self.logger.debug(f"📄 Content preview (first 500 chars): {content[:500]}")
+            
+            # Enhanced debugging: Check content format
+            lines = content.split('\n')
+            self.logger.info(f"📊 Total lines: {len(lines)}")
+            
+            # Check for COBOL patterns
+            cobol_patterns = {
+                'level_numbers': len([line for line in lines if re.match(r'^\s*\d+\s+', line)]),
+                'pic_clauses': len([line for line in lines if 'PIC' in line.upper()]),
+                'field_names': len([line for line in lines if re.match(r'^\s*\d+\s+[A-Z]', line)]),
+                'filler_fields': len([line for line in lines if 'FILLER' in line.upper()])
+            }
+            
+            self.logger.info(f"📋 COBOL patterns found: {cobol_patterns}")
+            
+            # If no COBOL patterns found, it might not be a copybook
+            if cobol_patterns['level_numbers'] == 0:
+                return {
+                    "status": "error", 
+                    "error": "No COBOL level numbers found - file may not be a copybook",
+                    "file_name": file_path.name,
+                    "debug_info": {
+                        "content_preview": content[:200],
+                        "patterns_found": cobol_patterns
+                    }
+                }
+            
+            # Parse copybook structure using LLM with fallback
+            copybook_info = await self._parse_copybook_structure_with_fallback(content, file_path.name)
             
             if copybook_info:
                 table_name = copybook_info['record_name']
                 schema = copybook_info['fields']
                 
+                self.logger.info(f"✅ Parsed copybook: {table_name} with {len(schema)} fields")
+                
                 # Create SQLite table from copybook fields
                 await self._create_sqlite_table(table_name, schema)
                 
-                # Store schema metadata (existing)
+                # Store schema metadata
                 await self._store_table_schema(table_name, 'copybook', schema, file_path.name)
                 
-                # ADD THIS: Store as chunks for vector indexing
+                # Store as chunks for vector indexing
                 await self._store_copybook_as_chunks(table_name, copybook_info, content, file_path.name)
                 
                 return {
@@ -1056,14 +1087,75 @@ class DataLoaderAgent:
                     "table_name": table_name,
                     "field_count": len(schema),
                     "record_structure": copybook_info.get('structure_type', 'flat'),
-                    "chunks_created": len(schema) + 1  # +1 for the record structure chunk
+                    "chunks_created": len(schema) + 1,
+                    "debug_info": {
+                        "parsing_method": copybook_info.get('parsing_method', 'llm'),
+                        "patterns_found": cobol_patterns
+                    }
                 }
             else:
-                return {"status": "error", "error": "Could not parse copybook structure"}
+                return {
+                    "status": "error", 
+                    "error": "Could not parse copybook structure with any method",
+                    "file_name": file_path.name,
+                    "debug_info": {
+                        "content_preview": content[:200],
+                        "patterns_found": cobol_patterns,
+                        "suggested_fixes": [
+                            "Check if file is a valid COBOL copybook",
+                            "Verify level numbers are present (01, 05, 10, etc.)",
+                            "Ensure PIC clauses are formatted correctly",
+                            "Check for proper COBOL field syntax"
+                        ]
+                    }
+                }
                 
         except Exception as e:
             self.logger.error(f"Copybook processing failed: {str(e)}")
-            return {"status": "error", "error": str(e)}
+            return {
+                "status": "error", 
+                "error": str(e),
+                "file_name": file_path.name,
+                "debug_info": {
+                    "exception_type": type(e).__name__,
+                    "content_length": len(content)
+                }
+            }
+
+    async def _parse_copybook_structure_with_fallback(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
+        """Parse copybook with multiple fallback methods"""
+        
+        # Method 1: Try LLM parsing first
+        try:
+            self.logger.info("🤖 Attempting LLM-based copybook parsing...")
+            llm_result = await self._parse_copybook_structure_llm(content, filename)
+            if llm_result and llm_result.get('fields'):
+                llm_result['parsing_method'] = 'llm'
+                return llm_result
+        except Exception as e:
+            self.logger.warning(f"LLM parsing failed: {str(e)}")
+        
+        # Method 2: Enhanced regex parsing
+        try:
+            self.logger.info("🔍 Attempting enhanced regex parsing...")
+            regex_result = self._parse_copybook_with_enhanced_regex(content, filename)
+            if regex_result and regex_result.get('fields'):
+                regex_result['parsing_method'] = 'enhanced_regex'
+                return regex_result
+        except Exception as e:
+            self.logger.warning(f"Enhanced regex parsing failed: {str(e)}")
+        
+        # Method 3: Simple regex fallback
+        try:
+            self.logger.info("📝 Attempting simple regex parsing...")
+            simple_result = self._parse_copybook_with_simple_regex(content, filename)
+            if simple_result and simple_result.get('fields'):
+                simple_result['parsing_method'] = 'simple_regex'
+                return simple_result
+        except Exception as e:
+            self.logger.warning(f"Simple regex parsing failed: {str(e)}")
+        
+        return None
 
     # ADD THIS NEW METHOD
     async def _store_copybook_as_chunks(self, table_name: str, copybook_info: Dict, 
@@ -1156,103 +1248,260 @@ class DataLoaderAgent:
             self.logger.error(f"Failed to store copybook chunks: {str(e)}")
             raise
             
-    async def _parse_copybook_structure(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
-        """Enhanced LLM parsing with chunking support"""
-        #await self._ensure_llm_engine()
+    async def _parse_copybook_structure_llm(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
+        """LLM-based parsing with better error handling"""
         
-        prompt_template = """
-        Parse this COBOL copybook file and extract the record structure with proper handling of:
+        # Check if content is too large for LLM
+        if len(content) > 4000:  # Rough character limit
+            self.logger.info("📏 Content too large, using chunked processing...")
+            return await self._parse_copybook_chunked(content, filename)
         
-        {CONTENT}
-        
-        Handle these COBOL constructs:
-        1. FILLER fields - create unique names like FILLER_001, FILLER_002, etc.
-        2. REDEFINES fields - mark them but don't create duplicate columns
-        3. OCCURS clauses - note array/table structures
-        4. VALUE clauses - capture default values
-        5. USAGE clauses - affect data type conversion
-        6. Group items vs elementary items
-        
-        Convert to SQL-safe field names (underscores instead of hyphens).
-        
-        For FILLER fields, create sequential names: FILLER_001, FILLER_002, etc.
-        For REDEFINES fields, mark them as redefines but don't include in main table structure.
-        
-        Return as JSON:
+        prompt = f"""
+        You are a COBOL expert. Parse this copybook and extract field definitions.
+
+        COPYBOOK CONTENT:
+        {content}
+
+        Extract all field definitions with these rules:
+        1. Only include elementary items (fields with PIC clauses)
+        2. Convert COBOL names to SQL-safe names (replace hyphens with underscores)
+        3. Handle FILLER fields by giving them unique names like FILLER_001
+        4. Skip REDEFINES fields (they're overlays)
+        5. Convert PIC clauses to appropriate SQL types
+
+        Return ONLY valid JSON in this exact format:
         {{
             "record_name": "RECORD_NAME",
-            "structure_type": "flat|hierarchical",
             "fields": [
                 {{
-                    "name": "FIELD_1",
-                    "original_name": "FIELD-1", 
-                    "type": "VARCHAR(30)",
+                    "name": "FIELD_NAME",
+                    "type": "VARCHAR(50)",
                     "level": "05",
-                    "pic_clause": "PIC X(30)",
-                    "nullable": true,
-                    "is_filler": false,
-                    "redefines": null,
-                    "default_value": null,
-                    "occurs": null,
-                    "usage": "DISPLAY"
+                    "pic_clause": "PIC X(50)",
+                    "nullable": true
                 }}
-            ],
-            "filler_count": 3,
-            "has_redefines": true,
-            "has_occurs": false
+            ]
         }}
         """
         
         sampling_params = SamplingParams(temperature=0.1, max_tokens=2000)
         
         try:
-            # Use chunked generation
-            response_text = await self._generate_with_llm_chunked(
-                prompt_template, content, sampling_params, "{CONTENT}"
-            )
+            response_text = await self._generate_with_llm(prompt, sampling_params)
             
-            if '{' in response_text:
-                json_start = response_text.find('{')
-                json_end = response_text.rfind('}') + 1
-                parsed_result = json.loads(response_text[json_start:json_end])
+            # Enhanced JSON extraction
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group()
+                parsed_result = json.loads(json_str)
                 
-                # Ensure all field names are SQL-safe and FILLER names are unique
-                if 'fields' in parsed_result:
-                    filler_counter = 1
-                    seen_names = set()
+                # Validate structure
+                if self._validate_copybook_result(parsed_result):
+                    return self._post_process_copybook_result(parsed_result)
+                else:
+                    self.logger.warning("LLM result failed validation")
                     
-                    for field in parsed_result['fields']:
-                        if 'name' in field:
-                            if field['name'].upper().startswith('FILLER'):
-                                # Ensure unique FILLER names
-                                field['name'] = f"FILLER_{filler_counter:03d}"
-                                field['is_filler'] = True
-                                filler_counter += 1
-                            else:
-                                field['name'] = self._clean_column_name(field['name'])
-                            
-                            # Handle duplicate names (shouldn't happen but safety check)
-                            original_name = field['name']
-                            counter = 1
-                            while field['name'] in seen_names:
-                                field['name'] = f"{original_name}_{counter}"
-                                counter += 1
-                            
-                            seen_names.add(field['name'])
-                
-                # Clean record name
-                if 'record_name' in parsed_result:
-                    parsed_result['record_name'] = self._clean_column_name(parsed_result['record_name'])
-                
-                return parsed_result
-                
+        except json.JSONDecodeError as e:
+            self.logger.error(f"JSON parsing error: {str(e)}")
+            self.logger.debug(f"Raw LLM response: {response_text[:500]}...")
         except Exception as e:
-            self.logger.warning(f"LLM copybook parsing failed: {str(e)}")
-            # Fallback to regex parsing
-            return self._parse_copybook_with_regex(content, filename)
+            self.logger.error(f"LLM parsing error: {str(e)}")
         
         return None
+        
+    def _validate_copybook_result(self, result: Dict) -> bool:
+        """Validate parsed copybook result"""
+        if not isinstance(result, dict):
+            return False
+        
+        if 'fields' not in result or not isinstance(result['fields'], list):
+            return False
+        
+        if len(result['fields']) == 0:
+            return False
+        
+        # Check each field has required properties
+        for field in result['fields']:
+            if not isinstance(field, dict):
+                return False
+            if 'name' not in field or 'type' not in field:
+                return False
+            if not field['name'] or not field['type']:
+                return False
+        
+        return True
     
+    def _post_process_copybook_result(self, result: Dict) -> Dict:
+        """Post-process and clean up copybook result"""
+        # Ensure record name is SQL-safe
+        if 'record_name' not in result or not result['record_name']:
+            result['record_name'] = 'UNKNOWN_RECORD'
+        
+        result['record_name'] = self._clean_column_name(result['record_name'])
+        
+        # Clean up fields
+        filler_counter = 1
+        seen_names = set()
+        
+        for field in result['fields']:
+            # Clean field name
+            if field['name'].upper().startswith('FILLER'):
+                field['name'] = f"FILLER_{filler_counter:03d}"
+                filler_counter += 1
+            else:
+                field['name'] = self._clean_column_name(field['name'])
+            
+            # Ensure unique names
+            original_name = field['name']
+            counter = 1
+            while field['name'] in seen_names:
+                field['name'] = f"{original_name}_{counter}"
+                counter += 1
+            seen_names.add(field['name'])
+            
+            # Set defaults
+            field.setdefault('nullable', True)
+            field.setdefault('level', '05')
+            field.setdefault('pic_clause', '')
+        
+        result['structure_type'] = 'flat'
+        return result
+
+    def _parse_copybook_with_enhanced_regex(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
+        """Enhanced regex-based copybook parsing"""
+        try:
+            fields = []
+            record_name = None
+            filler_counter = 1
+            
+            # Find 01 level record name (more flexible pattern)
+            record_patterns = [
+                r'^\s*01\s+([A-Z][A-Z0-9-]*)',  # Standard format
+                r'^\s*1\s+([A-Z][A-Z0-9-]*)',   # Without leading zero
+                r'01\s+([A-Z][A-Z0-9-]*)',      # No line start anchor
+            ]
+            
+            for pattern in record_patterns:
+                record_match = re.search(pattern, content, re.MULTILINE | re.IGNORECASE)
+                if record_match:
+                    record_name = self._clean_column_name(record_match.group(1))
+                    break
+            
+            if not record_name:
+                record_name = self._generate_table_name(filename)
+            
+            # Enhanced field patterns (try multiple formats)
+            field_patterns = [
+                # Standard: level field-name PIC clause
+                r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*)\s+PIC\s+([X9AVSZ]+(?:\([0-9,]+\))?)',
+                # With FILLER: level FILLER PIC clause  
+                r'^\s*(\d+)\s+(FILLER)\s+PIC\s+([X9AVSZ]+(?:\([0-9,]+\))?)',
+                # Flexible spacing
+                r'(\d+)\s+([A-Z][A-Z0-9-]*)\s+PIC\s+([X9AVSZ]+(?:\([0-9,]+\))?)',
+            ]
+            
+            lines = content.split('\n')
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith('*'):  # Skip comments
+                    continue
+                    
+                for pattern in field_patterns:
+                    match = re.search(pattern, line, re.IGNORECASE)
+                    if match:
+                        level = match.group(1)
+                        field_name = match.group(2)
+                        pic_clause = match.group(3)
+                        
+                        # Skip group items (level < 49 without PIC usually means group)
+                        if int(level) <= 49 and not pic_clause:
+                            continue
+                        
+                        # Handle FILLER
+                        if field_name.upper() == 'FILLER':
+                            clean_name = f"FILLER_{filler_counter:03d}"
+                            filler_counter += 1
+                        else:
+                            clean_name = self._clean_column_name(field_name)
+                        
+                        # Convert PIC to SQL type
+                        sql_type = self._convert_pic_to_sql(pic_clause)
+                        
+                        fields.append({
+                            "name": clean_name,
+                            "type": sql_type,
+                            "level": level,
+                            "pic_clause": f"PIC {pic_clause}",
+                            "nullable": True
+                        })
+                        break  # Found match, move to next line
+            
+            if fields:
+                return {
+                    "record_name": record_name,
+                    "structure_type": "flat",
+                    "fields": fields
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Enhanced regex parsing failed: {str(e)}")
+        
+        return None
+
+    def _parse_copybook_with_simple_regex(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
+        """Simple regex parsing as last resort"""
+        try:
+            fields = []
+            record_name = self._generate_table_name(filename)
+            
+            # Very simple pattern - just find anything that looks like a field
+            lines = content.split('\n')
+            field_counter = 1
+            
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith('*'):
+                    continue
+                
+                # Look for level number followed by name
+                simple_match = re.match(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]+)', line, re.IGNORECASE)
+                if simple_match:
+                    level = simple_match.group(1)
+                    field_name = simple_match.group(2)
+                    
+                    # Skip 01 level (record name)
+                    if level == '01' or level == '1':
+                        continue
+                    
+                    clean_name = self._clean_column_name(field_name)
+                    
+                    # Default to VARCHAR for unknown types
+                    fields.append({
+                        "name": clean_name,
+                        "type": "VARCHAR(50)",
+                        "level": level,
+                        "pic_clause": "",
+                        "nullable": True
+                    })
+                    
+                    field_counter += 1
+                    
+                    # Limit to reasonable number of fields
+                    if field_counter > 100:
+                        break
+            
+            if fields:
+                return {
+                    "record_name": record_name,
+                    "structure_type": "flat", 
+                    "fields": fields
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Simple regex parsing failed: {str(e)}")
+        
+        return None
+
     def _parse_copybook_with_regex(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
         """Enhanced copybook parsing with FILLER, REDEFINES, and other COBOL constructs"""
         try:
