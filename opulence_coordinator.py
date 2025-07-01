@@ -24,7 +24,7 @@ from vllm import AsyncLLMEngine, AsyncEngineArgs, SamplingParams
 import pandas as pd
 
 # Import the single GPU manager we created
-from utils.single_gpu_manager import SingleGPUManager, SingleGPUConfig
+from utils.single_gpu_manager import DualGPUManager, DualGPUConfig
 
 # Import our agents with error handling
 try:
@@ -97,69 +97,69 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 @dataclass
-class SingleGPUOpulenceConfig:
-    """Configuration for Single GPU Opulence system"""
+class DualGPUOpulenceConfig:
+    """Configuration for Dual GPU Opulence system"""
     model_name: str = "codellama/CodeLlama-7b-Instruct-hf"
-    max_tokens: int = 1024  # Conservative for single GPU
+    max_tokens: int = 1024
     temperature: float = 0.1
     exclude_gpu_0: bool = True  # Don't use GPU 0 in shared systems
-    min_memory_gb: float = 6.0  # Minimum GPU memory required
-    max_processing_time: int = 900  # 15 minutes
-    batch_size: int = 16  # Smaller batch for single GPU
+    min_memory_gb: float = 6.0
+    max_processing_time: int = 900
+    batch_size: int = 8  # Per GPU
     vector_dim: int = 768
     max_db_rows: int = 10000
-    cache_ttl: int = 3600  # 1 hour
+    cache_ttl: int = 3600
     auto_cleanup: bool = True
-    force_gpu_id: Optional[int] = None  # Force specific GPU
+    force_gpu_ids: Optional[List[int]] = None  # Force specific GPUs [1, 2]
 
-class SingleGPUOpulenceCoordinator:
-    """Single GPU Opulence Coordinator - Uses one GPU for all operations"""
+class DualGPUOpulenceCoordinator:
+    """Dual GPU Opulence Coordinator - Uses 2 GPUs for load distribution"""
     
-    def __init__(self, config: SingleGPUOpulenceConfig = None):
-        """Initialize with single GPU approach"""
-        self.config = config or SingleGPUOpulenceConfig()
+    def __init__(self, config: DualGPUOpulenceConfig = None):
+        self.config = config or DualGPUOpulenceConfig()
         self.logger = self._setup_logging()
         
-        # Create single GPU manager configuration
-        gpu_config = SingleGPUConfig(
-            exclude_gpu_0=self.config.exclude_gpu_0,
-            min_memory_gb=self.config.min_memory_gb,
-            force_gpu_id=self.config.force_gpu_id,
-            cleanup_on_exit=self.config.auto_cleanup
-        )
+        # Create dual GPU manager
+        self.gpu_manager = DualGPUManager(self.config)
+        self.selected_gpus = self.gpu_manager.selected_gpus
         
-        # Initialize single GPU manager
-        self.gpu_manager = SingleGPUManager(gpu_config)
-        self.selected_gpu = self.gpu_manager.selected_gpu
+        # FIX: Add missing attributes
+        self.selected_gpu = self.selected_gpus[0] if self.selected_gpus else None  # For compatibility
+        
+        # Initialize stats
+        self.stats = {
+            "total_files_processed": 0,
+            "total_queries": 0,
+            "avg_response_time": 0,
+            "gpus_used": self.selected_gpus,
+            "tasks_completed": 0,
+            "start_time": time.time()
+        }
         
         # Initialize database
         self.db_path = "opulence_data.db"
         self._init_database()
         
-        # Create single LLM engine that all agents will share
-        self.llm_engine = self.gpu_manager.get_llm_engine(
-            self.config.model_name,
-            self.config.max_tokens
-        )
-        
-        # Simple agent storage - no complex allocation needed
+        # Agent storage with GPU assignment
         self.agents = {}
+        self.agent_gpu_assignments = {}
         
-        # Processing statistics
-        self.stats = {
-            "total_files_processed": 0,
-            "total_queries": 0,
-            "avg_response_time": 0,
-            "gpu_used": self.selected_gpu,
-            "tasks_completed": 0,
-            "start_time": time.time()
-        }
+        # Assign agent types to specific GPUs
+        self._assign_agents_to_gpus()
         
-        self.logger.info(f"✅ Single GPU Opulence Coordinator initialized on GPU {self.selected_gpu}")
-    
+        self.logger.info(f"✅ Dual GPU Coordinator initialized on GPUs {self.selected_gpus}")
+
+    # Fix 2: Add missing _setup_logging method
     def _setup_logging(self) -> logging.Logger:
         """Setup logging configuration"""
         return logging.getLogger(__name__)
+
+    # Fix 3: Add missing get_agent method
+    def get_agent(self, agent_type: str):
+        """Get agent - uses assigned GPU automatically"""
+        if agent_type not in self.agents:
+            self.agents[agent_type] = self._create_agent(agent_type)
+        return self.agents[agent_type]
     
     def _init_database(self):
         """Initialize SQLite database with required tables"""
@@ -260,76 +260,78 @@ class SingleGPUOpulenceCoordinator:
             self.logger.error(f"Database initialization failed: {str(e)}")
             raise
     
-    def get_agent(self, agent_type: str):
-        """Get agent - all agents use the same GPU automatically"""
-        if agent_type not in self.agents:
-            self.agents[agent_type] = self._create_agent(agent_type)
-        return self.agents[agent_type]
+    
     
     def _create_agent(self, agent_type: str):
-        """Create agent using shared LLM engine and GPU"""
+        """Create agent using assigned GPU and LLM engine"""
+        # Get assigned GPU for this agent type
+        assigned_gpu = self.agent_gpu_assignments.get(agent_type, self.selected_gpus[0])
+        
+        # Get LLM engine for assigned GPU
+        llm_engine = self.gpu_manager.get_llm_engine(assigned_gpu)
+        
         if agent_type == "code_parser" and CodeParserAgent:
             return CodeParserAgent(
-                llm_engine=self.llm_engine,
+                llm_engine=llm_engine,
                 db_path=self.db_path,
-                gpu_id=self.selected_gpu,
+                gpu_id=assigned_gpu,
                 coordinator=self
             )
         elif agent_type == "vector_index" and VectorIndexAgent:
             return VectorIndexAgent(
-                llm_engine=self.llm_engine,
+                llm_engine=llm_engine,
                 db_path=self.db_path,
-                gpu_id=self.selected_gpu,
+                gpu_id=assigned_gpu,
                 coordinator=self
             )
         elif agent_type == "data_loader" and DataLoaderAgent:
             return DataLoaderAgent(
-                llm_engine=self.llm_engine,
+                llm_engine=llm_engine,
                 db_path=self.db_path,
-                gpu_id=self.selected_gpu,
+                gpu_id=assigned_gpu,
                 coordinator=self
             )
         elif agent_type == "lineage_analyzer" and LineageAnalyzerAgent:
             return LineageAnalyzerAgent(
-                llm_engine=self.llm_engine,
+                llm_engine=llm_engine,
                 db_path=self.db_path,
-                gpu_id=self.selected_gpu,
+                gpu_id=assigned_gpu,
                 coordinator=self
             )
         elif agent_type == "logic_analyzer" and LogicAnalyzerAgent:
             return LogicAnalyzerAgent(
-                llm_engine=self.llm_engine,
+                llm_engine=llm_engine,
                 db_path=self.db_path,
-                gpu_id=self.selected_gpu,
+                gpu_id=assigned_gpu,
                 coordinator=self
             )
         elif agent_type == "documentation" and DocumentationAgent:
             return DocumentationAgent(
-                llm_engine=self.llm_engine,
+                llm_engine=llm_engine,
                 db_path=self.db_path,
-                gpu_id=self.selected_gpu,
+                gpu_id=assigned_gpu,
                 coordinator=self
             )
         elif agent_type == "db2_comparator" and DB2ComparatorAgent:
             return DB2ComparatorAgent(
-                llm_engine=self.llm_engine,
+                llm_engine=llm_engine,
                 db_path=self.db_path,
-                gpu_id=self.selected_gpu,
+                gpu_id=assigned_gpu,
                 max_rows=self.config.max_db_rows,
                 coordinator=self
             )
         elif agent_type == "chat_agent" and OpulenceChatAgent:
             return OpulenceChatAgent(
                 coordinator=self,
-                llm_engine=self.llm_engine,
+                llm_engine=llm_engine,
                 db_path=self.db_path,
-                gpu_id=self.selected_gpu
+                gpu_id=assigned_gpu
             )
         else:
             raise ValueError(f"Unknown or unavailable agent type: {agent_type}")
     
     async def process_batch_files(self, file_paths: List[Path], file_type: str = "auto") -> Dict[str, Any]:
-        """Process files using single GPU"""
+        """Process files using dual GPU"""
         task_id = self.gpu_manager.start_task("batch_file_processing")
         start_time = time.time()
         
@@ -337,7 +339,7 @@ class SingleGPUOpulenceCoordinator:
             results = []
             total_files = len(file_paths)
             
-            self.logger.info(f"🚀 Processing {total_files} files on GPU {self.selected_gpu}")
+            self.logger.info(f"🚀 Processing {total_files} files on GPUs {self.selected_gpus}")
             
             for i, file_path in enumerate(file_paths):
                 try:
@@ -363,7 +365,7 @@ class SingleGPUOpulenceCoordinator:
                         # Auto-detect
                         result = await self._auto_detect_and_process(file_path)
                     
-                    result["gpu_used"] = self.selected_gpu
+                    result["gpus_used"] = self.selected_gpus
                     results.append(result)
                     
                     # Log progress
@@ -376,7 +378,7 @@ class SingleGPUOpulenceCoordinator:
                         "status": "error",
                         "file": str(file_path),
                         "error": str(e),
-                        "gpu_used": self.selected_gpu
+                        "gpus_used": self.selected_gpus
                     })
             
             # Create vector embeddings for successful results
@@ -401,7 +403,7 @@ class SingleGPUOpulenceCoordinator:
                 "failed_files": total_files - len(successful_files),
                 "processing_time": processing_time,
                 "results": results,
-                "gpu_used": self.selected_gpu,
+                "gpus_used": self.selected_gpus,
                 "vector_indexing": "completed" if successful_files else "skipped"
             }
             
@@ -750,7 +752,7 @@ class SingleGPUOpulenceCoordinator:
             cursor.execute("""
                 INSERT INTO processing_stats (operation, duration, gpu_used, status)
                 VALUES (?, ?, ?, ?)
-            """, (operation, duration, self.selected_gpu, "completed"))
+            """, (operation, duration, str(self.selected_gpus), "completed"))
             
             conn.commit()
             conn.close()
@@ -848,14 +850,13 @@ class SingleGPUOpulenceCoordinator:
         gpu_status = self.gpu_manager.get_status()
         
         return {
-            "status": "healthy" if gpu_status['is_locked'] else "gpu_not_available",
-            "coordinator_type": "single_gpu",
-            "selected_gpu": self.selected_gpu,
+            "status": "healthy" if gpu_status.get('is_locked') else "gpu_not_available",
+            "coordinator_type": "dual_gpu",
+            "selected_gpus": self.selected_gpus,
             "gpu_status": gpu_status,
             "active_agents": len(self.agents),
             "stats": self.stats,
             "uptime_seconds": time.time() - self.stats["start_time"],
-            "llm_engine_available": self.llm_engine is not None,
             "database_available": os.path.exists(self.db_path)
         }
     
@@ -892,7 +893,7 @@ class SingleGPUOpulenceCoordinator:
         self.shutdown()
     
     def __repr__(self):
-        return (f"SingleGPUOpulenceCoordinator("
+        return (f"DualGPUCoordinator("
                 f"gpu={self.selected_gpu}, "
                 f"agents={len(self.agents)}, "
                 f"tasks_completed={self.stats['tasks_completed']})")
@@ -902,7 +903,7 @@ class SingleGPUOpulenceCoordinator:
 class SingleGPUChatEnhancer:
     """Enhanced chat capabilities for single GPU coordinator"""
     
-    def __init__(self, coordinator: SingleGPUOpulenceCoordinator):
+    def __init__(self, coordinator: DualGPUOpulenceCoordinator):
         self.coordinator = coordinator
         self.logger = coordinator.logger
     
@@ -1013,63 +1014,35 @@ class SingleGPUChatEnhancer:
             }
 
 
-# Factory Functions
-def create_single_gpu_coordinator(
-    model_name: str = "codellama/CodeLlama-7b-Instruct-hf",
-    exclude_gpu_0: bool = True,
-    min_memory_gb: float = 6.0,
-    force_gpu_id: Optional[int] = None
-) -> SingleGPUOpulenceCoordinator:
-    """Create a single GPU coordinator with specified configuration"""
-    
-    config = SingleGPUOpulenceConfig(
-        model_name=model_name,
-        exclude_gpu_0=exclude_gpu_0,
-        min_memory_gb=min_memory_gb,
-        force_gpu_id=force_gpu_id,
-        max_tokens=1024,  # Conservative for stability
-        auto_cleanup=True
-    )
-    
-    return SingleGPUOpulenceCoordinator(config)
 
-
-def create_shared_server_coordinator() -> SingleGPUOpulenceCoordinator:
-    """Create coordinator optimized for shared server environments"""
-    
-    config = SingleGPUOpulenceConfig(
-        model_name="microsoft/DialoGPT-medium",  # Smaller model
-        exclude_gpu_0=True,  # Don't compete with others
-        min_memory_gb=4.0,   # Lower requirement
-        max_tokens=512,      # Small context
-        auto_cleanup=True
-    )
-    
-    return SingleGPUOpulenceCoordinator(config)
-
-
-def create_dedicated_server_coordinator() -> SingleGPUOpulenceCoordinator:
-    """Create coordinator optimized for dedicated servers"""
-    
-    config = SingleGPUOpulenceConfig(
-        model_name="codellama/CodeLlama-7b-Instruct-hf",
-        exclude_gpu_0=False,  # Can use any GPU
-        min_memory_gb=8.0,    # Higher requirement
-        max_tokens=2048,      # Larger context
-        auto_cleanup=True
-    )
-    
-    return SingleGPUOpulenceCoordinator(config)
+def create_dual_gpu_coordinator(
+        model_name: str = "codellama/CodeLlama-7b-Instruct-hf",
+        exclude_gpu_0: bool = True,
+        min_memory_gb: float = 6.0,
+        force_gpu_ids: Optional[List[int]] = None
+         ) -> DualGPUOpulenceCoordinator:
+        """Create a dual GPU coordinator"""
+        
+        config = DualGPUOpulenceConfig(
+            model_name=model_name,
+            exclude_gpu_0=exclude_gpu_0,
+            min_memory_gb=min_memory_gb,
+            force_gpu_ids=force_gpu_ids,
+            max_tokens=1024,
+            auto_cleanup=True
+        )
+        
+        return DualGPUOpulenceCoordinator(config)
 
 
 # Global coordinator instance for easy access
 _global_coordinator = None
 
-def get_global_coordinator() -> SingleGPUOpulenceCoordinator:
+def get_global_coordinator() -> DualGPUOpulenceCoordinator:
     """Get or create global coordinator instance"""
     global _global_coordinator
     if _global_coordinator is None:
-        _global_coordinator = create_single_gpu_coordinator()
+        _global_coordinator = create_dual_gpu_coordinator(force_gpu_ids=[1, 2]) 
     return _global_coordinator
 
 
@@ -1106,181 +1079,3 @@ def get_system_status() -> Dict[str, Any]:
     coordinator = get_global_coordinator()
     return coordinator.get_health_status()
 
-
-# Example Usage and Testing
-async def run_example():
-    """Complete example showing all functionality"""
-    print("🚀 Starting Single GPU Coordinator Example")
-    
-    # Create coordinator with auto-cleanup
-    with create_single_gpu_coordinator() as coordinator:
-        print(f"✅ Coordinator ready on GPU {coordinator.selected_gpu}")
-        
-        # Process some files
-        file_paths = [Path("example.cbl"), Path("data.csv")]
-        print("📁 Processing files...")
-        
-        results = await coordinator.process_batch_files(file_paths, "auto")
-        print(f"✅ Processed {results['files_processed']} files")
-        print(f"   Successful: {results['successful_files']}")
-        print(f"   Failed: {results['failed_files']}")
-        
-        # Analyze a component
-        print("🔍 Analyzing component...")
-        analysis = await coordinator.analyze_component("TRADE_DATE", "field")
-        print(f"✅ Analysis status: {analysis['status']}")
-        
-        # Chat interaction
-        print("💬 Processing chat query...")
-        chat_result = await coordinator.process_chat_query("What is TRADE_DATE used for?")
-        print(f"✅ Chat response: {chat_result.get('response', 'No response')[:100]}...")
-        
-        # Search patterns
-        print("🔍 Searching code patterns...")
-        search_results = await coordinator.search_code_patterns("date calculation", limit=5)
-        print(f"✅ Found {search_results['total_found']} patterns")
-        
-        # Get system status
-        print("📊 System status:")
-        status = coordinator.get_health_status()
-        print(f"   Status: {status['status']}")
-        print(f"   GPU: {status['selected_gpu']}")
-        print(f"   Agents: {status['active_agents']}")
-        print(f"   Tasks completed: {status['stats']['tasks_completed']}")
-        
-    print("✅ Example completed, GPU automatically released")
-
-
-def test_coordinator_basic():
-    """Basic test of coordinator functionality"""
-    print("Testing Single GPU Coordinator...")
-    
-    try:
-        # Test creation
-        coordinator = create_single_gpu_coordinator()
-        print(f"✅ Created coordinator on GPU {coordinator.selected_gpu}")
-        
-        # Test agent creation
-        agent = coordinator.get_agent("code_parser")
-        print("✅ Created code parser agent")
-        
-        # Test status
-        status = coordinator.get_health_status()
-        print(f"✅ Status: {status['status']}")
-        
-        # Test cleanup
-        coordinator.cleanup()
-        print("✅ Cleanup successful")
-        
-        # Test shutdown
-        coordinator.shutdown()
-        print("✅ Shutdown successful")
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ Test failed: {e}")
-        return False
-
-
-if __name__ == "__main__":
-    # Run basic test
-    if test_coordinator_basic():
-        print("\n🎉 All tests passed!")
-        
-        # Run full example
-        print("\n" + "="*50)
-        asyncio.run(run_example())
-    else:
-        print("\n❌ Tests failed!")
-
-
-# Advanced Features for Production Use
-class ProductionCoordinatorManager:
-    """Production-ready coordinator manager with monitoring and recovery"""
-    
-    def __init__(self, config: SingleGPUOpulenceConfig = None):
-        self.config = config or SingleGPUOpulenceConfig()
-        self.coordinator = None
-        self.health_check_interval = 60  # seconds
-        self.max_restart_attempts = 3
-        self.restart_count = 0
-        self.logger = logging.getLogger(__name__)
-        
-    async def start(self):
-        """Start coordinator with health monitoring"""
-        try:
-            self.coordinator = SingleGPUOpulenceCoordinator(self.config)
-            
-            # Start health monitoring
-            asyncio.create_task(self._health_monitor())
-            
-            self.logger.info("✅ Production coordinator started")
-            return self.coordinator
-            
-        except Exception as e:
-            self.logger.error(f"❌ Failed to start coordinator: {e}")
-            raise
-    
-    async def _health_monitor(self):
-        """Monitor coordinator health and restart if needed"""
-        while self.coordinator is not None:
-            try:
-                await asyncio.sleep(self.health_check_interval)
-                
-                if self.coordinator is None:
-                    break
-                
-                # Check GPU status
-                status = self.coordinator.get_health_status()
-                
-                if status['status'] != 'healthy':
-                    self.logger.warning(f"⚠️ Unhealthy status: {status['status']}")
-                    
-                    if self.restart_count < self.max_restart_attempts:
-                        await self._restart_coordinator()
-                    else:
-                        self.logger.error("❌ Max restart attempts reached")
-                        break
-                
-            except Exception as e:
-                self.logger.error(f"❌ Health check failed: {e}")
-    
-    async def _restart_coordinator(self):
-        """Restart coordinator"""
-        try:
-            self.logger.info("🔄 Restarting coordinator...")
-            
-            if self.coordinator:
-                self.coordinator.shutdown()
-            
-            self.coordinator = SingleGPUOpulenceCoordinator(self.config)
-            self.restart_count += 1
-            
-            self.logger.info(f"✅ Coordinator restarted (attempt {self.restart_count})")
-            
-        except Exception as e:
-            self.logger.error(f"❌ Restart failed: {e}")
-    
-    def stop(self):
-        """Stop coordinator"""
-        if self.coordinator:
-            self.coordinator.shutdown()
-            self.coordinator = None
-
-
-# Export main classes and functions
-__all__ = [
-    'SingleGPUOpulenceCoordinator',
-    'SingleGPUOpulenceConfig', 
-    'SingleGPUChatEnhancer',
-    'create_single_gpu_coordinator',
-    'create_shared_server_coordinator',
-    'create_dedicated_server_coordinator',
-    'get_global_coordinator',
-    'quick_file_processing',
-    'quick_component_analysis',
-    'quick_chat_query',
-    'get_system_status',
-    'ProductionCoordinatorManager'
-]

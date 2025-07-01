@@ -41,25 +41,26 @@ class DataLoaderAgent:
     
     # ADD this new method
     async def _ensure_llm_engine(self):
-        """Ensure LLM engine is available - use coordinator first, fallback to own"""
+        """Get LLM engine from coordinator with GPU assignment"""
         if self.llm_engine is not None:
-            return  # Already have engine
+            return
         
-        # Try to get from coordinator first
         if self.coordinator is not None:
             try:
-                # Get available GPU from coordinator
-                best_gpu = await self.coordinator.get_available_gpu_for_agent("data_loader")
-                if best_gpu is not None:
-                    # Get shared LLM engine from coordinator
-                    engine = await self.coordinator.get_or_create_llm_engine(best_gpu)
-                    self.llm_engine = engine
-                    self.gpu_id = best_gpu
+                # Get assigned GPU for data_loader agent
+                assigned_gpu = self.coordinator.agent_gpu_assignments.get("data_loader")
+                if assigned_gpu is not None:
+                    self.gpu_id = assigned_gpu
+                    self.llm_engine = self.coordinator.gpu_manager.get_llm_engine(assigned_gpu)
                     self._using_coordinator_llm = True
-                    self.logger.info(f"DataLoader using coordinator's LLM on GPU {best_gpu}")
+                    self.logger.info(f"DataLoader using assigned GPU {assigned_gpu}")
                     return
             except Exception as e:
-                self.logger.warning(f"Failed to get LLM from coordinator: {e}")
+                self.logger.warning(f"Failed to get assigned GPU: {e}")
+        
+        # Fallback to any available GPU
+        if not self._engine_created:
+            await self._create_fallback_engine()
         
         # Try to get from global coordinator
         if not self._engine_created:
@@ -85,6 +86,11 @@ class DataLoaderAgent:
     async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
         """Generate text with LLM - handles both old and new vLLM API"""
         try:
+            if self.llm_engine is None:
+                await self._ensure_llm_engine()
+
+            await asyncio.sleep(0.1)
+            
             # Try new API first (with request_id)
             request_id = str(uuid.uuid4())
             #result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
