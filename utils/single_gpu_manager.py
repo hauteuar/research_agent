@@ -229,21 +229,25 @@ class SingleGPUManager:
             
             # Create engine with conservative settings
             engine_args = AsyncEngineArgs(
-                model=model_name,
-                tensor_parallel_size=1,
-                max_model_len=min(max_tokens, 3000),  # Conservative max length
-                gpu_memory_utilization=memory_utilization,
-                device="cuda:0",  # Maps to our selected GPU
-                trust_remote_code=True,
-                enforce_eager=True,
-                disable_log_stats=False,
-                quantization=None,
-                load_format="auto",
-                dtype="auto",
-                seed=42,
-                max_num_seqs=8,  # Small batch size
-                enable_prefix_caching=False
-            )
+            model=model_name,
+            tensor_parallel_size=1,
+            max_model_len=min(max_tokens, 2048),  # Reduced for stability
+            gpu_memory_utilization=0.4,  # More conservative
+            device="cuda:0",
+            trust_remote_code=True,
+            enforce_eager=True,  # Important for stability
+            disable_log_stats=False,
+            quantization=None,
+            load_format="auto",
+            dtype="auto",
+            seed=42,
+            max_num_seqs=4,  # REDUCED - this is key for your multi-request issue
+            enable_prefix_caching=False,
+            # Add these new parameters for better stability:
+            max_paddings=256,
+            disable_custom_all_reduce=True,
+            worker_use_ray=False  # Disable Ray for simpler setup
+        )
             
             self.llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
             
