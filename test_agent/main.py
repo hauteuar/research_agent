@@ -507,7 +507,7 @@ class LLMIntelligentAnalyzer:
 
 class MainframeAnalyzer:
     def __init__(self):
-        self.db_path = ":memory:"
+        self.db_path = "mainframe_analysis.db" 
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.init_database()
         self.file_references = []
@@ -749,8 +749,12 @@ class MainframeAnalyzer:
 
     def analyze_uploaded_files(self, uploaded_files: List) -> Dict[str, Any]:
         """Enhanced file analysis"""
+        cursor = self.conn.cursor()
         results = {
             'programs_analyzed': 0,
+            'files_found': set(),
+            'new_programs': 0,      # Track new vs existing
+            'updated_programs': 0, 
             'files_found': set(),
             'vsam_files': set(),
             'db2_files': set(),
@@ -762,7 +766,35 @@ class MainframeAnalyzer:
         }
         
         for uploaded_file in uploaded_files:
-            content = str(uploaded_file.read(), "utf-8")
+            content = None
+            encodings_to_try = ['utf-8', 'cp1252', 'iso-8859-1', 'cp500', 'ibm1047', 'latin1']
+            
+            for encoding in encodings_to_try:
+                try:
+                    uploaded_file.seek(0)  # Reset file pointer
+                    content = uploaded_file.read().decode(encoding)
+                    break
+                except (UnicodeDecodeError, UnicodeError):
+                    continue
+            
+            cursor.execute("SELECT COUNT(*) FROM file_references WHERE program = ?", (filename,))
+            existing_count = cursor.fetchone()[0]
+            
+            if existing_count > 0:
+                # DELETE OLD ANALYSIS FOR THIS PROGRAM
+                cursor.execute("DELETE FROM file_references WHERE program = ?", (filename,))
+                cursor.execute("DELETE FROM cobol_fields WHERE program = ?", (filename,))
+                cursor.execute("DELETE FROM vsam_operations WHERE program = ?", (filename,))
+                cursor.execute("DELETE FROM llm_analysis WHERE program = ?", (filename,))
+                results['updated_programs'] += 1
+            else:
+                results['new_programs'] += 1
+            
+            if content is None:
+                # Fallback: ignore problematic characters
+                uploaded_file.seek(0)
+                content = uploaded_file.read().decode('utf-8', errors='ignore')
+                
             filename = uploaded_file.name
             
             if filename.endswith(('.cbl', '.cob', '.cobol', '.cpy')):
