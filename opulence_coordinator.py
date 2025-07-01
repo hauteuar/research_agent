@@ -329,6 +329,24 @@ class DualGPUOpulenceCoordinator:
             )
         else:
             raise ValueError(f"Unknown or unavailable agent type: {agent_type}")
+        
+    def _assign_agents_to_gpus(self):
+        """Assign different agent types to different GPUs for load balancing"""
+        if len(self.selected_gpus) >= 2:
+            # GPU 0: Code parsing (heavier workload)
+            self.agent_gpu_assignments["code_parser"] = self.selected_gpus[0]
+            self.agent_gpu_assignments["lineage_analyzer"] = self.selected_gpus[0]
+            self.agent_gpu_assignments["logic_analyzer"] = self.selected_gpus[0]
+            
+            # GPU 1: Data processing (lighter workload)
+            self.agent_gpu_assignments["data_loader"] = self.selected_gpus[1]
+            self.agent_gpu_assignments["vector_index"] = self.selected_gpus[1]
+            self.agent_gpu_assignments["chat_agent"] = self.selected_gpus[1]
+        else:
+            # Fallback to single GPU if only one available
+            gpu_id = self.selected_gpus[0]
+            for agent_type in ["code_parser", "data_loader", "vector_index", "chat_agent"]:
+                self.agent_gpu_assignments[agent_type] = gpu_id
     
     async def process_batch_files(self, file_paths: List[Path], file_type: str = "auto") -> Dict[str, Any]:
         """Process files using dual GPU"""
