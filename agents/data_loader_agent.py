@@ -63,7 +63,7 @@ class DataLoaderAgent:
         
         return self._engine
 
-     async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
+    async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
         """Generate text with LLM - lazy loading version"""
         try:
             # LAZY LOAD: Get engine only when needed

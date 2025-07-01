@@ -36,17 +36,20 @@ class CodeChunk:
 class CompleteEnhancedCodeParserAgent:
     def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
                  gpu_id: int = None, coordinator=None):
-        self.llm_engine = llm_engine
+        # REMOVE: self.llm_engine = llm_engine
+        self._engine = None  # Cached engine reference (starts as None)
+        
         self.db_path = db_path or "opulence_data.db"
         self.gpu_id = gpu_id
         self.coordinator = coordinator
         self.logger = logging.getLogger(__name__)
-        
         # Thread safety
         self._engine_lock = asyncio.Lock()
         self._engine_created = False
         self._using_coordinator_llm = False
         self._processed_files = set()  # Duplicate prevention
+        self._engine_loaded = False
+        self._using_shared_engine = False
         
         # COMPLETE COBOL PATTERNS
         self.cobol_patterns = {
@@ -271,6 +274,30 @@ class CompleteEnhancedCodeParserAgent:
         except Exception as e:
             self.logger.error(f"Database initialization failed: {str(e)}")
 
+    async def get_engine(self):
+        """Get LLM engine with lazy loading and sharing"""
+        if self._engine is None and self.coordinator:
+            async with self._engine_lock:  # Thread safety
+                # Double-check pattern
+                if self._engine is None:
+                    try:
+                        # Get assigned GPU for code_parser agent type
+                        assigned_gpu = self.coordinator.agent_gpu_assignments.get("code_parser")
+                        if assigned_gpu is not None:
+                            # Get shared engine from coordinator
+                            self._engine = await self.coordinator.get_shared_llm_engine(assigned_gpu)
+                            self.gpu_id = assigned_gpu
+                            self._using_shared_engine = True
+                            self._engine_loaded = True
+                            self.logger.info(f"✅ CodeParser using shared engine on GPU {assigned_gpu}")
+                        else:
+                            raise ValueError("No GPU assigned for code_parser agent type")
+                    except Exception as e:
+                        self.logger.error(f"❌ Failed to get shared engine: {e}")
+                        raise
+        
+        return self._engine
+
     def _generate_file_hash(self, content: str, file_path: Path) -> str:
         """Generate unique hash for file content and metadata"""
         hash_input = f"{file_path.name}:{file_path.stat().st_mtime}:{len(content)}:{content[:100]}"
@@ -298,86 +325,21 @@ class CompleteEnhancedCodeParserAgent:
             self.logger.error(f"Duplicate check failed: {str(e)}")
             return False
 
-    async def _ensure_llm_engine(self):
-        """Ensure LLM engine is available - FIXED for single GPU coordinator"""
-        if self.llm_engine is not None:
-            return
-        
-        # FIX: Use single GPU coordinator approach
-        try:
-            # The single GPU coordinator already has the LLM engine
-            self.llm_engine = self.coordinator.llm_engine
-            self.gpu_id = self.coordinator.selected_gpu
-            self.logger.info(f"Chat agent using coordinator's LLM on GPU {self.gpu_id}")
-            return
-        except Exception as e:
-            self.logger.error(f"Failed to get LLM engine from coordinator: {e}")
-            raise
-        
-
-    async def _create_fallback_llm_engine(self):
-        """Create own LLM engine as last resort"""
-        try:
-            from gpu_force_fix import GPUForcer
-            
-            best_gpu = None
-            best_memory = 0
-            
-            for gpu_id in range(4):
-                try:
-                    memory_info = GPUForcer.check_gpu_memory(gpu_id)
-                    free_gb = memory_info.get('free_gb', 0)
-                    if free_gb > best_memory:
-                        best_memory = free_gb
-                        best_gpu = gpu_id
-                except:
-                    continue
-            
-            if best_gpu is None or best_memory < 0.5:
-                raise RuntimeError(f"No GPU found with sufficient memory. Best: {best_memory:.1f}GB")
-            
-            self.logger.warning(f"CodeParser creating FALLBACK LLM on GPU {best_gpu} with {best_memory:.1f}GB")
-            
-            original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
-            
-            try:
-                GPUForcer.force_gpu_environment(best_gpu)
-                
-                engine_args = GPUForcer.create_vllm_engine_args(
-                    "microsoft/DialoGPT-small",
-                    1024
-                )
-                engine_args.gpu_memory_utilization = 0.2
-                
-                from vllm import AsyncLLMEngine
-                self.llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
-                self.gpu_id = best_gpu
-                self._engine_created = True
-                self._using_coordinator_llm = False
-                
-                self.logger.info(f"✅ CodeParser fallback LLM created on GPU {best_gpu}")
-                
-            finally:
-                if original_cuda_visible is not None:
-                    os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible
-                elif 'CUDA_VISIBLE_DEVICES' in os.environ:
-                    del os.environ['CUDA_VISIBLE_DEVICES']
-                    
-        except Exception as e:
-            self.logger.error(f"Failed to create fallback LLM engine: {str(e)}")
-            raise
-
+    
     async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
-        """Generate text with LLM - handles async generator properly"""
+        """Generate text with LLM - lazy loading version"""
         try:
-            if self.llm_engine is None:
+            # LAZY LOAD: Get engine only when needed
+            engine = await self.get_engine()
+            if engine is None:
+                self.logger.warning("No LLM engine available")
                 return ""
             
             request_id = str(uuid.uuid4())
             
             try:
-                # Get async generator from vLLM
-                result_generator = self.llm_engine.generate(
+               
+                result_generator = engine.generate(
                     prompt, sampling_params, request_id=request_id
                 )
                 
@@ -390,7 +352,7 @@ class CompleteEnhancedCodeParserAgent:
             except TypeError as e:
                 if "request_id" in str(e):
                     # Fallback to old API
-                    result_generator = self.llm_engine.generate(prompt, sampling_params)
+                    result_generator = engine.generate(prompt, sampling_params)
                     async for result in result_generator:
                         if result and hasattr(result, 'outputs') and len(result.outputs) > 0:
                             return result.outputs[0].text.strip()
@@ -440,13 +402,14 @@ class CompleteEnhancedCodeParserAgent:
         if isinstance(result, dict):
             result['gpu_used'] = self.gpu_id
             result['agent_type'] = 'enhanced_code_parser'
-            result['using_coordinator_llm'] = self._using_coordinator_llm
+            result['using_shared_engine'] = self._using_shared_engine
+            result['engine_loaded_lazily'] = self._engine_loaded
         return result
 
     async def process_file(self, file_path: Path) -> Dict[str, Any]:
         """Process a single code file with enhanced error handling and verification"""
         try:
-            await self._ensure_llm_engine()
+            #await self._ensure_llm_engine()
             
             # Debug logging
             self.logger.info(f"Processing file: {file_path}")
@@ -603,7 +566,7 @@ class CompleteEnhancedCodeParserAgent:
 
     async def _parse_cobol_complete(self, content: str, filename: str) -> List[CodeChunk]:
         """Complete COBOL parsing with all structures"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         chunks = []
         lines = content.split('\n')
@@ -2171,7 +2134,7 @@ class CompleteEnhancedCodeParserAgent:
     # LLM Analysis Methods
     async def _analyze_division_with_llm(self, content: str, division_name: str) -> Dict[str, Any]:
         """Analyze COBOL division with LLM"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         prompt = f"""
         Analyze this COBOL {division_name}:
@@ -2213,7 +2176,7 @@ class CompleteEnhancedCodeParserAgent:
 
     async def _analyze_data_section_with_llm(self, content: str, section_name: str) -> Dict[str, Any]:
         """Analyze data section with comprehensive field analysis"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         # Extract field information
         field_analysis = await self._analyze_fields_comprehensive(content)
@@ -2266,7 +2229,7 @@ class CompleteEnhancedCodeParserAgent:
 
     async def _analyze_section_with_llm(self, content: str, section_name: str) -> Dict[str, Any]:
         """Analyze general section with LLM"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         prompt = f"""
         Analyze this COBOL section: {section_name}
@@ -2308,7 +2271,7 @@ class CompleteEnhancedCodeParserAgent:
 
     async def _analyze_paragraph_with_llm(self, content: str) -> Dict[str, Any]:
         """Analyze paragraph with LLM"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         prompt = f"""
         Analyze this COBOL paragraph:
@@ -2357,7 +2320,7 @@ class CompleteEnhancedCodeParserAgent:
 
     async def _analyze_sql_comprehensive(self, sql_content: str) -> Dict[str, Any]:
         """Comprehensive SQL analysis"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         prompt = f"""
         Perform comprehensive analysis of this SQL statement:
@@ -2431,7 +2394,7 @@ class CompleteEnhancedCodeParserAgent:
 
     async def _analyze_cics_command_comprehensive(self, command_type: str, params: str, content: str) -> Dict[str, Any]:
         """Comprehensive CICS command analysis"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         prompt = f"""
         Analyze this CICS command:
@@ -2537,7 +2500,7 @@ class CompleteEnhancedCodeParserAgent:
 
     async def _analyze_jcl_job_card(self, content: str) -> Dict[str, Any]:
         """Analyze JCL job card"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         prompt = f"""
         Analyze this JCL job card:
@@ -2588,7 +2551,7 @@ class CompleteEnhancedCodeParserAgent:
 
     async def _analyze_jcl_step_comprehensive(self, content: str, step_name: str) -> Dict[str, Any]:
         """Comprehensive JCL step analysis"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         prompt = f"""
         Analyze this JCL step: {step_name}
@@ -2643,7 +2606,7 @@ class CompleteEnhancedCodeParserAgent:
 
     async def _analyze_jcl_dd_statement(self, content: str, dd_name: str) -> Dict[str, Any]:
         """Analyze JCL DD statement"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         dataset_info = self._extract_dd_dataset_info(content)
         
@@ -3267,7 +3230,7 @@ class CompleteEnhancedCodeParserAgent:
     # Analysis methods for external use
     async def analyze_program(self, program_name: str) -> Dict[str, Any]:
         """Analyze a complete program"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         try:
             import sqlite3
