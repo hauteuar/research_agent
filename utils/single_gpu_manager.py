@@ -47,9 +47,9 @@ class DualGPUManager:
         self.total_tasks_processed = {}  # {gpu_id: count}
         self.start_time = time.time()
         
-        
-        self._initialize_gpus()
         self.engine_creation_locks = {}  # Add this line
+        self._initialize_gpus()
+        
     def _initialize_gpus(self):
         """Find and lock 2 best available GPUs"""
         if self.config.force_gpu_ids:
