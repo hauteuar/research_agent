@@ -16,10 +16,10 @@ sys.path.insert(0, str(project_root))
 
 # Import the new single GPU system
 from opulence_coordinator import (
-    SingleGPUOpulenceCoordinator,
-    SingleGPUOpulenceConfig,
-    SingleGPUChatEnhancer,
-    create_single_gpu_coordinator,
+    DualGPUOpulenceCoordinator,      # Changed from SingleGPUOpulenceCoordinator
+    DualGPUOpulenceConfig,           # Changed from SingleGPUOpulenceConfig
+    SingleGPUChatEnhancer,           # Keep same - works with dual GPU
+    create_dual_gpu_coordinator,     # Changed from create_single_gpu_coordinator
     create_shared_server_coordinator,
     create_dedicated_server_coordinator,
     get_global_coordinator,
@@ -30,12 +30,13 @@ from opulence_coordinator import (
     ProductionCoordinatorManager
 )
 
+# 2. Update logging setup
 def setup_logging(log_level="INFO", quiet=False):
     """Setup logging configuration"""
     handlers = []
     
-    # File handler
-    file_handler = logging.FileHandler("opulence_single_gpu.log")
+    # File handler - change filename
+    file_handler = logging.FileHandler("opulence_dual_gpu.log")  # Changed filename
     handlers.append(file_handler)
     
     # Console handler (unless quiet mode)
@@ -50,17 +51,21 @@ def setup_logging(log_level="INFO", quiet=False):
     )
     
     logger = logging.getLogger(__name__)
-    logger.info("Single GPU Opulence logging initialized")
+    logger.info("Dual GPU Opulence logging initialized")  # Changed message
 
 async def run_batch_processing(file_paths, coordinator):
-    """Run batch processing mode with single GPU"""
+    """Run batch processing mode with dual GPU"""
     logger = logging.getLogger(__name__)
-    logger.info(f"🚀 Starting single GPU batch processing for {len(file_paths)} files")
+    logger.info(f"🚀 Starting dual GPU batch processing for {len(file_paths)} files")
     
-    # Show initial GPU status
+    # Show initial GPU status - CHANGED to show multiple GPUs
     status = coordinator.get_health_status()
-    logger.info(f"📊 Using GPU {coordinator.selected_gpu}")
-    logger.info(f"📊 GPU Status: {status['gpu_status']['memory_free_gb']:.1f}GB free")
+    logger.info(f"📊 Using GPUs {coordinator.selected_gpus}")  # Changed from selected_gpu
+    
+    # Show status for each GPU
+    for gpu_id in coordinator.selected_gpus:
+        gpu_status = coordinator.gpu_manager.get_gpu_status(gpu_id)
+        logger.info(f"📊 GPU {gpu_id} Status: {gpu_status.get('memory_free_gb', 0):.1f}GB free")
     
     try:
         result = await coordinator.process_batch_files(file_paths)
@@ -70,49 +75,25 @@ async def run_batch_processing(file_paths, coordinator):
             logger.info(f"📊 Files processed: {result['files_processed']}")
             logger.info(f"⏱️ Processing time: {result['processing_time']:.2f} seconds")
             
-            # Print results summary
+            # Print results summary - CHANGED
             print("\n" + "="*80)
-            print("SINGLE GPU BATCH PROCESSING RESULTS")
+            print("DUAL GPU BATCH PROCESSING RESULTS")  # Changed title
             print("="*80)
             print(f"Status: ✅ {result['status']}")
-            print(f"GPU Used: {result['gpu_used']}")
+            print(f"GPUs Used: {result['gpus_used']}")  # Changed from gpu_used
             print(f"Files Processed: {result['files_processed']}")
             print(f"Successful Files: {result['successful_files']}")
             print(f"Failed Files: {result['failed_files']}")
             print(f"Processing Time: {result['processing_time']:.2f} seconds")
             print(f"Vector Indexing: {result['vector_indexing']}")
             
-            # Print individual file results
-            successful_count = 0
-            failed_count = 0
-            
-            for i, file_result in enumerate(result.get("results", [])):
-                if isinstance(file_result, dict):
-                    status_icon = "✅" if file_result.get('status') == 'success' else "❌"
-                    print(f"\n{status_icon} File {i+1}: {file_result.get('file', 'Unknown')}")
-                    
-                    if file_result.get('status') == 'success':
-                        successful_count += 1
-                        chunks = file_result.get('chunks_created', 0)
-                        if chunks > 0:
-                            print(f"   📊 Chunks created: {chunks}")
-                        file_type = file_result.get('file_type', 'Unknown')
-                        print(f"   📄 File type: {file_type}")
-                    else:
-                        failed_count += 1
-                        if 'error' in file_result:
-                            print(f"   ❌ Error: {file_result['error']}")
-            
-            # Show final status
+            # Show final status for each GPU - CHANGED
             final_status = coordinator.get_health_status()
-            gpu_status = final_status['gpu_status']
-            
             print(f"\n📊 Final GPU Status:")
-            print(f"   Memory: {gpu_status['memory_usage_gb']:.1f}GB used")
-            print(f"   Active Tasks: {gpu_status['active_tasks']}")
-            print(f"   Total Tasks Completed: {gpu_status['total_tasks_processed']}")
-            
-            print("="*80)
+            for gpu_id in coordinator.selected_gpus:
+                gpu_status = coordinator.gpu_manager.get_gpu_status(gpu_id)
+                print(f"   GPU {gpu_id}: {gpu_status.get('memory_usage_gb', 0):.1f}GB used, "
+                      f"{gpu_status.get('active_tasks', 0)} active tasks")
             
         else:
             logger.error(f"❌ Batch processing failed: {result.get('error', 'Unknown error')}")
@@ -125,21 +106,22 @@ async def run_batch_processing(file_paths, coordinator):
     return 0
 
 async def run_analysis_mode(component_name, component_type, coordinator):
-    """Run analysis mode with single GPU"""
+    """Run analysis mode with dual GPU"""
     logger = logging.getLogger(__name__)
     logger.info(f"🔍 Starting analysis for {component_type or 'auto-detect'}: {component_name}")
-    logger.info(f"📊 Using GPU {coordinator.selected_gpu}")
+    logger.info(f"📊 Using GPUs {coordinator.selected_gpus}")  # Changed from selected_gpu
     
+    # Rest stays the same...
     try:
         result = await coordinator.analyze_component(component_name, component_type)
         
         if result.get("status") != "error":
             print("\n" + "="*80)
-            print("SINGLE GPU COMPONENT ANALYSIS RESULTS")
+            print("DUAL GPU COMPONENT ANALYSIS RESULTS")  # Changed title
             print("="*80)
             print(f"Component: {result.get('component_name', component_name)}")
             print(f"Type: {result.get('component_type', 'Unknown')}")
-            print(f"GPU Used: {result.get('gpu_used', coordinator.selected_gpu)}")
+            print(f"GPUs Used: {result.get('gpus_used', coordinator.selected_gpus)}")  
             print(f"Status: {result.get('status', 'Unknown')}")
             print(f"Processing Time: {result.get('processing_time', 0):.2f} seconds")
             
@@ -206,15 +188,15 @@ async def run_analysis_mode(component_name, component_type, coordinator):
 async def run_chat_mode(coordinator):
     """Run interactive chat mode"""
     logger = logging.getLogger(__name__)
-    logger.info(f"💬 Starting chat mode on GPU {coordinator.selected_gpu}")
+    logger.info(f"💬 Starting chat mode on GPUs {coordinator.selected_gpus}")  # Changed
     
-    enhancer = SingleGPUChatEnhancer(coordinator)
+    enhancer = SingleGPUChatEnhancer(coordinator)  # Keep same - still works
     conversation_history = []
     
     print("\n" + "="*80)
     print("OPULENCE INTERACTIVE CHAT MODE")
     print("="*80)
-    print(f"GPU: {coordinator.selected_gpu}")
+    print(f"GPUs: {coordinator.selected_gpus}")  # Changed from GPU
     print("Type 'quit', 'exit', or Ctrl+C to stop")
     print("Type 'status' to see system status")
     print("Type 'analyze COMPONENT_NAME' to analyze a component")
@@ -288,7 +270,6 @@ async def run_chat_mode(coordinator):
         return 1
     
     return 0
-
 async def run_web_interface():
     """Run Streamlit web interface"""
     import subprocess
@@ -297,7 +278,7 @@ async def run_web_interface():
     # Set environment variables for Streamlit
     env = os.environ.copy()
     env['PYTHONPATH'] = str(project_root)
-    env['OPULENCE_MODE'] = 'single_gpu'  # Tell Streamlit to use single GPU mode
+    env['OPULENCE_MODE'] = 'dual_gpu'  # Changed from 'single_gpu'  # Tell Streamlit to use single GPU mode
     
     # Check if streamlit app exists
     streamlit_app = project_root / "streamlit_app_single_gpu.py"
@@ -339,24 +320,27 @@ def validate_files(file_paths):
 async def run_gpu_status():
     """Show current GPU status"""
     print("\n" + "="*80)
-    print("SINGLE GPU STATUS REPORT")
+    print("DUAL GPU STATUS REPORT")  # Changed title
     print("="*80)
     
     try:
         coordinator = get_global_coordinator()
         status = coordinator.get_health_status()
-        gpu_status = status['gpu_status']
         
-        print(f"Selected GPU: {status['selected_gpu']}")
+        print(f"Selected GPUs: {status['selected_gpus']}")  # Changed from selected_gpu
         print(f"Status: {status['status']}")
-        print(f"LLM Engine: {'✅ Available' if status['llm_engine_available'] else '❌ Not Available'}")
         print(f"Database: {'✅ Available' if status['database_available'] else '❌ Not Available'}")
         
+        # Show details for each GPU - CHANGED
         print(f"\nGPU Details:")
-        print(f"  Memory Used: {gpu_status.get('memory_usage_gb', 0):.1f}GB")
-        print(f"  Active Tasks: {gpu_status.get('active_tasks', 0)}")
-        print(f"  Total Tasks Processed: {gpu_status.get('total_tasks_processed', 0)}")
-        print(f"  GPU Locked: {'✅ Yes' if gpu_status.get('is_locked', False) else '❌ No'}")
+        for gpu_id in coordinator.selected_gpus:
+            gpu_status = coordinator.gpu_manager.get_gpu_status(gpu_id)
+            print(f"  GPU {gpu_id}:")
+            print(f"    Memory Used: {gpu_status.get('memory_usage_gb', 0):.1f}GB")
+            print(f"    Active Tasks: {gpu_status.get('active_tasks', 0)}")
+            print(f"    Total Tasks: {gpu_status.get('total_tasks_processed', 0)}")
+            print(f"    Locked: {'✅ Yes' if gpu_status.get('is_locked', False) else '❌ No'}")  
+        
         
         print(f"\nSystem Stats:")
         stats = status['stats']
@@ -377,14 +361,14 @@ async def run_gpu_status():
 async def run_system_test():
     """Run basic system test"""
     print("\n" + "="*80)
-    print("SINGLE GPU SYSTEM TEST")
+    print("DUAL GPU SYSTEM TEST")  # Changed title
     print("="*80)
     
     try:
         # Test coordinator creation
         print("1. 🧪 Creating coordinator...")
-        coordinator = create_single_gpu_coordinator()
-        print(f"   ✅ Coordinator created on GPU {coordinator.selected_gpu}")
+        coordinator = create_dual_gpu_coordinator(force_gpu_ids=[1, 2])  # Changed
+        print(f"   ✅ Coordinator created on GPUs {coordinator.selected_gpus}")  # Changed
         
         # Test agent creation
         print("2. 🧪 Testing agent creation...")
@@ -421,32 +405,44 @@ async def run_system_test():
 
 async def main():
     """Main application entry point"""
-    parser = argparse.ArgumentParser(description="Opulence Deep Research Mainframe Agent (Single GPU)")
+    parser = argparse.ArgumentParser(description="Opulence Deep Research Mainframe Agent (Dual GPU)")  # Changed
     
     # Operation modes
     parser.add_argument("--mode", choices=["web", "batch", "analyze", "chat", "gpu-status", "test"], 
                        default="web", help="Operation mode (default: web)")
     
-    # Batch processing options
+    # Batch processing options (same)
     parser.add_argument("--files", nargs="+", help="Files to process in batch mode")
     parser.add_argument("--folder", help="Folder containing files to process")
     parser.add_argument("--file-type", choices=["auto", "cobol", "jcl", "csv"], 
                        default="auto", help="File type for batch processing")
     
-    # Analysis options
+    # Analysis options (same)
     parser.add_argument("--component", help="Component name for analysis")
     parser.add_argument("--type", choices=["field", "file", "table", "program", "jcl"],
                        help="Component type for analysis")
+    
+    # Dual GPU configuration options - CHANGED
+    parser.add_argument("--model", default="codellama/CodeLlama-7b-Instruct-hf",
+                       help="Model name to use")
+    parser.add_argument("--exclude-gpu-0", action="store_true", default=True,
+                       help="Exclude GPU 0 from selection (default: True)")
+    parser.add_argument("--force-gpus", nargs=2, type=int, metavar=('GPU1', 'GPU2'),
+                       help="Force specific GPUs (e.g., --force-gpus 1 2)")  # CHANGED
+    parser.add_argument("--min-memory", type=float, default=6.0,
+                       help="Minimum GPU memory required per GPU in GB (default: 6.0)")  # CHANGED
+    parser.add_argument("--max-tokens", type=int, default=1024,
+                       help="Maximum tokens for model (default: 1024)")
     
     # Single GPU configuration options
     parser.add_argument("--model", default="codellama/CodeLlama-7b-Instruct-hf",
                        help="Model name to use")
     parser.add_argument("--exclude-gpu-0", action="store_true", default=True,
                        help="Exclude GPU 0 from selection (default: True)")
-    parser.add_argument("--force-gpu", type=int, choices=[0, 1, 2, 3],
-                       help="Force specific GPU (0-3)")
+    parser.add_argument("--force-gpus", nargs=2, type=int, metavar=('GPU1', 'GPU2'),
+                       help="Force specific GPUs (e.g., --force-gpus 1 2)")  # CHANGED
     parser.add_argument("--min-memory", type=float, default=6.0,
-                       help="Minimum GPU memory required in GB (default: 6.0)")
+                       help="Minimum GPU memory required per GPU in GB (default: 6.0)")  # CHANGED
     parser.add_argument("--max-tokens", type=int, default=1024,
                        help="Maximum tokens for model (default: 1024)")
     
@@ -486,18 +482,18 @@ async def main():
             coordinator = create_dedicated_server_coordinator()
             logger.info("📊 Using dedicated server configuration")
         else:
-            # Custom configuration
-            config = SingleGPUOpulenceConfig(
+            # Custom configuration - CHANGED
+            config = DualGPUOpulenceConfig(  # Changed from SingleGPUOpulenceConfig
                 model_name=args.model,
                 exclude_gpu_0=args.exclude_gpu_0,
                 min_memory_gb=args.min_memory,
                 max_tokens=args.max_tokens,
-                force_gpu_id=args.force_gpu
+                force_gpu_ids=args.force_gpus  # Changed from force_gpu_id
             )
-            coordinator = SingleGPUOpulenceCoordinator(config)
+            coordinator = DualGPUOpulenceCoordinator(config)  # Changed class
             logger.info("📊 Using custom configuration")
         
-        logger.info(f"🎯 Coordinator initialized on GPU {coordinator.selected_gpu}")
+        logger.info(f"🎯 Coordinator initialized on GPUs {coordinator.selected_gpus}")  # Changed
         
         # Handle specific modes
         if args.mode == "batch":
