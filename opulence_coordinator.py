@@ -1374,7 +1374,7 @@ class DualGPUProductionCoordinatorManager:
                         del self.coordinator.gpu_manager.gpu_engines[gpu_id]
                     
                     # Recreate engine for this GPU
-                    self.coordinator.gpu_manager.get_llm_engine(gpu_id)
+                    self.coordinator.gpu_manager.get_llm_engine_safe(gpu_id)
                     
                     self.logger.info(f"✅ GPU {gpu_id} recovery successful")
                     
