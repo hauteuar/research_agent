@@ -350,3 +350,184 @@ class DualGPUManager:
         self.total_tasks_processed.clear()
         
         logger.info("✅ Dual GPUs released successfully")
+    
+    def get_llm_engine(self, gpu_id: int, model_name: str = None, max_tokens: int = None):
+        """Get or create LLM engine for specific GPU"""
+        if gpu_id not in self.selected_gpus:
+            raise ValueError(f"GPU {gpu_id} is not managed by this coordinator. Available GPUs: {self.selected_gpus}")
+        
+        # Return existing engine if available
+        if gpu_id in self.gpu_engines:
+            logger = logging.getLogger(__name__)
+            logger.info(f"♻️ Reusing existing LLM engine on GPU {gpu_id}")
+            return self.gpu_engines[gpu_id]
+        
+        # Create new engine
+        model_name = model_name or self.config.model_name
+        max_tokens = max_tokens or self.config.max_tokens
+        
+        logger = logging.getLogger(__name__)
+        logger.info(f"🔧 Creating LLM engine for {model_name} on GPU {gpu_id}")
+        
+        try:
+            # Create engine for specific GPU
+            engine = self._create_engine_for_gpu(gpu_id, model_name, max_tokens)
+            self.gpu_engines[gpu_id] = engine
+            
+            # Update GPU info after engine creation
+            self.gpu_info[gpu_id] = self._get_gpu_info(gpu_id)
+            
+            logger.info(f"✅ LLM engine created successfully on GPU {gpu_id}")
+            return engine
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to create LLM engine on GPU {gpu_id}: {str(e)}")
+            raise
+    
+    def _create_engine_for_gpu(self, gpu_id: int, model_name: str, max_tokens: int):
+        """Create LLM engine for specific GPU"""
+        from vllm import AsyncLLMEngine, AsyncEngineArgs
+        
+        # Store original CUDA environment
+        original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
+        
+        try:
+            # Set CUDA device for this specific GPU
+            os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
+            os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
+            
+            # Check available memory for this GPU
+            current_info = self._get_gpu_info(gpu_id)
+            if current_info:
+                available_memory = current_info['free_gb']
+                logger = logging.getLogger(__name__)
+                logger.info(f"📊 GPU {gpu_id} available memory: {available_memory:.1f}GB")
+                
+                # Adjust memory utilization based on available memory
+                if available_memory < 6:
+                    memory_utilization = 0.3
+                elif available_memory < 12:
+                    memory_utilization = 0.4
+                else:
+                    memory_utilization = 0.5
+            else:
+                memory_utilization = 0.3  # Conservative fallback
+            
+            # Create engine with conservative settings for dual GPU
+            engine_args = AsyncEngineArgs(
+                model=model_name,
+                tensor_parallel_size=1,  # Single GPU per engine
+                max_model_len=min(max_tokens, 2048),  # Conservative max length
+                gpu_memory_utilization=memory_utilization,
+                device="cuda:0",  # Always 0 after setting CUDA_VISIBLE_DEVICES
+                trust_remote_code=True,
+                enforce_eager=True,  # Important for stability
+                disable_log_stats=False,
+                quantization=None,
+                load_format="auto",
+                dtype="auto",
+                seed=42,
+                max_num_seqs=2,  # 2 concurrent requests per GPU
+                enable_prefix_caching=False,
+                max_paddings=128,
+                disable_custom_all_reduce=True,
+                worker_use_ray=False,
+                disable_log_requests=True
+            )
+            
+            # Create the engine
+            engine = AsyncLLMEngine.from_engine_args(engine_args)
+            
+            # Verify engine creation
+            final_info = self._get_gpu_info(gpu_id)
+            if final_info and current_info:
+                memory_used = current_info['free_gb'] - final_info['free_gb']
+                logger.info(f"✅ LLM engine created on GPU {gpu_id}, using {memory_used:.1f}GB")
+            
+            return engine
+            
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"❌ Failed to create LLM engine on GPU {gpu_id}: {e}")
+            raise
+        finally:
+            # Restore original CUDA environment
+            if original_cuda_visible is not None:
+                os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible
+            else:
+                # Set back to both GPUs
+                os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, self.selected_gpus))
+    
+    def get_next_available_gpu(self) -> int:
+        """Get GPU with lowest current load (round-robin with load balancing)"""
+        if not self.selected_gpus:
+            raise RuntimeError("No GPUs available")
+        
+        # Find GPU with least active tasks
+        gpu_loads = {}
+        for gpu_id in self.selected_gpus:
+            gpu_loads[gpu_id] = len(self.active_tasks.get(gpu_id, []))
+        
+        # Return GPU with minimum load
+        selected_gpu = min(gpu_loads.keys(), key=lambda x: gpu_loads[x])
+        
+        # Also consider memory usage as tiebreaker
+        if list(gpu_loads.values()).count(min(gpu_loads.values())) > 1:
+            # Multiple GPUs have same task load, check memory
+            memory_loads = {}
+            for gpu_id in self.selected_gpus:
+                if gpu_loads[gpu_id] == min(gpu_loads.values()):
+                    gpu_info = self._get_gpu_info(gpu_id)
+                    memory_loads[gpu_id] = gpu_info.get('memory_usage_percent', 100) if gpu_info else 100
+            
+            selected_gpu = min(memory_loads.keys(), key=lambda x: memory_loads[x])
+        
+        logger = logging.getLogger(__name__)
+        logger.debug(f"🎯 Selected GPU {selected_gpu} (load: {gpu_loads[selected_gpu]} tasks)")
+        
+        return selected_gpu
+    
+    def get_or_create_llm_engine(self, gpu_id: int = None, model_name: str = None, max_tokens: int = None):
+        """Get or create LLM engine, with automatic GPU selection if not specified"""
+        target_gpu = gpu_id if gpu_id is not None else self.get_next_available_gpu()
+        return self.get_llm_engine(target_gpu, model_name, max_tokens)
+    
+    def has_llm_engine(self, gpu_id: int) -> bool:
+        """Check if GPU has an LLM engine"""
+        return gpu_id in self.gpu_engines
+    
+    def remove_llm_engine(self, gpu_id: int):
+        """Remove LLM engine from specific GPU"""
+        if gpu_id in self.gpu_engines:
+            logger = logging.getLogger(__name__)
+            logger.info(f"🗑️ Removing LLM engine from GPU {gpu_id}")
+            
+            try:
+                # Clean up the engine
+                del self.gpu_engines[gpu_id]
+                
+                # Clean GPU memory
+                self.cleanup_gpu_memory(gpu_id)
+                
+                logger.info(f"✅ LLM engine removed from GPU {gpu_id}")
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to remove LLM engine from GPU {gpu_id}: {e}")
+    
+    def get_engine_info(self) -> Dict[str, Any]:
+        """Get information about all LLM engines"""
+        engine_info = {}
+        
+        for gpu_id in self.selected_gpus:
+            engine_info[f"gpu_{gpu_id}"] = {
+                "has_engine": self.has_llm_engine(gpu_id),
+                "active_tasks": len(self.active_tasks.get(gpu_id, [])),
+                "total_tasks_processed": self.total_tasks_processed.get(gpu_id, 0)
+            }
+        
+        return {
+            "engines_info": engine_info,
+            "total_engines": len(self.gpu_engines),
+            "available_gpus": self.selected_gpus,
+            "engines_per_gpu": {gpu_id: gpu_id in self.gpu_engines for gpu_id in self.selected_gpus}
+        }
