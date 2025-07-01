@@ -161,8 +161,8 @@ class DualGPUOpulenceCoordinator:
         return self.gpu_manager.gpu_engines
     
     async def get_shared_llm_engine(self, gpu_id: int):
-        """Get shared LLM engine - LAZY LOADING with reference counting"""
-        async with self.engine_lock:  # Prevent concurrent creation
+        """Get shared LLM engine - THREAD SAFE VERSION"""
+        async with self.engine_lock:
             
             if self.gpu_manager.has_llm_engine(gpu_id):
                 # Increment reference count
@@ -170,9 +170,9 @@ class DualGPUOpulenceCoordinator:
                 self.logger.info(f"♻️ Reusing existing engine on GPU {gpu_id} (refs: {self.engine_reference_count[gpu_id]})")
                 return self.gpu_manager.gpu_engines[gpu_id]
             
-            # Create new engine through GPU manager
+            # Create new engine using SAFE method
             self.logger.info(f"🔧 Creating new engine on GPU {gpu_id}...")
-            engine = self.gpu_manager.get_llm_engine(
+            engine = await self.gpu_manager.get_llm_engine_safe(  # Use safe method
                 gpu_id, 
                 self.config.model_name, 
                 self.config.max_tokens
@@ -184,7 +184,6 @@ class DualGPUOpulenceCoordinator:
             
             self.logger.info(f"✅ Engine created on GPU {gpu_id} (refs: 1)")
             return engine
-
             
     # 3. ADD engine reference management
     def release_engine_reference(self, gpu_id: int, task_id: str = None):

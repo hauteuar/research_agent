@@ -12,7 +12,8 @@ import os
 from typing import Dict, Optional, Any, List
 from dataclasses import dataclass
 from datetime import datetime as dt
-
+import asyncio
+from vllm import AsyncLLMEngine, AsyncEngineArgs
 logger = logging.getLogger(__name__)
 @dataclass
 class DualGPUConfig:
@@ -48,7 +49,7 @@ class DualGPUManager:
         
         
         self._initialize_gpus()
-    
+        self.engine_creation_locks = {}  # Add this line
     def _initialize_gpus(self):
         """Find and lock 2 best available GPUs"""
         if self.config.force_gpu_ids:
@@ -62,6 +63,7 @@ class DualGPUManager:
             self.active_tasks[gpu_id] = []
             self.total_tasks_processed[gpu_id] = 0
             self.gpu_info[gpu_id] = self._get_gpu_info(gpu_id)
+            self.engine_creation_locks[gpu_id] = asyncio.Lock() 
         
         self._lock_gpus()
     
@@ -352,38 +354,51 @@ class DualGPUManager:
         
         logger.info("✅ Dual GPUs released successfully")
     
-    def get_llm_engine(self, gpu_id: int, model_name: str = None, max_tokens: int = None):
-        """Get or create LLM engine for specific GPU - PREVENTS DUPLICATE LOADING"""
+    async def get_llm_engine_safe(self, gpu_id: int, model_name: str = None, max_tokens: int = None):
+        """Thread-safe LLM engine creation - PREVENTS RACE CONDITIONS"""
         if gpu_id not in self.selected_gpus:
             raise ValueError(f"GPU {gpu_id} not managed by this coordinator. Available: {self.selected_gpus}")
         
-        # IMPORTANT: Return existing engine if already created
+        # Fast path: return existing engine
         if gpu_id in self.gpu_engines:
             logger = logging.getLogger(__name__)
-            logger.info(f"♻️ Reusing existing LLM engine on GPU {gpu_id} (prevents duplicate loading)")
+            logger.info(f"♻️ Reusing existing LLM engine on GPU {gpu_id}")
             return self.gpu_engines[gpu_id]
         
-        # Only create if doesn't exist
-        model_name = model_name or self.config.model_name
-        max_tokens = max_tokens or self.config.max_tokens
-        
-        logger = logging.getLogger(__name__)
-        logger.info(f"🔧 Creating NEW LLM engine for {model_name} on GPU {gpu_id}")
-        
-        try:
-            engine = self._create_engine_for_gpu(gpu_id, model_name, max_tokens)
-            self.gpu_engines[gpu_id] = engine  # CACHE the engine
+    # Slow path: create with lock to prevent race conditions
+        async with self.engine_creation_locks[gpu_id]:
+            # Double-check pattern (another coroutine might have created it)
+            if gpu_id in self.gpu_engines:
+                logger = logging.getLogger(__name__)
+                logger.info(f"♻️ Engine created by another coroutine on GPU {gpu_id}")
+                return self.gpu_engines[gpu_id]
             
-            logger.info(f"✅ LLM engine created and cached on GPU {gpu_id}")
-            return engine
+            # Check available memory before creation
+            gpu_info = self._get_gpu_info(gpu_id)
+            if gpu_info and gpu_info['free_gb'] < 8:
+                raise RuntimeError(f"GPU {gpu_id} insufficient memory: {gpu_info['free_gb']:.1f}GB free")
             
-        except Exception as e:
-            logger.error(f"❌ Failed to create LLM engine on GPU {gpu_id}: {str(e)}")
-            raise
+            # Safe to create engine
+            model_name = model_name or "codellama/CodeLlama-7b-Instruct-hf"
+            max_tokens = max_tokens or 1024
+            
+            logger = logging.getLogger(__name__)
+            logger.info(f"🔧 Creating NEW LLM engine for {model_name} on GPU {gpu_id}")
+            
+            try:
+                engine = self._create_engine_for_gpu(gpu_id, model_name, max_tokens)
+                self.gpu_engines[gpu_id] = engine  # Cache the engine
+                
+                logger.info(f"✅ LLM engine created and cached on GPU {gpu_id}")
+                return engine
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to create LLM engine on GPU {gpu_id}: {str(e)}")
+                raise
 
     
     def _create_engine_for_gpu(self, gpu_id: int, model_name: str, max_tokens: int):
-        """Create LLM engine for specific GPU"""
+        """Create LLM engine with improved memory management and error handling"""
         from vllm import AsyncLLMEngine, AsyncEngineArgs
         
         # Store original CUDA environment
@@ -401,21 +416,42 @@ class DualGPUManager:
                 logger = logging.getLogger(__name__)
                 logger.info(f"📊 GPU {gpu_id} available memory: {available_memory:.1f}GB")
                 
-                # Adjust memory utilization based on available memory
-                if available_memory < 6:
-                    memory_utilization = 0.3
+                # IMPROVED: More conservative memory allocation
+                if available_memory < 8:
+                    raise RuntimeError(f"GPU {gpu_id} insufficient memory: {available_memory:.1f}GB (need 8GB+)")
                 elif available_memory < 12:
-                    memory_utilization = 0.4
+                    memory_utilization = 0.20  # Very conservative
+                    max_tokens = min(max_tokens, 512)
+                    max_num_seqs = 1
+                elif available_memory < 20:
+                    memory_utilization = 0.30
+                    max_tokens = min(max_tokens, 1024)
+                    max_num_seqs = 1
                 else:
-                    memory_utilization = 0.5
+                    memory_utilization = 0.40  # Still conservative for dual GPU
+                    max_num_seqs = 2
             else:
-                memory_utilization = 0.3  # Conservative fallback
+                # Fallback if can't get GPU info
+                memory_utilization = 0.20
+                max_tokens = min(max_tokens, 512)
+                max_num_seqs = 1
+            
+            # IMPROVED: Force cleanup before creation
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                # Additional cleanup
+                torch.cuda.ipc_collect()
+            
+            logger.info(f"🔧 Creating engine: model={model_name}, max_tokens={max_tokens}, memory_util={memory_utilization}")
             
             # Create engine with conservative settings for dual GPU
             engine_args = AsyncEngineArgs(
                 model=model_name,
                 tensor_parallel_size=1,  # Single GPU per engine
-                max_model_len=min(max_tokens, 2048),  # Conservative max length
+                max_model_len=max_tokens,
                 gpu_memory_utilization=memory_utilization,
                 device="cuda:0",  # Always 0 after setting CUDA_VISIBLE_DEVICES
                 trust_remote_code=True,
@@ -425,29 +461,49 @@ class DualGPUManager:
                 load_format="auto",
                 dtype="auto",
                 seed=42,
-                max_num_seqs=2,  # 2 concurrent requests per GPU
+                max_num_seqs=max_num_seqs,  # Dynamic based on memory
                 enable_prefix_caching=False,
-                max_paddings=128,
+                max_paddings=64,  # Reduced from 128
                 disable_custom_all_reduce=True,
                 worker_use_ray=False,
-                disable_log_requests=True
+                disable_log_requests=True,
+                # ADDED: Additional memory-saving options
+                max_num_batched_tokens=max_tokens * max_num_seqs,
+                swap_space=0,  # Disable CPU offloading to avoid complexity
+                cpu_offload_gb=0,
+                enable_chunked_prefill=False
             )
             
             # Create the engine
+            logger.info(f"⚡ Initializing AsyncLLMEngine on GPU {gpu_id}...")
             engine = AsyncLLMEngine.from_engine_args(engine_args)
             
-            # Verify engine creation
+            # Verify engine creation and log memory usage
             final_info = self._get_gpu_info(gpu_id)
             if final_info and current_info:
                 memory_used = current_info['free_gb'] - final_info['free_gb']
-                logger.info(f"✅ LLM engine created on GPU {gpu_id}, using {memory_used:.1f}GB")
+                logger.info(f"✅ Engine created on GPU {gpu_id}: {memory_used:.1f}GB used, {final_info['free_gb']:.1f}GB remaining")
+            else:
+                logger.info(f"✅ Engine created on GPU {gpu_id} (memory info unavailable)")
             
             return engine
             
         except Exception as e:
             logger = logging.getLogger(__name__)
-            logger.error(f"❌ Failed to create LLM engine on GPU {gpu_id}: {e}")
-            raise
+            logger.error(f"❌ Engine creation failed on GPU {gpu_id}: {e}")
+            
+            # Clean up on failure
+            try:
+                import gc
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+            except:
+                pass
+            
+            raise RuntimeError(f"Failed to create LLM engine on GPU {gpu_id}: {str(e)}")
+            
         finally:
             # Restore original CUDA environment
             if original_cuda_visible is not None:
