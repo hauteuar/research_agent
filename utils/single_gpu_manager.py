@@ -352,37 +352,34 @@ class DualGPUManager:
         logger.info("✅ Dual GPUs released successfully")
     
     def get_llm_engine(self, gpu_id: int, model_name: str = None, max_tokens: int = None):
-        """Get or create LLM engine for specific GPU"""
+        """Get or create LLM engine for specific GPU - PREVENTS DUPLICATE LOADING"""
         if gpu_id not in self.selected_gpus:
-            raise ValueError(f"GPU {gpu_id} is not managed by this coordinator. Available GPUs: {self.selected_gpus}")
+            raise ValueError(f"GPU {gpu_id} not managed by this coordinator. Available: {self.selected_gpus}")
         
-        # Return existing engine if available
+        # IMPORTANT: Return existing engine if already created
         if gpu_id in self.gpu_engines:
             logger = logging.getLogger(__name__)
-            logger.info(f"♻️ Reusing existing LLM engine on GPU {gpu_id}")
+            logger.info(f"♻️ Reusing existing LLM engine on GPU {gpu_id} (prevents duplicate loading)")
             return self.gpu_engines[gpu_id]
         
-        # Create new engine
+        # Only create if doesn't exist
         model_name = model_name or self.config.model_name
         max_tokens = max_tokens or self.config.max_tokens
         
         logger = logging.getLogger(__name__)
-        logger.info(f"🔧 Creating LLM engine for {model_name} on GPU {gpu_id}")
+        logger.info(f"🔧 Creating NEW LLM engine for {model_name} on GPU {gpu_id}")
         
         try:
-            # Create engine for specific GPU
             engine = self._create_engine_for_gpu(gpu_id, model_name, max_tokens)
-            self.gpu_engines[gpu_id] = engine
+            self.gpu_engines[gpu_id] = engine  # CACHE the engine
             
-            # Update GPU info after engine creation
-            self.gpu_info[gpu_id] = self._get_gpu_info(gpu_id)
-            
-            logger.info(f"✅ LLM engine created successfully on GPU {gpu_id}")
+            logger.info(f"✅ LLM engine created and cached on GPU {gpu_id}")
             return engine
             
         except Exception as e:
             logger.error(f"❌ Failed to create LLM engine on GPU {gpu_id}: {str(e)}")
             raise
+
     
     def _create_engine_for_gpu(self, gpu_id: int, model_name: str, max_tokens: int):
         """Create LLM engine for specific GPU"""

@@ -113,8 +113,6 @@ class DualGPUOpulenceConfig:
     force_gpu_ids: Optional[List[int]] = None  # Force specific GPUs [1, 2]
 
 class DualGPUOpulenceCoordinator:
-    """Dual GPU Opulence Coordinator - Uses 2 GPUs for load distribution"""
-    
     def __init__(self, config: DualGPUOpulenceConfig = None):
         self.config = config or DualGPUOpulenceConfig()
         self.logger = self._setup_logging()
@@ -123,8 +121,20 @@ class DualGPUOpulenceCoordinator:
         self.gpu_manager = DualGPUManager(self.config)
         self.selected_gpus = self.gpu_manager.selected_gpus
         
-        # FIX: Add missing attributes
-        self.selected_gpu = self.selected_gpus[0] if self.selected_gpus else None  # For compatibility
+        # Initialize database
+        self.db_path = "opulence_data.db"
+        self._init_database()
+        
+        # IMPORTANT: Create LLM engines ONCE during initialization
+        self.llm_engines = {}  # {gpu_id: engine}
+        self._initialize_llm_engines()
+        
+        # Agent storage with GPU assignment
+        self.agents = {}
+        self.agent_gpu_assignments = {}
+        
+        # Assign agent types to specific GPUs
+        self._assign_agents_to_gpus()
         
         # Initialize stats
         self.stats = {
@@ -136,23 +146,33 @@ class DualGPUOpulenceCoordinator:
             "start_time": time.time()
         }
         
-        # Initialize database
-        self.db_path = "opulence_data.db"
-        self._init_database()
-        
-        # Agent storage with GPU assignment
-        self.agents = {}
-        self.agent_gpu_assignments = {}
-        
-        # Assign agent types to specific GPUs
-        self._assign_agents_to_gpus()
-        
         self.logger.info(f"✅ Dual GPU Coordinator initialized on GPUs {self.selected_gpus}")
-
+    
+    def _initialize_llm_engines(self):
+        """Initialize LLM engines ONCE for each GPU during startup"""
+        self.logger.info("🔧 Initializing LLM engines for dual GPU...")
+        
+        for gpu_id in self.selected_gpus:
+            try:
+                self.logger.info(f"🔧 Creating LLM engine on GPU {gpu_id}...")
+                engine = self.gpu_manager.get_llm_engine(gpu_id)
+                self.llm_engines[gpu_id] = engine
+                self.logger.info(f"✅ LLM engine ready on GPU {gpu_id}")
+            except Exception as e:
+                self.logger.error(f"❌ Failed to create LLM engine on GPU {gpu_id}: {e}")
+                raise
+        
+        self.logger.info(f"✅ All LLM engines initialized: {list(self.llm_engines.keys())}")
     # Fix 2: Add missing _setup_logging method
     def _setup_logging(self) -> logging.Logger:
         """Setup logging configuration"""
         return logging.getLogger(__name__)
+    
+    def get_shared_llm_engine(self, gpu_id: int):
+        """Get the shared LLM engine for a specific GPU"""
+        if gpu_id not in self.llm_engines:
+            raise RuntimeError(f"No LLM engine available for GPU {gpu_id}")
+        return self.llm_engines[gpu_id]
 
     # Fix 3: Add missing get_agent method
     def get_agent(self, agent_type: str):
@@ -263,58 +283,60 @@ class DualGPUOpulenceCoordinator:
     
     
     def _create_agent(self, agent_type: str):
-        """Create agent using assigned GPU and LLM engine"""
+        """Create agent using SHARED LLM engine"""
         # Get assigned GPU for this agent type
         assigned_gpu = self.agent_gpu_assignments.get(agent_type, self.selected_gpus[0])
         
-        # Get LLM engine for assigned GPU
-        llm_engine = self.gpu_manager.get_llm_engine(assigned_gpu)
+        # IMPORTANT: Use shared engine instead of creating new one
+        shared_engine = self.get_shared_llm_engine(assigned_gpu)
+        
+        self.logger.info(f"🔗 Creating {agent_type} agent with shared engine on GPU {assigned_gpu}")
         
         if agent_type == "code_parser" and CodeParserAgent:
             return CodeParserAgent(
-                llm_engine=llm_engine,
+                llm_engine=shared_engine,  # SHARED engine
                 db_path=self.db_path,
                 gpu_id=assigned_gpu,
                 coordinator=self
             )
         elif agent_type == "vector_index" and VectorIndexAgent:
             return VectorIndexAgent(
-                llm_engine=llm_engine,
+                llm_engine=shared_engine,  # SHARED engine
                 db_path=self.db_path,
                 gpu_id=assigned_gpu,
                 coordinator=self
             )
         elif agent_type == "data_loader" and DataLoaderAgent:
             return DataLoaderAgent(
-                llm_engine=llm_engine,
+                llm_engine=shared_engine,  # SHARED engine
                 db_path=self.db_path,
                 gpu_id=assigned_gpu,
                 coordinator=self
             )
         elif agent_type == "lineage_analyzer" and LineageAnalyzerAgent:
             return LineageAnalyzerAgent(
-                llm_engine=llm_engine,
+                llm_engine=shared_engine,  # SHARED engine
                 db_path=self.db_path,
                 gpu_id=assigned_gpu,
                 coordinator=self
             )
         elif agent_type == "logic_analyzer" and LogicAnalyzerAgent:
             return LogicAnalyzerAgent(
-                llm_engine=llm_engine,
+                llm_engine=shared_engine,  # SHARED engine
                 db_path=self.db_path,
                 gpu_id=assigned_gpu,
                 coordinator=self
             )
         elif agent_type == "documentation" and DocumentationAgent:
             return DocumentationAgent(
-                llm_engine=llm_engine,
+                llm_engine=shared_engine,  # SHARED engine
                 db_path=self.db_path,
                 gpu_id=assigned_gpu,
                 coordinator=self
             )
         elif agent_type == "db2_comparator" and DB2ComparatorAgent:
             return DB2ComparatorAgent(
-                llm_engine=llm_engine,
+                llm_engine=shared_engine,  # SHARED engine
                 db_path=self.db_path,
                 gpu_id=assigned_gpu,
                 max_rows=self.config.max_db_rows,
@@ -323,7 +345,7 @@ class DualGPUOpulenceCoordinator:
         elif agent_type == "chat_agent" and OpulenceChatAgent:
             return OpulenceChatAgent(
                 coordinator=self,
-                llm_engine=llm_engine,
+                llm_engine=shared_engine,  # SHARED engine
                 db_path=self.db_path,
                 gpu_id=assigned_gpu
             )
@@ -868,14 +890,20 @@ class DualGPUOpulenceCoordinator:
         gpu_status = self.gpu_manager.get_status()
         
         return {
-            "status": "healthy" if gpu_status.get('is_locked') else "gpu_not_available",
+            "status": "healthy" if len(self.llm_engines) == len(self.selected_gpus) else "degraded",
             "coordinator_type": "dual_gpu",
             "selected_gpus": self.selected_gpus,
-            "gpu_status": gpu_status,
             "active_agents": len(self.agents),
             "stats": self.stats,
             "uptime_seconds": time.time() - self.stats["start_time"],
-            "database_available": os.path.exists(self.db_path)
+            "database_available": os.path.exists(self.db_path),
+            # NEW: Engine sharing status
+            "engine_sharing": {
+                "engines_created": len(self.llm_engines),
+                "engines_per_gpu": {gpu_id: gpu_id in self.llm_engines for gpu_id in self.selected_gpus},
+                "shared_engines": True,  # Indicates engines are shared across agents
+                "memory_efficient": len(self.llm_engines) <= len(self.selected_gpus)  # Should be True
+           }
         }
     
     def cleanup(self):
