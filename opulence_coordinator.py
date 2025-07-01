@@ -125,9 +125,11 @@ class DualGPUOpulenceCoordinator:
         self.db_path = "opulence_data.db"
         self._init_database()
         
-        # IMPORTANT: Don't create engines during init - use lazy loading
-        self.llm_engines = {}  # Will be populated on-demand
-        self._engine_creation_lock = asyncio.Lock()  # Prevent concurrent creation
+        # LAZY LOADING: Don't create engines during init
+        # REMOVE: self._initialize_llm_engines()
+        self.llm_engines = {}  # Will be populated on demand
+        self.engine_reference_count = {}  # Track how many agents use each engine
+        self.engine_lock = asyncio.Lock()  # Prevent concurrent engine creation
         
         # Agent storage with GPU assignment
         self.agents = {}
@@ -143,36 +145,73 @@ class DualGPUOpulenceCoordinator:
             "avg_response_time": 0,
             "gpus_used": self.selected_gpus,
             "tasks_completed": 0,
-            "start_time": time.time()
+            "start_time": time.time(),
+            "engines_loaded": 0,  # Track loaded engines
+            "lazy_loading": True   # Flag for lazy loading mode
         }
         
-        self.logger.info(f"✅ Dual GPU Coordinator initialized on GPUs {self.selected_gpus} (engines will load on-demand)")
-
-    def _initialize_llm_engines(self):
-        """Initialize LLM engines ONCE for each GPU during startup"""
-        self.logger.info("🔧 Initializing LLM engines for dual GPU...")
-        
-        for gpu_id in self.selected_gpus:
+        self.logger.info(f"✅ Dual GPU Coordinator initialized on GPUs {self.selected_gpus} (LAZY LOADING)")
+    
+    async def get_shared_llm_engine(self, gpu_id: int):
+        """Get shared LLM engine - LAZY LOADING with reference counting"""
+        async with self.engine_lock:  # Prevent concurrent creation
+            
+            # Return existing engine if already loaded
+            if gpu_id in self.llm_engines:
+                self.engine_reference_count[gpu_id] += 1
+                self.logger.info(f"♻️ Reusing existing LLM engine on GPU {gpu_id} (refs: {self.engine_reference_count[gpu_id]})")
+                return self.llm_engines[gpu_id]
+            
+            # Create engine only when first requested
+            self.logger.info(f"🔧 LAZY LOADING: Creating LLM engine on GPU {gpu_id}...")
+            
             try:
-                self.logger.info(f"🔧 Creating LLM engine on GPU {gpu_id}...")
-                engine = self.gpu_manager.get_llm_engine(gpu_id)
+                engine = self.gpu_manager.get_llm_engine(
+                    gpu_id, 
+                    self.config.model_name, 
+                    self.config.max_tokens
+                )
+                
+                # Cache the engine and initialize reference count
                 self.llm_engines[gpu_id] = engine
-                self.logger.info(f"✅ LLM engine ready on GPU {gpu_id}")
+                self.engine_reference_count[gpu_id] = 1
+                self.stats["engines_loaded"] += 1
+                
+                self.logger.info(f"✅ LLM engine created and cached on GPU {gpu_id} (refs: 1)")
+                return engine
+                
             except Exception as e:
                 self.logger.error(f"❌ Failed to create LLM engine on GPU {gpu_id}: {e}")
                 raise
-        
-        self.logger.info(f"✅ All LLM engines initialized: {list(self.llm_engines.keys())}")
+
+    # 3. ADD engine reference management
+    def release_engine_reference(self, gpu_id: int):
+        """Release reference to engine (for cleanup tracking)"""
+        if gpu_id in self.engine_reference_count:
+            self.engine_reference_count[gpu_id] -= 1
+            self.logger.debug(f"📉 Released engine reference for GPU {gpu_id} (refs: {self.engine_reference_count[gpu_id]})")
+            
+            # Optional: Remove engine if no references (aggressive cleanup)
+            if self.engine_reference_count[gpu_id] <= 0 and self.config.auto_cleanup:
+                self._cleanup_unused_engine(gpu_id)
+
+    def _cleanup_unused_engine(self, gpu_id: int):
+        """Clean up engine with no references"""
+        try:
+            if gpu_id in self.llm_engines:
+                self.logger.info(f"🗑️ Cleaning up unused engine on GPU {gpu_id}")
+                del self.llm_engines[gpu_id]
+                del self.engine_reference_count[gpu_id]
+                self.gpu_manager.cleanup_gpu_memory(gpu_id)
+                self.stats["engines_loaded"] -= 1
+        except Exception as e:
+            self.logger.error(f"❌ Engine cleanup failed for GPU {gpu_id}: {e}")
+
     # Fix 2: Add missing _setup_logging method
     def _setup_logging(self) -> logging.Logger:
         """Setup logging configuration"""
         return logging.getLogger(__name__)
     
-    def get_shared_llm_engine(self, gpu_id: int):
-        """Get the shared LLM engine for a specific GPU"""
-        if gpu_id not in self.llm_engines:
-            raise RuntimeError(f"No LLM engine available for GPU {gpu_id}")
-        return self.llm_engines[gpu_id]
 
     # Fix 3: Add missing get_agent method
     def get_agent(self, agent_type: str):
@@ -280,220 +319,63 @@ class DualGPUOpulenceCoordinator:
             self.logger.error(f"Database initialization failed: {str(e)}")
             raise
     
-    async def get_or_create_shared_engine(self, gpu_id: int):
-        """Get or create LLM engine with lazy loading and memory management"""
-        if gpu_id not in self.selected_gpus:
-            raise ValueError(f"GPU {gpu_id} not available. Selected GPUs: {self.selected_gpus}")
-        
-        # Return existing engine if available
-        if gpu_id in self.llm_engines:
-            self.logger.debug(f"♻️ Reusing existing engine on GPU {gpu_id}")
-            return self.llm_engines[gpu_id]
-        
-        # Create engine with lock to prevent concurrent creation
-        async with self._engine_creation_lock:
-            # Double-check after acquiring lock
-            if gpu_id in self.llm_engines:
-                return self.llm_engines[gpu_id]
-            
-            self.logger.info(f"🔧 Creating LLM engine on GPU {gpu_id} (lazy loading)...")
-            
-            try:
-                # Check if we need to free memory from other GPU first
-                await self._manage_gpu_memory_before_creation(gpu_id)
-                
-                # Create engine with conservative settings
-                engine = await self._create_conservative_engine(gpu_id)
-                self.llm_engines[gpu_id] = engine
-                
-                self.logger.info(f"✅ LLM engine created successfully on GPU {gpu_id}")
-                return engine
-                
-            except Exception as e:
-                self.logger.error(f"❌ Failed to create engine on GPU {gpu_id}: {e}")
-                
-                # Try fallback with smaller model
-                return await self._create_fallback_engine(gpu_id)
     
-    async def _manage_gpu_memory_before_creation(self, target_gpu: int):
-        """Manage GPU memory before creating new engine"""
-        # Check available memory on target GPU
-        gpu_info = self.gpu_manager._get_gpu_info(target_gpu)
-        if gpu_info:
-            free_memory = gpu_info['free_gb']
-            self.logger.info(f"📊 GPU {target_gpu} has {free_memory:.1f}GB free memory")
-            
-            # If less than 8GB free, try to free up memory
-            if free_memory < 8.0:
-                self.logger.warning(f"⚠️ Low memory on GPU {target_gpu}, attempting cleanup...")
-                
-                # Clean up GPU memory
-                self.gpu_manager.cleanup_gpu_memory(target_gpu)
-                
-                # Wait for cleanup
-                await asyncio.sleep(2)
-                
-                # Check again
-                updated_info = self.gpu_manager._get_gpu_info(target_gpu)
-                if updated_info:
-                    new_free = updated_info['free_gb']
-                    self.logger.info(f"📊 After cleanup: GPU {target_gpu} has {new_free:.1f}GB free")
-                    
-                    if new_free < 6.0:
-                        raise RuntimeError(f"Insufficient memory on GPU {target_gpu}: {new_free:.1f}GB available, need 6GB+")
-    
-    async def _create_conservative_engine(self, gpu_id: int):
-        """Create engine with very conservative memory settings"""
-        from vllm import AsyncLLMEngine, AsyncEngineArgs
-        
-        # Store original CUDA environment
-        original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
-        
-        try:
-            # Set CUDA device for this specific GPU
-            os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
-            
-            # Very conservative settings for dual GPU
-            engine_args = AsyncEngineArgs(
-                model=self.config.model_name,
-                tensor_parallel_size=1,
-                max_model_len=1024,  # VERY small context
-                gpu_memory_utilization=0.3,  # VERY conservative - only 30%
-                device="cuda:0",
-                trust_remote_code=True,
-                enforce_eager=True,
-                disable_log_stats=True,
-                quantization=None,  # Could add "awq" or "gptq" if available
-                load_format="auto",
-                dtype="auto",
-                seed=42,
-                max_num_seqs=1,  # ONLY 1 concurrent request
-                enable_prefix_caching=False,
-                max_paddings=32,  # Very small
-                disable_custom_all_reduce=True,
-                worker_use_ray=False,
-                disable_log_requests=True,
-                # Additional memory-saving options
-                max_seq_len_to_capture=512,  # Limit captured sequences
-                block_size=8,  # Smaller block size
-            )
-            
-            # Create engine
-            engine = AsyncLLMEngine.from_engine_args(engine_args)
-            
-            return engine
-            
-        finally:
-            # Restore CUDA environment
-            if original_cuda_visible is not None:
-                os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible
-            else:
-                os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, self.selected_gpus))
-    
-    async def _create_fallback_engine(self, gpu_id: int):
-        """Create engine with much smaller model as fallback"""
-        self.logger.warning(f"⚠️ Creating fallback engine with smaller model on GPU {gpu_id}")
-        
-        fallback_models = [
-            "microsoft/DialoGPT-medium",  # ~354MB
-            "microsoft/DialoGPT-small",   # ~117MB  
-            "gpt2",                       # ~548MB
-        ]
-        
-        for model_name in fallback_models:
-            try:
-                from vllm import AsyncLLMEngine, AsyncEngineArgs
-                
-                original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
-                
-                try:
-                    os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
-                    
-                    engine_args = AsyncEngineArgs(
-                        model=model_name,
-                        tensor_parallel_size=1,
-                        max_model_len=512,  # Very small
-                        gpu_memory_utilization=0.2,  # Very conservative
-                        device="cuda:0",
-                        trust_remote_code=True,
-                        enforce_eager=True,
-                        max_num_seqs=1,
-                        enable_prefix_caching=False
-                    )
-                    
-                    engine = AsyncLLMEngine.from_engine_args(engine_args)
-                    self.llm_engines[gpu_id] = engine
-                    
-                    self.logger.info(f"✅ Fallback engine created with {model_name} on GPU {gpu_id}")
-                    return engine
-                    
-                finally:
-                    if original_cuda_visible is not None:
-                        os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible
-                    else:
-                        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, self.selected_gpus))
-                        
-            except Exception as e:
-                self.logger.warning(f"Failed to create fallback with {model_name}: {e}")
-                continue
-        
-        raise RuntimeError(f"Failed to create any engine on GPU {gpu_id}")
     
     def _create_agent(self, agent_type: str):
-        """Create agent using SHARED LLM engine"""
+        """Create agent using LAZY LOADED shared engine"""
         # Get assigned GPU for this agent type
         assigned_gpu = self.agent_gpu_assignments.get(agent_type, self.selected_gpus[0])
         
-        # IMPORTANT: Use shared engine instead of creating new one
-        shared_engine = self.get_shared_llm_engine(assigned_gpu)
+        self.logger.info(f"🔗 Creating {agent_type} agent (will lazy load engine on GPU {assigned_gpu})")
         
-        self.logger.info(f"🔗 Creating {agent_type} agent with shared engine on GPU {assigned_gpu}")
+        # Pass coordinator reference instead of engine directly
+        # Agents will call get_shared_llm_engine() when they need the engine
         
         if agent_type == "code_parser" and CodeParserAgent:
             return CodeParserAgent(
-                llm_engine=None,  # SHARED engine
+                llm_engine=None,  # Will be set via lazy loading
                 db_path=self.db_path,
                 gpu_id=assigned_gpu,
-                coordinator=self
+                coordinator=self  # Agent uses coordinator.get_shared_llm_engine()
             )
         elif agent_type == "vector_index" and VectorIndexAgent:
             return VectorIndexAgent(
-                llm_engine=None,  # SHARED engine
+                llm_engine=None,
                 db_path=self.db_path,
                 gpu_id=assigned_gpu,
                 coordinator=self
             )
         elif agent_type == "data_loader" and DataLoaderAgent:
             return DataLoaderAgent(
-                llm_engine=None,  # SHARED engine
+                llm_engine=None,
                 db_path=self.db_path,
                 gpu_id=assigned_gpu,
                 coordinator=self
             )
         elif agent_type == "lineage_analyzer" and LineageAnalyzerAgent:
             return LineageAnalyzerAgent(
-                llm_engine=None,  # SHARED engine
+                llm_engine=None,
                 db_path=self.db_path,
                 gpu_id=assigned_gpu,
                 coordinator=self
             )
         elif agent_type == "logic_analyzer" and LogicAnalyzerAgent:
             return LogicAnalyzerAgent(
-                llm_engine=None,  # SHARED engine
+                llm_engine=None,
                 db_path=self.db_path,
                 gpu_id=assigned_gpu,
                 coordinator=self
             )
         elif agent_type == "documentation" and DocumentationAgent:
             return DocumentationAgent(
-                llm_engine=None,  # SHARED engine
+                llm_engine=None,
                 db_path=self.db_path,
                 gpu_id=assigned_gpu,
                 coordinator=self
             )
         elif agent_type == "db2_comparator" and DB2ComparatorAgent:
             return DB2ComparatorAgent(
-                llm_engine=None,  # SHARED engine
+                llm_engine=None,
                 db_path=self.db_path,
                 gpu_id=assigned_gpu,
                 max_rows=self.config.max_db_rows,
@@ -502,13 +384,13 @@ class DualGPUOpulenceCoordinator:
         elif agent_type == "chat_agent" and OpulenceChatAgent:
             return OpulenceChatAgent(
                 coordinator=self,
-                llm_engine=None,  # SHARED engine
+                llm_engine=None,
                 db_path=self.db_path,
                 gpu_id=assigned_gpu
             )
         else:
             raise ValueError(f"Unknown or unavailable agent type: {agent_type}")
-        
+                
     def _assign_agents_to_gpus(self):
         """Assign different agent types to different GPUs for load balancing"""
         if len(self.selected_gpus) >= 2:
@@ -1043,37 +925,59 @@ class DualGPUOpulenceCoordinator:
             return {"error": str(e)}
     
     def get_health_status(self) -> Dict[str, Any]:
-        """Get system health status"""
+        """Get system health status with lazy loading info"""
         gpu_status = self.gpu_manager.get_status()
         
         return {
-            "status": "healthy" if len(self.llm_engines) == len(self.selected_gpus) else "degraded",
-            "coordinator_type": "dual_gpu",
+            "status": "healthy" if self.selected_gpus else "no_gpus",
+            "coordinator_type": "dual_gpu_lazy",
             "selected_gpus": self.selected_gpus,
             "active_agents": len(self.agents),
             "stats": self.stats,
             "uptime_seconds": time.time() - self.stats["start_time"],
             "database_available": os.path.exists(self.db_path),
-            # NEW: Engine sharing status
-            "engine_sharing": {
-                "engines_created": len(self.llm_engines),
-                "engines_per_gpu": {gpu_id: gpu_id in self.llm_engines for gpu_id in self.selected_gpus},
-                "shared_engines": True,  # Indicates engines are shared across agents
-                "memory_efficient": len(self.llm_engines) <= len(self.selected_gpus)  # Should be True
-           }
+            # LAZY LOADING STATUS
+            "lazy_loading": {
+                "enabled": True,
+                "engines_loaded": len(self.llm_engines),
+                "engines_available": len(self.selected_gpus),
+                "engine_references": self.engine_reference_count.copy(),
+                "memory_efficient": len(self.llm_engines) <= len(self.selected_gpus),
+                "on_demand_loading": True
+            }
         }
-    
+
+    # 6. ADD method to preload engines if needed
+    async def preload_engines(self, gpu_ids: List[int] = None):
+        """Manually preload engines on specific GPUs (optional)"""
+        target_gpus = gpu_ids or self.selected_gpus
+        
+        self.logger.info(f"🚀 Preloading engines on GPUs: {target_gpus}")
+        
+        for gpu_id in target_gpus:
+            try:
+                await self.get_shared_llm_engine(gpu_id)
+                self.logger.info(f"✅ Preloaded engine on GPU {gpu_id}")
+            except Exception as e:
+                self.logger.error(f"❌ Failed to preload engine on GPU {gpu_id}: {e}")
+
+    # 7. UPDATE cleanup method
     def cleanup(self):
-        """Clean up resources without releasing GPU lock"""
+        """Clean up resources including lazy loaded engines"""
         self.logger.info("🧹 Cleaning up coordinator resources...")
         
         # Clear agent cache
         self.agents.clear()
         
+        # Clean up all loaded engines
+        for gpu_id in list(self.llm_engines.keys()):
+            self._cleanup_unused_engine(gpu_id)
+        
         # Clean up GPU memory
         self.gpu_manager.cleanup_gpu_memory()
         
         self.logger.info("✅ Cleanup completed")
+
     
     def shutdown(self):
         """Shutdown coordinator and release all resources"""

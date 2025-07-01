@@ -22,134 +22,86 @@ import hashlib
 from vllm import AsyncLLMEngine, SamplingParams
 
 class DataLoaderAgent:
+    """Agent for loading and mapping data files and schemas with lazy loading"""
+    
     def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
                  gpu_id: int = None, coordinator=None):
-        self.coordinator = coordinator
+        # REMOVE: self.llm_engine = llm_engine  
+        self._engine = None  # Cached engine reference (starts as None)
+        
         self.db_path = db_path or "opulence_data.db"
         self.gpu_id = gpu_id
+        self.coordinator = coordinator
         self.logger = logging.getLogger(__name__)
         
-        # Don't load engine immediately - wait for first use
-        self.llm_engine = llm_engine
-        self._engine_loading = False
+        # NEW: Lazy loading tracking
+        self._engine_loaded = False
+        self._using_shared_engine = False
         
+        # Initialize SQLite tables for data mapping
         self._init_data_tables()
-        
-        if self.llm_engine:
-            self.logger.info(f"✅ DataLoader initialized with pre-loaded engine on GPU {gpu_id}")
-        else:
-            self.logger.info(f"💤 DataLoader initialized for GPU {gpu_id} (engine will load on first use)")
     
-    async def _ensure_llm_engine(self):
-        """Ensure LLM engine is available with lazy loading"""
-        if self.llm_engine is not None:
-            return  # Already have engine
+    # NEW: Lazy loading engine getter
+    async def get_engine(self):
+        """Get LLM engine with lazy loading and sharing"""
+        if self._engine is None and self.coordinator:
+            try:
+                # Get assigned GPU for data_loader agent type
+                assigned_gpu = self.coordinator.agent_gpu_assignments.get("data_loader")
+                if assigned_gpu is not None:
+                    # Get shared engine from coordinator
+                    self._engine = await self.coordinator.get_shared_llm_engine(assigned_gpu)
+                    self.gpu_id = assigned_gpu
+                    self._using_shared_engine = True
+                    self._engine_loaded = True
+                    self.logger.info(f"✅ DataLoader using shared engine on GPU {assigned_gpu}")
+                else:
+                    raise ValueError("No GPU assigned for data_loader agent type")
+            except Exception as e:
+                self.logger.error(f"❌ Failed to get shared engine: {e}")
+                raise
         
-        if self._engine_loading:
-            # Wait for concurrent loading to complete
-            while self._engine_loading:
-                await asyncio.sleep(0.1)
-            return
-        
-        self._engine_loading = True
-        
-        try:
-            if self.coordinator and hasattr(self.coordinator, 'get_or_create_shared_engine'):
-                self.logger.info(f"🔧 Loading LLM engine on GPU {self.gpu_id}...")
-                
-                # Get shared engine with lazy loading
-                self.llm_engine = await self.coordinator.get_or_create_shared_engine(self.gpu_id)
-                
-                self.logger.info(f"✅ LLM engine ready on GPU {self.gpu_id}")
-            else:
-                raise RuntimeError("No coordinator available for engine loading")
-                
-        except Exception as e:
-            self.logger.error(f"❌ Failed to load LLM engine: {e}")
-            raise
-        finally:
-            self._engine_loading = False
+        return self._engine
 
-    async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
-        """Generate text with LLM - handles both old and new vLLM API"""
+     async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
+        """Generate text with LLM - lazy loading version"""
         try:
-            if self.llm_engine is None:
-                await self._ensure_llm_engine()
+            # LAZY LOAD: Get engine only when needed
+            engine = await self.get_engine()
+            if engine is None:
+                raise RuntimeError("No LLM engine available")
 
             await asyncio.sleep(0.1)
 
             # Try new API first (with request_id)
             request_id = str(uuid.uuid4())
-            #result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
-            async for output in self.llm_engine.generate(prompt, sampling_params, request_id=request_id):
-                result = output
-                break
-            return result.outputs[0].text.strip()
-        except TypeError as e:
-            if "request_id" in str(e):
-                # Fallback to old API (without request_id)
-                #result = await self.llm_engine.generate(prompt, sampling_params)
-                async for output in self.llm_engine.generate(prompt, sampling_params):
+            try:
+                async for output in engine.generate(prompt, sampling_params, request_id=request_id):
                     result = output
                     break
                 return result.outputs[0].text.strip()
-            else:
-                raise e
+            except TypeError as e:
+                if "request_id" in str(e):
+                    # Fallback to old API (without request_id)
+                    async for output in engine.generate(prompt, sampling_params):
+                        result = output
+                        break
+                    return result.outputs[0].text.strip()
+                else:
+                    raise e
         except Exception as e:
             self.logger.error(f"LLM generation failed: {str(e)}")
             return ""
     
-    # ADD this new method
-    async def _create_llm_engine(self):
-        """Create own LLM engine as fallback (smaller memory footprint)"""
-        try:
-            from gpu_force_fix import GPUForcer
-            
-            best_gpu = GPUForcer.find_best_gpu_with_memory(1.5)  # Lower requirement
-            if best_gpu is None:
-                raise RuntimeError("No suitable GPU found for fallback LLM engine")
-            
-            self.logger.warning(f"DataLoader creating fallback LLM on GPU {best_gpu}")
-            
-            original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
-            
-            try:
-                GPUForcer.force_gpu_environment(best_gpu)
-                
-                # Create smaller engine to avoid conflicts
-                engine_args = GPUForcer.create_vllm_engine_args(
-                    "codellama/CodeLlama-7b-Instruct-hf",
-                    2048  # Smaller context
-                )
-                engine_args.gpu_memory_utilization = 0.3  # Use less memory
-                
-                from vllm import AsyncLLMEngine
-                self.llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
-                self.gpu_id = best_gpu
-                self._engine_created = True
-                self._using_coordinator_llm = False
-                
-                self.logger.info(f"✅ DataLoader fallback LLM created on GPU {best_gpu}")
-                
-            finally:
-                if original_cuda_visible is not None:
-                    os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible
-                elif 'CUDA_VISIBLE_DEVICES' in os.environ:
-                    del os.environ['CUDA_VISIBLE_DEVICES']
-                    
-        except Exception as e:
-            self.logger.error(f"Failed to create fallback LLM engine: {str(e)}")
-            raise
-
     # ADD this helper method
     def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Add processing information to results"""
         if isinstance(result, dict):
             result['gpu_used'] = self.gpu_id
             result['agent_type'] = 'data_loader'
-            result['using_coordinator_llm'] = self._using_coordinator_llm
+            result['using_shared_engine'] = self._using_shared_engine
+            result['engine_loaded_lazily'] = self._engine_loaded
         return result
-    
     
     def _init_data_tables(self):
         """Initialize SQLite tables for data storage"""
@@ -209,7 +161,7 @@ class DataLoaderAgent:
     async def process_file(self, file_path: Path) -> Dict[str, Any]:
         """Process a data file (CSV, DDL, DCLGEN, layout)"""
         try:
-            await self._ensure_llm_engine()
+            #await self._ensure_llm_engine()
             file_extension = file_path.suffix.lower()
             file_content = self._read_file_safely(file_path)
             
@@ -258,7 +210,7 @@ class DataLoaderAgent:
     async def _process_csv_file(self, file_path: Path, content: str) -> Dict[str, Any]:
         """Process CSV file and create corresponding table"""
         try:
-            await self._ensure_llm_engine()
+            #await self._ensure_llm_engine()
             # Detect delimiter and structure
             delimiter = self._detect_csv_delimiter(content)
             
@@ -461,7 +413,7 @@ class DataLoaderAgent:
     
     async def _enhance_schema_with_llm(self, schema: List[Dict], filename: str) -> List[Dict[str, Any]]:
         """Use LLM to enhance schema with business context using chunking"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         # Process schema in chunks if it's large
         if len(schema) > 10:
@@ -519,7 +471,7 @@ class DataLoaderAgent:
 
     async def _parse_ddl_statements(self, ddl_content: str) -> List[Dict[str, Any]]:
         """Parse DDL statements to extract table definitions - FIXED"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         tables = []
         
         # Use LLM to parse complex DDL
@@ -727,7 +679,7 @@ class DataLoaderAgent:
     
     async def _generate_field_descriptions(self, columns: List[str], sample_df: pd.DataFrame) -> Dict[str, str]:
         """Generate field descriptions using LLM - FIXED"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         descriptions = {}
         
         # Process columns in batches
@@ -810,7 +762,7 @@ class DataLoaderAgent:
     
     async def _parse_ddl_statements(self, ddl_content: str) -> List[Dict[str, Any]]:
         """Parse DDL statements to extract table definitions"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         tables = []
         
         # Use LLM to parse complex DDL
@@ -929,7 +881,7 @@ class DataLoaderAgent:
     
     async def _parse_dclgen_structure(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
         """Parse DCLGEN structure using LLM - FIXED"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         prompt = f"""
         Parse this DB2 DCLGEN file and extract the table structure:
         
@@ -1206,7 +1158,7 @@ class DataLoaderAgent:
             
     async def _parse_copybook_structure(self, content: str, filename: str) -> Optional[Dict[str, Any]]:
         """Enhanced LLM parsing with chunking support"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         prompt_template = """
         Parse this COBOL copybook file and extract the record structure with proper handling of:
@@ -1632,7 +1584,7 @@ class DataLoaderAgent:
     async def get_data_lineage_info(self, component_name: str) -> Dict[str, Any]:
         """Get data lineage information for a component - FIXED"""
         try:
-            await self._ensure_llm_engine()
+            #await self._ensure_llm_engine()
             component_info = await self.get_component_info(component_name)
             
             if component_info["component_type"] == "table":
