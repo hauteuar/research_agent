@@ -613,7 +613,17 @@ class VectorIndexAgent(BaseOpulenceAgent):  # ✅ INHERIT FROM BASE CLASS
         except Exception as e:
             self.logger.error(f"Batch embedding processing failed: {str(e)}")
             return self._add_processing_info({"status": "error", "error": str(e)})
-    
+        
+    def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Add processing information to results"""
+        if isinstance(result, dict):
+            result['gpu_used'] = self.gpu_id
+            result['agent_type'] = 'vector_index'
+            result['using_shared_engine'] = self._using_shared_engine
+            result['engine_loaded_lazily'] = self._engine_loaded
+        return result
+        
+
     async def _store_embedding_reference(self, chunk_id: int, embedding_id: str, 
                                        faiss_id: int, embedding_vector: List[float]):
         """Store embedding reference in SQLite"""
