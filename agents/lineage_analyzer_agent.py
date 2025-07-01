@@ -18,6 +18,7 @@ import networkx as nx
 from collections import defaultdict
 
 from vllm import AsyncLLMEngine, SamplingParams
+from agents.base_agent import BaseAgent, BaseOpulenceAgent
 
 @dataclass
 class LineageNode:
@@ -38,11 +39,13 @@ class LineageEdge:
     confidence_score: float = 1.0
 
 
-class LineageAnalyzerAgent:
+class LineageAnalyzerAgent(BaseOpulenceAgent): 
     """Agent to analyze field lineage, data flow, and component lifecycle"""
-    def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
-                 gpu_id: int = None, coordinator=None):
-        # REMOVE: self.llm_engine = llm_engine
+    def __init__(self, coordinator, llm_engine: AsyncLLMEngine = None, 
+                 db_path: str = "opulence_data.db", gpu_id: int = 0):
+        
+        # ✅ FIXED: Proper super().__init__() call first
+        super().__init__(coordinator, "lineage_analyzer", db_path, gpu_id)  
         self._engine = None  # Cached engine reference (starts as None)
         
         self.db_path = db_path or "opulence_data.db"

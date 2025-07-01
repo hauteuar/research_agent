@@ -19,6 +19,7 @@ import hashlib
 
 import torch
 from vllm import AsyncLLMEngine, SamplingParams
+from agents.base_agent import BaseOpulenceAgent
 
 @dataclass
 class LogicPattern:
@@ -40,11 +41,14 @@ class BusinessRule:
     fields_involved: List[str]
     confidence_score: float
 
-class LogicAnalyzerAgent:
+class LogicAnalyzerAgent(BaseOpulenceAgent): 
     """Agent for analyzing program logic and business rules with lazy loading"""
     
-    def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
-                 gpu_id: int = None, coordinator=None):
+    def __init__(self, coordinator, llm_engine: AsyncLLMEngine = None, 
+                 db_path: str = "opulence_data.db", gpu_id: int = 0):
+        
+        # ✅ FIXED: Proper super().__init__() call first
+        super().__init__(coordinator, "lineage_analyzer", db_path, gpu_id)
         # REMOVE: self.llm_engine = llm_engine
         self._engine = None  # Cached engine reference (starts as None)
         

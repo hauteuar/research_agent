@@ -614,7 +614,7 @@ class VectorIndexAgent(BaseOpulenceAgent):  # ✅ INHERIT FROM BASE CLASS
             self.logger.error(f"Batch embedding processing failed: {str(e)}")
             return self._add_processing_info({"status": "error", "error": str(e)})
     
-     async def _store_embedding_reference(self, chunk_id: int, embedding_id: str, 
+    async def _store_embedding_reference(self, chunk_id: int, embedding_id: str, 
                                        faiss_id: int, embedding_vector: List[float]):
         """Store embedding reference in SQLite"""
         await self._ensure_vector_initialized()
