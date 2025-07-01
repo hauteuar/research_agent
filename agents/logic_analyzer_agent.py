@@ -41,20 +41,22 @@ class BusinessRule:
     confidence_score: float
 
 class LogicAnalyzerAgent:
-    """Agent for analyzing program logic and business rules"""
+    """Agent for analyzing program logic and business rules with lazy loading"""
     
     def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
                  gpu_id: int = None, coordinator=None):
-        self.llm_engine = llm_engine
-        self.db_path = db_path or "opulence_data.db"  # ADD default value
+        # REMOVE: self.llm_engine = llm_engine
+        self._engine = None  # Cached engine reference (starts as None)
+        
+        self.db_path = db_path or "opulence_data.db"
         self.gpu_id = gpu_id
-        self.coordinator = coordinator  # ADD this line
+        self.coordinator = coordinator
         self.logger = logging.getLogger(__name__)
         
-        # ADD these lines for coordinator integration
-        self._engine_created = False
-        self._using_coordinator_llm = False
-        
+        # NEW: Lazy loading tracking
+        self._engine_loaded = False
+        self._using_shared_engine = False
+                
         # Logic patterns to detect
         self.logic_patterns = {
             'conditional_logic': re.compile(r'\bIF\b.*?\bEND-IF\b', re.DOTALL | re.IGNORECASE),
@@ -73,104 +75,44 @@ class LogicAnalyzerAgent:
             'approval_rules': re.compile(r'IF.*?(APPROVE|REJECT|PENDING)', re.IGNORECASE)
         }
 
+    
+    async def get_engine(self):
+        """Get LLM engine with lazy loading and sharing"""
+        if self._engine is None and self.coordinator:
+            try:
+                # Get assigned GPU for logic_analyzer agent type
+                assigned_gpu = self.coordinator.agent_gpu_assignments.get("logic_analyzer")
+                if assigned_gpu is not None:
+                    # Get shared engine from coordinator
+                    self._engine = await self.coordinator.get_shared_llm_engine(assigned_gpu)
+                    self.gpu_id = assigned_gpu
+                    self._using_shared_engine = True
+                    self._engine_loaded = True
+                    self.logger.info(f"✅ LogicAnalyzer using shared engine on GPU {assigned_gpu}")
+                else:
+                    raise ValueError("No GPU assigned for logic_analyzer agent type")
+            except Exception as e:
+                self.logger.error(f"❌ Failed to get shared engine: {e}")
+                raise
+        
+        return self._engine
     # ADD this new method
-    async def _ensure_llm_engine(self):
-        """Ensure LLM engine is available - use coordinator first, fallback to own"""
-        if self.llm_engine is not None:
-            return  # Already have engine
-        
-        # Try to get from coordinator first
-        if self.coordinator is not None:
-            try:
-                # Get available GPU from coordinator
-                best_gpu = await self.coordinator.get_available_gpu_for_agent("logic_analyzer")
-                if best_gpu is not None:
-                    # Get shared LLM engine from coordinator
-                    engine = await self.coordinator.get_or_create_llm_engine(best_gpu)
-                    self.llm_engine = engine
-                    self.gpu_id = best_gpu
-                    self._using_coordinator_llm = True
-                    self.logger.info(f"LogicAnalyzer using coordinator's LLM on GPU {best_gpu}")
-                    return
-            except Exception as e:
-                self.logger.warning(f"Failed to get LLM from coordinator: {e}")
-        
-        # Try to get from global coordinator
-        if not self._engine_created:
-            try:
-                from opulence_coordinator import get_dynamic_coordinator
-                global_coordinator = get_dynamic_coordinator()
-                
-                best_gpu = await global_coordinator.get_available_gpu_for_agent("logic_analyzer")
-                if best_gpu is not None:
-                    engine = await global_coordinator.get_or_create_llm_engine(best_gpu)
-                    self.llm_engine = engine
-                    self.gpu_id = best_gpu
-                    self._using_coordinator_llm = True
-                    self.logger.info(f"LogicAnalyzer using global coordinator's LLM on GPU {best_gpu}")
-                    return
-            except Exception as e:
-                self.logger.warning(f"Failed to get LLM from global coordinator: {e}")
-        
-        # Last resort: create own engine
-        if not self._engine_created:
-            await self._create_llm_engine()
     
     # ADD this new method
-    async def _create_llm_engine(self):
-        """Create own LLM engine as fallback (smaller memory footprint)"""
-        try:
-            from gpu_force_fix import GPUForcer
-            
-            best_gpu = GPUForcer.find_best_gpu_with_memory(1.5)  # Lower requirement
-            if best_gpu is None:
-                raise RuntimeError("No suitable GPU found for fallback LLM engine")
-            
-            self.logger.warning(f"LogicAnalyzer creating fallback LLM on GPU {best_gpu}")
-            
-            original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
-            
-            try:
-                GPUForcer.force_gpu_environment(best_gpu)
-                
-                # Create smaller engine to avoid conflicts
-                engine_args = GPUForcer.create_vllm_engine_args(
-                    "codellama/CodeLlama-7b-Instruct-hf",
-                    2048  # Smaller context
-                )
-                engine_args.gpu_memory_utilization = 0.3  # Use less memory
-                
-                from vllm import AsyncLLMEngine
-                self.llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
-                self.gpu_id = best_gpu
-                self._engine_created = True
-                self._using_coordinator_llm = False
-                
-                self.logger.info(f"✅ LogicAnalyzer fallback LLM created on GPU {best_gpu}")
-                
-            finally:
-                if original_cuda_visible is not None:
-                    os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible
-                elif 'CUDA_VISIBLE_DEVICES' in os.environ:
-                    del os.environ['CUDA_VISIBLE_DEVICES']
-                    
-        except Exception as e:
-            self.logger.error(f"Failed to create fallback LLM engine: {str(e)}")
-            raise
-
-    # ADD this helper method
+    
     def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Add processing information to results"""
         if isinstance(result, dict):
             result['gpu_used'] = self.gpu_id
             result['agent_type'] = 'logic_analyzer'
-            result['using_coordinator_llm'] = self._using_coordinator_llm
+            result['using_shared_engine'] = self._using_shared_engine
+            result['engine_loaded_lazily'] = self._engine_loaded
         return result
-    
+        
     async def analyze_program(self, program_name: str) -> Dict[str, Any]:
         """Comprehensive analysis of a program's logic"""
         try:
-            await self._ensure_llm_engine()  # ADD this line
+            #await self._ensure_llm_engine()  # ADD this line
             
             # Get program chunks from database
             chunks = await self._get_program_chunks(program_name)
@@ -220,7 +162,7 @@ class LogicAnalyzerAgent:
     async def stream_logic_analysis(self, program_name: str) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream logic analysis results as they're processed"""
         try:
-            await self._ensure_llm_engine()  # ADD this line
+            #await self._ensure_llm_engine()  # ADD this line
             
             chunks = await self._get_program_chunks(program_name)
             
@@ -319,7 +261,7 @@ class LogicAnalyzerAgent:
     
     async def _llm_analyze_logic(self, content: str, chunk_type: str) -> Dict[str, Any]:
         """Use LLM to analyze logic in code chunk"""
-        await self._ensure_llm_engine()  # ADD this line
+        #await self._ensure_llm_engine()  # ADD this line
         
         prompt = f"""
         Analyze the logic in this {chunk_type} code chunk:
@@ -468,7 +410,7 @@ class LogicAnalyzerAgent:
     async def _analyze_business_rule(self, rule_id: str, rule_type: str, 
                                    rule_code: str, context: str) -> Optional[BusinessRule]:
         """Analyze a specific business rule using LLM"""
-        await self._ensure_llm_engine()  # ADD this line
+        #await self._ensure_llm_engine()  # ADD this line
         
         prompt = f"""
         Analyze this business rule from COBOL code:
@@ -546,7 +488,7 @@ class LogicAnalyzerAgent:
     
     async def _llm_identify_patterns(self, content: str, chunk_type: str) -> List[Dict[str, Any]]:
         """Use LLM to identify logic patterns"""
-        await self._ensure_llm_engine()  # ADD this line
+        #await self._ensure_llm_engine()  # ADD this line
         
         prompt = f"""
         Identify common logic patterns in this {chunk_type} code:
@@ -735,7 +677,7 @@ class LogicAnalyzerAgent:
     async def analyze_business_logic(self, program_name: str) -> Dict[str, Any]:
         """Specialized analysis focused on business logic"""
         try:
-            await self._ensure_llm_engine()  # ADD this line
+            #await self._ensure_llm_engine()  # ADD this line
             
             chunks = await self._get_program_chunks(program_name)
             
@@ -759,7 +701,7 @@ class LogicAnalyzerAgent:
     
     async def _extract_comprehensive_business_logic(self, chunks: List[tuple]) -> Dict[str, Any]:
         """Extract comprehensive business logic from all chunks"""
-        await self._ensure_llm_engine()  # ADD this line
+        #await self._ensure_llm_engine()  # ADD this line
         
         all_content = '\n'.join([chunk[4] for chunk in chunks])
         
@@ -792,7 +734,8 @@ class LogicAnalyzerAgent:
     async def analyze_full_lifecycle(self, component_name: str, component_type: str) -> Dict[str, Any]:
         """Analyze full lifecycle of a component"""
         try:
-            await self._ensure_llm_engine()
+            #
+            # await self._ensure_llm_engine()
             
             # Get all chunks related to this component
             conn = sqlite3.connect(self.db_path)
@@ -843,7 +786,7 @@ class LogicAnalyzerAgent:
     
     async def _analyze_lifecycle_patterns(self, chunks: List[tuple], component_name: str) -> Dict[str, Any]:
         """Analyze lifecycle patterns for a component"""
-        await self._ensure_llm_engine()
+        #await self._ensure_llm_engine()
         
         # Combine relevant content
         all_content = '\n'.join([chunk[2] for chunk in chunks])
@@ -894,7 +837,7 @@ class LogicAnalyzerAgent:
     async def find_dependencies(self, component_name: str) -> List[str]:
         """Find all dependencies for a component"""
         try:
-            await self._ensure_llm_engine()
+            #await self._ensure_llm_engine()
             
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
