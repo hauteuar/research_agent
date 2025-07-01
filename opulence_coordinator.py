@@ -144,8 +144,6 @@ class SingleGPUOpulenceCoordinator:
         
         # Simple agent storage - no complex allocation needed
         self.agents = {}
-        self._llm_queue = asyncio.Queue()
-        asyncio.create_task(self._llm_worker())
         
         # Processing statistics
         self.stats = {
@@ -157,37 +155,12 @@ class SingleGPUOpulenceCoordinator:
             "start_time": time.time()
         }
         
-        
         self.logger.info(f"✅ Single GPU Opulence Coordinator initialized on GPU {self.selected_gpu}")
     
     def _setup_logging(self) -> logging.Logger:
         """Setup logging configuration"""
         return logging.getLogger(__name__)
     
-    async def _llm_worker(self):
-        """Worker to handle LLM requests in a queue"""
-      
-        print("🔁 LLM worker started")
-        while True:
-            prompt, sampling_params, future = await self._llm_queue.get()
-            print(f"🧠 Generating for prompt: {prompt}")
-        
-            task = await self._llm_queue.get()
-            prompt, sampling_params, future = task
-
-            try:
-                result = await self.llm_engine.generate(prompt, sampling_params)
-                future.set_result(result)
-            except Exception as e:
-                future.set_exception(e)
-            finally:
-                self._llm_queue.task_done()
-
-    async def safe_generate(self, prompt: List[str], sampling_params: SamplingParams):
-        future = asyncio.get_event_loop().create_future()
-        await self._llm_queue.put((prompt, sampling_params, future))
-        return await future
-
     def _init_database(self):
         """Initialize SQLite database with required tables"""
         try:

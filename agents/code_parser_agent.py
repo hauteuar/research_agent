@@ -377,8 +377,7 @@ class CompleteEnhancedCodeParserAgent:
             
             try:
                 # Get async generator from vLLM
-                #result_generator = self.llm_engine.generate(
-                result_generator = await self.coordinator.safe_generate(
+                result_generator = self.llm_engine.generate(
                     prompt, sampling_params, request_id=request_id
                 )
                 
@@ -391,8 +390,7 @@ class CompleteEnhancedCodeParserAgent:
             except TypeError as e:
                 if "request_id" in str(e):
                     # Fallback to old API
-                    #result_generator = self.llm_engine.generate(prompt, sampling_params)
-                    result_generator = await self.coordinator.safe_generate(prompt, sampling_params)
+                    result_generator = self.llm_engine.generate(prompt, sampling_params)
                     async for result in result_generator:
                         if result and hasattr(result, 'outputs') and len(result.outputs) > 0:
                             return result.outputs[0].text.strip()
