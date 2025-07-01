@@ -48,7 +48,7 @@ class LogicAnalyzerAgent(BaseOpulenceAgent):
                  db_path: str = "opulence_data.db", gpu_id: int = 0):
         
         # ✅ FIXED: Proper super().__init__() call first
-        super().__init__(coordinator, "lineage_analyzer", db_path, gpu_id)
+        super().__init__(coordinator, "logic_analyzer", db_path, gpu_id)
         # REMOVE: self.llm_engine = llm_engine
         self._engine = None  # Cached engine reference (starts as None)
         
@@ -114,55 +114,57 @@ class LogicAnalyzerAgent(BaseOpulenceAgent):
         return result
         
     async def analyze_program(self, program_name: str) -> Dict[str, Any]:
-        """Comprehensive analysis of a program's logic"""
-        try:
-            #await self._ensure_llm_engine()  # ADD this line
-            
-            # Get program chunks from database
-            chunks = await self._get_program_chunks(program_name)
-            
-            if not chunks:
-                return self._add_processing_info({"error": f"Program {program_name} not found"})
-            
-            # Analyze each chunk
-            chunk_analyses = []
-            total_complexity = 0
-            
-            for chunk in chunks:
-                chunk_analysis = await self._analyze_chunk_logic(chunk)
-                chunk_analyses.append(chunk_analysis)
-                total_complexity += chunk_analysis.get('complexity_score', 0)
-            
-            # Extract business rules
-            business_rules = await self._extract_business_rules(chunks)
-            
-            # Identify logic patterns
-            logic_patterns = await self._identify_logic_patterns(chunks)
-            
-            # Generate recommendations
-            recommendations = await self._generate_recommendations(chunk_analyses, logic_patterns)
-            
-            # Calculate overall metrics
-            metrics = self._calculate_program_metrics(chunk_analyses, logic_patterns)
-            
-            result = {
-                "program_name": program_name,
-                "total_chunks": len(chunks),
-                "complexity_score": total_complexity / len(chunks) if chunks else 0,
-                "chunk_analyses": chunk_analyses,
-                "business_rules": [rule.__dict__ for rule in business_rules],
-                "logic_patterns": [pattern.__dict__ for pattern in logic_patterns],
-                "recommendations": recommendations,
-                "metrics": metrics,
-                "analysis_timestamp": datetime.now().isoformat()
-            }
-            
-            return self._add_processing_info(result)
-            
-        except Exception as e:
-            self.logger.error(f"Program analysis failed for {program_name}: {str(e)}")
-            return self._add_processing_info({"error": str(e)})
-    
+        async with self.get_engine_context() as engine:
+        # Pass engine to all LLM methods
+           
+            try:
+                #await self._ensure_llm_engine()  # ADD this line
+                
+                # Get program chunks from database
+                chunks = await self._get_program_chunks(program_name)
+                
+                if not chunks:
+                    return self._add_processing_info({"error": f"Program {program_name} not found"})
+                
+                # Analyze each chunk
+                chunk_analyses = []
+                total_complexity = 0
+                
+                for chunk in chunks:
+                    chunk_analysis = await self._analyze_chunk_logic(chunk)
+                    chunk_analyses.append(chunk_analysis)
+                    total_complexity += chunk_analysis.get('complexity_score', 0)
+                
+                # Extract business rules
+                business_rules = await self._extract_business_rules(chunks, engine)
+                
+                # Identify logic patterns
+                logic_patterns = await self._identify_logic_patterns(chunks, engine)
+                
+                # Generate recommendations
+                recommendations = await self._generate_recommendations(chunk_analyses, logic_patterns)
+                
+                # Calculate overall metrics
+                metrics = self._calculate_program_metrics(chunk_analyses, logic_patterns)
+                
+                result = {
+                    "program_name": program_name,
+                    "total_chunks": len(chunks),
+                    "complexity_score": total_complexity / len(chunks) if chunks else 0,
+                    "chunk_analyses": chunk_analyses,
+                    "business_rules": [rule.__dict__ for rule in business_rules],
+                    "logic_patterns": [pattern.__dict__ for pattern in logic_patterns],
+                    "recommendations": recommendations,
+                    "metrics": metrics,
+                    "analysis_timestamp": datetime.now().isoformat()
+                }
+                
+                return self._add_processing_info(result)
+                
+            except Exception as e:
+                self.logger.error(f"Program analysis failed for {program_name}: {str(e)}")
+                return self._add_processing_info({"error": str(e)})
+        
     async def stream_logic_analysis(self, program_name: str) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream logic analysis results as they're processed"""
         try:
@@ -263,7 +265,7 @@ class LogicAnalyzerAgent(BaseOpulenceAgent):
             "metadata": metadata
         }
     
-    async def _llm_analyze_logic(self, content: str, chunk_type: str) -> Dict[str, Any]:
+    async def _llm_analyze_logic(self, content: str, chunk_type: str, engine) -> Dict[str, Any]:
         """Use LLM to analyze logic in code chunk"""
         #await self._ensure_llm_engine()  # ADD this line
         
@@ -293,7 +295,9 @@ class LogicAnalyzerAgent(BaseOpulenceAgent):
         
         sampling_params = SamplingParams(temperature=0.1, max_tokens=800)
         request_id = str(uuid.uuid4())
-        result = await self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
+        async for result in engine.generate(prompt, sampling_params, request_id=request_id):
+            response_text = result.outputs[0].text.strip()
+            break
         
         try:
             response_text = result.outputs[0].text.strip()
