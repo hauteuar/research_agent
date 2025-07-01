@@ -2,6 +2,7 @@
 """
 Opulence Chat Agent - Intelligent conversational interface for mainframe analysis
 Provides natural language interaction with the analyzed codebase
+CORRECTED for Dual GPU Coordinator with lazy loading
 """
 
 import asyncio
@@ -35,10 +36,16 @@ class OpulenceChatAgent:
     def __init__(self, coordinator, llm_engine: Optional[AsyncLLMEngine] = None, 
                  db_path: str = "opulence_data.db", gpu_id: int = 0):
         self.coordinator = coordinator
-        self.llm_engine = llm_engine
+        # REMOVE: self.llm_engine = llm_engine
+        self._engine = None  # Cached engine reference (starts as None)
+        
         self.db_path = db_path
         self.gpu_id = gpu_id
         self.logger = logging.getLogger(__name__)
+        
+        # NEW: Lazy loading tracking
+        self._engine_loaded = False
+        self._using_shared_engine = False
         
         # Chat patterns for different types of queries
         self.query_patterns = {
@@ -92,6 +99,68 @@ class OpulenceChatAgent:
             }
         }
     
+    # NEW: Lazy loading engine getter (matching other agents)
+    async def get_engine(self):
+        """Get LLM engine with lazy loading and sharing"""
+        if self._engine is None and self.coordinator:
+            try:
+                # Get assigned GPU for chat_agent type
+                assigned_gpu = self.coordinator.agent_gpu_assignments.get("chat_agent")
+                if assigned_gpu is not None:
+                    # Get shared engine from coordinator
+                    self._engine = await self.coordinator.get_shared_llm_engine(assigned_gpu)
+                    self.gpu_id = assigned_gpu
+                    self._using_shared_engine = True
+                    self._engine_loaded = True
+                    self.logger.info(f"✅ ChatAgent using shared engine on GPU {assigned_gpu}")
+                else:
+                    raise ValueError("No GPU assigned for chat_agent type")
+            except Exception as e:
+                self.logger.error(f"❌ Failed to get shared engine: {e}")
+                raise
+        
+        return self._engine
+
+    async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
+        """Generate text with LLM - lazy loading version"""
+        try:
+            # LAZY LOAD: Get engine only when needed
+            engine = await self.get_engine()
+            if engine is None:
+                raise RuntimeError("No LLM engine available")
+
+            await asyncio.sleep(0.1)
+
+            # Try new API first (with request_id)
+            request_id = str(uuid.uuid4())
+            try:
+                async for output in engine.generate(prompt, sampling_params, request_id=request_id):
+                    result = output
+                    break
+                return result.outputs[0].text.strip()
+            except TypeError as e:
+                if "request_id" in str(e):
+                    # Fallback to old API (without request_id)
+                    async for output in engine.generate(prompt, sampling_params):
+                        result = output
+                        break
+                    return result.outputs[0].text.strip()
+                else:
+                    raise e
+        except Exception as e:
+            self.logger.error(f"LLM generation failed: {str(e)}")
+            return ""
+    
+    # ADD this helper method
+    def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Add processing information to results"""
+        if isinstance(result, dict):
+            result['gpu_used'] = self.gpu_id
+            result['agent_type'] = 'chat_agent'
+            result['using_shared_engine'] = self._using_shared_engine
+            result['engine_loaded_lazily'] = self._engine_loaded
+        return result
+    
     async def process_chat_query(self, query: str, conversation_history: List[Dict] = None) -> Dict[str, Any]:
         """Process a chat query and return intelligent response"""
         try:
@@ -114,25 +183,28 @@ class OpulenceChatAgent:
             
             # Generate response based on query type
             if context.chat_type == 'analysis':
-                return await self._handle_analysis_query(context)
+                result = await self._handle_analysis_query(context)
             elif context.chat_type == 'lineage':
-                return await self._handle_lineage_query(context)
+                result = await self._handle_lineage_query(context)
             elif context.chat_type == 'comparison':
-                return await self._handle_comparison_query(context)
+                result = await self._handle_comparison_query(context)
             elif context.chat_type == 'search':
-                return await self._handle_search_query(context)
+                result = await self._handle_search_query(context)
             elif context.chat_type == 'impact':
-                return await self._handle_impact_query(context)
+                result = await self._handle_impact_query(context)
             else:
-                return await self._handle_general_query(context)
+                result = await self._handle_general_query(context)
+            
+            # CHANGE: Use helper method to add processing info
+            return self._add_processing_info(result)
                 
         except Exception as e:
             self.logger.error(f"Chat query processing failed: {str(e)}")
-            return {
+            return self._add_processing_info({
                 "response": f"I encountered an error processing your query: {str(e)}",
                 "response_type": "error",
                 "suggestions": ["Try rephrasing your question", "Check if the component name is correct"]
-            }
+            })
     
     def _classify_query_type(self, query: str) -> str:
         """Classify the type of query based on patterns"""
@@ -224,7 +296,7 @@ class OpulenceChatAgent:
         }
     
     async def _handle_lineage_query(self, context: ChatContext) -> Dict[str, Any]:
-        """Handle lineage-type queries - FIXED"""
+        """Handle lineage-type queries - FIXED for dual GPU coordinator"""
         if not context.relevant_components:
             return {
                 "response": "To trace lineage, please specify a field, file, or data element you'd like me to trace.",
@@ -238,9 +310,9 @@ class OpulenceChatAgent:
         
         component = context.relevant_components[0]
         
-        # Perform lineage analysis - FIXED
+        # Perform lineage analysis - FIXED for dual GPU coordinator
         try:
-            # FIX: Use single GPU coordinator approach
+            # FIX: Use dual GPU coordinator approach
             lineage_agent = self.coordinator.get_agent("lineage_analyzer")
             lineage_result = await lineage_agent.analyze_field_lineage(component)
             
@@ -263,10 +335,9 @@ class OpulenceChatAgent:
                 "response_type": "error",
                 "suggestions": ["Try a different component name", "Check if the component exists in the processed files"]
             }
-
     
     async def _handle_search_query(self, context: ChatContext) -> Dict[str, Any]:
-        """Handle search-type queries - FIXED"""
+        """Handle search-type queries - FIXED for dual GPU coordinator"""
         # Extract search terms
         search_terms = self._extract_search_terms(context.user_query)
         
@@ -281,9 +352,9 @@ class OpulenceChatAgent:
                 ]
             }
         
-        # Perform vector search - FIXED
+        # Perform vector search - FIXED for dual GPU coordinator
         try:
-            # FIX: Use single GPU coordinator approach
+            # FIX: Use dual GPU coordinator approach
             vector_agent = self.coordinator.get_agent("vector_index")
             search_results = await vector_agent.semantic_search(" ".join(search_terms), top_k=10)
             
@@ -451,9 +522,7 @@ class OpulenceChatAgent:
         return suggestions[:3]  # Return top 3
     
     async def _generate_analysis_response(self, component: str, analysis: Dict, user_query: str) -> str:
-        """Generate intelligent analysis response using LLM with retrieved context - FIXED"""
-        await self._ensure_llm_engine()
-        
+        """Generate intelligent analysis response using LLM with retrieved context - FIXED for dual GPU coordinator"""
         # Prepare context from analysis results
         context_parts = [f"Component: {component}"]
         
@@ -485,10 +554,10 @@ class OpulenceChatAgent:
                     total_refs = usage_stats.get("total_references", 0)
                     context_parts.append(f"Total references: {total_refs}")
         
-        # Get semantic search results for additional context - FIXED
+        # Get semantic search results for additional context - FIXED for dual GPU coordinator
         search_context = ""
         try:
-            # FIX: Use single GPU coordinator approach
+            # FIX: Use dual GPU coordinator approach
             vector_agent = self.coordinator.get_agent("vector_index")
             search_results = await vector_agent.semantic_search(f"{component} {user_query}", top_k=3)
             if search_results:
@@ -532,8 +601,6 @@ class OpulenceChatAgent:
 
     async def _generate_lineage_response(self, component: str, lineage_result: Dict, user_query: str) -> str:
         """Generate intelligent lineage response using LLM"""
-        await self._ensure_llm_engine()
-        
         # Prepare lineage context
         context_parts = [f"Component: {component}"]
         
@@ -586,8 +653,6 @@ class OpulenceChatAgent:
     
     async def _generate_search_response(self, search_terms: List[str], search_results: List[Dict], user_query: str) -> str:
         """Generate intelligent search response using LLM"""
-        await self._ensure_llm_engine()
-        
         if not search_results:
             return f"I couldn't find any code patterns matching '{' '.join(search_terms)}'. Try different search terms or check if the relevant files have been processed."
         
@@ -634,8 +699,6 @@ class OpulenceChatAgent:
     
     async def _generate_comparison_response(self, comp1: str, comp2: str, analysis1: Dict, analysis2: Dict, user_query: str) -> str:
         """Generate intelligent comparison response using LLM"""
-        await self._ensure_llm_engine()
-        
         # Prepare comparison context
         context_parts = [f"Comparing: {comp1} vs {comp2}"]
         
@@ -687,8 +750,6 @@ class OpulenceChatAgent:
     
     async def _generate_impact_response(self, component: str, analysis: Dict, user_query: str) -> str:
         """Generate intelligent impact analysis response using LLM"""
-        await self._ensure_llm_engine()
-        
         # Prepare impact context
         context_parts = [f"Component: {component}"]
         
@@ -751,8 +812,6 @@ class OpulenceChatAgent:
     
     async def _generate_contextual_response(self, context: ChatContext) -> str:
         """Generate contextual response for general queries using LLM"""
-        await self._ensure_llm_engine()
-        
         # Build context from conversation history and available data
         context_parts = [f"User query: {context.user_query}"]
         
@@ -833,55 +892,44 @@ I'm Opulence, your mainframe analysis assistant! I can help you understand and a
 Just describe what you'd like to know about your mainframe systems!
         """
     
-    async def _ensure_llm_engine(self):
-        """Ensure LLM engine is available - reuse coordinator's engines"""
-        if self.llm_engine is not None:
-            return
-        
-        # Try to get from coordinator first
-        if self.coordinator is not None:
+    # Cleanup and resource management
+    def cleanup(self):
+        """Clean up chat agent resources"""
+        if self._using_shared_engine and self.coordinator:
+            # Release engine reference if using shared engine
             try:
-                best_gpu = await self.coordinator.get_available_gpu_for_agent("chat_agent")
-                if best_gpu is not None:
-                    self.llm_engine = await self.coordinator.get_or_create_llm_engine(best_gpu)
-                    self.gpu_id = best_gpu
-                    self.logger.info(f"Chat agent using coordinator's LLM on GPU {best_gpu}")
-                    return
+                self.coordinator.release_engine_reference(self.gpu_id)
             except Exception as e:
-                self.logger.warning(f"Failed to get LLM from coordinator: {e}")
+                self.logger.warning(f"Failed to release engine reference: {e}")
         
-        # Fallback: try global coordinator
-        try:
-            from opulence_coordinator import get_dynamic_coordinator
-            global_coordinator = get_dynamic_coordinator()
-            best_gpu = await global_coordinator.get_available_gpu_for_agent("chat_agent")
-            if best_gpu is not None:
-                self.llm_engine = await global_coordinator.get_or_create_llm_engine(best_gpu)
-                self.gpu_id = best_gpu
-                self.logger.info(f"Chat agent using global coordinator's LLM on GPU {best_gpu}")
-        except Exception as e:
-            self.logger.error(f"Failed to get LLM engine: {e}")
-            raise
+        self._engine = None
+        self._engine_loaded = False
+        self._using_shared_engine = False
+        
+        self.logger.info("✅ ChatAgent resources cleaned up")
     
-    async def _generate_with_llm(self, prompt: str, sampling_params) -> str:
-        """Generate text with LLM - handles both old and new vLLM API"""
+    def get_agent_status(self) -> Dict[str, Any]:
+        """Get current agent status"""
+        return {
+            "agent_type": "chat_agent",
+            "gpu_id": self.gpu_id,
+            "engine_loaded": self._engine_loaded,
+            "using_shared_engine": self._using_shared_engine,
+            "engine_available": self._engine is not None,
+            "coordinator_connected": self.coordinator is not None,
+            "knowledge_base_loaded": len(self.knowledge_base) > 0,
+            "query_patterns_loaded": len(self.query_patterns) > 0
+        }
+    
+    def __repr__(self):
+        return (f"OpulenceChatAgent("
+                f"gpu_id={self.gpu_id}, "
+                f"engine_loaded={self._engine_loaded}, "
+                f"shared_engine={self._using_shared_engine})")
+    
+    def __del__(self):
+        """Destructor to ensure cleanup"""
         try:
-            # Try new API first (with request_id)
-            request_id = str(uuid.uuid4())
-            async_generator = self.llm_engine.generate(prompt, sampling_params, request_id=request_id)
-            
-            # Handle the async generator
-            async for result in async_generator:
-                return result.outputs[0].text.strip()
-                
-        except TypeError as e:
-            if "request_id" in str(e):
-                # Fallback to old API (without request_id)
-                async_generator = self.llm_engine.generate(prompt, sampling_params)
-                async for result in async_generator:
-                    return result.outputs[0].text.strip()
-            else:
-                raise e
-        except Exception as e:
-            self.logger.error(f"LLM generation failed: {str(e)}")
-            return ""
+            self.cleanup()
+        except:
+            pass  # Ignore cleanup errors during destruction
