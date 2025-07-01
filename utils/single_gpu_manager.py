@@ -46,6 +46,7 @@ class DualGPUManager:
         self.total_tasks_processed = {}  # {gpu_id: count}
         self.start_time = time.time()
         
+        
         self._initialize_gpus()
     
     def _initialize_gpus(self):
