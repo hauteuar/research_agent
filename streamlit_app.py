@@ -1791,100 +1791,18 @@ def show_footer():
         st.markdown("**🕐 System Time**")
         st.markdown(f"{dt.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-
-def main():
-    """Main application function for dual GPU system"""
+def show_dashboard():
+    """Show main dashboard for dual GPU system"""
+    st.markdown('<div class="sub-header">Dual GPU System Overview</div>', unsafe_allow_html=True)
     
-    # Header
-    st.markdown('<div class="main-header">🧠 Opulence Dual GPU Deep Research Agent</div>', unsafe_allow_html=True)
+    if not st.session_state.coordinator:
+        st.warning("System not initialized")
+        return
     
-    # Show import status
-    if not COORDINATOR_AVAILABLE:
-        st.error("⚠️ Dual GPU Coordinator module not available - Running in demo mode")
-        if st.button("🐛 Toggle Debug Mode"):
-            st.session_state.debug_mode = not st.session_state.debug_mode
-            st.rerun()
-    
-    # Sidebar navigation
-    with st.sidebar:
-        st.image("https://via.placeholder.com/150x50/1e3a8a/ffffff?text=OPULENCE", use_container_width=True)
-        
-        page = st.selectbox(
-            "Navigation",
-            ["🏠 Dashboard", "📂 File Upload", "💬 Enhanced Chat", "🔍 Enhanced Analysis", 
-             "🔍 Enhanced Search", "📊 Field Lineage", "🔄 DB2 Comparison", "📋 Documentation", "⚙️ System Health"]
-        )
-        
-        # Quick actions
-        st.markdown("### Quick Actions")
-        if st.button("🔄 Refresh Dual GPU System"):
-            st.rerun()
-        
-        # System status indicator with dual GPU info
-        if COORDINATOR_AVAILABLE and st.session_state.coordinator:
-            try:
-                health = st.session_state.coordinator.get_health_status()
-                gpu_ids = health.get('selected_gpus', [])
-                st.success(f"🟢 Dual GPU System Healthy (GPUs {gpu_ids})")
-            except:
-                st.success("🟢 Dual GPU System Healthy")
-        elif COORDINATOR_AVAILABLE:
-            st.warning("🟡 Dual GPU System Not Initialized")
-        else:
-            st.error("🔴 Demo Mode")
-        
-        # Show example queries
-        show_example_queries()
-        
-        # Show debug info if enabled
-        show_debug_info()
-    
-    # Main content based on selected page
+    # Get system statistics
     try:
-        if page == "🏠 Dashboard":
-            show_dashboard()
-        elif page == "📂 File Upload":
-            show_file_upload()
-        elif page == "💬 Enhanced Chat":
-            show_enhanced_chat_analysis()
-        elif page == "🔍 Enhanced Analysis":
-            show_enhanced_component_analysis()
-        elif page == "🔍 Enhanced Search":
-            show_enhanced_search()
-        elif page == "📊 Field Lineage":
-            show_field_lineage()
-        elif page == "🔄 DB2 Comparison":
-            show_db2_comparison()
-        elif page == "📋 Documentation":
-            show_documentation()
-        elif page == "⚙️ System Health":
-            show_system_health()
-    except Exception as e:
-        st.error(f"Error loading page: {str(e)}")
-        st.exception(e)
-    
-    # Show footer
-    show_footer()
-
-
-# Main execution
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        st.error(f"Application error: {str(e)}")
-        st.exception(e)
-        
-        # Emergency debug mode
-        st.markdown("### Emergency Debug Info")
-        st.json({
-            "error": str(e),
-            "traceback": traceback.format_exc(),
-            "session_state": dict(st.session_state),
-            "coordinator_type": "dual_gpu"
-        })())
-        
-        # Overall health indicator
+        stats_result = safe_run_async(st.session_state.coordinator.get_statistics())
+                                      # Overall health indicator
         if health.get("status") == "healthy":
             st.success("🟢 Dual GPU System Status: Healthy")
         else:
@@ -2026,14 +1944,101 @@ def export_system_logs():
         st.error(f"Failed to export logs: {str(e)}")
 
 
-def show_dashboard():
-    """Show main dashboard for dual GPU system"""
-    st.markdown('<div class="sub-header">Dual GPU System Overview</div>', unsafe_allow_html=True)
+def main():
+    """Main application function for dual GPU system"""
     
-    if not st.session_state.coordinator:
-        st.warning("System not initialized")
-        return
+    # Header
+    st.markdown('<div class="main-header">🧠 Opulence Dual GPU Deep Research Agent</div>', unsafe_allow_html=True)
     
-    # Get system statistics
+    # Show import status
+    if not COORDINATOR_AVAILABLE:
+        st.error("⚠️ Dual GPU Coordinator module not available - Running in demo mode")
+        if st.button("🐛 Toggle Debug Mode"):
+            st.session_state.debug_mode = not st.session_state.debug_mode
+            st.rerun()
+    
+    # Sidebar navigation
+    with st.sidebar:
+        st.image("https://via.placeholder.com/150x50/1e3a8a/ffffff?text=OPULENCE", use_container_width=True)
+        
+        page = st.selectbox(
+            "Navigation",
+            ["🏠 Dashboard", "📂 File Upload", "💬 Enhanced Chat", "🔍 Enhanced Analysis", 
+             "🔍 Enhanced Search", "📊 Field Lineage", "🔄 DB2 Comparison", "📋 Documentation", "⚙️ System Health"]
+        )
+        
+        # Quick actions
+        st.markdown("### Quick Actions")
+        if st.button("🔄 Refresh Dual GPU System"):
+            st.rerun()
+        
+        # System status indicator with dual GPU info
+        if COORDINATOR_AVAILABLE and st.session_state.coordinator:
+            try:
+                health = st.session_state.coordinator.get_health_status()
+                gpu_ids = health.get('selected_gpus', [])
+                st.success(f"🟢 Dual GPU System Healthy (GPUs {gpu_ids})")
+            except:
+                st.success("🟢 Dual GPU System Healthy")
+        elif COORDINATOR_AVAILABLE:
+            st.warning("🟡 Dual GPU System Not Initialized")
+        else:
+            st.error("🔴 Demo Mode")
+        
+        # Show example queries
+        show_example_queries()
+        
+        # Show debug info if enabled
+        show_debug_info()
+    
+    # Main content based on selected page
     try:
-        stats_result = safe_run_async(st.session_state.coordinator.get_statistics
+        if page == "🏠 Dashboard":
+            show_dashboard()
+        elif page == "📂 File Upload":
+            show_file_upload()
+        elif page == "💬 Enhanced Chat":
+            show_enhanced_chat_analysis()
+        elif page == "🔍 Enhanced Analysis":
+            show_enhanced_component_analysis()
+        elif page == "🔍 Enhanced Search":
+            show_enhanced_search()
+        elif page == "📊 Field Lineage":
+            show_field_lineage()
+        elif page == "🔄 DB2 Comparison":
+            show_db2_comparison()
+        elif page == "📋 Documentation":
+            show_documentation()
+        elif page == "⚙️ System Health":
+            show_system_health()
+    except Exception as e:
+        st.error(f"Error loading page: {str(e)}")
+        st.exception(e)
+    
+    # Show footer
+    show_footer()
+
+
+# Main execution
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        st.error(f"Application error: {str(e)}")
+        st.exception(e)
+        
+        # Emergency debug mode
+        st.markdown("### Emergency Debug Info")
+        st.json({
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "session_state": dict(st.session_state),
+            "coordinator_type": "dual_gpu"
+        })
+        
+        
+
+
+                                          
+
+            
