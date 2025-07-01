@@ -265,7 +265,7 @@ class DualGPUOpulenceCoordinator:
             
         except Exception as e:
             self.logger.error(f"❌ Failed to finish task {task_id}: {e}")
-            
+
     # Fix 3: Add missing get_agent method
     def get_agent(self, agent_type: str):
         """Get agent - uses assigned GPU automatically"""
@@ -463,87 +463,69 @@ class DualGPUOpulenceCoordinator:
                 self.agent_gpu_assignments[agent_type] = gpu_id
     
     async def process_batch_files(self, file_paths: List[Path], file_type: str = "auto") -> Dict[str, Any]:
-        """Process files using dual GPU"""
-        task_id = self.gpu_manager.start_task("batch_file_processing")
+        """UPDATED: Process files with proper engine management"""
         start_time = time.time()
+        results = []
+        total_files = len(file_paths)
         
+        self.logger.info(f"🚀 Processing {total_files} files on GPUs {self.selected_gpus}")
+        
+        for i, file_path in enumerate(file_paths):
+            try:
+                self.logger.info(f"📄 Processing file {i+1}/{total_files}: {file_path.name}")
+                
+                # Get appropriate agent
+                if file_type == "cobol" or file_path.suffix.lower() in ['.cbl', '.cob']:
+                    agent = self.get_agent("code_parser")
+                elif file_type == "csv" or file_path.suffix.lower() == '.csv':
+                    agent = self.get_agent("data_loader")
+                else:
+                    agent = self.get_agent("code_parser")  # Default
+                
+                # Process with automatic engine management
+                result = await agent.process_file(file_path)
+                await self._ensure_file_stored_in_db(file_path, result, file_type)
+                
+                results.append(result)
+                
+            except Exception as e:
+                self.logger.error(f"❌ Failed to process {file_path}: {str(e)}")
+                results.append({
+                    "status": "error",
+                    "file": str(file_path),
+                    "error": str(e)
+                })
+        
+        # Update statistics
+        processing_time = time.time() - start_time
+        self.stats["total_files_processed"] += total_files
+        self.stats["tasks_completed"] += 1
+        
+        return {
+            "status": "success",
+            "files_processed": total_files,
+            "processing_time": processing_time,
+            "results": results,
+            "gpus_used": self.selected_gpus
+        }
+
+    async def process_chat_query(self, query: str, conversation_history: List[Dict] = None) -> Dict[str, Any]:
+        """UPDATED: Process chat with automatic engine management"""
         try:
-            results = []
-            total_files = len(file_paths)
+            chat_agent = self.get_agent("chat_agent")
+            # Agent handles engine management internally via context manager
+            result = await chat_agent.process_chat_query(query, conversation_history)
             
-            self.logger.info(f"🚀 Processing {total_files} files on GPUs {self.selected_gpus}")
+            self.stats["total_queries"] += 1
+            return result
             
-            for i, file_path in enumerate(file_paths):
-                try:
-                    self.logger.info(f"📄 Processing file {i+1}/{total_files}: {file_path.name}")
-                    
-                    # Determine file type and get appropriate agent
-                    if file_type == "cobol" or file_path.suffix.lower() in ['.cbl', '.cob']:
-                        agent = self.get_agent("code_parser")
-                        result = await agent.process_file(file_path)
-                        await self._ensure_file_stored_in_db(file_path, result, "cobol")
-                        
-                    elif file_type == "jcl" or file_path.suffix.lower() == '.jcl':
-                        agent = self.get_agent("code_parser")
-                        result = await agent.process_file(file_path)
-                        await self._ensure_file_stored_in_db(file_path, result, "jcl")
-                        
-                    elif file_type == "csv" or file_path.suffix.lower() == '.csv':
-                        agent = self.get_agent("data_loader")
-                        result = await agent.process_file(file_path)
-                        await self._ensure_file_stored_in_db(file_path, result, "csv")
-                        
-                    else:
-                        # Auto-detect
-                        result = await self._auto_detect_and_process(file_path)
-                    
-                    result["gpus_used"] = self.selected_gpus
-                    results.append(result)
-                    
-                    # Log progress
-                    if (i + 1) % 5 == 0:
-                        self.logger.info(f"📊 Progress: {i+1}/{total_files} files processed")
-                    
-                except Exception as e:
-                    self.logger.error(f"❌ Failed to process {file_path}: {str(e)}")
-                    results.append({
-                        "status": "error",
-                        "file": str(file_path),
-                        "error": str(e),
-                        "gpus_used": self.selected_gpus
-                    })
-            
-            # Create vector embeddings for successful results
-            successful_files = [r for r in results if r.get("status") == "success"]
-            if successful_files:
-                try:
-                    await self._create_vector_embeddings_for_processed_files(file_paths)
-                    self.logger.info("✅ Vector embeddings created for processed files")
-                except Exception as e:
-                    self.logger.warning(f"⚠️ Vector embedding creation failed: {str(e)}")
-            
-            # Update statistics
-            processing_time = time.time() - start_time
-            self.stats["total_files_processed"] += total_files
-            self.stats["tasks_completed"] += 1
-            self._update_processing_stats("batch_processing", processing_time)
-            
+        except Exception as e:
+            self.logger.error(f"❌ Chat query failed: {str(e)}")
             return {
-                "status": "success",
-                "files_processed": total_files,
-                "successful_files": len(successful_files),
-                "failed_files": total_files - len(successful_files),
-                "processing_time": processing_time,
-                "results": results,
-                "gpus_used": self.selected_gpus,
-                "vector_indexing": "completed" if successful_files else "skipped"
+                "response": f"I encountered an error: {str(e)}",
+                "response_type": "error",
+                "suggestions": ["Try rephrasing your question", "Check system status"]
             }
-            
-        finally:
-            self.gpu_manager.finish_task(task_id)
-            # Optional: cleanup memory after large batch
-            if len(file_paths) > 10:
-                self.gpu_manager.cleanup_gpu_memory()
     
     async def _auto_detect_and_process(self, file_path: Path) -> Dict[str, Any]:
         """Auto-detect file type and process"""
@@ -1015,19 +997,32 @@ class DualGPUOpulenceCoordinator:
                 self.logger.error(f"❌ Failed to preload engine on GPU {gpu_id}: {e}")
 
     # 7. UPDATE cleanup method
-    def cleanup(self):
-        """Clean up resources including lazy loaded engines"""
+     def cleanup(self):
+            """UPDATED: Comprehensive cleanup with agent management"""
         self.logger.info("🧹 Cleaning up coordinator resources...")
+        
+        # Clean up all agents
+        for agent_type, agent in self.agents.items():
+            try:
+                if hasattr(agent, 'cleanup'):
+                    agent.cleanup()
+                    self.logger.info(f"✅ Cleaned up {agent_type} agent")
+            except Exception as e:
+                self.logger.error(f"❌ Failed to cleanup {agent_type}: {e}")
         
         # Clear agent cache
         self.agents.clear()
         
-        # Clean up all loaded engines
-        for gpu_id in list(self.llm_engines.keys()):
+        # Clean up all engines and references
+        for gpu_id in list(self.engine_reference_count.keys()):
             self._cleanup_unused_engine(gpu_id)
         
-        # Clean up GPU memory
-        self.gpu_manager.cleanup_gpu_memory()
+        # Clean up GPU manager
+        self.gpu_manager.release_gpus()
+        
+        # Clear task mappings
+        self.task_engine_mapping.clear()
+        self.engine_reference_count.clear()
         
         self.logger.info("✅ Cleanup completed")
 

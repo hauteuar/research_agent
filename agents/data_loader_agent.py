@@ -18,15 +18,14 @@ from datetime import datetime as dt
 import zipfile
 import uuid
 import hashlib
+from agents.base_agent import BaseOpulenceAgent
 
 from vllm import AsyncLLMEngine, SamplingParams
 
-class DataLoaderAgent:
-    """Agent for loading and mapping data files and schemas with lazy loading"""
-    
+class DataLoaderAgent(BaseOpulenceAgent):
     def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
                  gpu_id: int = None, coordinator=None):
-        # REMOVE: self.llm_engine = llm_engine  
+        super().__init__(coordinator, "data_loader", db_path, gpu_id)        # REMOVE: self.llm_engine = llm_engine  
         self._engine = None  # Cached engine reference (starts as None)
         
         self.db_path = db_path or "opulence_data.db"

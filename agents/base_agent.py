@@ -1,5 +1,6 @@
 import weakref
 from contextlib import asynccontextmanager
+import logging
 
 class BaseOpulenceAgent:
     """Base class for all Opulence agents with automatic resource management"""

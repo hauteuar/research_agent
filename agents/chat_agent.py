@@ -17,6 +17,8 @@ from pathlib import Path
 
 from vllm import AsyncLLMEngine, SamplingParams
 import uuid
+from agents.base_agent import BaseOpulenceAgent
+
 
 
 @dataclass
@@ -33,50 +35,52 @@ class ChatContext:
 class OpulenceChatAgent:
     """Enhanced chat agent for natural language interaction with mainframe analysis"""
     
-    def __init__(self, coordinator, llm_engine: Optional[AsyncLLMEngine] = None, 
-                 db_path: str = "opulence_data.db", gpu_id: int = 0):
-        self.coordinator = coordinator
-        # REMOVE: self.llm_engine = llm_engine
-        self._engine = None  # Cached engine reference (starts as None)
-        
-        self.db_path = db_path
-        self.gpu_id = gpu_id
-        self.logger = logging.getLogger(__name__)
-        
-        # NEW: Lazy loading tracking
-        self._engine_loaded = False
-        self._using_shared_engine = False
-        
-        # Chat patterns for different types of queries
-        self.query_patterns = {
-            'analysis': [
-                r'analyze|analysis|examine|investigate|study',
-                r'what (is|are|does)|how (does|is|are)',
-                r'explain|describe|tell me about',
-                r'show me|find|search for'
-            ],
-            'lineage': [
-                r'trace|lineage|flow|path|journey',
-                r'where (is|does|comes|goes)',
-                r'source|destination|origin',
-                r'upstream|downstream|dependencies'
-            ],
-            'comparison': [
-                r'compare|difference|similar|contrast',
-                r'versus|vs|against|between',
-                r'same|different|alike'
-            ],
-            'impact': [
-                r'impact|effect|affect|change',
-                r'what happens if|what if',
-                r'consequences|result|outcome'
-            ],
-            'search': [
-                r'find|search|look for|locate',
-                r'contains|includes|has',
-                r'pattern|like|similar to'
-            ]
-        }
+    class OpulenceChatAgent(BaseOpulenceAgent):
+        def __init__(self, llm_engine: AsyncLLMEngine = None, db_path: str = None, 
+                 gpu_id: int = None, coordinator=None ):
+            super().__init__(coordinator, "chat_agent", db_path, gpu_id)
+            self.coordinator = coordinator
+            # REMOVE: self.llm_engine = llm_engine
+            self._engine = None  # Cached engine reference (starts as None)
+            
+            self.db_path = db_path
+            self.gpu_id = gpu_id
+            self.logger = logging.getLogger(__name__)
+            
+            # NEW: Lazy loading tracking
+            self._engine_loaded = False
+            self._using_shared_engine = False
+            
+            # Chat patterns for different types of queries
+            self.query_patterns = {
+                'analysis': [
+                    r'analyze|analysis|examine|investigate|study',
+                    r'what (is|are|does)|how (does|is|are)',
+                    r'explain|describe|tell me about',
+                    r'show me|find|search for'
+                ],
+                'lineage': [
+                    r'trace|lineage|flow|path|journey',
+                    r'where (is|does|comes|goes)',
+                    r'source|destination|origin',
+                    r'upstream|downstream|dependencies'
+                ],
+                'comparison': [
+                    r'compare|difference|similar|contrast',
+                    r'versus|vs|against|between',
+                    r'same|different|alike'
+                ],
+                'impact': [
+                    r'impact|effect|affect|change',
+                    r'what happens if|what if',
+                    r'consequences|result|outcome'
+                ],
+                'search': [
+                    r'find|search|look for|locate',
+                    r'contains|includes|has',
+                    r'pattern|like|similar to'
+                ]
+            }
         
         # Knowledge base for enhanced responses
         self.knowledge_base = {
