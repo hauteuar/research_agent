@@ -997,8 +997,8 @@ class DualGPUOpulenceCoordinator:
                 self.logger.error(f"❌ Failed to preload engine on GPU {gpu_id}: {e}")
 
     # 7. UPDATE cleanup method
-     def cleanup(self):
-            """UPDATED: Comprehensive cleanup with agent management"""
+    def cleanup(self):
+        """UPDATED: Comprehensive cleanup with agent management"""
         self.logger.info("🧹 Cleaning up coordinator resources...")
         
         # Clean up all agents
