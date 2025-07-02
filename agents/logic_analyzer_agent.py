@@ -59,6 +59,11 @@ class LogicAnalyzerAgent(BaseOpulenceAgent):
         # NEW: Lazy loading tracking
         self._engine_loaded = False
         self._using_shared_engine = False
+        
+        # NEW: Prompt length limits
+        self.MAX_PROMPT_LENGTH = 1024  # Token limit
+        self.ESTIMATED_CHARS_PER_TOKEN = 4  # Conservative estimate
+        self.MAX_PROMPT_CHARS = self.MAX_PROMPT_LENGTH * self.ESTIMATED_CHARS_PER_TOKEN
                 
         # Logic patterns to detect
         self.logic_patterns = {
@@ -77,6 +82,75 @@ class LogicAnalyzerAgent(BaseOpulenceAgent):
             'transformation_rules': re.compile(r'MOVE.*?TO.*', re.IGNORECASE),
             'approval_rules': re.compile(r'IF.*?(APPROVE|REJECT|PENDING)', re.IGNORECASE)
         }
+
+    def _validate_and_truncate_prompt(self, prompt: str, preserve_structure: bool = True) -> str:
+        """
+        Validate prompt length and truncate if necessary while preserving structure
+        
+        Args:
+            prompt: The prompt text to validate
+            preserve_structure: Whether to preserve JSON structure indicators
+            
+        Returns:
+            Truncated prompt that fits within token limits
+        """
+        if len(prompt) <= self.MAX_PROMPT_CHARS:
+            return prompt
+        
+        self.logger.warning(f"Prompt length {len(prompt)} chars exceeds limit {self.MAX_PROMPT_CHARS}, truncating...")
+        
+        if preserve_structure:
+            # Try to preserve the structure by finding key sections
+            lines = prompt.split('\n')
+            
+            # Keep instruction lines (usually at start)
+            instruction_lines = []
+            code_lines = []
+            json_template_lines = []
+            
+            in_code_section = False
+            in_json_section = False
+            
+            for line in lines:
+                if any(keyword in line.lower() for keyword in ['analyze', 'determine', 'provide', 'return as json']):
+                    instruction_lines.append(line)
+                elif line.strip().startswith('{') or line.strip().startswith('[') or in_json_section:
+                    json_template_lines.append(line)
+                    in_json_section = True
+                    if line.strip().endswith('}') or line.strip().endswith(']'):
+                        in_json_section = False
+                elif len(line.strip()) > 0 and not line.startswith(' '):
+                    if not in_code_section:
+                        instruction_lines.append(line)
+                else:
+                    code_lines.append(line)
+                    in_code_section = True
+            
+            # Calculate space allocation
+            instruction_text = '\n'.join(instruction_lines)
+            json_template_text = '\n'.join(json_template_lines)
+            
+            # Reserve space for instructions and JSON template
+            reserved_space = len(instruction_text) + len(json_template_text) + 200  # buffer
+            available_for_code = self.MAX_PROMPT_CHARS - reserved_space
+            
+            if available_for_code > 500:  # Minimum useful code length
+                # Truncate code section
+                code_text = '\n'.join(code_lines)
+                if len(code_text) > available_for_code:
+                    code_text = code_text[:available_for_code-20] + "\n..."
+                
+                # Reconstruct prompt
+                truncated_prompt = f"{instruction_text}\n{code_text}\n{json_template_text}"
+            else:
+                # If structure preservation doesn't work, do simple truncation
+                truncated_prompt = prompt[:self.MAX_PROMPT_CHARS-20] + "\n..."
+        else:
+            # Simple truncation
+            truncated_prompt = prompt[:self.MAX_PROMPT_CHARS-20] + "..."
+        
+        self.logger.info(f"Prompt truncated from {len(prompt)} to {len(truncated_prompt)} chars")
+        return truncated_prompt
 
     async def get_engine(self):
         """Get LLM engine with lazy loading and sharing"""
@@ -159,35 +233,42 @@ class LogicAnalyzerAgent(BaseOpulenceAgent):
     
     async def _analyze_lifecycle_patterns(self, chunks: List[tuple], component_name: str, engine) -> Dict[str, Any]:
         """Analyze lifecycle patterns for a component"""
-        # Combine relevant content
+        # Combine relevant content with length limit
         all_content = '\n'.join([chunk[2] for chunk in chunks])
         
-        prompt = f"""
-        Analyze the lifecycle of component '{component_name}' based on this code:
+        # Create prompt with careful length management
+        base_prompt = f"""Analyze the lifecycle of component '{component_name}' based on this code:
+
+Determine:
+1. Where this component is created/initialized
+2. How it's used throughout the programs
+3. Where it's modified or updated
+4. Any cleanup or finalization
+5. Dependencies and relationships
+
+Return as JSON:
+{{
+    "creation_points": ["location1", "location2"],
+    "usage_patterns": ["pattern1", "pattern2"],
+    "modification_points": ["mod1", "mod2"],
+    "dependencies": ["dep1", "dep2"],
+    "lifecycle_summary": "summary text"
+}}"""
         
-        {all_content[:1500]}...
+        # Calculate available space for content
+        available_space = self.MAX_PROMPT_CHARS - len(base_prompt) - 100  # buffer
+        if len(all_content) > available_space:
+            all_content = all_content[:available_space] + "..."
         
-        Determine:
-        1. Where this component is created/initialized
-        2. How it's used throughout the programs
-        3. Where it's modified or updated
-        4. Any cleanup or finalization
-        5. Dependencies and relationships
+        full_prompt = base_prompt.replace("based on this code:", f"based on this code:\n\n{all_content}")
         
-        Return as JSON:
-        {{
-            "creation_points": ["location1", "location2"],
-            "usage_patterns": ["pattern1", "pattern2"],
-            "modification_points": ["mod1", "mod2"],
-            "dependencies": ["dep1", "dep2"],
-            "lifecycle_summary": "summary text"
-        }}
-        """
+        # Validate final prompt length
+        full_prompt = self._validate_and_truncate_prompt(full_prompt, preserve_structure=True)
         
         sampling_params = SamplingParams(temperature=0.1, max_tokens=600)
         request_id = str(uuid.uuid4())
         
-        async for result in engine.generate(prompt, sampling_params, request_id=request_id):
+        async for result in engine.generate(full_prompt, sampling_params, request_id=request_id):
             response_text = result.outputs[0].text.strip()
             break
         
@@ -377,33 +458,34 @@ class LogicAnalyzerAgent(BaseOpulenceAgent):
             "business_rules": len(analysis_result.get("business_rules", []))
         }
         
-        prompt = f"""
-        Based on this COBOL program analysis, generate detailed optimization recommendations:
+        prompt = f"""Based on this COBOL program analysis, generate detailed optimization recommendations:
+
+Program Analysis Summary:
+- Average Complexity Score: {summary['complexity_score']:.2f}
+- Total Chunks: {summary['total_chunks']}
+- High Complexity Chunks: {summary['high_complexity_chunks']}
+- Logic Patterns Found: {summary['patterns_found']}
+- Business Rules Identified: {summary['business_rules']}
+
+Provide optimization recommendations in these categories:
+1. Performance optimizations
+2. Maintainability improvements
+3. Code structure enhancements
+4. Error handling improvements
+5. Testing recommendations
+
+Return as JSON:
+{{
+    "performance": ["recommendation1", "recommendation2"],
+    "maintainability": ["recommendation1", "recommendation2"],
+    "structure": ["recommendation1", "recommendation2"],
+    "error_handling": ["recommendation1", "recommendation2"],
+    "testing": ["recommendation1", "recommendation2"],
+    "priority_recommendations": ["high_priority1", "high_priority2"]
+}}"""
         
-        Program Analysis Summary:
-        - Average Complexity Score: {summary['complexity_score']:.2f}
-        - Total Chunks: {summary['total_chunks']}
-        - High Complexity Chunks: {summary['high_complexity_chunks']}
-        - Logic Patterns Found: {summary['patterns_found']}
-        - Business Rules Identified: {summary['business_rules']}
-        
-        Provide optimization recommendations in these categories:
-        1. Performance optimizations
-        2. Maintainability improvements
-        3. Code structure enhancements
-        4. Error handling improvements
-        5. Testing recommendations
-        
-        Return as JSON:
-        {{
-            "performance": ["recommendation1", "recommendation2"],
-            "maintainability": ["recommendation1", "recommendation2"],
-            "structure": ["recommendation1", "recommendation2"],
-            "error_handling": ["recommendation1", "recommendation2"],
-            "testing": ["recommendation1", "recommendation2"],
-            "priority_recommendations": ["high_priority1", "high_priority2"]
-        }}
-        """
+        # Validate prompt length
+        prompt = self._validate_and_truncate_prompt(prompt, preserve_structure=True)
         
         sampling_params = SamplingParams(temperature=0.2, max_tokens=800)
         request_id = str(uuid.uuid4())
@@ -830,34 +912,41 @@ class LogicAnalyzerAgent(BaseOpulenceAgent):
     
     async def _llm_analyze_logic(self, content: str, chunk_type: str, engine) -> Dict[str, Any]:
         """Use LLM to analyze logic in code chunk"""
-        prompt = f"""
-        Analyze the logic in this {chunk_type} code chunk:
         
-        {content[:1500]}...
+        # Create base prompt
+        base_prompt = f"""Analyze the logic in this {chunk_type} code chunk:
+
+Provide analysis on:
+1. Main logical operations performed
+2. Decision points and conditions
+3. Data transformations
+4. Error handling mechanisms
+5. Business logic patterns
+6. Potential optimization opportunities
+
+Return as JSON:
+{{
+    "main_operations": ["operation1", "operation2"],
+    "decision_points": ["condition1", "condition2"],
+    "data_transformations": ["transform1", "transform2"],
+    "error_handling": ["mechanism1", "mechanism2"],
+    "business_logic": "description",
+    "optimizations": ["opportunity1", "opportunity2"]
+}}"""
         
-        Provide analysis on:
-        1. Main logical operations performed
-        2. Decision points and conditions
-        3. Data transformations
-        4. Error handling mechanisms
-        5. Business logic patterns
-        6. Potential optimization opportunities
+        # Calculate available space for content
+        available_space = self.MAX_PROMPT_CHARS - len(base_prompt) - 100  # buffer
+        truncated_content = content[:available_space] + "..." if len(content) > available_space else content
         
-        Return as JSON:
-        {{
-            "main_operations": ["operation1", "operation2"],
-            "decision_points": ["condition1", "condition2"],
-            "data_transformations": ["transform1", "transform2"],
-            "error_handling": ["mechanism1", "mechanism2"],
-            "business_logic": "description",
-            "optimizations": ["opportunity1", "opportunity2"]
-        }}
-        """
+        full_prompt = base_prompt.replace("code chunk:", f"code chunk:\n\n{truncated_content}")
+        
+        # Final validation
+        full_prompt = self._validate_and_truncate_prompt(full_prompt, preserve_structure=True)
         
         sampling_params = SamplingParams(temperature=0.1, max_tokens=800)
         request_id = str(uuid.uuid4())
         
-        async for result in engine.generate(prompt, sampling_params, request_id=request_id):
+        async for result in engine.generate(full_prompt, sampling_params, request_id=request_id):
             response_text = result.outputs[0].text.strip()
             break
         
@@ -981,34 +1070,40 @@ class LogicAnalyzerAgent(BaseOpulenceAgent):
     async def _analyze_business_rule(self, rule_id: str, rule_type: str, 
                                    rule_code: str, context: str, engine) -> Optional[BusinessRule]:
         """Analyze a specific business rule using LLM"""
-        prompt = f"""
-        Analyze this business rule from COBOL code:
         
-        Rule Type: {rule_type}
-        Rule Code: {rule_code}
+        # Create base prompt
+        base_prompt = f"""Analyze this business rule from COBOL code:
+
+Rule Type: {rule_type}
+Rule Code: {rule_code}
+
+Extract:
+1. The condition that triggers this rule
+2. The action taken when condition is met
+3. Fields/variables involved
+4. Confidence in rule extraction (0.0-1.0)
+
+Return as JSON:
+{{
+    "condition": "description of condition",
+    "action": "description of action",
+    "fields_involved": ["field1", "field2"],
+    "confidence_score": 0.8
+}}"""
         
-        Context (surrounding code):
-        {context[:500]}...
+        # Calculate available space for context
+        available_space = self.MAX_PROMPT_CHARS - len(base_prompt) - 100
+        truncated_context = context[:available_space] + "..." if len(context) > available_space else context
         
-        Extract:
-        1. The condition that triggers this rule
-        2. The action taken when condition is met
-        3. Fields/variables involved
-        4. Confidence in rule extraction (0.0-1.0)
+        full_prompt = base_prompt.replace("Rule Code: {rule_code}", f"Rule Code: {rule_code}\n\nContext (surrounding code):\n{truncated_context}")
         
-        Return as JSON:
-        {{
-            "condition": "description of condition",
-            "action": "description of action",
-            "fields_involved": ["field1", "field2"],
-            "confidence_score": 0.8
-        }}
-        """
+        # Final validation
+        full_prompt = self._validate_and_truncate_prompt(full_prompt, preserve_structure=True)
         
         sampling_params = SamplingParams(temperature=0.1, max_tokens=400)
         request_id = str(uuid.uuid4())
         
-        async for result in engine.generate(prompt, sampling_params, request_id=request_id):
+        async for result in engine.generate(full_prompt, sampling_params, request_id=request_id):
             response_text = result.outputs[0].text.strip()
             break
         
@@ -1059,34 +1154,41 @@ class LogicAnalyzerAgent(BaseOpulenceAgent):
     
     async def _llm_identify_patterns(self, content: str, chunk_type: str, engine) -> List[Dict[str, Any]]:
         """Use LLM to identify logic patterns"""
-        prompt = f"""
-        Identify common logic patterns in this {chunk_type} code:
         
-        {content[:1000]}...
+        # Create base prompt
+        base_prompt = f"""Identify common logic patterns in this {chunk_type} code:
+
+Look for patterns like:
+- Data validation patterns
+- Error handling patterns
+- Loop constructs
+- Conditional logic patterns
+- File processing patterns
+
+Return as JSON array:
+[
+    {{
+        "type": "validation",
+        "description": "pattern description",
+        "complexity": 2.5,
+        "snippet": "code snippet",
+        "recommendations": ["recommendation1", "recommendation2"]
+    }}
+]"""
         
-        Look for patterns like:
-        - Data validation patterns
-        - Error handling patterns
-        - Loop constructs
-        - Conditional logic patterns
-        - File processing patterns
+        # Calculate available space for content
+        available_space = self.MAX_PROMPT_CHARS - len(base_prompt) - 100
+        truncated_content = content[:available_space] + "..." if len(content) > available_space else content
         
-        Return as JSON array:
-        [
-            {{
-                "type": "validation",
-                "description": "pattern description",
-                "complexity": 2.5,
-                "snippet": "code snippet",
-                "recommendations": ["recommendation1", "recommendation2"]
-            }}
-        ]
-        """
+        full_prompt = base_prompt.replace("code:", f"code:\n\n{truncated_content}")
+        
+        # Final validation
+        full_prompt = self._validate_and_truncate_prompt(full_prompt, preserve_structure=True)
         
         sampling_params = SamplingParams(temperature=0.2, max_tokens=600)
         request_id = str(uuid.uuid4())
         
-        async for result in engine.generate(prompt, sampling_params, request_id=request_id):
+        async for result in engine.generate(full_prompt, sampling_params, request_id=request_id):
             response_text = result.outputs[0].text.strip()
             break
         
@@ -1271,27 +1373,35 @@ class LogicAnalyzerAgent(BaseOpulenceAgent):
     
     async def _extract_comprehensive_business_logic(self, chunks: List[tuple], engine) -> Dict[str, Any]:
         """Extract comprehensive business logic from all chunks"""
+        
+        # Combine content with length management
         all_content = '\n'.join([chunk[4] for chunk in chunks])
         
-        prompt = f"""
-        Analyze this complete COBOL program and extract the business logic:
+        # Create base prompt
+        base_prompt = """Analyze this complete COBOL program and extract the business logic:
+
+Focus on:
+1. What business processes this program implements
+2. Key business rules and validations
+3. Data processing workflows
+4. Business calculations and transformations
+5. Decision points that affect business outcomes
+
+Provide a comprehensive business logic summary."""
         
-        {all_content[:2000]}...
+        # Calculate available space for content
+        available_space = self.MAX_PROMPT_CHARS - len(base_prompt) - 100
+        truncated_content = all_content[:available_space] + "..." if len(all_content) > available_space else all_content
         
-        Focus on:
-        1. What business processes this program implements
-        2. Key business rules and validations
-        3. Data processing workflows
-        4. Business calculations and transformations
-        5. Decision points that affect business outcomes
+        full_prompt = base_prompt.replace("program and extract", f"program and extract the business logic:\n\n{truncated_content}\n\nFocus on")
         
-        Provide a comprehensive business logic summary.
-        """
+        # Final validation
+        full_prompt = self._validate_and_truncate_prompt(full_prompt, preserve_structure=False)
         
         sampling_params = SamplingParams(temperature=0.2, max_tokens=1000)
         request_id = str(uuid.uuid4())
         
-        async for result in engine.generate(prompt, sampling_params, request_id=request_id):
+        async for result in engine.generate(full_prompt, sampling_params, request_id=request_id):
             response_text = result.outputs[0].text.strip()
             break
         
