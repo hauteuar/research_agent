@@ -1708,6 +1708,535 @@ class CompleteEnhancedCodeParserAgent:
             self.logger.error(f"Database operation failed: {str(e)}")
             raise e
 
+    async def _analyze_data_section_with_llm(self, content: str, section_name: str) -> Dict[str, Any]:
+        """Analyze data section with comprehensive field analysis - LLM METHOD"""
+        
+        # Extract field information first for context
+        field_analysis = await self._analyze_fields_comprehensive(content)
+        
+        prompt = f"""
+        Analyze this COBOL data section: {section_name}
+        
+        {content[:800]}...
+        
+        Provide comprehensive analysis of:
+        1. Record structures and hierarchical layouts
+        2. Key data elements and their business purposes
+        3. Relationships between fields and groups
+        4. Data validation patterns and constraints
+        5. Business domain and entity types represented
+        6. Memory usage patterns and optimization opportunities
+        7. Reusability and maintainability aspects
+        
+        Return as JSON:
+        {{
+            "record_structures": [
+                {{"name": "record1", "purpose": "customer data", "fields": 15}}
+            ],
+            "key_elements": [
+                {{"name": "element1", "type": "identifier", "business_purpose": "customer key"}}
+            ],
+            "field_relationships": [
+                {{"parent": "customer-record", "children": ["cust-name", "cust-addr"]}}
+            ],
+            "validation_patterns": [
+                {{"field": "field1", "validation": "required", "constraint": "not null"}}
+            ],
+            "business_domain": "customer management",
+            "entity_types": ["customer", "address", "contact"],
+            "memory_analysis": {{
+                "estimated_size": 500,
+                "optimization_opportunities": ["pack decimal fields", "reorder for alignment"]
+            }},
+            "maintainability": {{
+                "complexity_score": 7,
+                "documentation_level": "good",
+                "naming_consistency": "high"
+            }}
+        }}
+        """
+        
+        sampling_params = SamplingParams(temperature=0.2, max_tokens=800)
+        
+        try:
+            response_text = await self._generate_with_llm(prompt, sampling_params)
+            if '{' in response_text:
+                json_start = response_text.find('{')
+                json_end = response_text.rfind('}') + 1
+                llm_analysis = json.loads(response_text[json_start:json_end])
+                
+                # Enhance LLM analysis with field analysis data
+                llm_analysis['field_analysis'] = field_analysis
+                llm_analysis['section_type'] = section_name
+                llm_analysis['analysis_timestamp'] = dt.now().isoformat()
+                
+                # Add computed metrics
+                llm_analysis['computed_metrics'] = {
+                    'total_fields': field_analysis["statistics"]["total_fields"],
+                    'numeric_fields_ratio': (field_analysis["statistics"]["numeric_fields"] / 
+                                           max(field_analysis["statistics"]["total_fields"], 1)) * 100,
+                    'computational_fields_ratio': (field_analysis["statistics"]["computational_fields"] / 
+                                                 max(field_analysis["statistics"]["total_fields"], 1)) * 100,
+                    'table_fields_ratio': (field_analysis["statistics"]["table_fields"] / 
+                                         max(field_analysis["statistics"]["total_fields"], 1)) * 100
+                }
+                
+                return llm_analysis
+                
+        except Exception as e:
+            self.logger.warning(f"Data section LLM analysis failed: {str(e)}")
+        
+        # Fallback analysis using extracted field data
+        return self._generate_fallback_data_section_analysis(content, section_name, field_analysis)
+
+    def _generate_fallback_data_section_analysis(self, content: str, section_name: str, 
+                                               field_analysis: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate fallback analysis when LLM is unavailable"""
+        
+        # Extract basic information from content
+        record_structures = self._extract_record_structures_basic(content)
+        key_elements = self._extract_key_elements_basic(content)
+        business_domain = self._infer_business_domain_from_fields(field_analysis["fields"])
+        
+        return {
+            "record_structures": record_structures,
+            "key_elements": key_elements,
+            "field_relationships": self._extract_field_relationships_basic(content),
+            "validation_patterns": self._extract_validation_patterns_basic(content),
+            "business_domain": business_domain,
+            "entity_types": self._extract_entity_types_basic(content),
+            "memory_analysis": {
+                "estimated_size": self._estimate_section_memory(content),
+                "optimization_opportunities": self._suggest_memory_optimizations(content)
+            },
+            "maintainability": {
+                "complexity_score": self._calculate_section_complexity(content),
+                "documentation_level": self._assess_documentation_level(content),
+                "naming_consistency": self._assess_naming_consistency(content)
+            },
+            "field_analysis": field_analysis,
+            "section_type": section_name,
+            "analysis_timestamp": dt.now().isoformat(),
+            "analysis_method": "fallback_regex_based"
+        }
+
+    def _extract_record_structures_basic(self, content: str) -> List[Dict[str, Any]]:
+        """Extract basic record structures using regex"""
+        structures = []
+        
+        # Find 01-level items (record definitions)
+        record_pattern = re.compile(r'^\s*01\s+([A-Z][A-Z0-9-]*)(.*?)$', re.MULTILINE | re.IGNORECASE)
+        
+        for match in record_pattern.finditer(content):
+            record_name = match.group(1)
+            record_definition = match.group(2)
+            
+            # Count subordinate fields for this record
+            record_start = match.end()
+            next_record = record_pattern.search(content, record_start)
+            record_end = next_record.start() if next_record else len(content)
+            record_content = content[record_start:record_end]
+            
+            field_count = len(self.cobol_patterns['data_item'].findall(record_content))
+            
+            # Infer purpose from record name
+            purpose = self._infer_record_purpose(record_name)
+            
+            structures.append({
+                "name": record_name,
+                "purpose": purpose,
+                "fields": field_count,
+                "has_occurs": "OCCURS" in record_definition.upper(),
+                "has_redefines": "REDEFINES" in record_definition.upper()
+            })
+        
+        return structures
+
+    def _extract_key_elements_basic(self, content: str) -> List[Dict[str, Any]]:
+        """Extract key data elements using regex"""
+        elements = []
+        
+        data_matches = self.cobol_patterns['data_item'].finditer(content)
+        
+        for match in data_matches:
+            if match.group(0).strip().startswith('*'):
+                continue
+                
+            try:
+                level = int(match.group(1))
+                name = match.group(2)
+                definition = match.group(3)
+                
+                # Focus on important fields (01, 05, 10 levels typically)
+                if level in [1, 5, 10]:
+                    element_type = self._classify_element_type(name, definition)
+                    business_purpose = self._infer_element_purpose(name)
+                    
+                    elements.append({
+                        "name": name,
+                        "level": level,
+                        "type": element_type,
+                        "business_purpose": business_purpose,
+                        "pic_clause": self._extract_pic_clause(definition),
+                        "usage": self._extract_usage_clause(definition)
+                    })
+            except (ValueError, IndexError):
+                continue
+        
+        return elements
+
+    def _extract_field_relationships_basic(self, content: str) -> List[Dict[str, Any]]:
+        """Extract basic field relationships"""
+        relationships = []
+        current_parent = None
+        parent_level = 0
+        
+        data_matches = self.cobol_patterns['data_item'].finditer(content)
+        
+        for match in data_matches:
+            if match.group(0).strip().startswith('*'):
+                continue
+                
+            try:
+                level = int(match.group(1))
+                name = match.group(2)
+                
+                if level == 1:
+                    current_parent = name
+                    parent_level = 1
+                    relationships.append({
+                        "parent": name,
+                        "children": [],
+                        "type": "record"
+                    })
+                elif level > parent_level and current_parent:
+                    # Find the relationship for current parent
+                    for rel in relationships:
+                        if rel["parent"] == current_parent:
+                            rel["children"].append(name)
+                            break
+            except (ValueError, IndexError):
+                continue
+        
+        return relationships
+
+    def _extract_validation_patterns_basic(self, content: str) -> List[Dict[str, Any]]:
+        """Extract basic validation patterns"""
+        patterns = []
+        
+        data_matches = self.cobol_patterns['data_item'].finditer(content)
+        
+        for match in data_matches:
+            if match.group(0).strip().startswith('*'):
+                continue
+                
+            try:
+                name = match.group(2)
+                definition = match.group(3).upper()
+                
+                # Look for validation indicators
+                validations = []
+                
+                if 'VALUE' in definition:
+                    validations.append("has_default_value")
+                
+                pic_clause = self._extract_pic_clause(definition)
+                if pic_clause:
+                    if '9' in pic_clause:
+                        validations.append("numeric_only")
+                    if 'A' in pic_clause:
+                        validations.append("alphabetic_only")
+                    if 'X' in pic_clause:
+                        validations.append("alphanumeric")
+                
+                if 'OCCURS' in definition:
+                    validations.append("array_bounds_check")
+                
+                if validations:
+                    patterns.append({
+                        "field": name,
+                        "validations": validations,
+                        "constraints": self._extract_constraints(definition)
+                    })
+            except (IndexError, AttributeError):
+                continue
+        
+        return patterns
+
+    def _infer_business_domain_from_fields(self, fields: List[Dict]) -> str:
+        """Infer business domain from field names"""
+        domain_indicators = {
+            'financial': ['amount', 'balance', 'payment', 'rate', 'interest', 'fee', 'cost'],
+            'customer': ['customer', 'client', 'name', 'address', 'phone', 'email'],
+            'product': ['product', 'item', 'inventory', 'stock', 'sku', 'catalog'],
+            'transaction': ['transaction', 'order', 'invoice', 'receipt', 'sale'],
+            'employee': ['employee', 'staff', 'payroll', 'salary', 'department'],
+            'general': []
+        }
+        
+        domain_scores = {domain: 0 for domain in domain_indicators}
+        
+        for field in fields:
+            field_name = field.get('name', '').lower()
+            
+            for domain, indicators in domain_indicators.items():
+                if domain == 'general':
+                    continue
+                    
+                for indicator in indicators:
+                    if indicator in field_name:
+                        domain_scores[domain] += 1
+                        break
+        
+        # Return domain with highest score, or 'general' if no clear winner
+        max_score = max(domain_scores.values())
+        if max_score == 0:
+            return 'general'
+        
+        return max(domain_scores, key=domain_scores.get)
+
+    def _extract_entity_types_basic(self, content: str) -> List[str]:
+        """Extract entity types from field names"""
+        entities = set()
+        
+        # Common entity patterns
+        entity_patterns = {
+            'customer': ['customer', 'client', 'cust'],
+            'account': ['account', 'acct'],
+            'product': ['product', 'item', 'prod'],
+            'transaction': ['transaction', 'trans', 'txn'],
+            'order': ['order', 'invoice'],
+            'employee': ['employee', 'emp', 'staff'],
+            'address': ['address', 'addr'],
+            'contact': ['contact', 'phone', 'email']
+        }
+        
+        content_upper = content.upper()
+        
+        for entity, patterns in entity_patterns.items():
+            if any(pattern.upper() in content_upper for pattern in patterns):
+                entities.add(entity)
+        
+        return list(entities)
+
+    def _suggest_memory_optimizations(self, content: str) -> List[str]:
+        """Suggest memory optimization opportunities"""
+        suggestions = []
+        
+        content_upper = content.upper()
+        
+        # Check for COMP usage opportunities
+        if 'PIC 9' in content_upper and 'COMP' not in content_upper:
+            suggestions.append("Consider COMP usage for numeric fields to save space")
+        
+        # Check for COMP-3 opportunities
+        if content_upper.count('PIC 9') > 5 and 'COMP-3' not in content_upper:
+            suggestions.append("Consider COMP-3 (packed decimal) for numeric fields")
+        
+        # Check for field alignment
+        if 'COMP' in content_upper:
+            suggestions.append("Review field ordering for optimal alignment")
+        
+        # Check for OCCURS without INDEXED BY
+        if 'OCCURS' in content_upper and 'INDEXED BY' not in content_upper:
+            suggestions.append("Add INDEXED BY clauses to table definitions for performance")
+        
+        # Check for large display fields
+        x_fields = re.findall(r'PIC\s+X\((\d+)\)', content_upper)
+        large_fields = [int(size) for size in x_fields if int(size) > 100]
+        if large_fields:
+            suggestions.append("Consider dynamic allocation for large text fields")
+        
+        return suggestions
+
+    def _assess_documentation_level(self, content: str) -> str:
+        """Assess documentation level in section"""
+        lines = content.split('\n')
+        total_lines = len([line for line in lines if line.strip()])
+        comment_lines = len([line for line in lines if line.strip().startswith('*')])
+        
+        if total_lines == 0:
+            return "none"
+        
+        comment_ratio = comment_lines / total_lines
+        
+        if comment_ratio > 0.3:
+            return "excellent"
+        elif comment_ratio > 0.15:
+            return "good"
+        elif comment_ratio > 0.05:
+            return "fair"
+        else:
+            return "poor"
+
+    def _assess_naming_consistency(self, content: str) -> str:
+        """Assess naming consistency in section"""
+        data_matches = self.cobol_patterns['data_item'].finditer(content)
+        field_names = []
+        
+        for match in data_matches:
+            if not match.group(0).strip().startswith('*'):
+                try:
+                    field_names.append(match.group(2))
+                except IndexError:
+                    continue
+        
+        if not field_names:
+            return "unknown"
+        
+        # Check naming patterns
+        hyphenated = sum(1 for name in field_names if '-' in name)
+        underscored = sum(1 for name in field_names if '_' in name)
+        mixed_case = sum(1 for name in field_names if not name.isupper())
+        
+        total_fields = len(field_names)
+        consistency_score = 0
+        
+        # Prefer consistent hyphenation (COBOL standard)
+        if hyphenated / total_fields > 0.8:
+            consistency_score += 30
+        
+        # Consistent case (should be uppercase in COBOL)
+        if mixed_case / total_fields < 0.1:
+            consistency_score += 30
+        
+        # Consistent length (not too short, not too long)
+        avg_length = sum(len(name) for name in field_names) / total_fields
+        if 5 <= avg_length <= 20:
+            consistency_score += 20
+        
+        # Prefix consistency (fields in same group should have similar prefixes)
+        prefixes = set()
+        for name in field_names:
+            if '-' in name:
+                prefix = name.split('-')[0]
+                prefixes.add(prefix)
+        
+        if len(prefixes) <= len(field_names) / 3:  # Good prefix grouping
+            consistency_score += 20
+        
+        if consistency_score >= 80:
+            return "high"
+        elif consistency_score >= 60:
+            return "medium"
+        else:
+            return "low"
+
+    def _infer_record_purpose(self, record_name: str) -> str:
+        """Infer purpose from record name"""
+        name_upper = record_name.upper()
+        
+        purpose_patterns = {
+            'customer_data': ['CUSTOMER', 'CLIENT', 'CUST'],
+            'account_data': ['ACCOUNT', 'ACCT'],
+            'transaction_data': ['TRANSACTION', 'TRANS', 'TXN'],
+            'product_data': ['PRODUCT', 'ITEM', 'INVENTORY'],
+            'employee_data': ['EMPLOYEE', 'EMP', 'STAFF'],
+            'header_data': ['HEADER', 'HDR', 'HEAD'],
+            'detail_data': ['DETAIL', 'DTL', 'LINE'],
+            'summary_data': ['SUMMARY', 'TOTAL', 'SUM'],
+            'control_data': ['CONTROL', 'CTL', 'FLAG'],
+            'work_area': ['WORK', 'TEMP', 'SCRATCH', 'WS']
+        }
+        
+        for purpose, patterns in purpose_patterns.items():
+            if any(pattern in name_upper for pattern in patterns):
+                return purpose
+        
+        return 'business_data'
+
+    def _classify_element_type(self, name: str, definition: str) -> str:
+        """Classify data element type"""
+        name_upper = name.upper()
+        def_upper = definition.upper()
+        
+        # Check for identifiers
+        if any(pattern in name_upper for pattern in ['ID', 'KEY', 'NBR', 'NUMBER']):
+            return 'identifier'
+        
+        # Check for amounts/financial
+        if any(pattern in name_upper for pattern in ['AMT', 'AMOUNT', 'BALANCE', 'TOTAL']):
+            return 'financial'
+        
+        # Check for dates/times
+        if any(pattern in name_upper for pattern in ['DATE', 'TIME', 'YEAR', 'MONTH']):
+            return 'temporal'
+        
+        # Check for names/descriptions
+        if any(pattern in name_upper for pattern in ['NAME', 'DESC', 'TEXT']):
+            return 'descriptive'
+        
+        # Check for status/flags
+        if any(pattern in name_upper for pattern in ['STATUS', 'FLAG', 'IND']):
+            return 'control'
+        
+        # Check by PIC clause
+        pic_clause = self._extract_pic_clause(definition)
+        if pic_clause:
+            if '9' in pic_clause:
+                return 'numeric'
+            elif 'X' in pic_clause:
+                return 'alphanumeric'
+            elif 'A' in pic_clause:
+                return 'alphabetic'
+        
+        return 'general'
+
+    def _infer_element_purpose(self, name: str) -> str:
+        """Infer business purpose of element"""
+        name_upper = name.upper()
+        
+        purpose_patterns = {
+            'unique_identification': ['ID', 'KEY', 'NBR'],
+            'financial_amount': ['AMT', 'AMOUNT', 'BALANCE', 'PAYMENT'],
+            'personal_information': ['NAME', 'FNAME', 'LNAME', 'ADDRESS'],
+            'contact_information': ['PHONE', 'EMAIL', 'FAX'],
+            'date_tracking': ['DATE', 'TIME', 'CREATED', 'UPDATED'],
+            'status_tracking': ['STATUS', 'FLAG', 'ACTIVE', 'INACTIVE'],
+            'business_classification': ['TYPE', 'CLASS', 'CATEGORY', 'CODE'],
+            'measurement': ['QTY', 'QUANTITY', 'SIZE', 'LENGTH', 'COUNT'],
+            'description': ['DESC', 'DESCRIPTION', 'TEXT', 'COMMENT']
+        }
+        
+        for purpose, patterns in purpose_patterns.items():
+            if any(pattern in name_upper for pattern in patterns):
+                return purpose
+        
+        return 'general_data'
+
+    def _extract_constraints(self, definition: str) -> List[str]:
+        """Extract constraints from field definition"""
+        constraints = []
+        def_upper = definition.upper()
+        
+        # VALUE clause indicates default/required value
+        if 'VALUE' in def_upper:
+            value_match = self._extract_value_clause(definition)
+            if value_match:
+                if 'SPACE' in value_match.upper():
+                    constraints.append("initialized_to_spaces")
+                elif 'ZERO' in value_match.upper():
+                    constraints.append("initialized_to_zero")
+                else:
+                    constraints.append("has_default_value")
+        
+        # OCCURS indicates array bounds
+        occurs_info = self._extract_occurs_info(definition)
+        if occurs_info:
+            constraints.append(f"array_size_{occurs_info['min_occurs']}_to_{occurs_info['max_occurs']}")
+        
+        # PIC clause indicates format constraints
+        pic_clause = self._extract_pic_clause(definition)
+        if pic_clause:
+            if '9' in pic_clause:
+                constraints.append("numeric_format")
+            if 'A' in pic_clause:
+                constraints.append("alphabetic_only")
+            if 'X' in pic_clause:
+                constraints.append("alphanumeric_format")
+        
+        return constraints
+
     # ALL LLM ANALYSIS METHODS REMAIN UNCHANGED TO PRESERVE LLM CALLS
     async def _analyze_division_with_llm(self, content: str, division_name: str) -> Dict[str, Any]:
         """Analyze COBOL division with LLM - UNCHANGED"""
