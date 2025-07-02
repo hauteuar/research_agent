@@ -160,7 +160,7 @@ class DualGPUOpulenceCoordinator:
         """Access GPU manager's engine cache directly"""
         return self.gpu_manager.gpu_engines
     
-     async def get_shared_llm_engine(self, gpu_id: int):
+    async def get_shared_llm_engine(self, gpu_id: int):
         """FIXED: Get shared LLM engine with proper reuse logic"""
         async with self.engine_lock:
             
