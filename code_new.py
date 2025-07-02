@@ -4026,43 +4026,8 @@ class CompleteEnhancedCodeParserAgent:
         """Extract record layout information - UNCHANGED"""
         layouts = []
         
-        record_pattern = re.compile(r'^\s*01\s+([A-Z][A-Z0-9-]*)(.*?)        Return as JSON:
-        {{
-            "program": "program_name",
-            "input_datasets": [
-                {{"dsn": "dataset1", "purpose": "input data", "disposition": "SHR"}}
-            ],
-            "output_datasets": [
-                {{"dsn": "dataset2", "purpose": "output", "disposition": "NEW"}}
-            ],
-            "parameters": {{"parm1": "value1"}},
-            "conditional_logic": "condition description",
-            "dependencies": ["step1", "step2"],
-            "resources": {{"region": "size", "time": "limit"}}
-        }}
-        """
-        
-        sampling_params = SamplingParams(temperature=0.1, max_tokens=600)
-        
-        try:
-            response_text = await self._generate_with_llm(prompt, sampling_params)
-            if '{' in response_text:
-                json_start = response_text.find('{')
-                json_end = response_text.rfind('}') + 1
-                return json.loads(response_text[json_start:json_end])
-        except Exception as e:
-            self.logger.warning(f"JCL step analysis failed: {str(e)}")
-        
-        return {
-            "program": self._extract_exec_program(content),
-            "input_datasets": self._extract_input_datasets_detailed(content),
-            "output_datasets": self._extract_output_datasets_detailed(content),
-            "parameters": self._extract_parameters_detailed(content),
-            "conditional_logic": "None identified",
-            "dependencies": [],
-            "resources": {}
-        }
-
+        record_pattern = re.compile(r'^\s*01\s+([A-Z][A-Z0-9-]*)(.*?)')
+                                           
     # Enhanced metadata generation with business violations
     async def _generate_metadata_enhanced(self, chunks: List[CodeChunk], file_type: str, business_violations: List = None) -> Dict[str, Any]:
         """Generate enhanced metadata with business context"""

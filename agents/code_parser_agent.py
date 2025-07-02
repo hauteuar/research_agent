@@ -541,7 +541,7 @@ class CompleteEnhancedCodeParserAgent:
             # Business rule validation before parsing
             business_violations = []
             if file_type in self.business_validators:
-                violations = await self.business_validators[file_type].validate_structure(content)
+                violations = self.business_validators[file_type].validate_structure(content)
                 business_violations.extend(violations)
             
             # Parse based on file type with business context
@@ -5179,7 +5179,495 @@ class CompleteEnhancedCodeParserAgent:
         cross_program.sort(key=lambda x: x["program_count"], reverse=True)
         
         return cross_program
+    async def _parse_cobol_sections_with_context(self, content: str, program_name: str) -> List[CodeChunk]:
+        """Parse COBOL sections with enhanced business context"""
+        chunks = []
+        
+        section_patterns = {
+            'working_storage': self.cobol_patterns['working_storage'],
+            'file_section': self.cobol_patterns['file_section'],
+            'linkage_section': self.cobol_patterns['linkage_section'],
+            'local_storage': self.cobol_patterns['local_storage']
+        }
+        
+        section_positions = {}
+        for sect_name, pattern in section_patterns.items():
+            match = pattern.search(content)
+            if match:
+                section_positions[sect_name] = {
+                    'start': match.start(),
+                    'match': match
+                }
+        
+        # Sort sections by position
+        sorted_sections = sorted(section_positions.items(), key=lambda x: x[1]['start'])
+        
+        for i, (sect_name, sect_info) in enumerate(sorted_sections):
+            start_pos = sect_info['start']
+            
+            # Find end position (next section or procedure division)
+            if i + 1 < len(sorted_sections):
+                end_pos = sorted_sections[i + 1][1]['start']
+            else:
+                # Look for procedure division
+                proc_match = self.cobol_patterns['procedure_division'].search(content, start_pos)
+                end_pos = proc_match.start() if proc_match else len(content)
+            
+            sect_content = content[start_pos:end_pos].strip()
+            
+            # Enhanced business context analysis for data sections
+            business_context = self._analyze_data_section_business_context(sect_content, sect_name)
+            
+            # LLM analysis for deeper insights (keeping existing LLM call)
+            metadata = await self._analyze_data_section_with_llm(sect_content, sect_name)
+            
+            # Add section-specific metadata
+            metadata.update({
+                'section_type': sect_name,
+                'data_organization': business_context.get('data_organization', 'sequential'),
+                'field_count': self._count_fields_in_section(sect_content),
+                'memory_estimate': self._estimate_section_memory(sect_content),
+                'complexity_score': self._calculate_section_complexity(sect_content)
+            })
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_{sect_name.upper()}_SECTION",
+                chunk_type="section",
+                content=sect_content,
+                metadata=metadata,
+                business_context=business_context,
+                line_start=content[:start_pos].count('\n'),
+                line_end=content[:end_pos].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
 
+    def _analyze_data_section_business_context(self, content: str, section_name: str) -> Dict[str, Any]:
+        """Analyze business context of data section"""
+        context = {
+            'section_purpose': '',
+            'data_organization': 'sequential',
+            'business_entities': [],
+            'data_categories': [],
+            'storage_requirements': {},
+            'reusability_scope': 'program_local'
+        }
+        
+        if 'working_storage' in section_name:
+            context.update({
+                'section_purpose': 'program_variables_and_constants',
+                'data_organization': 'hierarchical',
+                'reusability_scope': 'program_local',
+                'memory_allocation': 'static'
+            })
+        elif 'file_section' in section_name:
+            context.update({
+                'section_purpose': 'file_record_definitions',
+                'data_organization': 'record_based',
+                'reusability_scope': 'file_specific',
+                'memory_allocation': 'dynamic'
+            })
+        elif 'linkage_section' in section_name:
+            context.update({
+                'section_purpose': 'parameter_passing_interface',
+                'data_organization': 'parameter_based',
+                'reusability_scope': 'inter_program',
+                'memory_allocation': 'shared'
+            })
+        elif 'local_storage' in section_name:
+            context.update({
+                'section_purpose': 'recursive_program_storage',
+                'data_organization': 'instance_based',
+                'reusability_scope': 'program_instance',
+                'memory_allocation': 'per_invocation'
+            })
+        
+        # Analyze business entities and data categories
+        context['business_entities'] = self._extract_business_entities_from_section(content)
+        context['data_categories'] = self._extract_data_categories_from_section(content)
+        context['storage_requirements'] = self._analyze_storage_requirements(content)
+        
+        return context
+
+    def _count_fields_in_section(self, content: str) -> int:
+        """Count fields in a data section"""
+        data_matches = self.cobol_patterns['data_item'].finditer(content)
+        count = 0
+        
+        for match in data_matches:
+            if not match.group(0).strip().startswith('*'):  # Skip comments
+                count += 1
+        
+        return count
+
+    def _estimate_section_memory(self, content: str) -> int:
+        """Estimate memory usage for section"""
+        total_memory = 0
+        data_matches = self.cobol_patterns['data_item'].finditer(content)
+        
+        for match in data_matches:
+            if match.group(0).strip().startswith('*'):  # Skip comments
+                continue
+                
+            try:
+                level = int(match.group(1))
+                definition = match.group(3)
+                
+                # Only count elementary items (with PIC clauses)
+                pic_clause = self._extract_pic_clause(definition)
+                if pic_clause:
+                    usage = self._extract_usage_clause(definition)
+                    field_size = self._calculate_field_length(pic_clause, usage)
+                    
+                    # Handle OCCURS
+                    occurs_info = self._extract_occurs_info(definition)
+                    if occurs_info:
+                        field_size *= occurs_info['max_occurs']
+                    
+                    total_memory += field_size
+            except (ValueError, IndexError):
+                continue
+        
+        return total_memory
+
+    def _calculate_section_complexity(self, content: str) -> int:
+        """Calculate complexity score for data section"""
+        complexity = 0
+        
+        # Base complexity from field count
+        field_count = self._count_fields_in_section(content)
+        complexity += field_count
+        
+        # Add complexity for OCCURS clauses (tables)
+        occurs_count = len(self.cobol_patterns['occurs_clause'].findall(content))
+        complexity += occurs_count * 3
+        
+        # Add complexity for REDEFINES (overlays)
+        redefines_count = len(self.cobol_patterns['redefines'].findall(content))
+        complexity += redefines_count * 2
+        
+        # Add complexity for different data types
+        content_upper = content.upper()
+        if 'COMP' in content_upper:
+            complexity += 2
+        if 'PACKED-DECIMAL' in content_upper:
+            complexity += 1
+        
+        return min(complexity, 100)  # Cap at 100
+
+    def _extract_business_entities_from_section(self, content: str) -> List[str]:
+        """Extract business entities from section content"""
+        entities = set()
+        
+        # Look for common business entity patterns in field names
+        data_matches = self.cobol_patterns['data_item'].finditer(content)
+        
+        for match in data_matches:
+            if match.group(0).strip().startswith('*'):
+                continue
+                
+            try:
+                field_name = match.group(2).upper()
+                
+                # Extract business entities from field names
+                if any(pattern in field_name for pattern in ['CUSTOMER', 'CLIENT', 'CUST']):
+                    entities.add('customer')
+                elif any(pattern in field_name for pattern in ['ACCOUNT', 'ACCT']):
+                    entities.add('account')
+                elif any(pattern in field_name for pattern in ['PRODUCT', 'PROD', 'ITEM']):
+                    entities.add('product')
+                elif any(pattern in field_name for pattern in ['TRANSACTION', 'TRANS', 'TXN']):
+                    entities.add('transaction')
+                elif any(pattern in field_name for pattern in ['ORDER', 'INVOICE']):
+                    entities.add('order')
+                elif any(pattern in field_name for pattern in ['EMPLOYEE', 'EMP', 'STAFF']):
+                    entities.add('employee')
+                elif any(pattern in field_name for pattern in ['PAYMENT', 'PMT']):
+                    entities.add('payment')
+            except (IndexError, AttributeError):
+                continue
+        
+        return list(entities)
+
+    def _extract_data_categories_from_section(self, content: str) -> List[str]:
+        """Extract data categories from section content"""
+        categories = set()
+        
+        data_matches = self.cobol_patterns['data_item'].finditer(content)
+        
+        for match in data_matches:
+            if match.group(0).strip().startswith('*'):
+                continue
+                
+            try:
+                field_name = match.group(2).upper()
+                definition = match.group(3).upper()
+                
+                # Categorize by field name patterns
+                if any(pattern in field_name for pattern in ['AMOUNT', 'AMT', 'BALANCE', 'TOTAL']):
+                    categories.add('financial')
+                elif any(pattern in field_name for pattern in ['DATE', 'TIME', 'YEAR', 'MONTH']):
+                    categories.add('temporal')
+                elif any(pattern in field_name for pattern in ['NAME', 'ADDR', 'ADDRESS', 'PHONE']):
+                    categories.add('personal_data')
+                elif any(pattern in field_name for pattern in ['ID', 'KEY', 'NBR', 'NUMBER']):
+                    categories.add('identifier')
+                elif any(pattern in field_name for pattern in ['STATUS', 'FLAG', 'IND']):
+                    categories.add('control')
+                elif any(pattern in field_name for pattern in ['DESC', 'DESCRIPTION', 'TEXT']):
+                    categories.add('descriptive')
+                elif 'PIC 9' in definition:
+                    categories.add('numeric')
+                elif 'PIC X' in definition:
+                    categories.add('alphanumeric')
+            except (IndexError, AttributeError):
+                continue
+        
+        return list(categories)
+
+    def _analyze_storage_requirements(self, content: str) -> Dict[str, Any]:
+        """Analyze storage requirements for section"""
+        requirements = {
+            'total_bytes': 0,
+            'alignment_needs': [],
+            'performance_considerations': [],
+            'memory_efficiency': 'good'
+        }
+        
+        total_memory = self._estimate_section_memory(content)
+        requirements['total_bytes'] = total_memory
+        
+        # Analyze for alignment and performance issues
+        data_matches = self.cobol_patterns['data_item'].finditer(content)
+        comp_fields = 0
+        packed_fields = 0
+        display_fields = 0
+        
+        for match in data_matches:
+            if match.group(0).strip().startswith('*'):
+                continue
+                
+            try:
+                definition = match.group(3).upper()
+                usage = self._extract_usage_clause(definition)
+                
+                if usage in ['COMP', 'COMP-4', 'BINARY']:
+                    comp_fields += 1
+                    requirements['alignment_needs'].append('word_alignment')
+                elif usage == 'COMP-3' or 'PACKED-DECIMAL' in usage:
+                    packed_fields += 1
+                else:
+                    display_fields += 1
+            except (IndexError, AttributeError):
+                continue
+        
+        # Performance considerations
+        if comp_fields > 0:
+            requirements['performance_considerations'].append('binary_arithmetic_optimization')
+        if packed_fields > 0:
+            requirements['performance_considerations'].append('packed_decimal_efficiency')
+        if display_fields > comp_fields + packed_fields:
+            requirements['performance_considerations'].append('consider_computational_fields')
+        
+        # Memory efficiency assessment
+        if total_memory > 32767:  # 32K limit
+            requirements['memory_efficiency'] = 'poor'
+        elif total_memory > 16384:  # 16K
+            requirements['memory_efficiency'] = 'fair'
+        
+        return requirements
+
+    def _calculate_field_length(self, pic_clause: str, usage: str) -> int:
+        """Calculate field length based on PIC clause and usage - ENHANCED VERSION"""
+        if not pic_clause:
+            return 0
+        
+        pic_upper = pic_clause.upper().strip()
+        
+        # Handle different PIC clause formats
+        length = 0
+        
+        # Pattern 1: Explicit repetition with parentheses - X(10), 9(5), etc.
+        explicit_match = re.search(r'([X9ANVS])\((\d+)\)', pic_upper)
+        if explicit_match:
+            char_type = explicit_match.group(1)
+            repeat_count = int(explicit_match.group(2))
+            length = repeat_count
+        else:
+            # Pattern 2: Implicit repetition - XXX, 999, etc.
+            # Count each character type
+            length += len(re.findall(r'X', pic_upper))  # Alphanumeric
+            length += len(re.findall(r'9', pic_upper))  # Numeric
+            length += len(re.findall(r'A', pic_upper))  # Alphabetic
+            length += len(re.findall(r'N', pic_upper))  # National (usually 2 bytes each)
+            
+            # National characters are typically 2 bytes each
+            if 'N' in pic_upper:
+                length += len(re.findall(r'N', pic_upper))  # Double count for national
+        
+        # Handle special characters that don't add to length
+        # V (implied decimal point), S (sign), P (scaling)
+        # These don't contribute to storage length
+        
+        # Handle decimal scaling positions P
+        p_positions = len(re.findall(r'P', pic_upper))
+        # P positions don't add to physical length
+        
+        # Adjust length based on usage clause
+        if usage in ['COMP-3', 'PACKED-DECIMAL']:
+            # Packed decimal: (digits + 1) / 2
+            # Each pair of digits uses 1 byte, plus 1 nibble for sign
+            return (length + 1) // 2
+            
+        elif usage in ['COMP', 'COMP-4', 'BINARY']:
+            # Binary fields: based on number of digits
+            if length <= 4:
+                return 2  # Half word (16 bits)
+            elif length <= 9:
+                return 4  # Full word (32 bits)
+            elif length <= 18:
+                return 8  # Double word (64 bits)
+            else:
+                return 16  # Quad word (128 bits)
+                
+        elif usage == 'COMP-1':
+            return 4  # Single precision floating point
+            
+        elif usage == 'COMP-2':
+            return 8  # Double precision floating point
+            
+        elif usage == 'COMP-5':
+            # Native binary - same as COMP but may be different on some systems
+            if length <= 4:
+                return 2
+            elif length <= 9:
+                return 4
+            else:
+                return 8
+                
+        elif usage == 'INDEX':
+            return 4  # Index data item
+            
+        elif usage == 'POINTER':
+            return 4  # Pointer (or 8 on 64-bit systems)
+            
+        elif usage in ['DISPLAY', 'DISPLAY-1']:
+            # Display format - each character is 1 byte
+            return length
+            
+        elif usage == 'NATIONAL':
+            # National display - each character is typically 2 bytes (Unicode)
+            return length * 2
+            
+        else:
+            # Default to display format
+            return length
+
+# Additional helper methods for field length calculation
+
+    def _handle_pic_clause_variations(self, pic_clause: str) -> Dict[str, Any]:
+        """Handle various PIC clause patterns and return analysis"""
+        pic_upper = pic_clause.upper().strip()
+        
+        analysis = {
+            'base_length': 0,
+            'decimal_positions': 0,
+            'has_sign': False,
+            'has_decimal': False,
+            'scaling_positions': 0,
+            'data_type': 'unknown'
+        }
+        
+        # Check for sign
+        if 'S' in pic_upper:
+            analysis['has_sign'] = True
+        
+        # Check for implied decimal point
+        if 'V' in pic_upper:
+            analysis['has_decimal'] = True
+            # Split on V to count integer and decimal positions
+            parts = pic_upper.split('V')
+            if len(parts) == 2:
+                integer_part = parts[0]
+                decimal_part = parts[1]
+                
+                # Count digits in each part
+                integer_digits = self._count_digits_in_pic_part(integer_part)
+                decimal_digits = self._count_digits_in_pic_part(decimal_part)
+                
+                analysis['base_length'] = integer_digits + decimal_digits
+                analysis['decimal_positions'] = decimal_digits
+        
+        # Check for scaling positions (P)
+        p_count = pic_upper.count('P')
+        analysis['scaling_positions'] = p_count
+        
+        # Determine data type
+        if '9' in pic_upper:
+            analysis['data_type'] = 'numeric'
+        elif 'X' in pic_upper:
+            analysis['data_type'] = 'alphanumeric'
+        elif 'A' in pic_upper:
+            analysis['data_type'] = 'alphabetic'
+        elif 'N' in pic_upper:
+            analysis['data_type'] = 'national'
+        
+        # If no decimal point found, count all positions
+        if analysis['base_length'] == 0:
+            analysis['base_length'] = self._count_total_positions(pic_upper)
+        
+        return analysis
+
+    def _count_digits_in_pic_part(self, pic_part: str) -> int:
+        """Count digit positions in a part of PIC clause"""
+        count = 0
+        
+        # Handle explicit count: 9(5)
+        explicit_match = re.search(r'9\((\d+)\)', pic_part)
+        if explicit_match:
+            count += int(explicit_match.group(1))
+        
+        # Handle implicit count: 999
+        implicit_nines = len(re.findall(r'9', pic_part))
+        # Subtract any that were already counted in explicit
+        if explicit_match:
+            implicit_nines -= 1  # The 9 in 9(5) shouldn't be double-counted
+        
+        count += implicit_nines
+        
+        return count
+
+    def _count_total_positions(self, pic_clause: str) -> int:
+        """Count total character positions in PIC clause"""
+        total = 0
+        
+        # Handle all character types with explicit counts
+        patterns = [
+            (r'X\((\d+)\)', 1),  # X(n) - alphanumeric
+            (r'9\((\d+)\)', 1),  # 9(n) - numeric
+            (r'A\((\d+)\)', 1),  # A(n) - alphabetic
+            (r'N\((\d+)\)', 2),  # N(n) - national (2 bytes each)
+        ]
+        
+        for pattern, multiplier in patterns:
+            matches = re.finditer(pattern, pic_clause)
+            for match in matches:
+                total += int(match.group(1)) * multiplier
+        
+        # Handle implicit repetitions
+        implicit_chars = {
+            'X': len(re.findall(r'X(?!\()', pic_clause)),  # X not followed by (
+            '9': len(re.findall(r'9(?!\()', pic_clause)),  # 9 not followed by (
+            'A': len(re.findall(r'A(?!\()', pic_clause)),  # A not followed by (
+            'N': len(re.findall(r'N(?!\()', pic_clause)) * 2,  # N not followed by (, double for national
+        }
+        
+        total += sum(implicit_chars.values())
+        
+        return total
+    
     # Integration and modernization analysis
     async def analyze_modernization_opportunities(self, program_name: str = None) -> Dict[str, Any]:
         """Analyze modernization opportunities for programs"""

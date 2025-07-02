@@ -224,6 +224,186 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                     "status": "error"
                 })
     
+    async def analyze_field_lineage_with_fallback(self, field_name: str) -> Dict[str, Any]:
+        """Enhanced field lineage with timeout protection and partial saves"""
+        try:
+            # Check existing partial results first
+            existing = await self._load_existing_partial(field_name)
+            if existing:
+                self.logger.info(f"📋 Found existing partial analysis for {field_name}")
+                return existing
+            
+            # Get references with limit for high complexity
+            field_references = await self._find_field_references(field_name)
+            total_refs = len(field_references)
+            
+            # Adaptive strategy based on reference count
+            if total_refs > 30:  # HIGH complexity like TMSCOTHU
+                return await self._process_high_complexity(field_name, field_references)
+            elif total_refs > 15:  # MEDIUM complexity  
+                return await self._process_medium_complexity(field_name, field_references)
+            else:  # LOW complexity
+                return await self.analyze_field_lineage(field_name)  # Use existing method
+                
+        except Exception as e:
+            # Save error state and return partial results
+            return await self._handle_analysis_failure(field_name, str(e))
+
+    async def _process_high_complexity(self, field_name: str, references: List[Dict]) -> Dict[str, Any]:
+        """Process high complexity components like TMSCOTHU with smart limits"""
+        
+        # 1. Prioritize most important references
+        prioritized_refs = self._prioritize_by_importance(references)[:20]  # Max 20
+        
+        # 2. Initialize partial result tracking
+        result = {
+            "field_name": field_name,
+            "status": "partial",
+            "total_references_found": len(references),
+            "references_analyzed": 0,
+            "high_complexity_mode": True,
+            "analysis_strategy": "prioritized_sampling",
+            "lineage_data": {"programs": set(), "operations": [], "transformations": []},
+            "progress_log": []
+        }
+        
+        # 3. Process in small batches with saves
+        batch_size = 5
+        async with self.get_engine_context() as engine:
+            for i in range(0, len(prioritized_refs), batch_size):
+                batch = prioritized_refs[i:i + batch_size]
+                
+                try:
+                    # Process batch with 2-minute timeout
+                    async with asyncio.timeout(120):
+                        for ref in batch:
+                            ref_analysis = await self._analyze_field_reference_with_llm(
+                                field_name, ref["content"][:400],  # Truncate content
+                                ref["chunk_type"], ref["program_name"], engine
+                            )
+                            
+                            # Accumulate findings
+                            result["lineage_data"]["programs"].add(ref["program_name"])
+                            result["lineage_data"]["operations"].append(ref_analysis.get("operation_type", "UNKNOWN"))
+                            result["references_analyzed"] += 1
+                        
+                        # Save progress every batch
+                        await self._save_partial_progress(field_name, result)
+                        progress = (result["references_analyzed"] / len(prioritized_refs)) * 100
+                        result["progress_log"].append(f"Batch {i//batch_size + 1}: {progress:.1f}% complete")
+                        
+                except asyncio.TimeoutError:
+                    result["progress_log"].append(f"Batch {i//batch_size + 1}: TIMEOUT - continuing")
+                    continue
+        
+        # 4. Generate summary with LLM
+        result["llm_summary"] = await self._generate_partial_summary(field_name, result, engine)
+        
+        # 5. Convert sets to lists for JSON serialization
+        result["lineage_data"]["programs"] = list(result["lineage_data"]["programs"])
+        
+        # 6. Final save
+        await self._save_final_partial_result(field_name, result)
+        
+        return result
+
+    def _prioritize_by_importance(self, references: List[Dict]) -> List[Dict]:
+        """Smart prioritization for high-complexity analysis"""
+        def importance_score(ref):
+            score = 0
+            chunk_type = ref.get('chunk_type', '').lower()
+            content = ref.get('content', '').upper()
+            program_name = ref.get('program_name', '').upper()
+            
+            # Prioritize data definitions (highest importance)
+            if chunk_type in ['file_section', 'working_storage', 'data_division']:
+                score += 20
+            elif chunk_type == 'procedure_division':
+                score += 10
+            
+            # Prioritize transaction processing programs
+            if any(keyword in program_name for keyword in ['TXN', 'TRANS', 'POST', 'BAL']):
+                score += 15
+            
+            # Prioritize complex operations
+            complex_ops = ['COMPUTE', 'MOVE', 'IF', 'PERFORM', 'CALL', 'READ', 'WRITE']
+            score += sum(3 for op in complex_ops if op in content)
+            
+            # Prioritize copybook definitions
+            if 'COPY' in content and ref.get('field_name', '') in content:
+                score += 25
+                
+            return score
+        
+        return sorted(references, key=importance_score, reverse=True)
+
+    async def _save_partial_progress(self, field_name: str, result: Dict):
+        """Save intermediate progress to database"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT OR REPLACE INTO partial_analysis_cache 
+                (component_name, agent_type, partial_data, progress_percent, status, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                field_name, 
+                "lineage_analyzer",
+                json.dumps(result, default=str),
+                (result["references_analyzed"] / max(result.get("total_references_found", 1), 1)) * 100,
+                "in_progress",
+                dt.now().isoformat()
+            ))
+            
+            conn.commit()
+            conn.close()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to save progress: {e}")
+
+    async def _generate_partial_summary(self, field_name: str, result: Dict, engine) -> str:
+        """Generate LLM summary of partial analysis"""
+        try:
+            programs_list = list(result["lineage_data"]["programs"])[:10]  # Top 10 programs
+            operations_summary = {}
+            for op in result["lineage_data"]["operations"]:
+                operations_summary[op] = operations_summary.get(op, 0) + 1
+            
+            prompt = f"""
+            Summarize this partial field lineage analysis:
+            
+            Field: {field_name}
+            Analysis Status: {result['status']} 
+            References Analyzed: {result['references_analyzed']} of {result['total_references_found']}
+            Strategy: {result['analysis_strategy']}
+            
+            Key Programs Using This Field:
+            {', '.join(programs_list)}
+            
+            Operations Found:
+            {json.dumps(operations_summary, indent=2)}
+            
+            Provide a business-focused summary covering:
+            1. What this field appears to be used for
+            2. Key systems/programs that depend on it  
+            3. Main operations performed on this field
+            4. Business impact and criticality
+            5. Analysis completeness and confidence level
+            
+            Keep it concise (150 words max) and actionable for business stakeholders.
+            """
+            
+            sampling_params = SamplingParams(temperature=0.3, max_tokens=300)
+            request_id = str(uuid.uuid4())
+            
+            async for llm_result in engine.generate(prompt, sampling_params, request_id=request_id):
+                return llm_result.outputs[0].text.strip()
+                
+        except Exception as e:
+            self.logger.error(f"Summary generation failed: {e}")
+            return f"Partial analysis of {field_name}: Found in {len(result['lineage_data']['programs'])} programs with {result['references_analyzed']} references analyzed. Analysis strategy: {result.get('analysis_strategy', 'standard')}."
+
     async def _find_field_references(self, field_name: str) -> List[Dict[str, Any]]:
         """Find all references to a field across the codebase - FIXED VERSION"""
         references = []

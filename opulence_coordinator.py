@@ -374,6 +374,17 @@ class DualGPUOpulenceCoordinator:
                 
                 CREATE INDEX IF NOT EXISTS idx_vector_embeddings_chunk ON vector_embeddings(chunk_id);
                 CREATE INDEX IF NOT EXISTS idx_vector_embeddings_faiss ON vector_embeddings(faiss_id);
+                                 
+                CREATE TABLE IF NOT EXISTS partial_analysis_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    component_name TEXT NOT NULL,
+                    agent_type TEXT NOT NULL,
+                    partial_data TEXT NOT NULL,
+                    progress_percent INTEGER DEFAULT 0,
+                    status TEXT DEFAULT 'in_progress',
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX(component_name, agent_type, timestamp)
+                )
             """)
             
             conn.commit()
@@ -659,95 +670,249 @@ class DualGPUOpulenceCoordinator:
             self.logger.error(f"❌ Vector embedding creation failed: {str(e)}")
             return {"status": "error", "error": str(e)}
     
-    async def analyze_component(self, component_name: str, component_type: str = None) -> Dict[str, Any]:
-        """FIXED: Component analysis with proper engine sharing"""
+    async def analyze_component_enhanced(self, component_name: str, component_type: str = None) -> Dict[str, Any]:
+        """Enhanced component analysis with graceful degradation and partial results"""
         start_time = time.time()
         
         try:
-            self.logger.info(f"🔍 Analyzing component: {component_name}")
-            
-            # ✅ FIXED: Don't create separate tasks for each agent
-            # Instead, let agents reuse the same engine through base class
-            
-            # Verify component exists in database first
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT COUNT(*) FROM program_chunks 
-                WHERE program_name = ? OR program_name LIKE ?
-            """, (component_name, f"%{component_name}%"))
-            
-            chunk_count = cursor.fetchone()[0]
-            conn.close()
-            
-            if chunk_count == 0:
-                return {
-                    "component_name": component_name,
-                    "status": "error",
-                    "error": f"Component '{component_name}' not found in database"
-                }
-            
             # Determine component type
             if not component_type or component_type == "auto-detect":
                 component_type = await self._determine_component_type(component_name)
             
+            # Initialize comprehensive result structure
             analysis_result = {
                 "component_name": component_name,
                 "component_type": component_type,
-                "status": "processing",
-                "chunks_found": chunk_count,
-                "timestamp": dt.now().isoformat()
+                "analysis_timestamp": dt.now().isoformat(),
+                "status": "in_progress",
+                "analyses": {},
+                "executive_summary": "",
+                "recommendations": [],
+                "processing_metadata": {
+                    "start_time": start_time,
+                    "strategy": "graceful_degradation"
+                }
             }
             
-            # ✅ CRITICAL: Agents will share engines automatically via base class
-            analysis_success = False
+            # Define analysis strategy based on component type
+            analysis_tasks = []
             
             if component_type == "field":
-                try:
-                    lineage_agent = self.get_agent("lineage_analyzer")
-                    lineage_result = await lineage_agent.analyze_field_lineage(component_name)
-                    analysis_result["lineage"] = lineage_result
-                    analysis_success = True
-                except Exception as e:
-                    self.logger.error(f"❌ Lineage analysis failed: {e}")
-                    analysis_result["lineage"] = {"error": str(e)}
-            
+                analysis_tasks = [
+                    ("lineage_analysis", "lineage_analyzer", "analyze_field_lineage_with_fallback"),
+                    ("semantic_similarity", "vector_index", "search_similar_components")
+                ]
             elif component_type in ["program", "cobol"]:
+                analysis_tasks = [
+                    ("logic_analysis", "logic_analyzer", "analyze_program"),
+                    ("lifecycle_analysis", "lineage_analyzer", "analyze_full_lifecycle"),
+                    ("dependency_analysis", "vector_index", "find_code_dependencies")
+                ]
+            else:  # copybook, jcl, etc.
+                analysis_tasks = [
+                    ("usage_analysis", "lineage_analyzer", "analyze_field_lineage_with_fallback"),
+                    ("dependency_mapping", "logic_analyzer", "find_dependencies"),
+                    ("similarity_search", "vector_index", "search_similar_components")
+                ]
+            
+            # Execute analyses with error isolation
+            completed_count = 0
+            
+            for analysis_name, agent_type, method_name in analysis_tasks:
                 try:
-                    logic_agent = self.get_agent("logic_analyzer")
-                    logic_result = await logic_agent.analyze_program(component_name)
-                    analysis_result["logic_analysis"] = logic_result
-                    analysis_success = True
+                    self.logger.info(f"🔄 Running {analysis_name} for {component_name}")
+                    
+                    # Get agent and method
+                    agent = self.get_agent(agent_type)
+                    analysis_method = getattr(agent, method_name)
+                    
+                    # Execute with timeout (10 minutes max per analysis)
+                    async with asyncio.timeout(600):
+                        if analysis_name == "lifecycle_analysis":
+                            result = await analysis_method(component_name, component_type)
+                        else:
+                            result = await analysis_method(component_name)
+                    
+                    analysis_result["analyses"][analysis_name] = {
+                        "status": "success",
+                        "data": result,
+                        "agent_used": agent_type,
+                        "completion_time": time.time() - start_time
+                    }
+                    
+                    completed_count += 1
+                    self.logger.info(f"✅ {analysis_name} completed successfully")
+                    
+                except asyncio.TimeoutError:
+                    self.logger.warning(f"⏰ {analysis_name} timed out after 10 minutes")
+                    analysis_result["analyses"][analysis_name] = {
+                        "status": "timeout",
+                        "error": "Analysis exceeded 10-minute timeout",
+                        "agent_used": agent_type,
+                        "partial_data": "Check partial_analysis_cache table for intermediate results"
+                    }
+                    
                 except Exception as e:
-                    self.logger.error(f"❌ Logic analysis failed: {e}")
-                    analysis_result["logic_analysis"] = {"error": str(e)}
+                    self.logger.error(f"❌ {analysis_name} failed: {str(e)}")
+                    analysis_result["analyses"][analysis_name] = {
+                        "status": "error",
+                        "error": str(e),
+                        "agent_used": agent_type
+                    }
             
-            # Always try semantic search
-            try:
-                vector_agent = self.get_agent("vector_index")
-                semantic_results = await vector_agent.search_similar_components(component_name)
-                analysis_result["semantic_search"] = semantic_results
-            except Exception as e:
-                self.logger.error(f"❌ Semantic search failed: {e}")
-                analysis_result["semantic_search"] = {"error": str(e)}
+            # Determine final status
+            total_analyses = len(analysis_tasks)
+            if completed_count == total_analyses:
+                analysis_result["status"] = "completed"
+            elif completed_count > 0:
+                analysis_result["status"] = "partial"
+            else:
+                analysis_result["status"] = "failed"
             
-            # Finalize result
-            analysis_result["status"] = "completed" if analysis_success else "partial"
-            analysis_result["processing_time"] = time.time() - start_time
+            # Generate executive summary using available results
+            analysis_result["executive_summary"] = await self._generate_executive_summary(
+                component_name, analysis_result
+            )
             
-            return analysis_result
+            # Generate actionable recommendations
+            analysis_result["recommendations"] = self._generate_actionable_recommendations(
+                analysis_result, completed_count, total_analyses
+            )
+            
+            # Add final metadata
+            analysis_result["processing_metadata"].update({
+                "end_time": time.time(),
+                "total_duration_seconds": time.time() - start_time,
+                "analyses_completed": completed_count,
+                "analyses_total": total_analyses,
+                "success_rate": (completed_count / total_analyses) * 100
+            })
+            
+            return self._add_processing_info(analysis_result)
             
         except Exception as e:
-            self.logger.error(f"❌ Component analysis failed: {str(e)}")
-            return {
+            self.logger.error(f"❌ Enhanced component analysis failed: {str(e)}")
+            return self._add_processing_info({
                 "component_name": component_name,
-                "status": "error",
+                "status": "system_error",
                 "error": str(e),
-                "processing_time": time.time() - start_time
+                "processing_time": time.time() - start_time if 'start_time' in locals() else 0
+            })
+
+    async def _generate_executive_summary(self, component_name: str, analysis_result: Dict) -> str:
+        """Generate executive summary from available analysis results"""
+        try:
+            # Collect findings from successful analyses
+            findings = {}
+            for analysis_name, analysis_data in analysis_result["analyses"].items():
+                if analysis_data["status"] == "success":
+                    findings[analysis_name] = analysis_data["data"]
+            
+            if not findings:
+                return f"Analysis of {component_name} encountered technical difficulties. No complete results available at this time."
+            
+            # Use chat agent for summary generation
+            chat_agent = self.get_agent("chat_agent")
+            
+            # Prepare context for LLM
+            context = {
+                "component": component_name,
+                "type": analysis_result["component_type"],
+                "status": analysis_result["status"],
+                "findings_available": list(findings.keys()),
+                "completion_rate": f"{analysis_result['processing_metadata']['analyses_completed']}/{analysis_result['processing_metadata']['analyses_total']}"
             }
-        
+            
+            # Extract key insights from available data
+            key_insights = []
+            if "lineage_analysis" in findings:
+                lineage_data = findings["lineage_analysis"]
+                if isinstance(lineage_data, dict):
+                    programs_count = len(lineage_data.get("lineage_data", {}).get("programs", []))
+                    refs_analyzed = lineage_data.get("references_analyzed", 0)
+                    key_insights.append(f"Found usage in {programs_count} programs, analyzed {refs_analyzed} references")
+            
+            if "logic_analysis" in findings:
+                logic_data = findings["logic_analysis"]
+                if isinstance(logic_data, dict):
+                    complexity = logic_data.get("complexity_score", 0)
+                    rules_count = len(logic_data.get("business_rules", []))
+                    key_insights.append(f"Complexity score: {complexity:.1f}, {rules_count} business rules identified")
+            
+            prompt = f"""
+            Generate an executive summary for this component analysis:
+            
+            Component: {context['component']} ({context['type']})
+            Analysis Status: {context['status']} 
+            Completion Rate: {context['completion_rate']}
+            Available Findings: {', '.join(context['findings_available'])}
+            
+            Key Insights:
+            {chr(10).join(f"• {insight}" for insight in key_insights)}
+            
+            Provide a business-focused executive summary covering:
+            1. Component purpose and business function
+            2. Key findings from available analyses  
+            3. Dependencies and business impact
+            4. Analysis completeness and confidence level
+            5. Immediate actionable insights
+            
+            Target audience: Business stakeholders and IT management
+            Length: 200-250 words, professional tone
+            """
+            
+            async with chat_agent.get_engine_context() as engine:
+                sampling_params = SamplingParams(temperature=0.3, max_tokens=500)
+                request_id = str(uuid.uuid4())
+                
+                async for result in engine.generate(prompt, sampling_params, request_id=request_id):
+                    return result.outputs[0].text.strip()
+            
+        except Exception as e:
+            self.logger.error(f"Executive summary generation failed: {e}")
+            # Fallback summary
+            completed = analysis_result["processing_metadata"]["analyses_completed"]
+            total = analysis_result["processing_metadata"]["analyses_total"]
+            return f"Analysis of {component_name} ({analysis_result['component_type']}) completed {completed} of {total} analyses successfully. Status: {analysis_result['status']}. See detailed results below for available findings."
     
+    def _generate_actionable_recommendations(self, analysis_result: Dict, completed: int, total: int) -> List[str]:
+        """Generate actionable recommendations based on analysis results"""
+        recommendations = []
+        
+        # Status-based recommendations
+        if analysis_result["status"] == "partial":
+            completion_rate = (completed / total) * 100
+            if completion_rate >= 60:
+                recommendations.append(f"✅ Analysis {completion_rate:.0f}% complete - sufficient for initial assessment")
+            else:
+                recommendations.append(f"⚠️ Analysis only {completion_rate:.0f}% complete - consider re-running for full insights")
+        
+        elif analysis_result["status"] == "failed":
+            recommendations.append("❌ Analysis failed completely - check component complexity and system resources")
+            recommendations.append("🔧 Consider breaking component into smaller units for analysis")
+        
+        # Analysis-specific recommendations
+        for analysis_name, analysis_data in analysis_result["analyses"].items():
+            if analysis_data["status"] == "timeout":
+                if analysis_name == "lineage_analysis":
+                    recommendations.append("⏰ Lineage analysis timed out - check partial_analysis_cache for intermediate results")
+                elif analysis_name == "logic_analysis":
+                    recommendations.append("⏰ Logic analysis timed out - consider manual code review for business rules")
+        
+        # Success-based recommendations
+        successful_analyses = [name for name, data in analysis_result["analyses"].items() if data["status"] == "success"]
+        
+        if "lineage_analysis" in successful_analyses:
+            recommendations.append("📊 Lineage analysis available - review dependency impacts before making changes")
+        
+        if "logic_analysis" in successful_analyses:
+            recommendations.append("🧠 Business logic analysis complete - validate identified rules with business stakeholders")
+        
+        # Generic recommendations
+        if len(successful_analyses) > 0:
+            recommendations.append("📋 Use available analysis results for impact assessment and change planning")
+        
+        return recommendations
     async def _determine_component_type(self, component_name: str) -> str:
         """Determine component type from database"""
         conn = sqlite3.connect(self.db_path)
@@ -1095,7 +1260,7 @@ class SingleGPUChatEnhancer:
         """Analyze component with chat-enhanced explanations"""
         try:
             # Get regular analysis
-            analysis_result = await self.coordinator.analyze_component(component_name)
+            analysis_result = await self.coordinator.analyze_component_enhanced(component_name)
             
             # Get chat explanation
             if user_question:
@@ -1215,7 +1380,7 @@ async def quick_file_processing(file_paths: List[Path], file_type: str = "auto")
 async def quick_component_analysis(component_name: str, component_type: str = None) -> Dict[str, Any]:
     """Quick component analysis using global coordinator"""
     coordinator = get_global_coordinator()
-    return await coordinator.analyze_component(component_name, component_type)
+    return await coordinator.analyze_component_enhanced(component_name, component_type)
 
 
 async def quick_chat_query(query: str, conversation_history: List[Dict] = None) -> str:
