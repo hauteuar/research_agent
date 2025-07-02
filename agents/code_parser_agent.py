@@ -2121,7 +2121,304 @@ class CompleteEnhancedCodeParserAgent:
             return "medium"
         else:
             return "low"
+    
+    def _infer_perform_purpose(self, content: str, perform_type: str) -> str:
+        """Infer business purpose of PERFORM statement based on content and type"""
+        content_upper = content.upper()
+        
+        # Analyze PERFORM type patterns
+        if perform_type == 'perform_until':
+            return self._classify_until_loop_purpose(content_upper)
+        elif perform_type == 'perform_varying':
+            return self._classify_varying_loop_purpose(content_upper)
+        elif perform_type == 'perform_times':
+            return self._classify_times_loop_purpose(content_upper)
+        elif perform_type == 'perform_thru':
+            return self._classify_thru_range_purpose(content_upper)
+        elif perform_type == 'perform_inline':
+            return self._classify_inline_block_purpose(content_upper)
+        elif perform_type == 'perform_simple':
+            return self._classify_simple_perform_purpose(content_upper)
+        else:
+            return self._classify_generic_perform_purpose(content_upper)
 
+    def _classify_until_loop_purpose(self, content_upper: str) -> str:
+        """Classify UNTIL loop business purpose"""
+        
+        # Check for file processing patterns
+        if any(pattern in content_upper for pattern in ['READ', 'AT END', 'EOF', 'END-OF-FILE']):
+            return 'file_processing_loop'
+        
+        # Check for record processing patterns
+        if any(pattern in content_upper for pattern in ['FETCH', 'CURSOR', 'SQL']):
+            return 'database_record_processing'
+        
+        # Check for validation loops
+        if any(pattern in content_upper for pattern in ['VALID', 'ERROR', 'CHECK']):
+            return 'validation_loop'
+        
+        # Check for search patterns
+        if any(pattern in content_upper for pattern in ['SEARCH', 'FIND', 'LOCATE']):
+            return 'search_loop'
+        
+        # Check for accumulation patterns
+        if any(pattern in content_upper for pattern in ['ADD', 'TOTAL', 'SUM', 'COUNT']):
+            return 'accumulation_loop'
+        
+        # Check for condition-based processing
+        if any(pattern in content_upper for pattern in ['IF', 'WHEN', 'CONDITION']):
+            return 'conditional_processing_loop'
+        
+        return 'general_until_loop'
+
+    def _classify_varying_loop_purpose(self, content_upper: str) -> str:
+        """Classify VARYING loop business purpose"""
+        
+        # Check for table/array processing
+        if any(pattern in content_upper for pattern in ['TABLE', 'ARRAY', 'OCCURS', 'SUBSCRIPT']):
+            return 'table_array_processing'
+        
+        # Check for indexed processing
+        if any(pattern in content_upper for pattern in ['INDEX', 'INDEXED']):
+            return 'indexed_data_processing'
+        
+        # Check for counter-based operations
+        if any(pattern in content_upper for pattern in ['COUNT', 'COUNTER', 'INCREMENT']):
+            return 'counter_based_processing'
+        
+        # Check for batch processing
+        if any(pattern in content_upper for pattern in ['BATCH', 'RECORD', 'PROCESS']):
+            return 'batch_record_processing'
+        
+        # Check for mathematical operations
+        if any(pattern in content_upper for pattern in ['COMPUTE', 'CALCULATE', 'MULTIPLY']):
+            return 'mathematical_processing'
+        
+        # Check for data transformation
+        if any(pattern in content_upper for pattern in ['MOVE', 'TRANSFORM', 'CONVERT']):
+            return 'data_transformation_loop'
+        
+        return 'iterative_processing'
+
+    def _classify_times_loop_purpose(self, content_upper: str) -> str:
+        """Classify TIMES loop business purpose"""
+        
+        # Check for retry patterns
+        if any(pattern in content_upper for pattern in ['RETRY', 'ATTEMPT', 'TRY']):
+            return 'retry_mechanism'
+        
+        # Check for initialization patterns
+        if any(pattern in content_upper for pattern in ['INITIAL', 'SETUP', 'CLEAR']):
+            return 'initialization_loop'
+        
+        # Check for fixed repetition patterns
+        if any(pattern in content_upper for pattern in ['REPEAT', 'DUPLICATE', 'COPY']):
+            return 'fixed_repetition'
+        
+        # Check for testing patterns
+        if any(pattern in content_upper for pattern in ['TEST', 'VERIFY', 'CHECK']):
+            return 'testing_loop'
+        
+        # Check for output formatting
+        if any(pattern in content_upper for pattern in ['DISPLAY', 'PRINT', 'WRITE']):
+            return 'output_formatting'
+        
+        return 'fixed_iteration'
+
+    def _classify_thru_range_purpose(self, content_upper: str) -> str:
+        """Classify THRU range execution purpose"""
+        
+        # Extract paragraph names to infer purpose
+        perform_match = re.search(r'PERFORM\s+([A-Z0-9-]+)\s+(?:THROUGH|THRU)\s+([A-Z0-9-]+)', content_upper)
+        if perform_match:
+            start_para = perform_match.group(1)
+            end_para = perform_match.group(2)
+            
+            # Analyze paragraph name patterns
+            if any(pattern in start_para for pattern in ['INIT', 'START', 'BEGIN']):
+                return 'initialization_sequence'
+            elif any(pattern in start_para for pattern in ['VALID', 'CHECK', 'EDIT']):
+                return 'validation_sequence'
+            elif any(pattern in start_para for pattern in ['CALC', 'COMPUTE', 'TOTAL']):
+                return 'calculation_sequence'
+            elif any(pattern in start_para for pattern in ['PROCESS', 'HANDLE', 'EXEC']):
+                return 'business_process_sequence'
+            elif any(pattern in start_para for pattern in ['CLEAN', 'END', 'TERM']):
+                return 'cleanup_sequence'
+            elif any(pattern in start_para for pattern in ['READ', 'GET', 'FETCH']):
+                return 'data_retrieval_sequence'
+            elif any(pattern in start_para for pattern in ['WRITE', 'UPDATE', 'SAVE']):
+                return 'data_update_sequence'
+        
+        # Check content for business patterns
+        if any(pattern in content_upper for pattern in ['FILE', 'READ', 'WRITE']):
+            return 'file_processing_sequence'
+        elif any(pattern in content_upper for pattern in ['SQL', 'DATABASE', 'TABLE']):
+            return 'database_operation_sequence'
+        elif any(pattern in content_upper for pattern in ['SCREEN', 'MAP', 'DISPLAY']):
+            return 'screen_handling_sequence'
+        elif any(pattern in content_upper for pattern in ['ERROR', 'EXCEPTION']):
+            return 'error_handling_sequence'
+        
+        return 'procedural_sequence'
+
+    def _classify_inline_block_purpose(self, content_upper: str) -> str:
+        """Classify inline PERFORM block purpose"""
+        
+        # Check for conditional processing
+        if any(pattern in content_upper for pattern in ['IF', 'WHEN', 'CASE']):
+            return 'conditional_inline_processing'
+        
+        # Check for error handling
+        if any(pattern in content_upper for pattern in ['ERROR', 'EXCEPTION', 'INVALID']):
+            return 'inline_error_handling'
+        
+        # Check for calculations
+        if any(pattern in content_upper for pattern in ['COMPUTE', 'ADD', 'MULTIPLY', 'DIVIDE']):
+            return 'inline_calculation'
+        
+        # Check for data movement
+        if any(pattern in content_upper for pattern in ['MOVE', 'SET', 'INITIALIZE']):
+            return 'inline_data_movement'
+        
+        # Check for validation
+        if any(pattern in content_upper for pattern in ['VALIDATE', 'CHECK', 'VERIFY']):
+            return 'inline_validation'
+        
+        # Check for formatting
+        if any(pattern in content_upper for pattern in ['FORMAT', 'EDIT', 'MASK']):
+            return 'inline_formatting'
+        
+        return 'inline_block_processing'
+
+    def _classify_simple_perform_purpose(self, content_upper: str) -> str:
+        """Classify simple PERFORM statement purpose"""
+        
+        # Extract the performed paragraph name
+        perform_match = re.search(r'PERFORM\s+([A-Z0-9-]+)', content_upper)
+        if perform_match:
+            paragraph_name = perform_match.group(1)
+            
+            # Classify based on paragraph naming conventions
+            if any(pattern in paragraph_name for pattern in ['INIT', 'INITIAL', 'START', 'BEGIN']):
+                return 'initialization_call'
+            elif any(pattern in paragraph_name for pattern in ['VALID', 'CHECK', 'EDIT', 'VERIFY']):
+                return 'validation_call'
+            elif any(pattern in paragraph_name for pattern in ['CALC', 'COMPUTE', 'TOTAL', 'SUM']):
+                return 'calculation_call'
+            elif any(pattern in paragraph_name for pattern in ['READ', 'GET', 'FETCH', 'LOAD']):
+                return 'data_retrieval_call'
+            elif any(pattern in paragraph_name for pattern in ['WRITE', 'UPDATE', 'SAVE', 'STORE']):
+                return 'data_update_call'
+            elif any(pattern in paragraph_name for pattern in ['PRINT', 'DISPLAY', 'SHOW', 'OUTPUT']):
+                return 'output_call'
+            elif any(pattern in paragraph_name for pattern in ['PROCESS', 'HANDLE', 'EXEC', 'RUN']):
+                return 'business_process_call'
+            elif any(pattern in paragraph_name for pattern in ['ERROR', 'EXCEPTION', 'ABORT']):
+                return 'error_handling_call'
+            elif any(pattern in paragraph_name for pattern in ['CLEAN', 'CLEAR', 'RESET', 'END']):
+                return 'cleanup_call'
+            elif any(pattern in paragraph_name for pattern in ['FORMAT', 'EDIT', 'MASK']):
+                return 'formatting_call'
+            elif any(pattern in paragraph_name for pattern in ['OPEN', 'CLOSE']):
+                return 'file_control_call'
+            elif any(pattern in paragraph_name for pattern in ['SEARCH', 'FIND', 'LOCATE']):
+                return 'search_call'
+            elif any(pattern in paragraph_name for pattern in ['SORT', 'MERGE', 'ORDER']):
+                return 'sorting_call'
+            elif any(pattern in paragraph_name for pattern in ['REPORT', 'SUMMARY', 'LIST']):
+                return 'reporting_call'
+        
+        # If no clear pattern from name, check surrounding context
+        return 'subroutine_call'
+
+    def _classify_generic_perform_purpose(self, content_upper: str) -> str:
+        """Classify generic PERFORM when type is unclear"""
+        
+        # Analyze content for business purpose clues
+        business_patterns = {
+            'data_processing': ['DATA', 'RECORD', 'FIELD', 'FILE'],
+            'calculation': ['CALCULATE', 'COMPUTE', 'ADD', 'SUBTRACT', 'MULTIPLY', 'DIVIDE'],
+            'validation': ['VALIDATE', 'CHECK', 'VERIFY', 'EDIT', 'CONTROL'],
+            'input_output': ['READ', 'WRITE', 'DISPLAY', 'INPUT', 'OUTPUT'],
+            'database_operation': ['SQL', 'SELECT', 'INSERT', 'UPDATE', 'DELETE'],
+            'screen_handling': ['SCREEN', 'MAP', 'SEND', 'RECEIVE'],
+            'error_processing': ['ERROR', 'EXCEPTION', 'ABORT', 'INVALID'],
+            'business_logic': ['PROCESS', 'BUSINESS', 'RULE', 'POLICY'],
+            'utility_function': ['UTILITY', 'COMMON', 'SHARED', 'GENERAL']
+        }
+        
+        # Score each pattern
+        pattern_scores = {}
+        for purpose, keywords in business_patterns.items():
+            score = sum(1 for keyword in keywords if keyword in content_upper)
+            if score > 0:
+                pattern_scores[purpose] = score
+        
+        # Return highest scoring pattern
+        if pattern_scores:
+            return max(pattern_scores, key=pattern_scores.get)
+        
+        return 'general_processing'
+
+    def _analyze_perform_data_impact(self, content: str) -> Dict[str, Any]:
+        """Analyze data impact of PERFORM statement"""
+        content_upper = content.upper()
+        
+        impact = {
+            'reads_data': False,
+            'writes_data': False,
+            'modifies_files': False,
+            'accesses_database': False,
+            'fields_referenced': [],
+            'files_accessed': [],
+            'impact_scope': 'local'
+        }
+        
+        # Check for data reading operations
+        if any(op in content_upper for op in ['READ', 'GET', 'FETCH', 'ACCEPT']):
+            impact['reads_data'] = True
+        
+        # Check for data writing operations
+        if any(op in content_upper for op in ['WRITE', 'REWRITE', 'UPDATE', 'MOVE', 'SET']):
+            impact['writes_data'] = True
+        
+        # Check for file operations
+        if any(op in content_upper for op in ['OPEN', 'CLOSE', 'READ', 'WRITE', 'DELETE']):
+            impact['modifies_files'] = True
+        
+        # Check for database operations
+        if any(op in content_upper for op in ['EXEC SQL', 'SELECT', 'INSERT', 'UPDATE', 'DELETE']):
+            impact['accesses_database'] = True
+        
+        # Extract field references (simplified)
+        field_patterns = [
+            r'\b([A-Z][A-Z0-9-]*)\s+TO\s+([A-Z][A-Z0-9-]*)',  # MOVE patterns
+            r'\bADD\s+[^TO]+TO\s+([A-Z][A-Z0-9-]*)',  # ADD TO patterns
+            r'\bIF\s+([A-Z][A-Z0-9-]*)',  # IF condition patterns
+        ]
+        
+        for pattern in field_patterns:
+            matches = re.findall(pattern, content_upper)
+            for match in matches:
+                if isinstance(match, tuple):
+                    impact['fields_referenced'].extend(match)
+                else:
+                    impact['fields_referenced'].append(match)
+        
+        # Remove duplicates
+        impact['fields_referenced'] = list(set(impact['fields_referenced']))
+        
+        # Determine impact scope
+        if impact['accesses_database'] or impact['modifies_files']:
+            impact['impact_scope'] = 'global'
+        elif impact['writes_data']:
+            impact['impact_scope'] = 'program'
+        elif impact['reads_data']:
+            impact['impact_scope'] = 'read_only'
+        
+        return impact
+    
     def _infer_record_purpose(self, record_name: str) -> str:
         """Infer purpose from record name"""
         name_upper = record_name.upper()
