@@ -2419,6 +2419,565 @@ class CompleteEnhancedCodeParserAgent:
         
         return impact
     
+    """
+Missing Functions for CompleteEnhancedCodeParserAgent
+"""
+
+# Missing helper methods for BMS parsing
+def _extract_bms_attributes(self, definition: str) -> Dict[str, str]:
+    """Extract BMS attributes from field/map definition"""
+    attributes = {}
+    
+    # Common BMS attribute patterns
+    attr_patterns = {
+        'POS': re.compile(r'POS=\((\d+),(\d+)\)', re.IGNORECASE),
+        'LENGTH': re.compile(r'LENGTH=(\d+)', re.IGNORECASE),
+        'ATTRB': re.compile(r'ATTRB=([A-Z,]+)', re.IGNORECASE),
+        'INITIAL': re.compile(r'INITIAL=([^,\s]+)', re.IGNORECASE),
+        'PICIN': re.compile(r'PICIN=([^,\s]+)', re.IGNORECASE),
+        'PICOUT': re.compile(r'PICOUT=([^,\s]+)', re.IGNORECASE),
+        'JUSTIFY': re.compile(r'JUSTIFY=([^,\s]+)', re.IGNORECASE)
+    }
+    
+    for attr_name, pattern in attr_patterns.items():
+        match = pattern.search(definition)
+        if match:
+            if attr_name == 'POS':
+                attributes[attr_name] = f"({match.group(1)},{match.group(2)})"
+            else:
+                attributes[attr_name] = match.group(1)
+    
+    return attributes
+
+def _count_bms_fields_in_map(self, content: str, map_end_pos: int) -> int:
+    """Count BMS fields in a specific map"""
+    # Find next map or end of content
+    next_map = self.bms_patterns['bms_map'].search(content, map_end_pos)
+    search_end = next_map.start() if next_map else len(content)
+    
+    # Count fields in this map's content
+    map_content = content[map_end_pos:search_end]
+    field_matches = self.bms_patterns['bms_field'].findall(map_content)
+    
+    return len(field_matches)
+
+def _is_input_field(self, field_definition: str) -> bool:
+    """Check if BMS field is an input field"""
+    def_upper = field_definition.upper()
+    
+    # Check for input indicators
+    if 'PICIN=' in def_upper:
+        return True
+    if 'ATTRB=' in def_upper and 'UNPROT' in def_upper:
+        return True
+    if 'ATTRB=' in def_upper and 'FSET' in def_upper:
+        return True
+    
+    return False
+
+def _is_output_field(self, field_definition: str) -> bool:
+    """Check if BMS field is an output field"""
+    def_upper = field_definition.upper()
+    
+    # Check for output indicators
+    if 'PICOUT=' in def_upper:
+        return True
+    if 'INITIAL=' in def_upper:
+        return True
+    if 'ATTRB=' in def_upper and 'PROT' in def_upper:
+        return True
+    
+    return False
+
+def _extract_record_fields(self, content: str) -> List[Dict[str, Any]]:
+    """Extract fields within a record"""
+    fields = []
+    data_matches = self.cobol_patterns['data_item'].finditer(content)
+    
+    for match in data_matches:
+        if match.group(0).strip().startswith('*'):
+            continue
+            
+        try:
+            level = int(match.group(1))
+            name = match.group(2)
+            definition = match.group(3)
+            
+            # Skip the 01 level (record level itself)
+            if level > 1:
+                fields.append({
+                    "level": level,
+                    "name": name,
+                    "pic": self._extract_pic_clause(definition),
+                    "usage": self._extract_usage_clause(definition),
+                    "occurs": self._extract_occurs_info(definition)
+                })
+        except (ValueError, IndexError):
+            continue
+    
+    return fields
+
+def _calculate_record_length(self, content: str) -> int:
+    """Calculate total length of a record"""
+    total_length = 0
+    data_matches = self.cobol_patterns['data_item'].finditer(content)
+    
+    for match in data_matches:
+        if match.group(0).strip().startswith('*'):
+            continue
+            
+        try:
+            level = int(match.group(1))
+            definition = match.group(3)
+            
+            # Only count elementary items (with PIC clauses)
+            if level > 1:  # Skip the 01 level
+                pic_clause = self._extract_pic_clause(definition)
+                if pic_clause:
+                    usage = self._extract_usage_clause(definition)
+                    field_length = self._calculate_field_length(pic_clause, usage)
+                    
+                    # Handle OCCURS
+                    occurs_info = self._extract_occurs_info(definition)
+                    if occurs_info:
+                        field_length *= occurs_info['max_occurs']
+                    
+                    total_length += field_length
+        except (ValueError, IndexError):
+            continue
+    
+    return total_length
+
+def _extract_occurs_tables(self, content: str) -> List[Dict[str, Any]]:
+    """Extract OCCURS table definitions"""
+    tables = []
+    data_matches = self.cobol_patterns['data_item'].finditer(content)
+    
+    for match in data_matches:
+        if match.group(0).strip().startswith('*'):
+            continue
+            
+        try:
+            name = match.group(2)
+            definition = match.group(3)
+            
+            occurs_info = self._extract_occurs_info(definition)
+            if occurs_info:
+                tables.append({
+                    "table_name": name,
+                    "min_occurs": occurs_info['min_occurs'],
+                    "max_occurs": occurs_info['max_occurs'],
+                    "is_variable": occurs_info['is_variable'],
+                    "depending_on": occurs_info.get('depending_on'),
+                    "indexed_by": occurs_info.get('indexed_by')
+                })
+        except (IndexError, AttributeError):
+            continue
+    
+    return tables
+
+def _extract_redefines_structures(self, content: str) -> List[Dict[str, str]]:
+    """Extract REDEFINES structure definitions"""
+    redefines = []
+    
+    # Pattern for level 66 RENAMES
+    renames_matches = self.cobol_patterns['renames'].finditer(content)
+    for match in renames_matches:
+        redefines.append({
+            "type": "RENAMES",
+            "name": match.group(1),
+            "from_field": match.group(2),
+            "to_field": match.group(3)
+        })
+    
+    # Pattern for regular REDEFINES
+    data_matches = self.cobol_patterns['data_item'].finditer(content)
+    for match in data_matches:
+        if match.group(0).strip().startswith('*'):
+            continue
+            
+        try:
+            name = match.group(2)
+            definition = match.group(3)
+            
+            redefines_field = self._extract_redefines_info(definition)
+            if redefines_field:
+                redefines.append({
+                    "type": "REDEFINES",
+                    "name": name,
+                    "redefines_field": redefines_field
+                })
+        except (IndexError, AttributeError):
+            continue
+    
+    return redefines
+
+async def _verify_chunks_stored(self, program_name: str) -> int:
+    """Verify that chunks were properly stored in database"""
+    try:
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT COUNT(*) FROM program_chunks 
+            WHERE program_name = ?
+        """, (program_name,))
+        
+        count = cursor.fetchone()[0]
+        conn.close()
+        
+        return count
+        
+    except Exception as e:
+        self.logger.error(f"Chunk verification failed: {str(e)}")
+        return 0
+
+async def _parse_control_structures_with_nesting(self, content: str, program_name: str, offset: int) -> List[CodeChunk]:
+    """Parse control structures with proper nesting analysis"""
+    chunks = []
+    
+    # Enhanced control structure patterns
+    control_patterns = {
+        'if_statement': self.cobol_patterns['if_statement'],
+        'evaluate': self.cobol_patterns['evaluate'],
+        'when_clause': self.cobol_patterns['when_clause']
+    }
+    
+    nesting_stack = []
+    
+    for control_type, pattern in control_patterns.items():
+        matches = list(pattern.finditer(content))
+        
+        for i, match in enumerate(matches):
+            control_content = self._extract_control_structure_content(content, match.start(), control_type)
+            
+            # Analyze nesting level
+            nesting_level = self._calculate_nesting_level(content, match.start())
+            
+            business_context = {
+                'control_type': control_type,
+                'nesting_level': nesting_level,
+                'complexity_contribution': nesting_level * 2,
+                'maintainability_impact': 'high' if nesting_level > 3 else 'medium' if nesting_level > 1 else 'low'
+            }
+            
+            metadata = {
+                "control_type": control_type,
+                "nesting_level": nesting_level,
+                "condition": match.group(1) if match.groups() else "",
+                "structure_complexity": self._assess_control_structure_complexity(control_content)
+            }
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_{control_type.upper()}_{i+1}",
+                chunk_type="control_structure",
+                content=control_content,
+                metadata=metadata,
+                business_context=business_context,
+                line_start=offset + content[:match.start()].count('\n'),
+                line_end=offset + content[:match.start() + len(control_content)].count('\n')
+            )
+            chunks.append(chunk)
+    
+    return chunks
+
+    def _extract_control_structure_content(self, content: str, start_pos: int, control_type: str) -> str:
+        """Extract complete control structure content"""
+        lines = content[start_pos:].split('\n')
+        structure_lines = []
+        
+        if control_type == 'if_statement':
+            # Find matching END-IF
+            if_count = 0
+            for line in lines:
+                structure_lines.append(line)
+                line_upper = line.upper().strip()
+                if line_upper.startswith('IF '):
+                    if_count += 1
+                elif 'END-IF' in line_upper:
+                    if_count -= 1
+                    if if_count <= 0:
+                        break
+        elif control_type == 'evaluate':
+            # Find matching END-EVALUATE
+            eval_count = 0
+            for line in lines:
+                structure_lines.append(line)
+                line_upper = line.upper().strip()
+                if line_upper.startswith('EVALUATE '):
+                    eval_count += 1
+                elif 'END-EVALUATE' in line_upper:
+                    eval_count -= 1
+                    if eval_count <= 0:
+                        break
+        else:
+            # For other structures, take until next major structure or period
+            for line in lines:
+                structure_lines.append(line)
+                if line.strip().endswith('.') and len(structure_lines) > 1:
+                    break
+        
+        return '\n'.join(structure_lines)
+
+    def _calculate_nesting_level(self, content: str, position: int) -> int:
+        """Calculate nesting level at given position"""
+        preceding_content = content[:position]
+        
+        # Count unmatched control structures
+        if_count = preceding_content.upper().count('IF ') - preceding_content.upper().count('END-IF')
+        eval_count = preceding_content.upper().count('EVALUATE ') - preceding_content.upper().count('END-EVALUATE')
+        perform_count = preceding_content.upper().count('PERFORM ') - preceding_content.upper().count('END-PERFORM')
+        
+        return max(0, if_count + eval_count + perform_count)
+
+    def _assess_control_structure_complexity(self, content: str) -> int:
+        """Assess complexity of control structure"""
+        complexity = 1  # Base complexity
+        content_upper = content.upper()
+        
+        # Add complexity for nested structures
+        complexity += content_upper.count('IF ')
+        complexity += content_upper.count('WHEN ')
+        complexity += content_upper.count('ELSE')
+        complexity += content_upper.count('EVALUATE ')
+        
+        # Add complexity for conditions
+        complexity += content_upper.count(' AND ')
+        complexity += content_upper.count(' OR ')
+        complexity += content_upper.count(' NOT ')
+        
+        return min(complexity, 20)
+
+    async def _parse_jcl_job_with_flow(self, content: str, job_name: str) -> List[CodeChunk]:
+        """Parse JCL job card with execution flow analysis"""
+        chunks = []
+        
+        job_match = self.jcl_patterns['job_card'].search(content)
+        if not job_match:
+            return chunks
+        
+        # Extract job card and parameters
+        job_line_end = content.find('\n', job_match.end())
+        if job_line_end == -1:
+            job_line_end = len(content)
+        
+        job_content = content[job_match.start():job_line_end]
+        
+        business_context = {
+            'job_purpose': 'batch_job_execution',
+            'scheduling_type': self._determine_scheduling_type(job_content),
+            'resource_requirements': self._extract_job_resources(job_content),
+            'execution_priority': self._determine_job_priority(job_content)
+        }
+        
+        metadata = {
+            "job_name": job_match.group(1),
+            "job_parameters": self._extract_job_parameters(job_content),
+            "accounting_info": self._extract_accounting_info(job_content),
+            "class": self._extract_job_class(job_content)
+        }
+        
+        chunk = CodeChunk(
+            program_name=job_name,
+            chunk_id=f"{job_name}_JOB_CARD",
+            chunk_type="jcl_job",
+            content=job_content,
+            metadata=metadata,
+            business_context=business_context,
+            line_start=content[:job_match.start()].count('\n'),
+            line_end=content[:job_line_end].count('\n')
+        )
+        chunks.append(chunk)
+        
+        return chunks
+
+    def _determine_scheduling_type(self, job_content: str) -> str:
+        """Determine JCL job scheduling type"""
+        content_upper = job_content.upper()
+        
+        if 'CLASS=' in content_upper:
+            return 'batch_scheduled'
+        elif 'TYPRUN=' in content_upper:
+            if 'SCAN' in content_upper:
+                return 'syntax_check'
+            elif 'HOLD' in content_upper:
+                return 'held_for_release'
+        
+        return 'standard_batch'
+
+    def _extract_job_resources(self, job_content: str) -> Dict[str, str]:
+        """Extract resource requirements from job card"""
+        resources = {}
+        
+        resource_patterns = {
+            'TIME': re.compile(r'TIME=([^,\s]+)', re.IGNORECASE),
+            'REGION': re.compile(r'REGION=([^,\s]+)', re.IGNORECASE),
+            'CLASS': re.compile(r'CLASS=([^,\s]+)', re.IGNORECASE),
+            'MSGCLASS': re.compile(r'MSGCLASS=([^,\s]+)', re.IGNORECASE),
+            'MSGLEVEL': re.compile(r'MSGLEVEL=([^,\s]+)', re.IGNORECASE)
+        }
+        
+        for resource_name, pattern in resource_patterns.items():
+            match = pattern.search(job_content)
+            if match:
+                resources[resource_name] = match.group(1)
+        
+        return resources
+
+    def _determine_job_priority(self, job_content: str) -> str:
+        """Determine job execution priority"""
+        content_upper = job_content.upper()
+        
+        if 'PRTY=' in content_upper:
+            prty_match = re.search(r'PRTY=(\d+)', content_upper)
+            if prty_match:
+                priority = int(prty_match.group(1))
+                if priority >= 10:
+                    return 'high'
+                elif priority >= 5:
+                    return 'medium'
+                else:
+                    return 'low'
+        
+        return 'default'
+
+    def _extract_job_parameters(self, job_content: str) -> Dict[str, str]:
+        """Extract job parameters from job card"""
+        parameters = {}
+        
+        # Extract accounting information (usually in parentheses after job name)
+        accounting_match = re.search(r'JOB\s+\(([^)]+)\)', job_content, re.IGNORECASE)
+        if accounting_match:
+            parameters['accounting'] = accounting_match.group(1)
+        
+        # Extract other parameters
+        param_patterns = {
+            'USER': re.compile(r'USER=([^,\s]+)', re.IGNORECASE),
+            'PASSWORD': re.compile(r'PASSWORD=([^,\s]+)', re.IGNORECASE),
+            'GROUP': re.compile(r'GROUP=([^,\s]+)', re.IGNORECASE),
+            'NOTIFY': re.compile(r'NOTIFY=([^,\s]+)', re.IGNORECASE)
+        }
+        
+        for param_name, pattern in param_patterns.items():
+            match = pattern.search(job_content)
+            if match:
+                parameters[param_name] = match.group(1)
+        
+        return parameters
+
+    def _extract_accounting_info(self, job_content: str) -> str:
+        """Extract accounting information from job card"""
+        accounting_match = re.search(r'JOB\s+\(([^)]+)\)', job_content, re.IGNORECASE)
+        return accounting_match.group(1) if accounting_match else ""
+
+    def _extract_job_class(self, job_content: str) -> str:
+        """Extract job class from job card"""
+        class_match = re.search(r'CLASS=([^,\s]+)', job_content, re.IGNORECASE)
+        return class_match.group(1) if class_match else ""
+
+    async def analyze_program(self, program_name: str) -> Dict[str, Any]:
+        """Analyze a specific program comprehensively"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Get all chunks for the program
+            cursor.execute("""
+                SELECT chunk_type, content, metadata, business_context, 
+                    line_start, line_end, created_timestamp
+                FROM program_chunks 
+                WHERE program_name = ?
+                ORDER BY line_start
+            """, (program_name,))
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            if not rows:
+                return {"error": f"Program {program_name} not found"}
+            
+            # Analyze program structure
+            analysis = {
+                "program_name": program_name,
+                "total_chunks": len(rows),
+                "chunk_distribution": {},
+                "business_analysis": {},
+                "technical_metrics": {},
+                "complexity_analysis": {},
+                "quality_indicators": {}
+            }
+            
+            # Count chunk types
+            for row in rows:
+                chunk_type = row[0]
+                analysis["chunk_distribution"][chunk_type] = \
+                    analysis["chunk_distribution"].get(chunk_type, 0) + 1
+            
+            # Analyze business context
+            business_functions = set()
+            data_categories = set()
+            
+            for row in rows:
+                if row[3]:  # business_context
+                    try:
+                        business_context = json.loads(row[3])
+                        if 'business_function' in business_context:
+                            business_functions.add(business_context['business_function'])
+                        if 'data_category' in business_context:
+                            data_categories.add(business_context['data_category'])
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+            
+            analysis["business_analysis"] = {
+                "business_functions": list(business_functions),
+                "data_categories": list(data_categories),
+                "functional_diversity": len(business_functions),
+                "data_complexity": len(data_categories)
+            }
+            
+            # Calculate technical metrics
+            total_lines = sum(row[5] - row[4] + 1 for row in rows)
+            analysis["technical_metrics"] = {
+                "total_lines": total_lines,
+                "average_chunk_size": total_lines // len(rows) if rows else 0,
+                "largest_chunk": max(row[5] - row[4] + 1 for row in rows),
+                "complexity_indicators": self._calculate_program_complexity_indicators(rows)
+            }
+            
+            return analysis
+            
+        except Exception as e:
+            self.logger.error(f"Program analysis failed: {str(e)}")
+            return {"error": str(e)}
+
+    def _calculate_program_complexity_indicators(self, rows: List) -> Dict[str, int]:
+        """Calculate complexity indicators for a program"""
+        indicators = {
+            "sql_blocks": 0,
+            "cics_commands": 0,
+            "file_operations": 0,
+            "control_structures": 0,
+            "data_definitions": 0
+        }
+        
+        for row in rows:
+            chunk_type = row[0]
+            content = row[1]
+            
+            if chunk_type == "sql_block":
+                indicators["sql_blocks"] += 1
+            elif chunk_type == "cics_command":
+                indicators["cics_commands"] += 1
+            elif "file" in chunk_type.lower():
+                indicators["file_operations"] += 1
+            elif chunk_type in ["control_structure", "if_statement", "evaluate"]:
+                indicators["control_structures"] += 1
+            elif chunk_type in ["data_item", "section"]:
+                indicators["data_definitions"] += 1
+        
+        return indicators
+
     def _infer_record_purpose(self, record_name: str) -> str:
         """Infer purpose from record name"""
         name_upper = record_name.upper()
