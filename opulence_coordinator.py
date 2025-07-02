@@ -384,7 +384,7 @@ class DualGPUOpulenceCoordinator:
                     status TEXT DEFAULT 'in_progress',
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     INDEX(component_name, agent_type, timestamp)
-                )
+                );
             """)
             
             conn.commit()
