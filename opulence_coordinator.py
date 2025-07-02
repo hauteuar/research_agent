@@ -966,7 +966,7 @@ class DualGPUOpulenceCoordinator:
         try:
             chat_agent = self.get_agent("chat_agent")
             result = await chat_agent.process_chat_query(query, conversation_history)
-            result["gpu_used"] = self.selected_gpu
+            result["gpu_used"] = self.selected_gpus
             
             self.stats["total_queries"] += 1
             return result
@@ -976,7 +976,7 @@ class DualGPUOpulenceCoordinator:
             return {
                 "response": f"I encountered an error: {str(e)}",
                 "response_type": "error",
-                "gpu_used": self.selected_gpu,
+                "gpu_used": self.selected_gpus,
                 "suggestions": ["Try rephrasing your question", "Check system status"]
             }
         finally:
@@ -996,7 +996,7 @@ class DualGPUOpulenceCoordinator:
                 "query": query,
                 "results": results,
                 "total_found": len(results),
-                "gpu_used": self.selected_gpu
+                "gpu_used": self.selected_gpus
             }
             
         except Exception as e:
@@ -1005,7 +1005,7 @@ class DualGPUOpulenceCoordinator:
                 "status": "error",
                 "error": str(e),
                 "query": query,
-                "gpu_used": self.selected_gpu
+                "gpu_used": self.selected_gpus
             }
         finally:
             self.gpu_manager.finish_task(task_id)
@@ -1219,7 +1219,7 @@ class DualGPUOpulenceCoordinator:
     
     def __repr__(self):
         return (f"DualGPUCoordinator("
-                f"gpu={self.selected_gpu}, "
+                f"gpu={self.selected_gpus}, "
                 f"agents={len(self.agents)}, "
                 f"tasks_completed={self.stats['tasks_completed']})")
 
@@ -1283,7 +1283,7 @@ class SingleGPUChatEnhancer:
                 "chat_explanation": chat_result.get("response", ""),
                 "suggestions": chat_result.get("suggestions", []),
                 "response_type": "enhanced_analysis",
-                "gpu_used": self.coordinator.selected_gpu
+                "gpu_used": self.coordinator.selected_gpus
             }
             
         except Exception as e:
@@ -1326,7 +1326,7 @@ class SingleGPUChatEnhancer:
                 "total_found": len(search_results),
                 "suggestions": chat_result.get("suggestions", []),
                 "response_type": "enhanced_search",
-                "gpu_used": self.coordinator.selected_gpu
+                "gpu_used": self.coordinator.selected_gpus
             }
             
         except Exception as e:
