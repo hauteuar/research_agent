@@ -128,17 +128,30 @@ class OpulenceChatAgent(BaseOpulenceAgent):  # ✅ FIXED: Proper inheritance
         # ✅ FIXED: Use base class context manager for automatic engine management
         async with self.get_engine_context() as engine:
             try:
-                # Create chat context
+                # FIXED: Clean conversation history to remove any slice objects
+                clean_history = []
+                if conversation_history:
+                    for msg in conversation_history:
+                        clean_msg = {}
+                        for key, value in msg.items():
+                            if isinstance(value, slice):
+                                clean_msg[key] = f"slice({value.start}:{value.stop}:{value.step})"
+                            elif hasattr(value, '__dict__') and not isinstance(value, (str, int, float, bool, list, dict)):
+                                clean_msg[key] = str(value)
+                            else:
+                                clean_msg[key] = value
+                        clean_history.append(clean_msg)
+                
+                # Create chat context with cleaned data
                 context = ChatContext(
                     conversation_id=str(uuid.uuid4()),
                     user_query=query,
-                    conversation_history=conversation_history or [],
+                    conversation_history=clean_history,  # Use cleaned history
                     relevant_components=[],
                     analysis_results={},
                     chat_type=self._classify_query_type(query)
-                )
-                
-                # Extract components mentioned in query
+                )        
+                    # Extract components mentioned in query
                 context.relevant_components = self._extract_components_from_query(query)
                 
                 # Get relevant analysis results if components found
