@@ -160,19 +160,33 @@ class DualGPUOpulenceCoordinator:
         """Access GPU manager's engine cache directly"""
         return self.gpu_manager.gpu_engines
     
-    async def get_shared_llm_engine(self, gpu_id: int):
-        """Get shared LLM engine - THREAD SAFE VERSION"""
+     async def get_shared_llm_engine(self, gpu_id: int):
+        """FIXED: Get shared LLM engine with proper reuse logic"""
         async with self.engine_lock:
             
+            # ✅ CRITICAL: Check if engine already exists and is healthy
             if self.gpu_manager.has_llm_engine(gpu_id):
-                # Increment reference count
-                self.engine_reference_count[gpu_id] = self.engine_reference_count.get(gpu_id, 0) + 1
-                self.logger.info(f"♻️ Reusing existing engine on GPU {gpu_id} (refs: {self.engine_reference_count[gpu_id]})")
-                return self.gpu_manager.gpu_engines[gpu_id]
+                existing_engine = self.gpu_manager.gpu_engines[gpu_id]
+                
+                # ✅ Verify engine is still functional
+                try:
+                    # Simple health check - engine should respond to basic operations
+                    if hasattr(existing_engine, 'engine') and existing_engine.engine:
+                        # Increment reference count for tracking
+                        self.engine_reference_count[gpu_id] = self.engine_reference_count.get(gpu_id, 0) + 1
+                        self.logger.info(f"♻️ REUSING healthy engine on GPU {gpu_id} (refs: {self.engine_reference_count[gpu_id]})")
+                        return existing_engine
+                    else:
+                        # Engine exists but is unhealthy - remove it
+                        self.logger.warning(f"⚠️ Engine on GPU {gpu_id} unhealthy, recreating...")
+                        self.gpu_manager.remove_llm_engine(gpu_id)
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Engine health check failed on GPU {gpu_id}: {e}, recreating...")
+                    self.gpu_manager.remove_llm_engine(gpu_id)
             
-            # Create new engine using SAFE method
-            self.logger.info(f"🔧 Creating new engine on GPU {gpu_id}...")
-            engine = await self.gpu_manager.get_llm_engine_safe(  # Use safe method
+            # ✅ Create new engine only if none exists or previous was unhealthy
+            self.logger.info(f"🔧 Creating NEW engine on GPU {gpu_id}...")
+            engine = await self.gpu_manager.get_llm_engine_safe(
                 gpu_id, 
                 self.config.model_name, 
                 self.config.max_tokens
@@ -182,7 +196,7 @@ class DualGPUOpulenceCoordinator:
             self.engine_reference_count[gpu_id] = 1
             self.stats["engines_loaded"] += 1
             
-            self.logger.info(f"✅ Engine created on GPU {gpu_id} (refs: 1)")
+            self.logger.info(f"✅ NEW engine created on GPU {gpu_id} (refs: 1)")
             return engine
             
     # 3. ADD engine reference management
@@ -646,14 +660,16 @@ class DualGPUOpulenceCoordinator:
             return {"status": "error", "error": str(e)}
     
     async def analyze_component(self, component_name: str, component_type: str = None) -> Dict[str, Any]:
-        """Analyze component using single GPU"""
-        task_id = self.gpu_manager.start_task(f"analyze_{component_name}")
+        """FIXED: Component analysis with proper engine sharing"""
         start_time = time.time()
         
         try:
             self.logger.info(f"🔍 Analyzing component: {component_name}")
             
-            # Verify component exists in database
+            # ✅ FIXED: Don't create separate tasks for each agent
+            # Instead, let agents reuse the same engine through base class
+            
+            # Verify component exists in database first
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
@@ -663,26 +679,14 @@ class DualGPUOpulenceCoordinator:
             """, (component_name, f"%{component_name}%"))
             
             chunk_count = cursor.fetchone()[0]
+            conn.close()
             
             if chunk_count == 0:
-                # Try content search
-                cursor.execute("""
-                    SELECT COUNT(*) FROM program_chunks 
-                    WHERE content LIKE ? OR metadata LIKE ?
-                """, (f"%{component_name}%", f"%{component_name}%"))
-                
-                content_matches = cursor.fetchone()[0]
-                
-                if content_matches == 0:
-                    conn.close()
-                    return {
-                        "component_name": component_name,
-                        "status": "error",
-                        "error": f"Component '{component_name}' not found in database",
-                        "suggestion": "Check component name or ensure files were processed"
-                    }
-            
-            conn.close()
+                return {
+                    "component_name": component_name,
+                    "status": "error",
+                    "error": f"Component '{component_name}' not found in database"
+                }
             
             # Determine component type
             if not component_type or component_type == "auto-detect":
@@ -693,11 +697,10 @@ class DualGPUOpulenceCoordinator:
                 "component_type": component_type,
                 "status": "processing",
                 "chunks_found": chunk_count,
-                "gpu_used": self.selected_gpu,
                 "timestamp": dt.now().isoformat()
             }
             
-            # Perform component-specific analysis
+            # ✅ CRITICAL: Agents will share engines automatically via base class
             analysis_success = False
             
             if component_type == "field":
@@ -720,16 +723,6 @@ class DualGPUOpulenceCoordinator:
                     self.logger.error(f"❌ Logic analysis failed: {e}")
                     analysis_result["logic_analysis"] = {"error": str(e)}
             
-            elif component_type == "jcl":
-                try:
-                    lineage_agent = self.get_agent("lineage_analyzer")
-                    jcl_result = await lineage_agent.analyze_full_lifecycle(component_name, "jcl")
-                    analysis_result["jcl_analysis"] = jcl_result
-                    analysis_success = True
-                except Exception as e:
-                    self.logger.error(f"❌ JCL analysis failed: {e}")
-                    analysis_result["jcl_analysis"] = {"error": str(e)}
-            
             # Always try semantic search
             try:
                 vector_agent = self.get_agent("vector_index")
@@ -743,7 +736,6 @@ class DualGPUOpulenceCoordinator:
             analysis_result["status"] = "completed" if analysis_success else "partial"
             analysis_result["processing_time"] = time.time() - start_time
             
-            self.logger.info(f"✅ Component analysis completed for {component_name}")
             return analysis_result
             
         except Exception as e:
@@ -752,11 +744,9 @@ class DualGPUOpulenceCoordinator:
                 "component_name": component_name,
                 "status": "error",
                 "error": str(e),
-                "gpu_used": self.selected_gpu,
                 "processing_time": time.time() - start_time
             }
-        finally:
-            self.gpu_manager.finish_task(task_id)
+        
     
     async def _determine_component_type(self, component_name: str) -> str:
         """Determine component type from database"""
@@ -959,24 +949,40 @@ class DualGPUOpulenceCoordinator:
             return {"error": str(e)}
     
     def get_health_status(self) -> Dict[str, Any]:
-        """Get system health status with lazy loading info"""
+        """FIXED: Enhanced health status with engine sharing info"""
         gpu_status = self.gpu_manager.get_status()
+        
+        # ✅ Add engine sharing metrics
+        engine_sharing_stats = {}
+        for gpu_id, ref_count in self.engine_reference_count.items():
+            agents_on_gpu = [
+                agent_type for agent_type, assigned_gpu 
+                in self.agent_gpu_assignments.items() 
+                if assigned_gpu == gpu_id
+            ]
+            engine_sharing_stats[f"GPU_{gpu_id}"] = {
+                "reference_count": ref_count,
+                "agents_assigned": agents_on_gpu,
+                "engine_loaded": self.gpu_manager.has_llm_engine(gpu_id)
+            }
         
         return {
             "status": "healthy" if self.selected_gpus else "no_gpus",
-            "coordinator_type": "dual_gpu_lazy",
+            "coordinator_type": "dual_gpu_lazy_shared",
             "selected_gpus": self.selected_gpus,
             "active_agents": len(self.agents),
             "stats": self.stats,
             "uptime_seconds": time.time() - self.stats["start_time"],
             "database_available": os.path.exists(self.db_path),
-            # LAZY LOADING STATUS
+            "engine_sharing": engine_sharing_stats,  # ✅ New sharing metrics
             "lazy_loading": {
                 "enabled": True,
                 "engines_loaded": len(self.llm_engines),
                 "engines_available": len(self.selected_gpus),
-                "engine_references": self.engine_reference_count.copy(),
-                "memory_efficient": len(self.llm_engines) <= len(self.selected_gpus),
+                "sharing_efficient": all(
+                    ref_count <= len([a for a, g in self.agent_gpu_assignments.items() if g == gpu_id])
+                    for gpu_id, ref_count in self.engine_reference_count.items()
+                ),
                 "on_demand_loading": True
             }
         }
