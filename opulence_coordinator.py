@@ -670,7 +670,127 @@ class DualGPUOpulenceCoordinator:
             self.logger.error(f"❌ Vector embedding creation failed: {str(e)}")
             return {"status": "error", "error": str(e)}
     
-    async def analyze_component_enhanced(self, component_name: str, component_type: str = None) -> Dict[str, Any]:
+    async def _generate_executive_summary_simple(self, component_name: str, analysis_result: Dict) -> str:
+        """Generate simple executive summary without requiring LLM access"""
+        try:
+            summary_parts = []
+            
+            summary_parts.append(f"Analysis of {component_name} ({analysis_result['component_type']})")
+            summary_parts.append(f"Status: {analysis_result['status']}")
+            
+            # Summarize available analyses
+            successful_analyses = []
+            failed_analyses = []
+            timeout_analyses = []
+            
+            for analysis_name, analysis_data in analysis_result["analyses"].items():
+                if analysis_data["status"] == "success":
+                    successful_analyses.append(analysis_name)
+                elif analysis_data["status"] == "timeout":
+                    timeout_analyses.append(analysis_name)
+                else:
+                    failed_analyses.append(analysis_name)
+            
+            if successful_analyses:
+                summary_parts.append(f"Completed analyses: {', '.join(successful_analyses)}")
+            
+            if timeout_analyses:
+                summary_parts.append(f"Timed out: {', '.join(timeout_analyses)}")
+            
+            if failed_analyses:
+                summary_parts.append(f"Failed: {', '.join(failed_analyses)}")
+            
+            # Add key findings from successful analyses
+            findings = []
+            
+            if "lineage_analysis" in successful_analyses:
+                lineage_data = analysis_result["analyses"]["lineage_analysis"]["data"]
+                if isinstance(lineage_data, dict):
+                    if "total_references_found" in lineage_data:
+                        findings.append(f"Found {lineage_data['total_references_found']} references")
+                    if "programs_involved" in lineage_data:
+                        findings.append(f"Used in {len(lineage_data['programs_involved'])} programs")
+            
+            if "logic_analysis" in successful_analyses:
+                logic_data = analysis_result["analyses"]["logic_analysis"]["data"]
+                if isinstance(logic_data, dict):
+                    if "complexity_score" in logic_data:
+                        findings.append(f"Complexity score: {logic_data['complexity_score']:.1f}")
+                    if "business_rules" in logic_data:
+                        findings.append(f"{len(logic_data['business_rules'])} business rules found")
+            
+            if "semantic_analysis" in successful_analyses:
+                semantic_data = analysis_result["analyses"]["semantic_analysis"]["data"]
+                if isinstance(semantic_data, dict):
+                    similar_count = len(semantic_data.get("similar_components", {}).get("similar_components", []))
+                    if similar_count > 0:
+                        findings.append(f"{similar_count} similar components found")
+            
+            if findings:
+                summary_parts.append(f"Key findings: {'; '.join(findings)}")
+            
+            # Add processing metadata
+            metadata = analysis_result.get("processing_metadata", {})
+            duration = metadata.get("total_duration_seconds", 0)
+            if duration > 0:
+                summary_parts.append(f"Processing time: {duration:.1f} seconds")
+            
+            return ". ".join(summary_parts) + "."
+            
+        except Exception as e:
+            self.logger.error(f"❌ Simple summary generation failed: {e}")
+            return f"Analysis of {component_name}: {analysis_result.get('status', 'unknown')} status with {len(analysis_result.get('analyses', {}))} analysis attempts."
+
+    # Simplified recommendations method
+    def _generate_actionable_recommendations(self, analysis_result: Dict, completed: int, total: int) -> List[str]:
+        """Generate actionable recommendations based on analysis results"""
+        recommendations = []
+        
+        # Status-based recommendations
+        if analysis_result["status"] == "partial":
+            completion_rate = (completed / total) * 100 if total > 0 else 0
+            if completion_rate >= 60:
+                recommendations.append(f"✅ Analysis {completion_rate:.0f}% complete - sufficient for decision making")
+            else:
+                recommendations.append(f"⚠️ Analysis only {completion_rate:.0f}% complete - consider retry or manual review")
+        
+        elif analysis_result["status"] == "failed":
+            recommendations.append("❌ Analysis failed - check component exists and system resources available")
+            recommendations.append("🔧 Consider simplifying analysis scope or checking component name")
+        
+        elif analysis_result["status"] == "completed":
+            recommendations.append("✅ Complete analysis available - proceed with confidence")
+        
+        # Analysis-specific recommendations
+        analyses = analysis_result.get("analyses", {})
+        
+        if "lineage_analysis" in analyses:
+            if analyses["lineage_analysis"]["status"] == "success":
+                recommendations.append("📊 Lineage data available - review dependencies before making changes")
+            elif analyses["lineage_analysis"]["status"] == "timeout":
+                recommendations.append("⏰ Lineage analysis incomplete - check database for partial results")
+        
+        if "logic_analysis" in analyses:
+            if analyses["logic_analysis"]["status"] == "success":
+                recommendations.append("🧠 Business logic analyzed - validate rules with stakeholders")
+            elif analyses["logic_analysis"]["status"] == "timeout":
+                recommendations.append("⏰ Logic analysis incomplete - consider manual code review")
+        
+        if "semantic_analysis" in analyses and analyses["semantic_analysis"]["status"] == "success":
+            recommendations.append("🔍 Similar components identified - review for reuse opportunities")
+        
+        # General recommendations
+        timeout_count = sum(1 for a in analyses.values() if a.get("status") == "timeout")
+        if timeout_count > 0:
+            recommendations.append(f"⚠️ {timeout_count} analyses timed out - consider increasing timeouts or reducing scope")
+        
+        if len(recommendations) == 0:
+            recommendations.append("📋 Analysis complete - review detailed results for insights")
+        
+        return recommendations
+
+
+    async def analyze_component(self, component_name: str, component_type: str = None) -> Dict[str, Any]:
         """Enhanced component analysis with graceful degradation and partial results"""
         start_time = time.time()
         
@@ -694,74 +814,186 @@ class DualGPUOpulenceCoordinator:
                 }
             }
             
-            # Define analysis strategy based on component type
-            analysis_tasks = []
-            
-            if component_type == "field":
-                analysis_tasks = [
-                    ("lineage_analysis", "lineage_analyzer", "analyze_field_lineage_with_fallback"),
-                    ("semantic_similarity", "vector_index", "search_similar_components")
-                ]
-            elif component_type in ["program", "cobol"]:
-                analysis_tasks = [
-                    ("logic_analysis", "logic_analyzer", "analyze_program"),
-                    ("lifecycle_analysis", "lineage_analyzer", "analyze_full_lifecycle"),
-                    ("dependency_analysis", "vector_index", "find_code_dependencies")
-                ]
-            else:  # copybook, jcl, etc.
-                analysis_tasks = [
-                    ("usage_analysis", "lineage_analyzer", "analyze_field_lineage_with_fallback"),
-                    ("dependency_mapping", "logic_analyzer", "find_dependencies"),
-                    ("similarity_search", "vector_index", "search_similar_components")
-                ]
-            
-            # Execute analyses with error isolation
+            # Execute analyses with error isolation - USING EXISTING METHODS
             completed_count = 0
             
-            for analysis_name, agent_type, method_name in analysis_tasks:
+            # === LINEAGE ANALYSIS ===
+            try:
+                self.logger.info(f"🔄 Running lineage analysis for {component_name}")
+                
+                lineage_agent = self.get_agent("lineage_analyzer")
+                
+                # Call EXISTING lineage methods based on component type
+                async def run_lineage_analysis():
+                    if component_type == "field":
+                        # For fields, analyze field lineage
+                        return await lineage_agent.analyze_field_lineage(component_name)
+                    else:
+                        # For programs/copybooks, analyze full lifecycle
+                        return await lineage_agent.analyze_full_lifecycle(component_name, component_type)
+                
+                # Execute with timeout using asyncio.wait_for
+                lineage_result = await asyncio.wait_for(run_lineage_analysis(), timeout=600)
+                
+                analysis_result["analyses"]["lineage_analysis"] = {
+                    "status": "success",
+                    "data": lineage_result,
+                    "agent_used": "lineage_analyzer",
+                    "completion_time": time.time() - start_time
+                }
+                
+                completed_count += 1
+                self.logger.info(f"✅ Lineage analysis completed successfully")
+                
+            except asyncio.TimeoutError:
+                self.logger.warning(f"⏰ Lineage analysis timed out after 10 minutes")
+                analysis_result["analyses"]["lineage_analysis"] = {
+                    "status": "timeout",
+                    "error": "Lineage analysis exceeded 10-minute timeout",
+                    "agent_used": "lineage_analyzer",
+                    "partial_data": "Check program_chunks table for existing data"
+                }
+                
+            except Exception as e:
+                self.logger.error(f"❌ Lineage analysis failed: {str(e)}")
+                analysis_result["analyses"]["lineage_analysis"] = {
+                    "status": "error",
+                    "error": str(e),
+                    "agent_used": "lineage_analyzer"
+                }
+            
+            # === LOGIC ANALYSIS ===
+            if component_type in ["program", "cobol", "copybook"]:
                 try:
-                    self.logger.info(f"🔄 Running {analysis_name} for {component_name}")
+                    self.logger.info(f"🔄 Running logic analysis for {component_name}")
                     
-                    # Get agent and method
-                    agent = self.get_agent(agent_type)
-                    analysis_method = getattr(agent, method_name)
+                    logic_agent = self.get_agent("logic_analyzer")
                     
-                    # Execute with timeout (10 minutes max per analysis)
-                    async with asyncio.timeout(600):
-                        if analysis_name == "lifecycle_analysis":
-                            result = await analysis_method(component_name, component_type)
+                    # Call EXISTING logic methods
+                    async def run_logic_analysis():
+                        if component_type in ["program", "cobol"]:
+                            return await logic_agent.analyze_program(component_name)
                         else:
-                            result = await analysis_method(component_name)
+                            # For copybooks, find dependencies
+                            return await logic_agent.find_dependencies(component_name)
                     
-                    analysis_result["analyses"][analysis_name] = {
+                    logic_result = await asyncio.wait_for(run_logic_analysis(), timeout=600)
+                    
+                    analysis_result["analyses"]["logic_analysis"] = {
                         "status": "success",
-                        "data": result,
-                        "agent_used": agent_type,
+                        "data": logic_result,
+                        "agent_used": "logic_analyzer",
                         "completion_time": time.time() - start_time
                     }
                     
                     completed_count += 1
-                    self.logger.info(f"✅ {analysis_name} completed successfully")
+                    self.logger.info(f"✅ Logic analysis completed successfully")
                     
                 except asyncio.TimeoutError:
-                    self.logger.warning(f"⏰ {analysis_name} timed out after 10 minutes")
-                    analysis_result["analyses"][analysis_name] = {
+                    self.logger.warning(f"⏰ Logic analysis timed out after 10 minutes")
+                    analysis_result["analyses"]["logic_analysis"] = {
                         "status": "timeout",
-                        "error": "Analysis exceeded 10-minute timeout",
-                        "agent_used": agent_type,
-                        "partial_data": "Check partial_analysis_cache table for intermediate results"
+                        "error": "Logic analysis exceeded 10-minute timeout",
+                        "agent_used": "logic_analyzer"
                     }
                     
                 except Exception as e:
-                    self.logger.error(f"❌ {analysis_name} failed: {str(e)}")
-                    analysis_result["analyses"][analysis_name] = {
+                    self.logger.error(f"❌ Logic analysis failed: {str(e)}")
+                    analysis_result["analyses"]["logic_analysis"] = {
                         "status": "error",
                         "error": str(e),
-                        "agent_used": agent_type
+                        "agent_used": "logic_analyzer"
+                    }
+            
+            # === VECTOR/SEMANTIC ANALYSIS ===
+            try:
+                self.logger.info(f"🔄 Running semantic analysis for {component_name}")
+                
+                vector_agent = self.get_agent("vector_index")
+                
+                # Call EXISTING vector methods
+                async def run_semantic_analysis():
+                    # Search for similar components
+                    similarity_result = await vector_agent.search_similar_components(component_name, top_k=10)
+                    
+                    # Also try semantic search
+                    semantic_result = await vector_agent.semantic_search(
+                        f"{component_name} similar functionality", top_k=5
+                    )
+                    
+                    return {
+                        "similar_components": similarity_result,
+                        "semantic_search": semantic_result
+                    }
+                
+                semantic_result = await asyncio.wait_for(run_semantic_analysis(), timeout=300)
+                
+                analysis_result["analyses"]["semantic_analysis"] = {
+                    "status": "success",
+                    "data": semantic_result,
+                    "agent_used": "vector_index",
+                    "completion_time": time.time() - start_time
+                }
+                
+                completed_count += 1
+                self.logger.info(f"✅ Semantic analysis completed successfully")
+                
+            except asyncio.TimeoutError:
+                self.logger.warning(f"⏰ Semantic analysis timed out after 5 minutes")
+                analysis_result["analyses"]["semantic_analysis"] = {
+                    "status": "timeout",
+                    "error": "Semantic analysis exceeded 5-minute timeout",
+                    "agent_used": "vector_index"
+                }
+                
+            except Exception as e:
+                self.logger.error(f"❌ Semantic analysis failed: {str(e)}")
+                analysis_result["analyses"]["semantic_analysis"] = {
+                    "status": "error",
+                    "error": str(e),
+                    "agent_used": "vector_index"
+                }
+            
+            # === DEPENDENCY ANALYSIS (for programs) ===
+            if component_type in ["program", "cobol"]:
+                try:
+                    self.logger.info(f"🔄 Running dependency analysis for {component_name}")
+                    
+                    vector_agent = self.get_agent("vector_index")
+                    
+                    async def run_dependency_analysis():
+                        return await vector_agent.find_code_dependencies(component_name)
+                    
+                    dependency_result = await asyncio.wait_for(run_dependency_analysis(), timeout=300)
+                    
+                    analysis_result["analyses"]["dependency_analysis"] = {
+                        "status": "success",
+                        "data": dependency_result,
+                        "agent_used": "vector_index",
+                        "completion_time": time.time() - start_time
+                    }
+                    
+                    completed_count += 1
+                    self.logger.info(f"✅ Dependency analysis completed successfully")
+                    
+                except asyncio.TimeoutError:
+                    self.logger.warning(f"⏰ Dependency analysis timed out after 5 minutes")
+                    analysis_result["analyses"]["dependency_analysis"] = {
+                        "status": "timeout",
+                        "error": "Dependency analysis exceeded 5-minute timeout",
+                        "agent_used": "vector_index"
+                    }
+                    
+                except Exception as e:
+                    self.logger.error(f"❌ Dependency analysis failed: {str(e)}")
+                    analysis_result["analyses"]["dependency_analysis"] = {
+                        "status": "error",
+                        "error": str(e),
+                        "agent_used": "vector_index"
                     }
             
             # Determine final status
-            total_analyses = len(analysis_tasks)
+            total_analyses = len([a for a in analysis_result["analyses"].keys()])
             if completed_count == total_analyses:
                 analysis_result["status"] = "completed"
             elif completed_count > 0:
@@ -770,7 +1002,7 @@ class DualGPUOpulenceCoordinator:
                 analysis_result["status"] = "failed"
             
             # Generate executive summary using available results
-            analysis_result["executive_summary"] = await self._generate_executive_summary(
+            analysis_result["executive_summary"] = await self._generate_executive_summary_simple(
                 component_name, analysis_result
             )
             
@@ -785,7 +1017,7 @@ class DualGPUOpulenceCoordinator:
                 "total_duration_seconds": time.time() - start_time,
                 "analyses_completed": completed_count,
                 "analyses_total": total_analyses,
-                "success_rate": (completed_count / total_analyses) * 100
+                "success_rate": (completed_count / total_analyses) * 100 if total_analyses > 0 else 0
             })
             
             return self._add_processing_info(analysis_result)
