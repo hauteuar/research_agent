@@ -79,24 +79,24 @@ class LocalCodeBERTEmbeddingFunction(EmbeddingFunction):
     
     def __init__(self, model_path: str, tokenizer_path: str = None, device: str = "cpu"):
         """
-        Initialize with local model paths
+        Initialize with local model paths - ALWAYS USE CPU
         
         Args:
             model_path: Path to local CodeBERT model directory
             tokenizer_path: Path to tokenizer (if different from model_path)
-            device: Device to run model on (cpu or cuda:N)
+            device: Device to run model on - FORCED TO CPU
         """
         self.model_path = model_path
         self.tokenizer_path = tokenizer_path or model_path
-        self.device = device
+        self.device = "cpu"  # ✅ FORCE CPU ALWAYS
         self.tokenizer = None
         self.model = None
         self._load_model()
     
     def _load_model(self):
-        """Load the local CodeBERT model and tokenizer"""
+        """Load the local CodeBERT model and tokenizer - CPU ONLY"""
         try:
-            # Load from local directory
+            # Load from local directory - CPU ONLY
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.tokenizer_path,
                 local_files_only=True  # Prevent any external calls
@@ -105,32 +105,32 @@ class LocalCodeBERTEmbeddingFunction(EmbeddingFunction):
                 self.model_path,
                 local_files_only=True  # Prevent any external calls
             )
-            self.model.to(self.device)
+            self.model.to("cpu")  # ✅ FORCE CPU
             self.model.eval()
-            print(f"✅ Loaded local CodeBERT model from {self.model_path}")
+            print(f"✅ Loaded local CodeBERT model on CPU (avoiding GPU conflicts)")
         except Exception as e:
             raise RuntimeError(f"Failed to load local CodeBERT model: {e}")
     
     def __call__(self, input: Documents) -> Embeddings:
-        """Generate embeddings for input documents"""
+        """Generate embeddings for input documents - CPU ONLY"""
         try:
             embeddings = []
             
             for text in input:
-                # Tokenize
+                # Tokenize - CPU ONLY
                 inputs = self.tokenizer(
                     text,
                     return_tensors="pt",
                     padding=True,
                     truncation=True,
                     max_length=512
-                ).to(self.device)
+                )  # ✅ NO .to(device) - stays on CPU
                 
-                # Generate embedding
+                # Generate embedding - CPU ONLY
                 with torch.no_grad():
                     outputs = self.model(**inputs)
                     # Use CLS token embedding
-                    embedding = outputs.last_hidden_state[:, 0, :].cpu().numpy()
+                    embedding = outputs.last_hidden_state[:, 0, :].cpu().numpy()  # Already on CPU
                     
                     # Normalize for cosine similarity
                     embedding = embedding / np.linalg.norm(embedding)
@@ -140,7 +140,7 @@ class LocalCodeBERTEmbeddingFunction(EmbeddingFunction):
             
         except Exception as e:
             raise RuntimeError(f"Embedding generation failed: {e}")
-
+        
 class VectorIndexAgent(BaseOpulenceAgent):  # ✅ INHERIT FROM BASE CLASS
     """Agent for building and managing vector indices - with automatic resource management"""
     
@@ -223,19 +223,20 @@ class VectorIndexAgent(BaseOpulenceAgent):  # ✅ INHERIT FROM BASE CLASS
             return {}
 
     async def _initialize_components(self):
-        """Initialize embedding model and vector databases"""
+        """Initialize embedding model and vector databases - CPU ONLY FOR CODEBERT"""
         try:
             # Wait a bit to allow coordinator initialization
             await asyncio.sleep(1)
             
-            # Set device for embedding model
-            device = f"cuda:{self.gpu_id}" if self.gpu_id is not None and torch.cuda.is_available() else "cpu"
+            # ✅ FORCE CPU FOR EMBEDDING MODEL TO AVOID GPU CONFLICTS
+            embedding_device = "cpu"
+            self.logger.info(f"🔧 Using CPU for CodeBERT to avoid GPU conflicts with LLM (LLM uses GPU {self.gpu_id})")
             
             # Validate local model path exists
             if not Path(self.local_model_path).exists():
                 raise FileNotFoundError(f"Local model not found at: {self.local_model_path}")
             
-            # Load embedding model from local directory
+            # Load embedding model from local directory - CPU ONLY
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.local_model_path,
                 local_files_only=True  # Prevent any external calls
@@ -244,15 +245,15 @@ class VectorIndexAgent(BaseOpulenceAgent):  # ✅ INHERIT FROM BASE CLASS
                 self.local_model_path,
                 local_files_only=True  # Prevent any external calls
             )
-            self.embedding_model.to(device)
+            self.embedding_model.to(embedding_device)  # ✅ CPU ONLY
             self.embedding_model.eval()
             
-            self.logger.info(f"✅ Loaded local CodeBERT model from {self.local_model_path}")
+            self.logger.info(f"✅ Loaded local CodeBERT model on {embedding_device}")
             
-            # Create custom embedding function for ChromaDB
+            # Create custom embedding function for ChromaDB - CPU ONLY
             self.chroma_embedding_function = LocalCodeBERTEmbeddingFunction(
                 model_path=self.local_model_path,
-                device=device
+                device=embedding_device  # ✅ CPU ONLY
             )
             
             # Initialize FAISS index
@@ -285,26 +286,26 @@ class VectorIndexAgent(BaseOpulenceAgent):  # ✅ INHERIT FROM BASE CLASS
             raise
     
     async def embed_code_chunk(self, chunk_content: str, chunk_metadata: Dict[str, Any]) -> np.ndarray:
-        """Generate embedding for a code chunk using local model"""
+        """Generate embedding for a code chunk using local model - CPU ONLY"""
         try:
             # Prepare text for embedding
             text_to_embed = self._prepare_text_for_embedding(chunk_content, chunk_metadata)
             
-            # Tokenize
-            device = f"cuda:{self.gpu_id}" if self.gpu_id is not None and torch.cuda.is_available() else "cpu"
+            # ✅ FORCE CPU FOR TOKENIZATION - NO GPU USAGE
+            embedding_device = "cpu"
             inputs = self.tokenizer(
                 text_to_embed,
                 return_tensors="pt",
                 padding=True,
                 truncation=True,
                 max_length=512
-            ).to(device)
+            )  # ✅ NO .to(device) - stays on CPU
             
-            # Generate embedding
+            # Generate embedding - CPU ONLY
             with torch.no_grad():
                 outputs = self.embedding_model(**inputs)
                 # Use CLS token embedding
-                embedding = outputs.last_hidden_state[:, 0, :].cpu().numpy()
+                embedding = outputs.last_hidden_state[:, 0, :].cpu().numpy()  # Already on CPU
                 
                 # Normalize for cosine similarity
                 embedding = embedding / np.linalg.norm(embedding)
