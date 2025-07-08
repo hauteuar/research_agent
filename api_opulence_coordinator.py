@@ -24,42 +24,42 @@ from enum import Enum
 
 # Import existing agents unchanged
 try:
-    from agents.code_parser_agent import CodeParserAgent
+    from agents.code_parser_agent_api import CodeParserAgent
 except ImportError:
     CodeParserAgent = None
 
 try:
-    from agents.chat_agent import OpulenceChatAgent
+    from agents.chat_agent_api import OpulenceChatAgent
 except ImportError:
     OpulenceChatAgent = None
 
 try:
-    from agents.vector_index_agent import VectorIndexAgent
+    from agents.vector_index_agent_api import VectorIndexAgent
 except ImportError:
     VectorIndexAgent = None
 
 try:
-    from agents.data_loader_agent import DataLoaderAgent
+    from agents.data_loader_agent_api import DataLoaderAgent
 except ImportError:
     DataLoaderAgent = None
 
 try:
-    from agents.lineage_analyzer_agent import LineageAnalyzerAgent
+    from agents.lineage_analyzer_agent_api import LineageAnalyzerAgent
 except ImportError:
     LineageAnalyzerAgent = None
 
 try:
-    from agents.logic_analyzer_agent import LogicAnalyzerAgent
+    from agents.logic_analyzer_agent_api import LogicAnalyzerAgent
 except ImportError:
     LogicAnalyzerAgent = None
 
 try:
-    from agents.documentation_agent import DocumentationAgent
+    from agents.documentation_agent_api import DocumentationAgent
 except ImportError:
     DocumentationAgent = None
 
 try:
-    from agents.db2_comparator_agent import DB2ComparatorAgent
+    from agents.db2_comparator_agent_api import DB2ComparatorAgent
 except ImportError:
     DB2ComparatorAgent = None
 

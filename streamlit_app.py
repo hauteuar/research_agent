@@ -2035,10 +2035,3 @@ if __name__ == "__main__":
             "session_state": dict(st.session_state),
             "coordinator_type": "dual_gpu"
         })
-        
-        
-
-
-                                          
-
-            
