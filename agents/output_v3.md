@@ -1,6 +1,6 @@
 # Opulence Mainframe Deep Research Agent Architecture
 
-## 1. Simple System Overview (Plain English)
+## 1. Simple System Overview 
 
 The Opulence system takes legacy mainframe code from a **private wealth bank's security transaction processing system** and makes it understandable using modern AI technology:
 
@@ -14,11 +14,11 @@ The Opulence system takes legacy mainframe code from a **private wealth bank's s
 
 ---
 
-## 2. Core Components (80/20 Rule Table)
+## 2. Core Components
 
-| Component               | Function                                     | 80/20 Value                                                 |
+| Component               | Function                                     | Value                                                 |
 |-------------------------|----------------------------------------------|-------------------------------------------------------------|
-| **Code Parser**         | Converts COBOL/JCL into structured AST        | Enables structured understanding of 40-year-old trading logic |
+| **Code Parser**         | Converts COBOL/JCL into structured AST        | Enables structured understanding of 40-year-old logic |
 | **Data Loader**         | Loads DB2 tables and sample transaction files | Adds real-world context from actual customer trades         |
 | **Vector Index Agent**  | Embeds and indexes all elements in FAISS     | Powers fast semantic search: "find all margin calculation logic" |
 | **Lineage Agent**       | Tracks fields across jobs and programs        | Critical for compliance: trace customer ID through entire system |
