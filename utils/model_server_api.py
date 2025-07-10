@@ -210,16 +210,15 @@ class GPUModelLoader:
             # Set CUDA visible devices
             os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, self.config.gpu_ids))
             
-            # Create engine arguments
+            # Create engine arguments with only valid parameters
             engine_args = EngineArgs(
                 model=self.config.model_path or self.config.model_name,
                 tensor_parallel_size=self.config.tensor_parallel_size,
                 gpu_memory_utilization=self.config.gpu_memory_utilization,
                 max_model_len=self.config.max_model_len,
                 trust_remote_code=True,
-                # Remove invalid parameters that don't exist in EngineArgs
-                # disable_log_stats=False,  # Not a valid parameter
-                # disable_log_requests=True,  # Not a valid parameter
+                # Only include parameters that actually exist in EngineArgs
+                # Removed: disable_log_stats, disable_log_requests
             )
             
             # Create async engine
