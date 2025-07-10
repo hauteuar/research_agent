@@ -23,7 +23,12 @@ from fastapi import FastAPI, HTTPException, Request, Response, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, validator
-from vllm import AsyncLLMEngine, EngineArgs, SamplingParams
+from vllm import AsyncLLMEngine, SamplingParams
+try:
+    from vllm import EngineArgs
+except ImportError:
+    # Fallback for older vLLM versions
+    from vllm import AsyncEngineArgs as EngineArgs
 from vllm.utils import random_uuid
 
 # Configure logging
