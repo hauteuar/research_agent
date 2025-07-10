@@ -388,13 +388,10 @@ class ModelServerClient:
 class APIEngineContext:
     """Provides engine-like interface for existing agents using API calls"""
     
-    def __init__(self, config: APIOpulenceConfig):
-        self.logger = logging.getLogger(f"{__name__}.APIOpulenceCoordinator")
-        
-        self.config = config
-        self.load_balancer = LoadBalancer(config)
-        self.client = ModelServerClient(config)
-        self.db_path = config.db_path
+    def __init__(self, coordinator, preferred_gpu_id: int = None):
+        self.coordinator = coordinator
+        self.preferred_gpu_id = preferred_gpu_id
+        self.logger = logging.getLogger(f"{__name__}.APIEngineContext")
     
     async def generate(self, prompt: str, sampling_params, request_id: str = None):
         """Generate text via API (compatible with vLLM interface)"""
@@ -435,6 +432,8 @@ class APIOpulenceCoordinator:
     """API-based Opulence Coordinator - orchestrates existing agents through API calls"""
     
     def __init__(self, config: APIOpulenceConfig):
+        self.logger = logging.getLogger(f"{__name__}.APIOpulenceCoordinator")
+    
         self.config = config
         self.load_balancer = LoadBalancer(config)
         self.client = ModelServerClient(config)
