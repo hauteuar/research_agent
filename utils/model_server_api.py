@@ -216,10 +216,10 @@ class GPUModelLoader:
                 tensor_parallel_size=self.config.tensor_parallel_size,
                 gpu_memory_utilization=self.config.gpu_memory_utilization,
                 max_model_len=self.config.max_model_len,
-                max_num_batched_tokens=self.config.batch_size * self.config.max_tokens_per_request,
-                max_num_seqs=self.config.max_waiting_requests,
-                disable_log_stats=False,
                 trust_remote_code=True,
+                # Remove invalid parameters that don't exist in EngineArgs
+                # disable_log_stats=False,  # Not a valid parameter
+                # disable_log_requests=True,  # Not a valid parameter
             )
             
             # Create async engine
