@@ -43,11 +43,11 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ModelServerConfig:
     """Configuration for the model server"""
-    # Model configuration
+    # Model configuration - Conservative settings for low memory
     model_name: str = "codellama/CodeLlama-7b-Python-hf"
     model_path: Optional[str] = None
-    gpu_memory_utilization: float = 0.9
-    max_model_len: int = 4096
+    gpu_memory_utilization: float = 0.6  # Reduced from 0.9
+    max_model_len: int = 2048  # Reduced from 4096
     tensor_parallel_size: int = 1
     
     # Server configuration
@@ -211,12 +211,17 @@ class GPUModelLoader:
             os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, self.config.gpu_ids))
             
             # Create engine arguments with only valid parameters
+            # Reduce memory usage to prevent OOM during CUDA graph capture
             engine_args = EngineArgs(
                 model=self.config.model_path or self.config.model_name,
                 tensor_parallel_size=self.config.tensor_parallel_size,
-                gpu_memory_utilization=self.config.gpu_memory_utilization,
-                max_model_len=self.config.max_model_len,
+                gpu_memory_utilization=0.7,  # Reduced from 0.9 to leave room for CUDA graphs
+                max_model_len=min(self.config.max_model_len, 2048),  # Reduce context length
                 trust_remote_code=True,
+                # Disable CUDA graph to save memory (trades speed for memory)
+                disable_cuda_graph=True,
+                # Reduce batch size to save memory
+                max_num_seqs=16,  # Reduce from default
                 # Only include parameters that actually exist in EngineArgs
                 # Removed: disable_log_stats, disable_log_requests
             )
