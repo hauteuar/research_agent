@@ -44,7 +44,7 @@ except ImportError:
     DataLoaderAgent = None
 
 try:
-    from agents.lineage_analyzer_agent_api import LineageAnalyzerAgent
+    from agents.lineage_analyzer_agent_api import LineageAnalyzerAgent    
 except ImportError:
     LineageAnalyzerAgent = None
 
