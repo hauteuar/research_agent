@@ -1149,18 +1149,61 @@ class SimpleLoadBalancer:
 # ==================== Main Entry Point ====================
 
 def main():
-    """Main entry point with intelligent GPU allocation"""
+    """Main entry point with intelligent GPU allocation and auto-detection"""
     try:
-        # Check if we should run in single server mode or multi-server mode
-        num_servers = int(os.getenv("NUM_SERVERS", "2"))
+        # Get configuration
+        num_servers_env = os.getenv("NUM_SERVERS", "auto")
         base_port = int(os.getenv("BASE_PORT", "8000"))
         
         # Display startup banner
         logger.info("🚀 Starting Opulence Multi-GPU Model Server")
         logger.info("=" * 50)
         
+        # Auto-detect optimal number of servers if not specified
+        if num_servers_env.lower() == "auto" or num_servers_env == "0":
+            logger.info("🔍 Auto-detecting optimal server configuration...")
+            
+            # Get available GPUs with current settings
+            available_gpus = GPUManager.get_best_available_gpus(
+                num_gpus_needed=10,  # Get all available
+                memory_threshold_percent=float(os.getenv("GPU_MEMORY_THRESHOLD_PERCENT", "20.0")),
+                min_free_memory_gb=float(os.getenv("GPU_MIN_FREE_MEMORY_GB", "4.0"))
+            )
+            
+            if len(available_gpus) == 0:
+                logger.warning("🔍 No GPUs meet ideal criteria, checking with relaxed constraints...")
+                available_gpus = GPUManager.get_best_available_gpus(
+                    num_gpus_needed=10, 
+                    memory_threshold_percent=50.0, 
+                    min_free_memory_gb=2.0
+                )
+            
+            # Determine optimal server count
+            if len(available_gpus) == 0:
+                logger.error("❌ No GPUs available at all")
+                raise RuntimeError("No GPUs available")
+            elif len(available_gpus) == 1:
+                num_servers = 1
+                logger.info("🎯 Auto-detected: 1 server (single GPU available)")
+            elif len(available_gpus) == 2:
+                num_servers = 2
+                logger.info("🎯 Auto-detected: 2 servers (optimal for 2 GPUs)")
+            elif len(available_gpus) == 3:
+                num_servers = 2  # Use 2 servers, one gets 2 GPUs
+                logger.info("🎯 Auto-detected: 2 servers (3 GPUs available - uneven split)")
+            elif len(available_gpus) >= 4:
+                num_servers = min(4, len(available_gpus) // 2)  # Max 4 servers, 2+ GPUs each
+                logger.info(f"🎯 Auto-detected: {num_servers} servers ({len(available_gpus)} GPUs available)")
+            
+            logger.info(f"💡 To override auto-detection, set NUM_SERVERS={num_servers}")
+            
+        else:
+            # Manual override
+            num_servers = int(num_servers_env)
+            logger.info(f"📍 Manual override: {num_servers} servers requested")
+        
         if num_servers == 1:
-            # Single server mode (backward compatibility)
+            # Single server mode
             logger.info("📍 Single Server Mode")
             
             # Get best available GPU
@@ -1235,6 +1278,8 @@ def main():
                 logger.info(f"  📡 {config['server_id']}: http://localhost:{config['port']}")
             
             logger.info("✅ All servers started successfully!")
+            logger.info("📝 Usage examples:")
+            logger.info("  curl -X POST http://localhost:8000/generate -d '{\"prompt\":\"Hello\"}' -H 'Content-Type: application/json'")
             logger.info("Press Ctrl+C to stop all servers")
             
             # Wait for servers or handle shutdown
@@ -1252,6 +1297,7 @@ def main():
     except Exception as e:
         logger.error(f"❌ Server failed to start: {str(e)}")
         logger.error("💡 Try adjusting GPU_MEMORY_THRESHOLD_PERCENT or GPU_MIN_FREE_MEMORY_GB environment variables")
+        logger.error("💡 Or set NUM_SERVERS=1 to force single server mode")
         sys.exit(1)
 
 if __name__ == "__main__":
