@@ -1,0 +1,40 @@
+# requirements.txt for opulence_api
+"""
+Python package requirements for Opulence API System
+"""
+
+# Core API and web dependencies
+aiohttp>=3.8.0
+streamlit>=1.28.0 # If api_streamlit_app.py is included
+plotly>=5.15.0    # If api_streamlit_app.py is included and uses plotly
+
+# Vector databases and search (for vector_index_agent_api.py)
+torch>=2.0.0
+transformers>=4.30.0
+faiss-cpu>=1.7.4
+chromadb>=0.4.0
+# sentence-transformers might not be directly needed if using local CodeBERT via transformers
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+# sqlite3 is built-in
+
+# Database connectors (for db2_comparator_agent_api.py)
+# ibm-db>=3.1.4
+# ibm-db-sa>=0.4.0
+
+# Utility libraries
+python-dateutil>=2.8.0 # Often a transitive dependency, but good to list if directly used
+# pathlib2 is for Python < 3.6, likely not needed for modern environments
+
+# For DocumentationAgent (if used for formatting)
+markdown
+jinja2
+
+# Logging (though standard logging is often sufficient)
+# loguru>=0.7.0 # Keeping it optional as standard logging is used in many api files
+
+# Security (if any specific crypto operations are done by API, otherwise optional)
+# cryptography>=41.0.0
+# bcrypt>=4.0.0
