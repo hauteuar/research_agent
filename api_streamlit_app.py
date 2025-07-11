@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 """
-Enhanced Streamlit Application for Opulence API Research Agent
-- Complete mainframe file support (COBOL, JCL, COPYBOOK, PL/I, CICS, DB2, etc.)
-- Comprehensive GPU monitoring and status
-- Agent status tracking and display
-- Real-time coordinator health monitoring
+Enhanced Streamlit Application for Opulence API Research Agent - Part 1
+Core setup, utilities, and single GPU initialization
 """
 
 import streamlit as st
@@ -20,121 +17,61 @@ import json
 import os
 import sqlite3
 from datetime import datetime as dt
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 from enum import Enum
 import mimetypes
 import hashlib
+import tempfile
+from pathlib import Path
 
 # ============================================================================
-# GLOBAL CONSTANTS AND MAINFRAME FILE CONFIGURATION
+# GLOBAL CONSTANTS AND CONFIGURATION
 # ============================================================================
 
 COORDINATOR_AVAILABLE = True
 import_error = None
 
 try:
-    from api_opulence_coordinator import create_api_coordinator_from_config
+    from api_opulence_coordinator import create_api_coordinator_from_config, APIOpulenceCoordinator
 except ImportError as e:
     COORDINATOR_AVAILABLE = False
     import_error = str(e)
 
 # Comprehensive mainframe file types and extensions
 MAINFRAME_FILE_TYPES = {
-    # COBOL Files
     'cobol': {
         'extensions': ['.cbl', '.cob', '.cobol', '.cpy', '.copybook'],
         'description': 'COBOL Programs and Copybooks',
         'mime_types': ['text/plain', 'application/octet-stream'],
         'agent': 'code_parser'
     },
-    # JCL Files
     'jcl': {
         'extensions': ['.jcl', '.job', '.proc', '.prc'],
         'description': 'Job Control Language',
         'mime_types': ['text/plain'],
         'agent': 'code_parser'
     },
-    # PL/I Files
     'pli': {
         'extensions': ['.pli', '.pl1', '.pls'],
         'description': 'PL/I Programs',
         'mime_types': ['text/plain'],
         'agent': 'code_parser'
     },
-    # CICS Files
-    'cics': {
-        'extensions': ['.cics', '.bms', '.mapset'],
-        'description': 'CICS Maps and Programs',
-        'mime_types': ['text/plain'],
-        'agent': 'code_parser'
-    },
-    # DB2 SQL Files
-    'db2': {
+    'sql': {
         'extensions': ['.sql', '.db2', '.ddl', '.dml'],
-        'description': 'DB2 SQL Scripts',
+        'description': 'SQL Scripts',
         'mime_types': ['text/plain', 'application/sql'],
         'agent': 'db2_comparator'
     },
-    # Assembler Files
-    'asm': {
-        'extensions': ['.asm', '.s', '.hlasm', '.bal'],
-        'description': 'Assembler Programs',
-        'mime_types': ['text/plain'],
-        'agent': 'code_parser'
-    },
-    # VSAM Files
-    'vsam': {
-        'extensions': ['.vsam', '.ksds', '.esds', '.rrds'],
-        'description': 'VSAM File Definitions',
-        'mime_types': ['text/plain'],
-        'agent': 'data_loader'
-    },
-    # IMS Files
-    'ims': {
-        'extensions': ['.ims', '.psbgen', '.dbdgen', '.mfs'],
-        'description': 'IMS Database and Program Files',
-        'mime_types': ['text/plain'],
-        'agent': 'code_parser'
-    },
-    # REXX Files
-    'rexx': {
-        'extensions': ['.rexx', '.rex', '.cmd'],
-        'description': 'REXX Scripts',
-        'mime_types': ['text/plain'],
-        'agent': 'code_parser'
-    },
-    # Data Files
     'data': {
-        'extensions': ['.dat', '.txt', '.csv', '.tsv', '.fixed', '.ebcdic'],
-        'description': 'Mainframe Data Files',
+        'extensions': ['.dat', '.txt', '.csv', '.tsv', '.fixed'],
+        'description': 'Data Files',
         'mime_types': ['text/plain', 'text/csv', 'application/octet-stream'],
         'agent': 'data_loader'
-    },
-    # Control Files
-    'control': {
-        'extensions': ['.ctl', '.cfg', '.config', '.parm', '.sysin'],
-        'description': 'Control and Parameter Files',
-        'mime_types': ['text/plain'],
-        'agent': 'code_parser'
-    },
-    # Documentation
-    'docs': {
-        'extensions': ['.md', '.txt', '.doc', '.rtf', '.readme'],
-        'description': 'Documentation Files',
-        'mime_types': ['text/plain', 'text/markdown'],
-        'agent': 'documentation'
     }
 }
 
-# Get all supported extensions
-ALL_MAINFRAME_EXTENSIONS = []
-for file_type_info in MAINFRAME_FILE_TYPES.values():
-    ALL_MAINFRAME_EXTENSIONS.extend(file_type_info['extensions'])
-
-# Remove duplicates and sort
-ALL_MAINFRAME_EXTENSIONS = sorted(list(set(ALL_MAINFRAME_EXTENSIONS)))
-
-# Agent status tracking
+# Agent types
 AGENT_TYPES = [
     'code_parser', 'chat_agent', 'vector_index', 'data_loader',
     'lineage_analyzer', 'logic_analyzer', 'documentation', 'db2_comparator'
@@ -178,26 +115,102 @@ def initialize_session_state():
         'file_analysis_results': {},
         'agent_status': {agent: {'status': 'unknown', 'last_used': None, 'total_calls': 0, 'errors': 0} 
                         for agent in AGENT_TYPES},
-        'model_servers': [
-            {
-                "name": "gpu_server_1",
-                "endpoint": "http://localhost:8000",
-                "gpu_id": 0,
-                "max_concurrent_requests": 10,
-                "timeout": 300
-            }
-        ],
+        'model_servers': [],
         'coordinator': None,
         'debug_mode': False,
         'initialization_status': 'not_started',
         'import_error': import_error if not COORDINATOR_AVAILABLE else None,
         'auto_refresh_gpu': False,
-        'gpu_refresh_interval': 10
+        'gpu_refresh_interval': 10,
+        'current_query': '',
+        'analysis_results': {},
+        'dashboard_metrics': {
+            'files_processed': 0,
+            'queries_answered': 0,
+            'components_analyzed': 0,
+            'system_uptime': 0
+        }
     }
     
     for key, default_value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = default_value
+
+def detect_single_gpu_servers():
+    """Auto-detect single GPU server configurations"""
+    potential_ports = [8000, 8001, 8002, 8003]
+    detected_servers = []
+    
+    for i, port in enumerate(potential_ports):
+        endpoint = f"http://localhost:{port}"
+        try:
+            response = requests.get(f"{endpoint}/health", timeout=2)
+            if response.status_code == 200:
+                detected_servers.append({
+                    "name": f"local_gpu_{i}",
+                    "endpoint": endpoint,
+                    "gpu_id": i,
+                    "max_concurrent_requests": 5,  # Conservative for single GPU
+                    "timeout": 300
+                })
+                st.success(f"✅ Detected server at {endpoint}")
+        except:
+            continue
+    
+    return detected_servers
+
+def validate_server_endpoint(endpoint: str, timeout: int = 5) -> Dict[str, Any]:
+    """Validate a server endpoint and return detailed status"""
+    try:
+        response = requests.get(f"{endpoint}/health", timeout=timeout)
+        if response.status_code == 200:
+            try:
+                status_response = requests.get(f"{endpoint}/status", timeout=timeout)
+                if status_response.status_code == 200:
+                    status_data = status_response.json()
+                    gpu_info = status_data.get('gpu_info', {})
+                    gpu_count = len(gpu_info)
+                    model_name = status_data.get('model', 'Unknown')
+                    
+                    return {
+                        "status": "healthy",
+                        "message": f"Model: {model_name}, GPUs: {gpu_count}",
+                        "response_time": response.elapsed.total_seconds(),
+                        "accessible": True,
+                        "detailed_status": status_data
+                    }
+                else:
+                    return {
+                        "status": "healthy",
+                        "message": "Server healthy, detailed status unavailable",
+                        "response_time": response.elapsed.total_seconds(),
+                        "accessible": True,
+                        "detailed_status": None
+                    }
+            except:
+                return {
+                    "status": "healthy",
+                    "message": "Basic health check passed",
+                    "response_time": response.elapsed.total_seconds(),
+                    "accessible": True,
+                    "detailed_status": None
+                }
+        else:
+            return {
+                "status": "error",
+                "message": f"HTTP {response.status_code}",
+                "response_time": None,
+                "accessible": False,
+                "detailed_status": None
+            }
+    except requests.RequestException as e:
+        return {
+            "status": "error",
+            "message": f"Connection failed: {str(e)}",
+            "response_time": None,
+            "accessible": False,
+            "detailed_status": None
+        }
 
 def detect_mainframe_file_type(filename: str, content: str = None) -> Dict[str, Any]:
     """Detect mainframe file type from filename and content"""
@@ -218,7 +231,6 @@ def detect_mainframe_file_type(filename: str, content: str = None) -> Dict[str, 
     if content:
         content_upper = content.upper()
         
-        # COBOL detection
         if any(keyword in content_upper for keyword in ['IDENTIFICATION DIVISION', 'PROGRAM-ID', 'WORKING-STORAGE']):
             return {
                 'type': 'cobol',
@@ -227,7 +239,6 @@ def detect_mainframe_file_type(filename: str, content: str = None) -> Dict[str, 
                 'confidence': 'medium'
             }
         
-        # JCL detection
         if any(keyword in content_upper for keyword in ['//JOB ', '//EXEC ', '//DD ']):
             return {
                 'type': 'jcl',
@@ -236,25 +247,23 @@ def detect_mainframe_file_type(filename: str, content: str = None) -> Dict[str, 
                 'confidence': 'medium'
             }
         
-        # SQL detection
-        if any(keyword in content_upper for keyword in ['CREATE TABLE', 'SELECT ', 'INSERT INTO', 'UPDATE ', 'DELETE FROM']):
+        if any(keyword in content_upper for keyword in ['CREATE TABLE', 'SELECT ', 'INSERT INTO']):
             return {
-                'type': 'db2',
+                'type': 'sql',
                 'description': 'SQL Script (detected from content)',
                 'agent': 'db2_comparator',
                 'confidence': 'medium'
             }
     
-    # Default to generic data file
     return {
         'type': 'data',
-        'description': 'Generic Mainframe File',
+        'description': 'Generic File',
         'agent': 'code_parser',
         'confidence': 'low'
     }
 
 def add_custom_css():
-    """Add custom CSS styles for mainframe application"""
+    """Add custom CSS styles"""
     st.markdown("""
     <style>
     .main-header {
@@ -285,1343 +294,74 @@ def add_custom_css():
     .status-warning { color: #ffc107; font-weight: bold; }
     .status-error { color: #dc3545; font-weight: bold; }
     .status-unknown { color: #6c757d; font-weight: bold; }
-    .file-type-badge {
-        background-color: #007bff;
-        color: white;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-size: 0.8em;
-        margin-left: 10px;
-    }
-    .agent-status-card {
-        border: 1px solid #dee2e6;
-        border-radius: 8px;
+    .chat-message {
         padding: 10px;
         margin: 5px 0;
+        border-radius: 8px;
+        border-left: 4px solid #007bff;
         background-color: #f8f9fa;
     }
-    .mainframe-upload-area {
-        border: 2px dashed #007bff;
-        border-radius: 10px;
-        padding: 20px;
-        text-align: center;
-        background-color: #f8f9ff;
+    .analysis-result {
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 15px;
         margin: 10px 0;
+        background-color: #f8f9fa;
     }
     </style>
     """, unsafe_allow_html=True)
 
-def validate_server_endpoint(endpoint: str, timeout: int = 5) -> Dict[str, Any]:
-    """Validate a server endpoint and return detailed status"""
-    try:
-        # Health check
-        response = requests.get(f"{endpoint}/health", timeout=timeout)
-        if response.status_code == 200:
-            health_status = "healthy"
-            health_message = "Server responding"
-            
-            try:
-                # Get detailed status
-                status_response = requests.get(f"{endpoint}/status", timeout=timeout)
-                if status_response.status_code == 200:
-                    status_data = status_response.json()
-                    gpu_info = status_data.get('gpu_info', {})
-                    gpu_count = len(gpu_info)
-                    model_name = status_data.get('model', 'Unknown')
-                    active_requests = status_data.get('active_requests', 0)
-                    total_requests = status_data.get('total_requests', 0)
-                    
-                    health_message = f"Model: {model_name}, GPUs: {gpu_count}, Active: {active_requests}, Total: {total_requests}"
-                else:
-                    health_message = "Server healthy, detailed status unavailable"
-            except:
-                health_message = "Server healthy, status endpoint unavailable"
-            
-            return {
-                "status": health_status,
-                "message": health_message,
-                "response_time": response.elapsed.total_seconds(),
-                "accessible": True,
-                "detailed_status": status_data if 'status_data' in locals() else None
-            }
-        else:
-            return {
-                "status": "error",
-                "message": f"HTTP {response.status_code}",
-                "response_time": None,
-                "accessible": False,
-                "detailed_status": None
-            }
-    except requests.RequestException as e:
-        return {
-            "status": "error",
-            "message": f"Connection failed: {str(e)}",
-            "response_time": None,
-            "accessible": False,
-            "detailed_status": None
-        }
-    
 # ============================================================================
-# CORE COORDINATOR AND AGENT MONITORING
+# ENHANCED INITIALIZATION FOR SINGLE GPU
 # ============================================================================
 
 @with_error_handling
-def get_detailed_server_status():
-    """Get detailed status from all model servers including GPU and agent information"""
-    if not st.session_state.coordinator:
-        return {}
-    
-    detailed_status = {}
-    
-    try:
-        # Get coordinator health which includes server stats
-        health = st.session_state.coordinator.get_health_status()
-        server_stats = health.get('server_stats', {})
-        
-        # For each server, try to get detailed information
-        for server_name, basic_stats in server_stats.items():
-            try:
-                # Find the server configuration to get endpoint
-                server_config = None
-                for server in st.session_state.model_servers:
-                    if server.get('name') == server_name:
-                        server_config = server
-                        break
-                
-                if server_config and server_config.get('endpoint'):
-                    # Get detailed status from the model server directly
-                    response = requests.get(
-                        f"{server_config['endpoint']}/status",
-                        timeout=5
-                    )
-                    
-                    if response.status_code == 200:
-                        server_status = response.json()
-                        
-                        # Get metrics
-                        metrics_response = requests.get(
-                            f"{server_config['endpoint']}/metrics",
-                            timeout=5
-                        )
-                        metrics_data = metrics_response.json() if metrics_response.status_code == 200 else {}
-                        
-                        # Merge all data
-                        detailed_status[server_name] = {
-                            **basic_stats,
-                            'endpoint': server_config['endpoint'],
-                            'gpu_info': server_status.get('gpu_info', {}),
-                            'memory_info': server_status.get('memory_info', {}),
-                            'model': server_status.get('model', 'Unknown'),
-                            'uptime': server_status.get('uptime', 0),
-                            'metrics': metrics_data
-                        }
-                    else:
-                        detailed_status[server_name] = {
-                            **basic_stats,
-                            'endpoint': server_config['endpoint'],
-                            'error': f"HTTP {response.status_code}"
-                        }
-                else:
-                    detailed_status[server_name] = {
-                        **basic_stats,
-                        'error': 'No endpoint configured'
-                    }
-                    
-            except requests.RequestException as e:
-                detailed_status[server_name] = {
-                    **basic_stats,
-                    'error': f"Connection error: {str(e)}"
-                }
-            except Exception as e:
-                detailed_status[server_name] = {
-                    **basic_stats,
-                    'error': f"Error: {str(e)}"
-                }
-        
-        return detailed_status
-        
-    except Exception as e:
-        st.error(f"Failed to get detailed server status: {str(e)}")
-        return {}
-
-@with_error_handling
-def get_agent_status():
-    """Get status of all agents"""
-    if not st.session_state.coordinator:
-        return st.session_state.agent_status
-    
-    try:
-        # Get agent information from coordinator
-        agent_status = {}
-        
-        for agent_type in AGENT_TYPES:
-            try:
-                # Try to get agent from coordinator
-                agent = st.session_state.coordinator.get_agent(agent_type)
-                
-                if agent:
-                    # Agent is available
-                    status = {
-                        'status': 'available',
-                        'last_used': st.session_state.agent_status[agent_type].get('last_used'),
-                        'total_calls': st.session_state.agent_status[agent_type].get('total_calls', 0),
-                        'errors': st.session_state.agent_status[agent_type].get('errors', 0),
-                        'agent_object': type(agent).__name__
-                    }
-                else:
-                    status = {
-                        'status': 'unavailable',
-                        'last_used': None,
-                        'total_calls': 0,
-                        'errors': 0,
-                        'agent_object': None
-                    }
-                
-                agent_status[agent_type] = status
-                
-            except Exception as e:
-                agent_status[agent_type] = {
-                    'status': 'error',
-                    'last_used': None,
-                    'total_calls': 0,
-                    'errors': st.session_state.agent_status[agent_type].get('errors', 0) + 1,
-                    'error_message': str(e)
-                }
-        
-        # Update session state
-        st.session_state.agent_status.update(agent_status)
-        return agent_status
-        
-    except Exception as e:
-        st.error(f"Failed to get agent status: {str(e)}")
-        return st.session_state.agent_status
-
-# ============================================================================
-# ENHANCED FILE UPLOAD WITH MAINFRAME SUPPORT
-# ============================================================================
-
-def show_enhanced_file_upload():
-    """Enhanced file upload with comprehensive mainframe support"""
-    st.markdown('<div class="sub-header">📂 Mainframe File Upload & Processing</div>', unsafe_allow_html=True)
-    
-    if not st.session_state.coordinator:
-        st.error("🔴 System not initialized. Please initialize in System Health tab.")
-        st.info("The coordinator must be running to process mainframe files.")
-        return
-    
-    # File type information
-    with st.expander("📋 Supported Mainframe File Types", expanded=False):
-        for file_type, info in MAINFRAME_FILE_TYPES.items():
-            st.markdown(f"**{info['description']}**")
-            st.markdown(f"- Extensions: {', '.join(info['extensions'])}")
-            st.markdown(f"- Processed by: {info['agent']} agent")
-            st.markdown("---")
-    
-    # Upload area
-    st.markdown('<div class="mainframe-upload-area">', unsafe_allow_html=True)
-    st.markdown("### 🚀 Upload Mainframe Files")
-    st.markdown("Drag and drop your COBOL, JCL, DB2, PL/I, CICS, and other mainframe files here")
-    
-    uploaded_files = st.file_uploader(
-        "Choose mainframe files to upload",
-        accept_multiple_files=True,
-        type=None,  # Accept all file types
-        help="Upload any mainframe files including COBOL (.cbl, .cob), JCL (.jcl), SQL (.sql), etc."
-    )
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    if uploaded_files:
-        st.markdown("### 📁 Uploaded Files Analysis")
-        
-        file_analysis = []
-        
-        for uploaded_file in uploaded_files:
-            # Read file content for analysis
-            try:
-                file_content = uploaded_file.read().decode('utf-8', errors='ignore')
-                uploaded_file.seek(0)  # Reset file pointer
-            except:
-                file_content = None
-            
-            # Detect file type
-            file_type_info = detect_mainframe_file_type(uploaded_file.name, file_content)
-            
-            # Calculate file hash for tracking
-            file_hash = hashlib.md5(uploaded_file.getvalue()).hexdigest()
-            
-            file_info = {
-                'name': uploaded_file.name,
-                'size': uploaded_file.size,
-                'type': file_type_info['type'],
-                'description': file_type_info['description'],
-                'agent': file_type_info['agent'],
-                'confidence': file_type_info['confidence'],
-                'hash': file_hash,
-                'content_preview': file_content[:200] + '...' if file_content and len(file_content) > 200 else file_content,
-                'upload_time': dt.now().isoformat()
-            }
-            
-            file_analysis.append(file_info)
-        
-        # Display file analysis
-        for i, file_info in enumerate(file_analysis):
-            with st.expander(f"📄 {file_info['name']} ({file_info['size']} bytes)", expanded=False):
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.markdown(f"**File Type:** {file_info['type'].upper()}")
-                    st.markdown(f"**Description:** {file_info['description']}")
-                
-                with col2:
-                    st.markdown(f"**Processing Agent:** {file_info['agent']}")
-                    st.markdown(f"**Detection Confidence:** {file_info['confidence']}")
-                
-                with col3:
-                    st.markdown(f"**File Size:** {file_info['size']:,} bytes")
-                    st.markdown(f"**File Hash:** {file_info['hash'][:8]}...")
-                
-                if file_info['content_preview']:
-                    st.markdown("**Content Preview:**")
-                    st.code(file_info['content_preview'], language='text')
-        
-        # Processing options
-        st.markdown("### ⚙️ Processing Options")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            auto_detect_types = st.checkbox("🔍 Auto-detect file types", value=True)
-        
-        with col2:
-            parallel_processing = st.checkbox("⚡ Parallel processing", value=True)
-        
-        with col3:
-            save_to_database = st.checkbox("💾 Save to database", value=True)
-        
-        # Processing button
-        if st.button("🚀 Process All Files", type="primary"):
-            process_mainframe_files(uploaded_files, file_analysis, {
-                'auto_detect_types': auto_detect_types,
-                'parallel_processing': parallel_processing,
-                'save_to_database': save_to_database
-            })
-    
-    # Show processing history
-    show_file_processing_history()
-
-def process_mainframe_files(uploaded_files, file_analysis, options):
-    """Process uploaded mainframe files"""
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    results_container = st.container()
-    
-    total_files = len(uploaded_files)
-    processed_files = 0
-    results = []
-    
-    for i, (uploaded_file, file_info) in enumerate(zip(uploaded_files, file_analysis)):
-        try:
-            status_text.text(f"Processing {file_info['name']} ({i+1}/{total_files})...")
-            
-            # Save file temporarily
-            temp_file_path = f"/tmp/{file_info['name']}"
-            with open(temp_file_path, 'wb') as f:
-                f.write(uploaded_file.getvalue())
-            
-            # Update agent usage tracking
-            agent_type = file_info['agent']
-            st.session_state.agent_status[agent_type]['total_calls'] += 1
-            st.session_state.agent_status[agent_type]['last_used'] = dt.now().isoformat()
-            
-            # Process with coordinator
-            start_time = time.time()
-            
-            if options['parallel_processing'] and total_files > 1:
-                # TODO: Implement actual parallel processing
-                result = safe_run_async(
-                    st.session_state.coordinator.process_batch_files(
-                        [temp_file_path], file_info['type']
-                    )
-                )
-            else:
-                # Sequential processing
-                result = safe_run_async(
-                    st.session_state.coordinator.process_batch_files(
-                        [temp_file_path], file_info['type']
-                    )
-                )
-            
-            processing_time = time.time() - start_time
-            
-            if result and not result.get('error'):
-                # Success
-                st.session_state.agent_status[agent_type]['status'] = 'available'
-                
-                processing_result = {
-                    'file_name': file_info['name'],
-                    'file_type': file_info['type'],
-                    'agent_used': agent_type,
-                    'status': 'success',
-                    'processing_time': processing_time,
-                    'result': result,
-                    'timestamp': dt.now().isoformat()
-                }
-                
-                # Add to processing history
-                st.session_state.processing_history.append(processing_result)
-                
-                results.append(processing_result)
-                
-                with results_container:
-                    st.success(f"✅ Successfully processed {file_info['name']} in {processing_time:.2f}s")
-            
-            else:
-                # Error
-                error_msg = result.get('error', 'Unknown error') if result else 'Processing failed'
-                st.session_state.agent_status[agent_type]['errors'] += 1
-                
-                processing_result = {
-                    'file_name': file_info['name'],
-                    'file_type': file_info['type'],
-                    'agent_used': agent_type,
-                    'status': 'error',
-                    'error': error_msg,
-                    'processing_time': processing_time,
-                    'timestamp': dt.now().isoformat()
-                }
-                
-                st.session_state.processing_history.append(processing_result)
-                results.append(processing_result)
-                
-                with results_container:
-                    st.error(f"❌ Failed to process {file_info['name']}: {error_msg}")
-            
-            # Clean up temp file
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-            
-            processed_files += 1
-            progress_bar.progress(processed_files / total_files)
-            
-        except Exception as e:
-            st.error(f"❌ Exception processing {file_info['name']}: {str(e)}")
-            st.session_state.agent_status[file_info['agent']]['errors'] += 1
-    
-    # Final summary
-    status_text.text("Processing complete!")
-    success_count = sum(1 for r in results if r['status'] == 'success')
-    error_count = len(results) - success_count
-    
-    st.success(f"🎉 Processing Summary: {success_count} successful, {error_count} errors")
-    
-    # Show detailed results
-    if results:
-        st.markdown("### 📊 Processing Results")
-        df_results = pd.DataFrame(results)
-        st.dataframe(df_results[['file_name', 'file_type', 'agent_used', 'status', 'processing_time']], 
-                    use_container_width=True)
-
-def show_file_processing_history():
-    """Show file processing history"""
-    if st.session_state.processing_history:
-        st.markdown("### 📈 Processing History")
-        
-        # Summary stats
-        col1, col2, col3, col4 = st.columns(4)
-        
-        total_processed = len(st.session_state.processing_history)
-        successful = sum(1 for h in st.session_state.processing_history if h['status'] == 'success')
-        failed = total_processed - successful
-        avg_time = sum(h.get('processing_time', 0) for h in st.session_state.processing_history) / total_processed if total_processed > 0 else 0
-        
-        with col1:
-            st.metric("Total Files", total_processed)
-        with col2:
-            st.metric("Successful", successful)
-        with col3:
-            st.metric("Failed", failed)
-        with col4:
-            st.metric("Avg Time", f"{avg_time:.2f}s")
-        
-        # Recent files
-        recent_files = st.session_state.processing_history[-10:]  # Last 10 files
-        
-        history_data = []
-        for h in recent_files:
-            history_data.append({
-                'File': h['file_name'],
-                'Type': h['file_type'].upper(),
-                'Agent': h['agent_used'],
-                'Status': '✅' if h['status'] == 'success' else '❌',
-                'Time': f"{h.get('processing_time', 0):.2f}s",
-                'Timestamp': h['timestamp'][:19].replace('T', ' ')
-            })
-        
-        if history_data:
-            df_history = pd.DataFrame(history_data)
-            st.dataframe(df_history, use_container_width=True)
-    else:
-        st.info("No files processed yet. Upload and process some mainframe files to see history here.")
-
-# ============================================================================
-# COMPREHENSIVE AGENT STATUS DISPLAY
-# ============================================================================
-
-def show_comprehensive_agent_status():
-    """Show comprehensive agent status and monitoring"""
-    st.markdown('<div class="sub-header">🤖 Agent Status & Monitoring</div>', unsafe_allow_html=True)
-    
-    # Get current agent status
-    agent_status = get_agent_status()
-    
-    # Overall agent health
-    available_agents = sum(1 for status in agent_status.values() if status['status'] == 'available')
-    total_agents = len(AGENT_TYPES)
-    error_agents = sum(1 for status in agent_status.values() if status['status'] == 'error')
-    
-    # Health indicator
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Total Agents", total_agents)
-    
-    with col2:
-        st.metric("Available", available_agents)
-        if available_agents == total_agents:
-            st.success("All agents operational")
-    
-    with col3:
-        st.metric("Errors", error_agents)
-        if error_agents > 0:
-            st.error(f"{error_agents} agents have errors")
-    
-    with col4:
-        total_calls = sum(status.get('total_calls', 0) for status in agent_status.values())
-        st.metric("Total Calls", total_calls)
-    
-    # Individual agent status
-    st.markdown("### 🔍 Individual Agent Status")
-    
-    # Create columns for agent cards
-    cols = st.columns(2)
-    
-    for i, (agent_type, status) in enumerate(agent_status.items()):
-        col = cols[i % 2]
-        
-        with col:
-            # Determine status color and icon
-            if status['status'] == 'available':
-                status_color = "status-healthy"
-                status_icon = "🟢"
-            elif status['status'] == 'error':
-                status_color = "status-error"
-                status_icon = "🔴"
-            elif status['status'] == 'unavailable':
-                status_color = "status-warning"
-                status_icon = "🟡"
-            else:
-                status_color = "status-unknown"
-                status_icon = "⚪"
-            
-            # Agent card
-            with st.container():
-                st.markdown(f'<div class="agent-status-card">', unsafe_allow_html=True)
-                
-                # Header
-                st.markdown(f"**{status_icon} {agent_type.replace('_', ' ').title()} Agent**")
-                st.markdown(f'<span class="{status_color}">Status: {status["status"].upper()}</span>', 
-                           unsafe_allow_html=True)
-                
-                # Metrics
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    st.markdown(f"**Calls:** {status.get('total_calls', 0)}")
-                    st.markdown(f"**Errors:** {status.get('errors', 0)}")
-                
-                with col_b:
-                    last_used = status.get('last_used')
-                    if last_used:
-                        last_used_str = last_used[:19].replace('T', ' ')
-                        st.markdown(f"**Last Used:** {last_used_str}")
-                    else:
-                        st.markdown("**Last Used:** Never")
-                    
-                    if 'agent_object' in status and status['agent_object']:
-                        st.markdown(f"**Type:** {status['agent_object']}")
-                
-                # Error message if any
-                if status['status'] == 'error' and 'error_message' in status:
-                    st.error(f"Error: {status['error_message']}")
-                
-                st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Agent usage analytics
-    st.markdown("### 📊 Agent Usage Analytics")
-    
-    if any(status.get('total_calls', 0) > 0 for status in agent_status.values()):
-        # Usage distribution chart
-        usage_data = []
-        for agent_type, status in agent_status.items():
-            usage_data.append({
-                'Agent': agent_type.replace('_', ' ').title(),
-                'Total Calls': status.get('total_calls', 0),
-                'Errors': status.get('errors', 0),
-                'Success Rate': ((status.get('total_calls', 0) - status.get('errors', 0)) / 
-                               max(status.get('total_calls', 1), 1) * 100)
-            })
-        
-        df_usage = pd.DataFrame(usage_data)
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Usage bar chart
-            fig_usage = px.bar(df_usage, x='Agent', y='Total Calls',
-                              title='Agent Usage Distribution',
-                              color='Total Calls',
-                              color_continuous_scale='Blues')
-            fig_usage.update_layout(height=400)
-            st.plotly_chart(fig_usage, use_container_width=True)
-        
-        with col2:
-            # Success rate chart
-            fig_success = px.bar(df_usage, x='Agent', y='Success Rate',
-                                title='Agent Success Rates (%)',
-                                color='Success Rate',
-                                color_continuous_scale='RdYlGn')
-            fig_success.update_layout(height=400)
-            st.plotly_chart(fig_success, use_container_width=True)
-    else:
-        st.info("No agent usage data available yet. Process some files to see analytics.")
-    
-    # Agent testing section
-    st.markdown("### 🧪 Agent Testing")
-    
-    with st.expander("Test Individual Agents", expanded=False):
-        test_agent = st.selectbox("Select Agent to Test", AGENT_TYPES)
-        test_operation = st.selectbox("Test Operation", [
-            "Health Check", "Simple Query", "File Processing Test"
-        ])
-        
-        if st.button(f"Test {test_agent.replace('_', ' ').title()} Agent"):
-            test_agent_functionality(test_agent, test_operation)
-
-def test_agent_functionality(agent_type: str, operation: str):
-    """Test individual agent functionality"""
-    if not st.session_state.coordinator:
-        st.error("Coordinator not available for testing")
-        return
-    
-    try:
-        with st.spinner(f"Testing {agent_type} agent..."):
-            start_time = time.time()
-            
-            # Get the agent
-            agent = st.session_state.coordinator.get_agent(agent_type)
-            
-            if not agent:
-                st.error(f"❌ {agent_type} agent not available")
-                return
-            
-            # Perform test based on operation
-            if operation == "Health Check":
-                # Simple health check
-                result = {"status": "healthy", "agent_type": agent_type}
-                test_time = time.time() - start_time
-                st.success(f"✅ {agent_type} agent is healthy (Response time: {test_time:.3f}s)")
-            
-            elif operation == "Simple Query":
-                # Simple query test
-                if agent_type == "chat_agent":
-                    result = safe_run_async(
-                        st.session_state.coordinator.process_chat_query("Test query")
-                    )
-                elif agent_type == "vector_index":
-                    result = safe_run_async(
-                        st.session_state.coordinator.search_code_patterns("test pattern", limit=1)
-                    )
-                else:
-                    result = {"status": "test_completed", "message": "Basic functionality test"}
-                
-                test_time = time.time() - start_time
-                
-                if result and not result.get('error'):
-                    st.success(f"✅ {agent_type} agent query test passed (Response time: {test_time:.3f}s)")
-                    if st.session_state.get('debug_mode', False):
-                        st.json(result)
-                else:
-                    st.error(f"❌ {agent_type} agent query test failed")
-                    if result:
-                        st.error(f"Error: {result.get('error', 'Unknown error')}")
-            
-            elif operation == "File Processing Test":
-                # Create a simple test file
-                test_content = """IDENTIFICATION DIVISION.
-PROGRAM-ID. TEST-PROGRAM.
-WORKING-STORAGE SECTION.
-01 TEST-VARIABLE PIC X(10) VALUE 'TEST'.
-PROCEDURE DIVISION.
-DISPLAY 'Hello World'.
-STOP RUN."""
-                
-                # Save test file
-                test_file_path = "/tmp/test_cobol.cbl"
-                with open(test_file_path, 'w') as f:
-                    f.write(test_content)
-                
-                # Process the test file
-                result = safe_run_async(
-                    st.session_state.coordinator.process_batch_files([test_file_path], "cobol")
-                )
-                
-                test_time = time.time() - start_time
-                
-                if result and not result.get('error'):
-                    st.success(f"✅ {agent_type} agent file processing test passed (Response time: {test_time:.3f}s)")
-                    st.info(f"Processed {result.get('files_processed', 0)} files")
-                else:
-                    st.error(f"❌ {agent_type} agent file processing test failed")
-                    if result:
-                        st.error(f"Error: {result.get('error', 'Unknown error')}")
-                
-                # Clean up
-                if os.path.exists(test_file_path):
-                    os.remove(test_file_path)
-            
-            # Update agent status
-            st.session_state.agent_status[agent_type]['last_used'] = dt.now().isoformat()
-            st.session_state.agent_status[agent_type]['total_calls'] += 1
-            
-    except Exception as e:
-        st.error(f"❌ Agent test failed: {str(e)}")
-        st.session_state.agent_status[agent_type]['errors'] += 1
-
-# ============================================================================
-# ENHANCED GPU MONITORING WITH REAL-TIME UPDATES
-# ============================================================================
-
-def show_enhanced_gpu_monitoring():
-    """Enhanced GPU monitoring with real-time updates"""
-    st.markdown('<div class="sub-header">🎮 Enhanced GPU Monitoring & Performance</div>', unsafe_allow_html=True)
-    
-    if not st.session_state.coordinator:
-        st.error("🔴 System not initialized. Please initialize in System Health tab.")
-        return
-    
-    # Real-time controls
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        auto_refresh = st.checkbox("🔄 Auto Refresh", 
-                                  value=st.session_state.get('auto_refresh_gpu', False),
-                                  help="Auto-refresh GPU metrics")
-        st.session_state.auto_refresh_gpu = auto_refresh
-    
-    with col2:
-        refresh_interval = st.selectbox("Refresh Interval", 
-                                       [5, 10, 30, 60], 
-                                       index=st.session_state.get('gpu_refresh_interval', 1),
-                                       help="Seconds between refreshes")
-        st.session_state.gpu_refresh_interval = refresh_interval
-    
-    with col3:
-        if st.button("🔄 Refresh Now", help="Manually refresh all GPU data"):
-            st.rerun()
-    
-    with col4:
-        if st.button("📊 Export Metrics", help="Export current metrics to CSV"):
-            export_gpu_metrics()
-    
-    # Get detailed server status
-    detailed_status = get_detailed_server_status()
-    
-    if not detailed_status:
-        st.warning("No GPU server data available")
-        return
-    
-    # Overall GPU system health
-    show_gpu_system_overview(detailed_status)
-    
-    # GPU monitoring tabs
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "📊 Real-time Metrics", 
-        "🎯 Performance Analysis", 
-        "🏥 Health Monitor",
-        "📈 Historical Trends"
-    ])
-    
-    with tab1:
-        show_realtime_gpu_metrics(detailed_status)
-    
-    with tab2:
-        show_gpu_performance_analysis(detailed_status)
-    
-    with tab3:
-        show_gpu_health_monitoring(detailed_status)
-    
-    with tab4:
-        show_gpu_historical_trends()
-    
-    # Auto-refresh logic
-    if auto_refresh:
-        st.info(f"🔄 Auto-refreshing every {refresh_interval} seconds")
-        time.sleep(1)  # Brief pause to show the message
-        st.rerun()
-
-def show_gpu_system_overview(detailed_status: Dict):
-    """Show GPU system overview"""
-    st.markdown("### 🌐 GPU System Overview")
-    
-    # Calculate system-wide metrics
-    total_gpus = 0
-    healthy_gpus = 0
-    total_gpu_utilization = 0
-    total_memory_usage = 0
-    total_active_requests = 0
-    total_requests = 0
-    
-    server_count = len(detailed_status)
-    healthy_servers = 0
-    
-    for server_name, stats in detailed_status.items():
-        if 'error' not in stats:
-            healthy_servers += 1
-            total_active_requests += stats.get('active_requests', 0)
-            total_requests += stats.get('total_requests', 0)
-            
-            gpu_info = stats.get('gpu_info', {})
-            total_gpus += len(gpu_info)
-            
-            for gpu_name, gpu_data in gpu_info.items():
-                if stats.get('status') == 'healthy':
-                    healthy_gpus += 1
-                
-                utilization = gpu_data.get('utilization', 0)
-                total_gpu_utilization += utilization
-                
-                memory_total = gpu_data.get('total_memory', 0)
-                memory_used = gpu_data.get('memory_cached', 0)
-                if memory_total > 0:
-                    memory_usage_percent = (memory_used / memory_total) * 100
-                    total_memory_usage += memory_usage_percent
-    
-    avg_gpu_utilization = total_gpu_utilization / max(total_gpus, 1)
-    avg_memory_usage = total_memory_usage / max(total_gpus, 1)
-    
-    # System health indicator
-    if healthy_servers == server_count and healthy_gpus == total_gpus:
-        st.success(f"🟢 All Systems Operational - {healthy_servers}/{server_count} servers, {healthy_gpus}/{total_gpus} GPUs healthy")
-    elif healthy_servers > 0:
-        st.warning(f"⚠️ Partial Service - {healthy_servers}/{server_count} servers, {healthy_gpus}/{total_gpus} GPUs healthy")
-    else:
-        st.error(f"🔴 Service Degraded - {healthy_servers}/{server_count} servers, {healthy_gpus}/{total_gpus} GPUs healthy")
-    
-    # System metrics
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
-    with col1:
-        st.metric("GPU Servers", f"{healthy_servers}/{server_count}")
-    
-    with col2:
-        st.metric("Total GPUs", f"{healthy_gpus}/{total_gpus}")
-    
-    with col3:
-        st.metric("Avg GPU Utilization", f"{avg_gpu_utilization:.1f}%")
-    
-    with col4:
-        st.metric("Avg Memory Usage", f"{avg_memory_usage:.1f}%")
-    
-    with col5:
-        st.metric("Active Requests", total_active_requests)
-
-def show_realtime_gpu_metrics(detailed_status: Dict):
-    """Show real-time GPU metrics"""
-    st.markdown("### 🔄 Real-Time GPU Metrics")
-    
-    # Create GPU metrics table
-    gpu_metrics = []
-    
-    for server_name, stats in detailed_status.items():
-        if 'error' in stats:
-            continue
-        
-        gpu_info = stats.get('gpu_info', {})
-        metrics_info = stats.get('metrics', {})
-        
-        for gpu_name, gpu_data in gpu_info.items():
-            gpu_metrics.append({
-                'Server': server_name,
-                'GPU': gpu_name,
-                'Model': gpu_data.get('name', 'Unknown'),
-                'Utilization (%)': f"{gpu_data.get('utilization', 0):.1f}",
-                'Memory Used (GB)': f"{gpu_data.get('memory_cached', 0) / (1024**3):.2f}",
-                'Memory Total (GB)': f"{gpu_data.get('total_memory', 0) / (1024**3):.2f}",
-                'Memory Usage (%)': f"{(gpu_data.get('memory_cached', 0) / max(gpu_data.get('total_memory', 1), 1)) * 100:.1f}",
-                'Active Requests': stats.get('active_requests', 0),
-                'RPS': f"{metrics_info.get('requests_per_second', 0):.2f}",
-                'Avg Latency (s)': f"{metrics_info.get('average_latency', 0):.3f}",
-                'Status': '🟢' if stats.get('status') == 'healthy' else '🔴'
-            })
-    
-    if gpu_metrics:
-        # Display metrics table
-        df_metrics = pd.DataFrame(gpu_metrics)
-        st.dataframe(df_metrics, use_container_width=True)
-        
-        # Real-time charts
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # GPU Utilization chart
-            fig_util = px.bar(df_metrics, x='Server', y='Utilization (%)',
-                             title='GPU Utilization by Server',
-                             color='Utilization (%)',
-                             color_continuous_scale='RdYlGn_r',
-                             text='Utilization (%)')
-            fig_util.update_traces(texttemplate='%{text}%', textposition='outside')
-            fig_util.update_layout(height=400)
-            st.plotly_chart(fig_util, use_container_width=True)
-        
-        with col2:
-            # Memory Usage chart
-            df_metrics['Memory Usage (%)'] = df_metrics['Memory Usage (%)'].astype(float)
-            fig_mem = px.bar(df_metrics, x='Server', y='Memory Usage (%)',
-                            title='GPU Memory Usage by Server',
-                            color='Memory Usage (%)',
-                            color_continuous_scale='RdYlBu_r',
-                            text='Memory Usage (%)')
-            fig_mem.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
-            fig_mem.update_layout(height=400)
-            st.plotly_chart(fig_mem, use_container_width=True)
-        
-        # Performance metrics
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Requests per second
-            df_metrics['RPS'] = df_metrics['RPS'].astype(float)
-            fig_rps = px.bar(df_metrics, x='Server', y='RPS',
-                            title='Requests Per Second by Server',
-                            color='RPS',
-                            color_continuous_scale='Blues')
-            fig_rps.update_layout(height=400)
-            st.plotly_chart(fig_rps, use_container_width=True)
-        
-        with col2:
-            # Average latency
-            df_metrics['Avg Latency (s)'] = df_metrics['Avg Latency (s)'].astype(float)
-            fig_latency = px.bar(df_metrics, x='Server', y='Avg Latency (s)',
-                                title='Average Latency by Server',
-                                color='Avg Latency (s)',
-                                color_continuous_scale='RdYlBu')
-            fig_latency.update_layout(height=400)
-            st.plotly_chart(fig_latency, use_container_width=True)
-    
-    else:
-        st.info("No GPU metrics available")
-
-def show_gpu_performance_analysis(detailed_status: Dict):
-    """Show GPU performance analysis"""
-    st.markdown("### 🎯 GPU Performance Analysis")
-    
-    # Performance recommendations
-    recommendations = analyze_gpu_performance(detailed_status)
-    
-    if recommendations:
-        st.markdown("#### 💡 Performance Recommendations")
-        
-        for rec in recommendations:
-            if rec['type'] == 'critical':
-                st.error(f"🚨 **{rec['server']}**: {rec['message']}")
-            elif rec['type'] == 'warning':
-                st.warning(f"⚠️ **{rec['server']}**: {rec['message']}")
-            elif rec['type'] == 'info':
-                st.info(f"ℹ️ **{rec['server']}**: {rec['message']}")
-            else:
-                st.success(f"✅ **{rec['server']}**: {rec['message']}")
-    
-    # Performance distribution analysis
-    performance_data = []
-    
-    for server_name, stats in detailed_status.items():
-        if 'error' not in stats:
-            gpu_info = stats.get('gpu_info', {})
-            metrics = stats.get('metrics', {})
-            
-            for gpu_name, gpu_data in gpu_info.items():
-                performance_data.append({
-                    'server': server_name,
-                    'gpu': gpu_name,
-                    'utilization': gpu_data.get('utilization', 0),
-                    'memory_percent': (gpu_data.get('memory_cached', 0) / 
-                                     max(gpu_data.get('total_memory', 1), 1)) * 100,
-                    'active_requests': stats.get('active_requests', 0),
-                    'rps': metrics.get('requests_per_second', 0),
-                    'latency': metrics.get('average_latency', 0),
-                    'efficiency': (gpu_data.get('utilization', 0) / 
-                                 max(stats.get('active_requests', 1), 1))
-                })
-    
-    if performance_data:
-        df_perf = pd.DataFrame(performance_data)
-        
-        # Performance correlation analysis
-        st.markdown("#### 📊 Performance Correlation Analysis")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Utilization vs Active Requests
-            fig_corr1 = px.scatter(df_perf, x='active_requests', y='utilization',
-                                  title='GPU Utilization vs Active Requests',
-                                  color='server',
-                                  size='rps',
-                                  hover_data=['gpu', 'latency'])
-            fig_corr1.update_layout(height=400)
-            st.plotly_chart(fig_corr1, use_container_width=True)
-        
-        with col2:
-            # Memory Usage vs Latency
-            fig_corr2 = px.scatter(df_perf, x='memory_percent', y='latency',
-                                  title='Memory Usage vs Latency',
-                                  color='server',
-                                  size='utilization',
-                                  hover_data=['gpu', 'rps'])
-            fig_corr2.update_layout(height=400)
-            st.plotly_chart(fig_corr2, use_container_width=True)
-        
-        # Efficiency analysis
-        st.markdown("#### ⚡ Efficiency Analysis")
-        
-        efficiency_stats = df_perf.groupby('server').agg({
-            'efficiency': 'mean',
-            'utilization': 'mean',
-            'memory_percent': 'mean',
-            'rps': 'sum',
-            'latency': 'mean'
-        }).round(2)
-        
-        st.dataframe(efficiency_stats, use_container_width=True)
-
-def analyze_gpu_performance(detailed_status: Dict) -> List[Dict]:
-    """Analyze GPU performance and generate recommendations"""
-    recommendations = []
-    
-    for server_name, stats in detailed_status.items():
-        if 'error' in stats:
-            recommendations.append({
-                'type': 'critical',
-                'server': server_name,
-                'message': f"Server error: {stats['error']}"
-            })
-            continue
-        
-        gpu_info = stats.get('gpu_info', {})
-        metrics = stats.get('metrics', {})
-        active_requests = stats.get('active_requests', 0)
-        
-        for gpu_name, gpu_data in gpu_info.items():
-            utilization = gpu_data.get('utilization', 0)
-            memory_total = gpu_data.get('total_memory', 0)
-            memory_used = gpu_data.get('memory_cached', 0)
-            memory_percent = (memory_used / memory_total * 100) if memory_total > 0 else 0
-            
-            # Critical issues
-            if memory_percent > 95:
-                recommendations.append({
-                    'type': 'critical',
-                    'server': f"{server_name} ({gpu_name})",
-                    'message': f"Critical memory usage: {memory_percent:.1f}% - Risk of OOM errors"
-                })
-            
-            # Warning issues
-            elif memory_percent > 85:
-                recommendations.append({
-                    'type': 'warning',
-                    'server': f"{server_name} ({gpu_name})",
-                    'message': f"High memory usage: {memory_percent:.1f}% - Monitor closely"
-                })
-            
-            if utilization > 95 and active_requests > 5:
-                recommendations.append({
-                    'type': 'warning',
-                    'server': f"{server_name} ({gpu_name})",
-                    'message': f"High utilization: {utilization:.1f}% with {active_requests} requests - Consider load balancing"
-                })
-            
-            # Performance optimizations
-            if utilization < 20 and active_requests > 0:
-                recommendations.append({
-                    'type': 'info',
-                    'server': f"{server_name} ({gpu_name})",
-                    'message': f"Low utilization: {utilization:.1f}% with active requests - Check for bottlenecks"
-                })
-            
-            # Good performance
-            if 30 <= utilization <= 80 and memory_percent < 70:
-                recommendations.append({
-                    'type': 'success',
-                    'server': f"{server_name} ({gpu_name})",
-                    'message': f"Optimal performance: {utilization:.1f}% utilization, {memory_percent:.1f}% memory"
-                })
-    
-    return recommendations
-
-def show_gpu_health_monitoring(detailed_status: Dict):
-    """Show GPU health monitoring"""
-    st.markdown("### 🏥 GPU Health Monitoring")
-    
-    # Health summary
-    total_gpus = 0
-    healthy_gpus = 0
-    warning_gpus = 0
-    critical_gpus = 0
-    
-    health_details = []
-    
-    for server_name, stats in detailed_status.items():
-        if 'error' in stats:
-            continue
-        
-        gpu_info = stats.get('gpu_info', {})
-        server_healthy = stats.get('status') == 'healthy'
-        
-        for gpu_name, gpu_data in gpu_info.items():
-            total_gpus += 1
-            
-            utilization = gpu_data.get('utilization', 0)
-            memory_total = gpu_data.get('total_memory', 0)
-            memory_used = gpu_data.get('memory_cached', 0)
-            memory_percent = (memory_used / memory_total * 100) if memory_total > 0 else 0
-            
-            # Determine health status
-            health_status = "healthy"
-            health_message = "Operating normally"
-            issues = []
-            
-            if memory_percent > 95:
-                health_status = "critical"
-                issues.append(f"Critical memory usage: {memory_percent:.1f}%")
-                critical_gpus += 1
-            elif memory_percent > 85:
-                health_status = "warning"
-                issues.append(f"High memory usage: {memory_percent:.1f}%")
-                warning_gpus += 1
-            elif utilization > 95:
-                health_status = "warning"
-                issues.append(f"Very high utilization: {utilization:.1f}%")
-                warning_gpus += 1
-            elif not server_healthy:
-                health_status = "warning"
-                issues.append("Server unhealthy")
-                warning_gpus += 1
-            else:
-                healthy_gpus += 1
-            
-            if issues:
-                health_message = "; ".join(issues)
-            
-            health_details.append({
-                'server': server_name,
-                'gpu': gpu_name,
-                'status': health_status,
-                'message': health_message,
-                'utilization': utilization,
-                'memory_percent': memory_percent,
-                'gpu_model': gpu_data.get('name', 'Unknown'),
-                'temperature': gpu_data.get('temperature', 'N/A'),
-                'power_usage': gpu_data.get('power_usage', 'N/A')
-            })
-    
-    # Health overview
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Total GPUs", total_gpus)
-    
-    with col2:
-        st.metric("Healthy", healthy_gpus)
-        if healthy_gpus == total_gpus:
-            st.success("All GPUs healthy")
-    
-    with col3:
-        st.metric("Warnings", warning_gpus)
-        if warning_gpus > 0:
-            st.warning(f"{warning_gpus} GPUs need attention")
-    
-    with col4:
-        st.metric("Critical", critical_gpus)
-        if critical_gpus > 0:
-            st.error(f"{critical_gpus} GPUs in critical state")
-    
-    # Detailed health status
-    st.markdown("#### 🔍 Detailed Health Status")
-    
-    for detail in health_details:
-        status_icon = "🚨" if detail['status'] == 'critical' else "⚠️" if detail['status'] == 'warning' else "✅"
-        
-        with st.expander(f"{status_icon} {detail['server']} ({detail['gpu']}) - {detail['gpu_model']}", 
-                        expanded=detail['status'] != 'healthy'):
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.markdown(f"**Status:** {detail['status'].upper()}")
-                st.markdown(f"**Message:** {detail['message']}")
-            
-            with col2:
-                st.markdown(f"**Utilization:** {detail['utilization']:.1f}%")
-                st.markdown(f"**Memory Usage:** {detail['memory_percent']:.1f}%")
-            
-            with col3:
-                st.markdown(f"**Temperature:** {detail['temperature']}")
-                st.markdown(f"**Power Usage:** {detail['power_usage']}")
-
-def show_gpu_historical_trends():
-    """Show GPU historical trends"""
-    st.markdown("### 📈 Historical GPU Trends")
-    
-    # For now, show placeholder for historical data
-    # In a real implementation, this would pull from a time-series database
-    
-    st.info("📊 Historical trend analysis will be implemented with time-series data collection")
-    
-    # Placeholder charts
-    import numpy as np
-    
-    # Generate sample historical data
-    dates = pd.date_range(start='2024-01-01', end='2024-12-31', freq='D')
-    sample_data = []
-    
-    for i, date in enumerate(dates):
-        sample_data.append({
-            'Date': date,
-            'GPU_Utilization': 50 + 30 * np.sin(i / 30) + np.random.normal(0, 5),
-            'Memory_Usage': 60 + 20 * np.cos(i / 45) + np.random.normal(0, 3),
-            'Requests_Per_Second': 100 + 50 * np.sin(i / 20) + np.random.normal(0, 10),
-            'Average_Latency': 0.5 + 0.3 * np.cos(i / 60) + np.random.normal(0, 0.05)
-        })
-    
-    df_historical = pd.DataFrame(sample_data)
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # GPU utilization trend
-        fig_util_trend = px.line(df_historical, x='Date', y='GPU_Utilization',
-                                title='GPU Utilization Trend (Sample Data)',
-                                labels={'GPU_Utilization': 'Utilization (%)'})
-        fig_util_trend.update_layout(height=300)
-        st.plotly_chart(fig_util_trend, use_container_width=True)
-        
-        # Requests per second trend
-        fig_rps_trend = px.line(df_historical, x='Date', y='Requests_Per_Second',
-                               title='Requests Per Second Trend (Sample Data)',
-                               labels={'Requests_Per_Second': 'RPS'})
-        fig_rps_trend.update_layout(height=300)
-        st.plotly_chart(fig_rps_trend, use_container_width=True)
-    
-    with col2:
-        # Memory usage trend
-        fig_mem_trend = px.line(df_historical, x='Date', y='Memory_Usage',
-                               title='Memory Usage Trend (Sample Data)',
-                               labels={'Memory_Usage': 'Memory Usage (%)'})
-        fig_mem_trend.update_layout(height=300)
-        st.plotly_chart(fig_mem_trend, use_container_width=True)
-        
-        # Latency trend
-        fig_latency_trend = px.line(df_historical, x='Date', y='Average_Latency',
-                                   title='Average Latency Trend (Sample Data)',
-                                   labels={'Average_Latency': 'Latency (s)'})
-        fig_latency_trend.update_layout(height=300)
-        st.plotly_chart(fig_latency_trend, use_container_width=True)
-
-def export_gpu_metrics():
-    """Export current GPU metrics to CSV"""
-    try:
-        detailed_status = get_detailed_server_status()
-        
-        if not detailed_status:
-            st.error("No GPU data to export")
-            return
-        
-        # Prepare export data
-        export_data = []
-        timestamp = dt.now().isoformat()
-        
-        for server_name, stats in detailed_status.items():
-            if 'error' not in stats:
-                gpu_info = stats.get('gpu_info', {})
-                metrics = stats.get('metrics', {})
-                
-                for gpu_name, gpu_data in gpu_info.items():
-                    export_data.append({
-                        'Timestamp': timestamp,
-                        'Server': server_name,
-                        'GPU': gpu_name,
-                        'GPU_Model': gpu_data.get('name', 'Unknown'),
-                        'Utilization_Percent': gpu_data.get('utilization', 0),
-                        'Memory_Used_GB': gpu_data.get('memory_cached', 0) / (1024**3),
-                        'Memory_Total_GB': gpu_data.get('total_memory', 0) / (1024**3),
-                        'Memory_Usage_Percent': (gpu_data.get('memory_cached', 0) / 
-                                               max(gpu_data.get('total_memory', 1), 1)) * 100,
-                        'Active_Requests': stats.get('active_requests', 0),
-                        'Total_Requests': stats.get('total_requests', 0),
-                        'Success_Rate': stats.get('success_rate', 0),
-                        'RPS': metrics.get('requests_per_second', 0),
-                        'Average_Latency': metrics.get('average_latency', 0),
-                        'Error_Rate': metrics.get('error_rate', 0),
-                        'Server_Status': stats.get('status', 'unknown'),
-                        'Uptime_Seconds': stats.get('uptime', 0)
-                    })
-        
-        if export_data:
-            df_export = pd.DataFrame(export_data)
-            csv_data = df_export.to_csv(index=False)
-            
-            st.download_button(
-                label="💾 Download GPU Metrics CSV",
-                data=csv_data,
-                file_name=f"gpu_metrics_{timestamp[:19].replace(':', '-')}.csv",
-                mime="text/csv"
-            )
-            st.success("✅ GPU metrics prepared for download")
-        else:
-            st.error("No data available for export")
-    
-    except Exception as e:
-        st.error(f"Failed to export metrics: {str(e)}")
-
-
-# ============================================================================
-# ENHANCED COORDINATOR INITIALIZATION AND MONITORING
-# ============================================================================
-
-async def init_api_coordinator():
-    """Enhanced coordinator initialization with comprehensive validation"""
+async def init_api_coordinator_single_gpu():
+    """Enhanced coordinator initialization optimized for single GPU"""
     if not COORDINATOR_AVAILABLE:
         return {"error": "API Coordinator module not available"}
     
     if st.session_state.coordinator is None:
         try:
-            with st.spinner("Initializing API coordinator..."):
-                # Create API coordinator with configured servers
+            with st.spinner("🔍 Detecting available GPU servers..."):
+                # Auto-detect servers if none configured
+                if not st.session_state.model_servers:
+                    detected_servers = detect_single_gpu_servers()
+                    
+                    if detected_servers:
+                        st.session_state.model_servers = detected_servers
+                        st.info(f"🎯 Auto-detected {len(detected_servers)} GPU server(s)")
+                    else:
+                        # Fallback to default localhost configuration
+                        st.session_state.model_servers = [{
+                            "name": "local_gpu_0",
+                            "endpoint": "http://localhost:8000",
+                            "gpu_id": 0,
+                            "max_concurrent_requests": 3,  # Conservative for single GPU
+                            "timeout": 300
+                        }]
+                        st.warning("⚠️ No servers detected, using default localhost:8000")
+                
+                # Create coordinator with single GPU optimizations
                 coordinator = create_api_coordinator_from_config(
                     model_servers=st.session_state.model_servers,
-                    load_balancing_strategy="least_busy"
+                    load_balancing_strategy="round_robin",  # Simple strategy for single GPU
+                    max_retries=2,  # Fewer retries for faster response
+                    connection_pool_size=10,  # Smaller pool for single GPU
+                    request_timeout=120  # Shorter timeout for responsiveness
                 )
                 
-                # Initialize the coordinator
+                # Initialize with validation
                 await coordinator.initialize()
                 
-                # Comprehensive validation
-                validation_results = await validate_coordinator_setup(coordinator)
+                # Quick validation for single GPU setup
+                validation_results = await validate_single_gpu_setup(coordinator)
                 
-                if validation_results['overall_success']:
+                if validation_results['success']:
                     st.session_state.coordinator = coordinator
                     st.session_state.initialization_status = "completed"
                     
-                    # Initialize agent status tracking
+                    # Initialize agent status
                     for agent_type in AGENT_TYPES:
                         try:
                             agent = coordinator.get_agent(agent_type)
@@ -1635,8 +375,8 @@ async def init_api_coordinator():
                     
                     return {"success": True, "validation": validation_results}
                 else:
-                    st.session_state.initialization_status = f"validation_failed: {validation_results['summary']}"
-                    return {"error": f"Validation failed: {validation_results['summary']}"}
+                    st.session_state.initialization_status = f"validation_failed: {validation_results['message']}"
+                    return {"error": f"Validation failed: {validation_results['message']}"}
         
         except Exception as e:
             st.session_state.initialization_status = f"error: {str(e)}"
@@ -1644,830 +384,2558 @@ async def init_api_coordinator():
     
     return {"success": True, "message": "Coordinator already initialized"}
 
-async def validate_coordinator_setup(coordinator) -> Dict[str, Any]:
-    """Comprehensive validation of coordinator setup"""
-    validation_results = {
-        'server_validation': [],
-        'agent_validation': [],
-        'gpu_validation': [],
-        'overall_success': True,
-        'summary': ''
-    }
-    
+async def validate_single_gpu_setup(coordinator) -> Dict[str, Any]:
+    """Validate single GPU coordinator setup"""
     try:
-        # Validate servers
-        for server_config in st.session_state.model_servers:
-            server_result = validate_server_endpoint(server_config['endpoint'])
-            server_result['server_name'] = server_config['name']
-            validation_results['server_validation'].append(server_result)
+        # Check coordinator health
+        health = coordinator.get_health_status()
+        available_servers = health.get('available_servers', 0)
+        
+        if available_servers > 0:
+            # Test a simple API call
+            test_result = await coordinator.call_model_api(
+                "Test prompt for validation", 
+                {"max_tokens": 10, "temperature": 0.1}
+            )
             
-            if not server_result['accessible']:
-                validation_results['overall_success'] = False
-        
-        # Validate agents
-        for agent_type in AGENT_TYPES:
-            try:
-                agent = coordinator.get_agent(agent_type)
-                if agent:
-                    validation_results['agent_validation'].append({
-                        'agent_type': agent_type,
-                        'status': 'available',
-                        'class': type(agent).__name__
-                    })
-                else:
-                    validation_results['agent_validation'].append({
-                        'agent_type': agent_type,
-                        'status': 'unavailable',
-                        'error': 'Agent creation failed'
-                    })
-                    validation_results['overall_success'] = False
-            except Exception as e:
-                validation_results['agent_validation'].append({
-                    'agent_type': agent_type,
-                    'status': 'error',
-                    'error': str(e)
-                })
-                validation_results['overall_success'] = False
-        
-        # Validate GPU access
-        health_status = coordinator.get_health_status()
-        available_servers = health_status.get('available_servers', 0)
-        total_servers = health_status.get('total_servers', 0)
-        
-        validation_results['gpu_validation'] = {
-            'available_servers': available_servers,
-            'total_servers': total_servers,
-            'server_stats': health_status.get('server_stats', {}),
-            'success': available_servers > 0
-        }
-        
-        if available_servers == 0:
-            validation_results['overall_success'] = False
-        
-        # Generate summary
-        if validation_results['overall_success']:
-            validation_results['summary'] = f"All systems operational: {available_servers}/{total_servers} servers, {len([a for a in validation_results['agent_validation'] if a['status'] == 'available'])}/{len(AGENT_TYPES)} agents"
+            if test_result and not test_result.get('error'):
+                return {
+                    'success': True,
+                    'message': f'Single GPU setup validated successfully with {available_servers} server(s)',
+                    'servers': available_servers,
+                    'test_result': test_result
+                }
+            else:
+                return {
+                    'success': False,
+                    'message': 'API test call failed',
+                    'servers': available_servers
+                }
         else:
-            issues = []
-            if available_servers == 0:
-                issues.append("No GPU servers available")
-            
-            failed_agents = len([a for a in validation_results['agent_validation'] if a['status'] != 'available'])
-            if failed_agents > 0:
-                issues.append(f"{failed_agents} agent(s) failed")
-            
-            failed_servers = len([s for s in validation_results['server_validation'] if not s['accessible']])
-            if failed_servers > 0:
-                issues.append(f"{failed_servers} server(s) unreachable")
-            
-            validation_results['summary'] = "; ".join(issues)
-        
-        return validation_results
+            return {
+                'success': False,
+                'message': 'No GPU servers available',
+                'servers': 0
+            }
     
     except Exception as e:
-        validation_results['overall_success'] = False
-        validation_results['summary'] = f"Validation error: {str(e)}"
-        return validation_results
+        return {
+            'success': False,
+            'message': f'Validation error: {str(e)}',
+            'servers': 0
+        }
 
-# ============================================================================
-# ENHANCED SYSTEM HEALTH WITH COMPREHENSIVE MONITORING
-# ============================================================================
-
-def show_enhanced_system_health():
-    """Enhanced system health page with comprehensive monitoring"""
-    st.markdown('<div class="sub-header">⚙️ System Health & Comprehensive Monitoring</div>', unsafe_allow_html=True)
+def show_initialization_interface():
+    """Show initialization interface optimized for single GPU"""
+    st.markdown('<div class="sub-header">🚀 System Initialization</div>', unsafe_allow_html=True)
     
     if not COORDINATOR_AVAILABLE:
-        st.error("🔴 System Status: API Coordinator Not Available")
-        st.markdown("### Import Error Details")
+        st.error("🔴 API Coordinator module not available")
         st.code(st.session_state.get('import_error', 'Unknown import error'))
-        st.info("Please ensure the api_opulence_coordinator module is properly installed and configured.")
         return
     
-    # System overview
-    show_system_overview()
+    # Initialization status
+    status = st.session_state.initialization_status
     
-    st.markdown("---")
-    
-    # Server configuration
-    configure_enhanced_model_servers()
-    
-    st.markdown("---")
-    
-    # Coordinator management
-    show_coordinator_management()
-    
-    st.markdown("---")
-    
-    # Comprehensive status display
-    if st.session_state.coordinator:
-        show_comprehensive_system_status()
-
-def show_system_overview():
-    """Show system overview with health indicators"""
-    st.markdown("### 🌐 System Overview")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        # Coordinator status
-        if st.session_state.coordinator:
-            st.success("🟢 Coordinator: Active")
-        else:
-            st.error("🔴 Coordinator: Inactive")
-    
-    with col2:
-        # Server status
-        if st.session_state.model_servers:
-            server_count = len(st.session_state.model_servers)
-            st.info(f"🖥️ Servers: {server_count} configured")
-        else:
-            st.warning("⚠️ Servers: None configured")
-    
-    with col3:
-        # Agent status
-        if st.session_state.coordinator:
-            available_agents = sum(1 for status in st.session_state.agent_status.values() 
-                                 if status['status'] == 'available')
-            st.info(f"🤖 Agents: {available_agents}/{len(AGENT_TYPES)} available")
-        else:
-            st.warning("⚠️ Agents: Not initialized")
-    
-    with col4:
-        # Processing status
-        total_processed = len(st.session_state.processing_history)
-        if total_processed > 0:
-            successful = sum(1 for h in st.session_state.processing_history if h['status'] == 'success')
-            success_rate = (successful / total_processed) * 100
-            st.info(f"📊 Processing: {success_rate:.1f}% success rate")
-        else:
-            st.info("📊 Processing: No history")
-
-def configure_enhanced_model_servers():
-    """Enhanced model server configuration"""
-    st.markdown("### 🌐 Model Server Configuration")
-    
-    # Server configuration form
-    with st.form("enhanced_server_config"):
-        st.markdown("#### Add/Edit GPU Model Server")
+    if status == 'not_started':
+        st.info("🟡 System not initialized")
         
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         
         with col1:
-            server_name = st.text_input("Server Name", value="gpu_server_1", 
-                                      help="Unique identifier for this server")
-            endpoint = st.text_input("Endpoint URL", value="http://localhost:8000",
-                                   help="Full URL including protocol and port")
+            if st.button("🚀 Auto-Initialize (Recommended)", type="primary", use_container_width=True):
+                with st.spinner("Initializing system..."):
+                    result = safe_run_async(init_api_coordinator_single_gpu())
+                    
+                    if result and result.get('success'):
+                        st.success("✅ System initialized successfully!")
+                        st.rerun()
+                    else:
+                        error_msg = result.get('error') if result else "Unknown error"
+                        st.error(f"❌ Initialization failed: {error_msg}")
         
         with col2:
-            gpu_id = st.number_input("GPU ID", min_value=0, value=0,
-                                   help="GPU identifier on the server")
-            max_requests = st.number_input("Max Concurrent Requests", min_value=1, value=10,
-                                         help="Maximum concurrent requests")
+            if st.button("⚙️ Manual Configuration", use_container_width=True):
+                st.session_state.show_manual_config = True
         
-        with col3:
-            timeout = st.number_input("Timeout (seconds)", min_value=30, value=300,
-                                    help="Request timeout in seconds")
-            
-            # Server validation options
-            test_connection = st.checkbox("🔍 Test connection", value=True)
-            get_detailed_info = st.checkbox("📊 Get detailed server info", value=True)
-        
-        if st.form_submit_button("➕ Add/Update Server", type="primary"):
-            add_or_update_server(server_name, endpoint, gpu_id, max_requests, timeout, 
-                                test_connection, get_detailed_info)
+        # Manual configuration
+        if st.session_state.get('show_manual_config', False):
+            show_manual_server_configuration()
     
-    # Current servers display with enhanced information
-    show_current_servers()
-
-def add_or_update_server(server_name, endpoint, gpu_id, max_requests, timeout, 
-                        test_connection, get_detailed_info):
-    """Add or update a server with comprehensive validation"""
-    new_server = {
-        "name": server_name,
-        "endpoint": endpoint,
-        "gpu_id": gpu_id,
-        "max_concurrent_requests": max_requests,
-        "timeout": timeout
-    }
-    
-    # Test connection if requested
-    if test_connection:
-        with st.spinner(f"Testing connection to {server_name}..."):
-            validation_result = validate_server_endpoint(endpoint, timeout=10)
-            
-            if validation_result['accessible']:
-                st.success(f"✅ Connection to {server_name} successful")
-                st.info(f"⏱️ Response time: {validation_result['response_time']:.3f}s")
-                
-                # Get detailed server information
-                if get_detailed_info and validation_result['detailed_status']:
-                    status_data = validation_result['detailed_status']
-                    
-                    with st.expander("📊 Server Details", expanded=True):
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.markdown(f"**Model:** {status_data.get('model', 'Unknown')}")
-                            st.markdown(f"**Active Requests:** {status_data.get('active_requests', 0)}")
-                            st.markdown(f"**Total Requests:** {status_data.get('total_requests', 0)}")
-                        
-                        with col2:
-                            st.markdown(f"**Uptime:** {status_data.get('uptime', 0):.0f}s")
-                            gpu_count = len(status_data.get('gpu_info', {}))
-                            st.markdown(f"**GPUs:** {gpu_count}")
-                            
-                            if gpu_count > 0:
-                                st.markdown("**GPU Models:**")
-                                for gpu_name, gpu_data in status_data.get('gpu_info', {}).items():
-                                    st.markdown(f"- {gpu_data.get('name', 'Unknown')}")
-                
-                # Add server to configuration
-                existing_names = [s.get('name', '') for s in st.session_state.model_servers]
-                if server_name in existing_names:
-                    # Update existing server
-                    for i, server in enumerate(st.session_state.model_servers):
-                        if server.get('name') == server_name:
-                            st.session_state.model_servers[i] = new_server
-                            break
-                    st.success(f"🔄 Updated server: {server_name}")
-                else:
-                    # Add new server
-                    st.session_state.model_servers.append(new_server)
-                    st.success(f"➕ Added new server: {server_name}")
-                
-                st.rerun()
-            
-            else:
-                st.error(f"❌ Connection failed: {validation_result['message']}")
-                
-                # Still allow adding the server
-                if st.button("Add Server Anyway"):
-                    existing_names = [s.get('name', '') for s in st.session_state.model_servers]
-                    if server_name in existing_names:
-                        for i, server in enumerate(st.session_state.model_servers):
-                            if server.get('name') == server_name:
-                                st.session_state.model_servers[i] = new_server
-                                break
-                        st.warning(f"⚠️ Updated server (not validated): {server_name}")
-                    else:
-                        st.session_state.model_servers.append(new_server)
-                        st.warning(f"⚠️ Added server (not validated): {server_name}")
-                    st.rerun()
-    else:
-        # Add without testing
-        existing_names = [s.get('name', '') for s in st.session_state.model_servers]
-        if server_name in existing_names:
-            for i, server in enumerate(st.session_state.model_servers):
-                if server.get('name') == server_name:
-                    st.session_state.model_servers[i] = new_server
-                    break
-            st.success(f"🔄 Updated server: {server_name}")
-        else:
-            st.session_state.model_servers.append(new_server)
-            st.success(f"➕ Added new server: {server_name}")
-        st.rerun()
-
-def show_current_servers():
-    """Show current servers with enhanced information"""
-    st.markdown("#### 🖥️ Current Servers")
-    
-    if st.session_state.model_servers:
-        for i, server in enumerate(st.session_state.model_servers):
-            with st.expander(f"🖥️ {server.get('name', f'Server {i+1}')}", expanded=False):
-                
-                # Server details
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown(f"**Endpoint:** {server.get('endpoint', 'N/A')}")
-                    st.markdown(f"**GPU ID:** {server.get('gpu_id', 'N/A')}")
-                    st.markdown(f"**Max Requests:** {server.get('max_concurrent_requests', 'N/A')}")
-                
-                with col2:
-                    st.markdown(f"**Timeout:** {server.get('timeout', 'N/A')}s")
-                    
-                    # Real-time status check
-                    if st.button(f"🔄 Check Status", key=f"status_{i}"):
-                        check_server_real_time_status(server)
-                
-                # Action buttons
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    if st.button(f"🔍 Test Connection", key=f"test_{i}"):
-                        test_server_connection(server)
-                
-                with col2:
-                    if st.button(f"🎮 GPU Details", key=f"gpu_{i}"):
-                        show_server_gpu_details(server)
-                
-                with col3:
-                    if st.button(f"📊 Metrics", key=f"metrics_{i}"):
-                        show_server_metrics(server)
-                
-                with col4:
-                    if st.button(f"🗑️ Remove", key=f"remove_{i}", type="secondary"):
-                        st.session_state.model_servers.pop(i)
-                        st.success(f"Removed server: {server.get('name')}")
-                        st.rerun()
-    else:
-        st.info("📝 No servers configured. Add servers above to get started.")
-        
-        # Quick setup button
-        if st.button("⚡ Quick Setup (Localhost)", type="primary"):
-            default_servers = [
-                {
-                    "name": "local_gpu_0",
-                    "endpoint": "http://localhost:8000",
-                    "gpu_id": 0,
-                    "max_concurrent_requests": 10,
-                    "timeout": 300
-                },
-                {
-                    "name": "local_gpu_1", 
-                    "endpoint": "http://localhost:8001",
-                    "gpu_id": 1,
-                    "max_concurrent_requests": 10,
-                    "timeout": 300
-                }
-            ]
-            st.session_state.model_servers.extend(default_servers)
-            st.success("Added default localhost servers")
-            st.rerun()
-
-def test_server_connection(server):
-    """Test server connection with detailed results"""
-    with st.spinner(f"Testing {server['name']}..."):
-        result = validate_server_endpoint(server['endpoint'])
-        
-        if result['accessible']:
-            st.success(f"✅ {server['name']}: {result['message']}")
-            st.info(f"⏱️ Response time: {result['response_time']:.3f}s")
-        else:
-            st.error(f"❌ {server['name']}: {result['message']}")
-
-def show_server_gpu_details(server):
-    """Show detailed GPU information for a server"""
-    try:
-        with st.spinner(f"Getting GPU details from {server['name']}..."):
-            response = requests.get(f"{server['endpoint']}/status", timeout=10)
-            
-            if response.status_code == 200:
-                status_data = response.json()
-                gpu_info = status_data.get('gpu_info', {})
-                
-                if gpu_info:
-                    st.success(f"📊 GPU Details for {server['name']}:")
-                    
-                    for gpu_name, gpu_data in gpu_info.items():
-                        with st.container():
-                            st.markdown(f"**{gpu_name}**")
-                            
-                            col1, col2, col3 = st.columns(3)
-                            
-                            with col1:
-                                st.markdown(f"- Model: {gpu_data.get('name', 'Unknown')}")
-                                st.markdown(f"- Compute: {gpu_data.get('compute_capability', 'Unknown')}")
-                            
-                            with col2:
-                                total_mem = gpu_data.get('total_memory', 0) / (1024**3)
-                                used_mem = gpu_data.get('memory_cached', 0) / (1024**3)
-                                st.markdown(f"- Total Memory: {total_mem:.1f} GB")
-                                st.markdown(f"- Used Memory: {used_mem:.1f} GB")
-                            
-                            with col3:
-                                utilization = gpu_data.get('utilization', 0)
-                                st.markdown(f"- Utilization: {utilization:.1f}%")
-                                
-                                if total_mem > 0:
-                                    usage_percent = (used_mem / total_mem) * 100
-                                    st.markdown(f"- Memory Usage: {usage_percent:.1f}%")
-                else:
-                    st.warning("No GPU information available")
-            else:
-                st.error(f"HTTP {response.status_code}: Unable to get GPU details")
-    
-    except Exception as e:
-        st.error(f"Error getting GPU details: {str(e)}")
-
-def show_server_metrics(server):
-    """Show server performance metrics"""
-    try:
-        with st.spinner(f"Getting metrics from {server['name']}..."):
-            response = requests.get(f"{server['endpoint']}/metrics", timeout=10)
-            
-            if response.status_code == 200:
-                metrics_data = response.json()
-                
-                st.success(f"📈 Performance Metrics for {server['name']}:")
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.metric("Requests/Second", f"{metrics_data.get('requests_per_second', 0):.2f}")
-                    st.metric("Average Latency", f"{metrics_data.get('average_latency', 0):.3f}s")
-                    st.metric("GPU Utilization", f"{metrics_data.get('gpu_utilization', 0):.1f}%")
-                
-                with col2:
-                    st.metric("Memory Usage", f"{metrics_data.get('memory_usage', 0):.1f}%")
-                    st.metric("Active Connections", metrics_data.get('active_connections', 0))
-                    st.metric("Error Rate", f"{metrics_data.get('error_rate', 0):.2f}%")
-            else:
-                st.error(f"HTTP {response.status_code}: Unable to get metrics")
-    
-    except Exception as e:
-        st.error(f"Error getting metrics: {str(e)}")
-
-def check_server_real_time_status(server):
-    """Check real-time server status"""
-    try:
-        with st.spinner("Checking status..."):
-            # Health check
-            health_response = requests.get(f"{server['endpoint']}/health", timeout=5)
-            
-            if health_response.status_code == 200:
-                health_data = health_response.json()
-                st.success(f"🟢 {server['name']} is healthy")
-                st.info(f"Uptime: {health_data.get('uptime', 0):.0f}s")
-                
-                # Get detailed status
-                status_response = requests.get(f"{server['endpoint']}/status", timeout=5)
-                if status_response.status_code == 200:
-                    status_data = status_response.json()
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.markdown(f"**Model:** {status_data.get('model', 'Unknown')}")
-                        st.markdown(f"**Active Requests:** {status_data.get('active_requests', 0)}")
-                    
-                    with col2:
-                        st.markdown(f"**Total Requests:** {status_data.get('total_requests', 0)}")
-                        gpu_count = len(status_data.get('gpu_info', {}))
-                        st.markdown(f"**GPUs Available:** {gpu_count}")
-            else:
-                st.error(f"🔴 {server['name']} health check failed: HTTP {health_response.status_code}")
-    
-    except Exception as e:
-        st.error(f"🔴 {server['name']} is unreachable: {str(e)}")
-
-def show_coordinator_management():
-    """Show coordinator management interface"""
-    st.markdown("### 🤖 Coordinator Management")
-    
-    if not st.session_state.coordinator:
-        st.warning("🟡 Coordinator Status: Not Initialized")
-        
-        if st.button("🚀 Initialize Coordinator", type="primary"):
-            with st.spinner("Initializing coordinator system..."):
-                result = safe_run_async(init_api_coordinator())
-                
-                if result and result.get('success'):
-                    st.success("✅ Coordinator initialized successfully")
-                    
-                    # Show validation results
-                    validation = result.get('validation', {})
-                    if validation:
-                        with st.expander("📊 Initialization Validation Results", expanded=True):
-                            
-                            # Server validation
-                            st.markdown("**Server Validation:**")
-                            for server_val in validation.get('server_validation', []):
-                                status_icon = "✅" if server_val['accessible'] else "❌"
-                                st.markdown(f"{status_icon} {server_val['server_name']}: {server_val['message']}")
-                            
-                            # Agent validation  
-                            st.markdown("**Agent Validation:**")
-                            for agent_val in validation.get('agent_validation', []):
-                                status_icon = "✅" if agent_val['status'] == 'available' else "❌"
-                                st.markdown(f"{status_icon} {agent_val['agent_type']}: {agent_val['status']}")
-                            
-                            # GPU validation
-                            gpu_val = validation.get('gpu_validation', {})
-                            if gpu_val:
-                                st.markdown(f"**GPU Validation:** {gpu_val['available_servers']}/{gpu_val['total_servers']} servers available")
-                    
-                    st.rerun()
-                else:
-                    error_msg = result.get('error') if result else "Unknown error"
-                    st.error(f"❌ Initialization failed: {error_msg}")
-    else:
-        st.success("🟢 Coordinator Status: Active")
+    elif status == 'completed':
+        st.success("🟢 System initialized and ready")
         
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("🔄 Restart Coordinator"):
+            if st.button("🔄 Restart System"):
                 restart_coordinator()
         
         with col2:
-            if st.button("🧹 Cleanup Resources"):
-                cleanup_coordinator_resources()
+            if st.button("🏥 Health Check"):
+                run_health_check()
         
         with col3:
-            if st.button("📊 Health Check"):
-                run_comprehensive_health_check()
+            if st.button("📊 System Status"):
+                st.session_state.show_system_status = True
+        
+        # Show system status if requested
+        if st.session_state.get('show_system_status', False):
+            show_system_status_summary()
+    
+    else:
+        # Error or other status
+        st.error(f"🔴 System Status: {status}")
+        
+        if st.button("🔄 Retry Initialization"):
+            st.session_state.initialization_status = 'not_started'
+            st.rerun()
+
+def show_manual_server_configuration():
+    """Show manual server configuration for single GPU"""
+    st.markdown("#### ⚙️ Manual Server Configuration")
+    
+    with st.form("manual_server_config"):
+        st.markdown("Configure your GPU server endpoint:")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            endpoint = st.text_input("Server Endpoint", value="http://localhost:8000")
+            gpu_id = st.number_input("GPU ID", min_value=0, value=0)
+        
+        with col2:
+            server_name = st.text_input("Server Name", value="my_gpu_server")
+            max_requests = st.number_input("Max Concurrent Requests", min_value=1, value=3)
+        
+        test_connection = st.checkbox("Test connection before adding", value=True)
+        
+        if st.form_submit_button("Add Server"):
+            if test_connection:
+                with st.spinner("Testing connection..."):
+                    result = validate_server_endpoint(endpoint)
+                    
+                    if result['accessible']:
+                        st.success(f"✅ Connection successful: {result['message']}")
+                        add_server_to_config(server_name, endpoint, gpu_id, max_requests)
+                    else:
+                        st.error(f"❌ Connection failed: {result['message']}")
+            else:
+                add_server_to_config(server_name, endpoint, gpu_id, max_requests)
+
+def add_server_to_config(name: str, endpoint: str, gpu_id: int, max_requests: int):
+    """Add server to configuration"""
+    new_server = {
+        "name": name,
+        "endpoint": endpoint,
+        "gpu_id": gpu_id,
+        "max_concurrent_requests": max_requests,
+        "timeout": 300
+    }
+    
+    st.session_state.model_servers.append(new_server)
+    st.success(f"✅ Added server: {name}")
 
 def restart_coordinator():
     """Restart the coordinator"""
-    with st.spinner("Restarting coordinator..."):
-        try:
-            # Cleanup existing coordinator
-            if st.session_state.coordinator:
-                st.session_state.coordinator.cleanup()
-            
-            # Reset coordinator state
-            st.session_state.coordinator = None
-            st.session_state.initialization_status = 'not_started'
-            
-            # Reset agent status
-            for agent_type in AGENT_TYPES:
-                st.session_state.agent_status[agent_type] = {
-                    'status': 'unknown', 
-                    'last_used': None, 
-                    'total_calls': 0, 
-                    'errors': 0
-                }
-            
-            # Re-initialize
-            result = safe_run_async(init_api_coordinator())
-            
-            if result and result.get('success'):
-                st.success("✅ Coordinator restarted successfully")
-            else:
-                st.error(f"❌ Restart failed: {result.get('error') if result else 'Unknown error'}")
-            
-            st.rerun()
-            
-        except Exception as e:
-            st.error(f"❌ Restart failed: {str(e)}")
+    try:
+        if st.session_state.coordinator:
+            st.session_state.coordinator.cleanup()
+        
+        st.session_state.coordinator = None
+        st.session_state.initialization_status = 'not_started'
+        
+        # Reset agent status
+        for agent_type in AGENT_TYPES:
+            st.session_state.agent_status[agent_type] = {
+                'status': 'unknown', 
+                'last_used': None, 
+                'total_calls': 0, 
+                'errors': 0
+            }
+        
+        st.success("✅ System restarted successfully")
+        st.rerun()
+        
+    except Exception as e:
+        st.error(f"❌ Restart failed: {str(e)}")
 
-def cleanup_coordinator_resources():
-    """Cleanup coordinator resources"""
-    with st.spinner("Cleaning up resources..."):
-        try:
-            if st.session_state.coordinator:
-                st.session_state.coordinator.cleanup()
-                st.success("✅ Resources cleaned up successfully")
-            else:
-                st.info("No active coordinator to clean up")
-        except Exception as e:
-            st.error(f"❌ Cleanup failed: {str(e)}")
-
-def run_comprehensive_health_check():
+def run_health_check():
     """Run comprehensive health check"""
-    with st.spinner("Running comprehensive health check..."):
-        try:
-            if not st.session_state.coordinator:
-                st.error("❌ No coordinator available for health check")
-                return
-            
-            # Get coordinator health
-            health = st.session_state.coordinator.get_health_status()
-            
-            st.markdown("### 🏥 Health Check Results")
-            
-            # Overall status
-            overall_status = health.get('status', 'unknown')
-            if overall_status == 'healthy':
-                st.success(f"🟢 Overall Status: {overall_status.upper()}")
-            else:
-                st.error(f"🔴 Overall Status: {overall_status.upper()}")
-            
-            # Server health
-            server_stats = health.get('server_stats', {})
-            available_servers = health.get('available_servers', 0)
-            total_servers = health.get('total_servers', 0)
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric("Available Servers", f"{available_servers}/{total_servers}")
-            
-            with col2:
-                active_agents = health.get('active_agents', 0)
-                st.metric("Active Agents", active_agents)
-            
-            with col3:
-                uptime = health.get('uptime_seconds', 0)
-                st.metric("Uptime", f"{uptime:.0f}s")
-            
-            # Detailed server status
-            if server_stats:
-                st.markdown("#### 🖥️ Server Details")
-                
-                for server_name, stats in server_stats.items():
-                    status_icon = "🟢" if stats.get('available', False) else "🔴"
-                    
-                    with st.expander(f"{status_icon} {server_name}", expanded=False):
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.markdown(f"**Status:** {stats.get('status', 'unknown')}")
-                            st.markdown(f"**Active Requests:** {stats.get('active_requests', 0)}")
-                            st.markdown(f"**Total Requests:** {stats.get('total_requests', 0)}")
-                        
-                        with col2:
-                            success_rate = stats.get('success_rate', 0)
-                            st.markdown(f"**Success Rate:** {success_rate:.1f}%")
-                            avg_latency = stats.get('average_latency', 0)
-                            st.markdown(f"**Avg Latency:** {avg_latency:.3f}s")
-                            st.markdown(f"**Available:** {'Yes' if stats.get('available', False) else 'No'}")
-            
-            # Agent health
-            agent_status = get_agent_status()
-            available_agents = sum(1 for status in agent_status.values() if status['status'] == 'available')
-            
-            st.markdown("#### 🤖 Agent Health")
-            st.info(f"Agent Status: {available_agents}/{len(AGENT_TYPES)} agents available")
-            
-            for agent_type, status in agent_status.items():
-                status_icon = "🟢" if status['status'] == 'available' else "🔴" if status['status'] == 'error' else "🟡"
-                st.markdown(f"{status_icon} **{agent_type}**: {status['status']}")
-            
-        except Exception as e:
-            st.error(f"❌ Health check failed: {str(e)}")
-
-def show_comprehensive_system_status():
-    """Show comprehensive system status"""
     if not st.session_state.coordinator:
+        st.error("❌ No coordinator available")
         return
     
-    st.markdown("### 📊 Comprehensive System Status")
-    
-    # Get all status information
-    health_status = st.session_state.coordinator.get_health_status()
-    detailed_server_status = get_detailed_server_status()
-    agent_status = get_agent_status()
-    
-    # Create status tabs
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "🌐 System Overview",
-        "🖥️ Server Status", 
-        "🤖 Agent Status",
-        "📈 Performance Metrics"
-    ])
-    
-    with tab1:
-        show_system_status_overview(health_status, detailed_server_status, agent_status)
-    
-    with tab2:
-        show_detailed_server_status_tab(detailed_server_status)
-    
-    with tab3:
-        show_comprehensive_agent_status()
-    
-    with tab4:
-        show_system_performance_metrics(detailed_server_status)
-
-def show_system_status_overview(health_status, detailed_server_status, agent_status):
-    """Show system status overview"""
-    # System health summary
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        overall_status = health_status.get('status', 'unknown')
-        if overall_status == 'healthy':
-            st.success("🟢 System Healthy")
-        else:
-            st.error("🔴 System Issues")
-    
-    with col2:
-        available_servers = health_status.get('available_servers', 0)
-        total_servers = health_status.get('total_servers', 0)
-        if available_servers == total_servers and total_servers > 0:
-            st.success(f"🖥️ {available_servers}/{total_servers} Servers")
-        elif available_servers > 0:
-            st.warning(f"🖥️ {available_servers}/{total_servers} Servers")
-        else:
-            st.error(f"🖥️ {available_servers}/{total_servers} Servers")
-    
-    with col3:
-        available_agents = sum(1 for status in agent_status.values() if status['status'] == 'available')
-        total_agents = len(AGENT_TYPES)
-        if available_agents == total_agents:
-            st.success(f"🤖 {available_agents}/{total_agents} Agents")
-        elif available_agents > 0:
-            st.warning(f"🤖 {available_agents}/{total_agents} Agents")
-        else:
-            st.error(f"🤖 {available_agents}/{total_agents} Agents")
-    
-    with col4:
-        uptime = health_status.get('uptime_seconds', 0)
-        if uptime > 0:
-            st.info(f"⏱️ Uptime: {uptime:.0f}s")
-        else:
-            st.warning("⏱️ Uptime: Unknown")
-    
-    # Processing statistics
-    if st.session_state.processing_history:
-        st.markdown("#### 📊 Processing Statistics")
+    try:
+        health = st.session_state.coordinator.get_health_status()
         
-        total_files = len(st.session_state.processing_history)
-        successful_files = sum(1 for h in st.session_state.processing_history if h['status'] == 'success')
-        failed_files = total_files - successful_files
+        if health.get('status') == 'healthy':
+            st.success(f"🟢 System Healthy - {health.get('available_servers', 0)} servers available")
+        else:
+            st.warning(f"⚠️ System Issues - {health.get('available_servers', 0)} servers available")
+        
+        # Show detailed health info
+        with st.expander("📊 Detailed Health Information"):
+            st.json(health)
+    
+    except Exception as e:
+        st.error(f"❌ Health check failed: {str(e)}")
+
+def show_system_status_summary():
+    """Show system status summary"""
+    if not st.session_state.coordinator:
+        st.warning("No coordinator available")
+        return
+    
+    try:
+        health = st.session_state.coordinator.get_health_status()
         
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("Total Files", total_files)
+            st.metric("System Status", health.get('status', 'unknown').upper())
         
         with col2:
-            st.metric("Successful", successful_files)
+            st.metric("Available Servers", f"{health.get('available_servers', 0)}")
         
         with col3:
-            st.metric("Failed", failed_files)
+            st.metric("Active Agents", f"{health.get('active_agents', 0)}")
         
         with col4:
-            success_rate = (successful_files / total_files * 100) if total_files > 0 else 0
-            st.metric("Success Rate", f"{success_rate:.1f}%")
-
-def show_detailed_server_status_tab(detailed_server_status):
-    """Show detailed server status tab"""
-    if not detailed_server_status:
-        st.warning("No server status data available")
-        return
-    
-    for server_name, stats in detailed_server_status.items():
-        with st.expander(f"🖥️ {server_name}", expanded=True):
-            
-            if 'error' in stats:
-                st.error(f"❌ Server Error: {stats['error']}")
-                continue
-            
-            # Server metrics
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                status = stats.get('status', 'unknown')
-                if status == 'healthy':
-                    st.success(f"Status: {status}")
-                else:
-                    st.error(f"Status: {status}")
-            
-            with col2:
-                st.metric("Active Requests", stats.get('active_requests', 0))
-            
-            with col3:
-                st.metric("Total Requests", stats.get('total_requests', 0))
-            
-            with col4:
-                success_rate = stats.get('success_rate', 0)
-                st.metric("Success Rate", f"{success_rate:.1f}%")
-
-def show_system_performance_metrics(detailed_server_status):
-    """Show system performance metrics"""
-    if not detailed_server_status:
-        st.warning("No performance data available")
-        return
-    
-    # Aggregate performance data
-    performance_data = []
-    
-    for server_name, stats in detailed_server_status.items():
-        if 'error' not in stats:
-            metrics = stats.get('metrics', {})
-            gpu_info = stats.get('gpu_info', {})
-            
-            # Calculate average GPU utilization for this server
-            gpu_utilizations = [gpu_data.get('utilization', 0) for gpu_data in gpu_info.values()]
-            avg_gpu_util = sum(gpu_utilizations) / len(gpu_utilizations) if gpu_utilizations else 0
-            
-            performance_data.append({
-                'server': server_name,
-                'rps': metrics.get('requests_per_second', 0),
-                'latency': metrics.get('average_latency', 0),
-                'gpu_utilization': avg_gpu_util,
-                'active_requests': stats.get('active_requests', 0)
-            })
-    
-    if performance_data:
-        df_perf = pd.DataFrame(performance_data)
+            uptime = health.get('uptime_seconds', 0)
+            st.metric("Uptime", f"{uptime:.0f}s")
         
-        # Performance charts
+        # Agent status summary
+        available_agents = sum(1 for status in st.session_state.agent_status.values() 
+                             if status['status'] == 'available')
+        total_agents = len(AGENT_TYPES)
+        
+        if available_agents == total_agents:
+            st.success(f"🤖 All {total_agents} agents operational")
+        elif available_agents > 0:
+            st.warning(f"⚠️ {available_agents}/{total_agents} agents operational")
+        else:
+            st.error(f"❌ No agents operational")
+    
+    except Exception as e:
+        st.error(f"❌ Status check failed: {str(e)}")
+
+# ============================================================================
+# ENHANCED DASHBOARD IMPLEMENTATION
+# ============================================================================
+
+def show_enhanced_dashboard():
+    """Enhanced dashboard with comprehensive metrics and status"""
+    st.markdown('<div class="sub-header">🏠 Enhanced System Dashboard</div>', unsafe_allow_html=True)
+    
+    if not st.session_state.coordinator:
+        st.warning("🟡 System not initialized. Please initialize in the sidebar.")
+        show_initialization_interface()
+        return
+    
+    # Auto-refresh controls
+    col1, col2, col3 = st.columns([2, 1, 1])
+    
+    with col1:
+        st.markdown("### 📊 Real-time System Overview")
+    
+    with col2:
+        auto_refresh = st.checkbox("🔄 Auto-refresh", value=False)
+    
+    with col3:
+        if st.button("🔄 Refresh Now"):
+            st.rerun()
+    
+    # Get system metrics
+    system_metrics = get_dashboard_metrics()
+    
+    # Main metrics row
+    show_main_metrics(system_metrics)
+    
+    # System health overview
+    show_system_health_overview()
+    
+    # Two-column layout for detailed information
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        show_processing_statistics()
+        show_recent_activity()
+    
+    with col2:
+        show_server_status_cards()
+        show_agent_status_overview()
+    
+    # Performance charts
+    show_performance_charts(system_metrics)
+    
+    # Auto-refresh logic
+    if auto_refresh:
+        time.sleep(5)
+        st.rerun()
+
+def get_dashboard_metrics():
+    """Get comprehensive dashboard metrics"""
+    try:
+        if not st.session_state.coordinator:
+            return {}
+        
+        # Get coordinator health and stats
+        health = st.session_state.coordinator.get_health_status()
+        stats = safe_run_async(st.session_state.coordinator.get_statistics())
+        
+        # Calculate processing metrics
+        total_files = len(st.session_state.processing_history)
+        successful_files = sum(1 for h in st.session_state.processing_history if h.get('status') == 'success')
+        total_queries = len(st.session_state.chat_history)
+        total_components = len(st.session_state.get('analysis_results', {}))
+        
+        # Calculate success rates
+        file_success_rate = (successful_files / total_files * 100) if total_files > 0 else 0
+        
+        # Server metrics
+        available_servers = health.get('available_servers', 0)
+        total_servers = health.get('total_servers', 0)
+        
+        # Agent metrics
+        available_agents = sum(1 for status in st.session_state.agent_status.values() 
+                             if status['status'] == 'available')
+        
+        # System uptime
+        uptime = health.get('uptime_seconds', 0)
+        
+        return {
+            'files_processed': total_files,
+            'file_success_rate': file_success_rate,
+            'queries_answered': total_queries,
+            'components_analyzed': total_components,
+            'available_servers': available_servers,
+            'total_servers': total_servers,
+            'available_agents': available_agents,
+            'total_agents': len(AGENT_TYPES),
+            'system_uptime': uptime,
+            'health_status': health.get('status', 'unknown'),
+            'api_calls': health.get('stats', {}).get('total_api_calls', 0),
+            'system_stats': stats
+        }
+    
+    except Exception as e:
+        st.error(f"Failed to get dashboard metrics: {str(e)}")
+        return {}
+
+def show_main_metrics(metrics):
+    """Show main dashboard metrics"""
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        files_processed = metrics.get('files_processed', 0)
+        success_rate = metrics.get('file_success_rate', 0)
+        
+        st.metric(
+            label="📄 Files Processed",
+            value=files_processed,
+            delta=f"{success_rate:.1f}% success rate"
+        )
+    
+    with col2:
+        queries = metrics.get('queries_answered', 0)
+        api_calls = metrics.get('api_calls', 0)
+        
+        st.metric(
+            label="💬 Queries Answered", 
+            value=queries,
+            delta=f"{api_calls} API calls"
+        )
+    
+    with col3:
+        components = metrics.get('components_analyzed', 0)
+        available_agents = metrics.get('available_agents', 0)
+        total_agents = metrics.get('total_agents', 0)
+        
+        st.metric(
+            label="🔍 Components Analyzed",
+            value=components,
+            delta=f"{available_agents}/{total_agents} agents ready"
+        )
+    
+    with col4:
+        uptime = metrics.get('system_uptime', 0)
+        health = metrics.get('health_status', 'unknown')
+        
+        uptime_str = f"{uptime/3600:.1f}h" if uptime > 3600 else f"{uptime:.0f}s"
+        st.metric(
+            label="⏱️ System Uptime",
+            value=uptime_str,
+            delta=f"Status: {health}"
+        )
+
+def show_system_health_overview():
+    """Show system health overview"""
+    st.markdown("### 🏥 System Health Overview")
+    
+    try:
+        health = st.session_state.coordinator.get_health_status()
+        
+        # Health indicator
+        status = health.get('status', 'unknown')
+        available_servers = health.get('available_servers', 0)
+        total_servers = health.get('total_servers', 0)
+        
+        if status == 'healthy' and available_servers > 0:
+            st.success(f"🟢 System Operational - {available_servers}/{total_servers} servers healthy")
+        elif available_servers > 0:
+            st.warning(f"⚠️ Partial Service - {available_servers}/{total_servers} servers available")
+        else:
+            st.error(f"🔴 Service Unavailable - {available_servers}/{total_servers} servers responding")
+        
+        # Quick health metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            server_health = "Healthy" if available_servers > 0 else "Unhealthy"
+            st.metric("Server Health", server_health)
+        
+        with col2:
+            available_agents = sum(1 for status in st.session_state.agent_status.values() 
+                                 if status['status'] == 'available')
+            agent_health = f"{available_agents}/{len(AGENT_TYPES)}"
+            st.metric("Agent Health", agent_health)
+        
+        with col3:
+            total_errors = sum(status.get('errors', 0) for status in st.session_state.agent_status.values())
+            st.metric("Total Errors", total_errors)
+        
+        with col4:
+            db_status = "Connected" if os.path.exists(st.session_state.coordinator.db_path) else "Disconnected"
+            st.metric("Database", db_status)
+    
+    except Exception as e:
+        st.error(f"Failed to get health overview: {str(e)}")
+
+def show_processing_statistics():
+    """Show processing statistics and trends"""
+    st.markdown("#### 📈 Processing Statistics")
+    
+    if not st.session_state.processing_history:
+        st.info("No processing history available yet")
+        return
+    
+    # Processing summary
+    history = st.session_state.processing_history
+    total_files = len(history)
+    successful = sum(1 for h in history if h.get('status') == 'success')
+    failed = total_files - successful
+    
+    # Success rate chart
+    success_data = pd.DataFrame({
+        'Status': ['Successful', 'Failed'],
+        'Count': [successful, failed],
+        'Percentage': [successful/total_files*100, failed/total_files*100] if total_files > 0 else [0, 0]
+    })
+    
+    fig = px.pie(success_data, values='Count', names='Status', 
+                 title=f"Processing Success Rate ({total_files} files)",
+                 color_discrete_map={'Successful': '#28a745', 'Failed': '#dc3545'})
+    fig.update_layout(height=300)
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Recent processing times
+    if len(history) > 0:
+        recent_history = history[-10:]  # Last 10 files
+        times = [h.get('processing_time', 0) for h in recent_history]
+        files = [h.get('file_name', f'File {i}') for i, h in enumerate(recent_history)]
+        
+        time_df = pd.DataFrame({'File': files, 'Processing Time (s)': times})
+        
+        fig_time = px.bar(time_df, x='File', y='Processing Time (s)',
+                          title="Recent Processing Times")
+        fig_time.update_layout(height=300, xaxis_tickangle=-45)
+        st.plotly_chart(fig_time, use_container_width=True)
+
+def show_recent_activity():
+    """Show recent system activity"""
+    st.markdown("#### 🕒 Recent Activity")
+    
+    # Combine recent activities from different sources
+    activities = []
+    
+    # Recent file processing
+    for h in st.session_state.processing_history[-5:]:
+        activities.append({
+            'time': h.get('timestamp', ''),
+            'type': 'File Processing',
+            'description': f"Processed {h.get('file_name', 'unknown')}",
+            'status': h.get('status', 'unknown')
+        })
+    
+    # Recent chat queries
+    for h in st.session_state.chat_history[-3:]:
+        activities.append({
+            'time': h.get('timestamp', ''),
+            'type': 'Chat Query',
+            'description': f"Query: {h.get('query', '')[:50]}...",
+            'status': 'completed'
+        })
+    
+    # Recent analysis
+    for name, result in list(st.session_state.get('analysis_results', {}).items())[-3:]:
+        activities.append({
+            'time': result.get('timestamp', ''),
+            'type': 'Component Analysis',
+            'description': f"Analyzed {name}",
+            'status': result.get('status', 'unknown')
+        })
+    
+    # Sort by time and show recent
+    activities.sort(key=lambda x: x['time'], reverse=True)
+    
+    if activities:
+        for activity in activities[:8]:  # Show last 8 activities
+            status_icon = "✅" if activity['status'] == 'success' or activity['status'] == 'completed' else "❌"
+            time_str = activity['time'][:19].replace('T', ' ') if activity['time'] else 'Unknown time'
+            
+            st.markdown(f"""
+            <div class="chat-message">
+                {status_icon} <strong>{activity['type']}</strong><br>
+                {activity['description']}<br>
+                <small>🕒 {time_str}</small>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("No recent activity")
+
+def show_server_status_cards():
+    """Show server status as cards"""
+    st.markdown("#### 🖥️ Server Status")
+    
+    if not st.session_state.model_servers:
+        st.info("No servers configured")
+        return
+    
+    try:
+        health = st.session_state.coordinator.get_health_status()
+        server_stats = health.get('server_stats', {})
+        
+        for server_config in st.session_state.model_servers:
+            server_name = server_config['name']
+            stats = server_stats.get(server_name, {})
+            
+            # Determine status
+            is_available = stats.get('available', False)
+            status_color = "🟢" if is_available else "🔴"
+            
+            # Server card
+            with st.container():
+                st.markdown(f"""
+                <div class="metric-card">
+                    <h4>{status_color} {server_name}</h4>
+                    <p><strong>Endpoint:</strong> {server_config['endpoint']}</p>
+                    <p><strong>GPU ID:</strong> {server_config['gpu_id']}</p>
+                    <p><strong>Active Requests:</strong> {stats.get('active_requests', 0)}</p>
+                    <p><strong>Total Requests:</strong> {stats.get('total_requests', 0)}</p>
+                    <p><strong>Success Rate:</strong> {stats.get('success_rate', 0):.1f}%</p>
+                </div>
+                """, unsafe_allow_html=True)
+    
+    except Exception as e:
+        st.error(f"Failed to get server status: {str(e)}")
+
+def show_agent_status_overview():
+    """Show agent status overview"""
+    st.markdown("#### 🤖 Agent Status Overview")
+    
+    # Agent status summary
+    status_counts = {'available': 0, 'error': 0, 'unavailable': 0, 'unknown': 0}
+    
+    for agent_type, status in st.session_state.agent_status.items():
+        agent_status = status.get('status', 'unknown')
+        status_counts[agent_status] = status_counts.get(agent_status, 0) + 1
+    
+    # Status chart
+    status_df = pd.DataFrame([
+        {'Status': status.title(), 'Count': count} 
+        for status, count in status_counts.items() if count > 0
+    ])
+    
+    if not status_df.empty:
+        color_map = {
+            'Available': '#28a745',
+            'Error': '#dc3545', 
+            'Unavailable': '#ffc107',
+            'Unknown': '#6c757d'
+        }
+        
+        fig = px.bar(status_df, x='Status', y='Count',
+                     title="Agent Status Distribution",
+                     color='Status',
+                     color_discrete_map=color_map)
+        fig.update_layout(height=300)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Agent usage statistics
+    total_calls = sum(status.get('total_calls', 0) for status in st.session_state.agent_status.values())
+    total_errors = sum(status.get('errors', 0) for status in st.session_state.agent_status.values())
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Total Agent Calls", total_calls)
+    with col2:
+        st.metric("Total Agent Errors", total_errors)
+
+def show_performance_charts(metrics):
+    """Show performance charts"""
+    st.markdown("### 📊 Performance Analytics")
+    
+    # Create sample time series data for demonstration
+    # In a real implementation, this would come from historical data
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Processing throughput over time
+        st.markdown("#### 📈 Processing Throughput")
+        
+        # Generate sample data based on current metrics
+        import numpy as np
+        dates = pd.date_range(start='2024-01-01', periods=30, freq='D')
+        
+        # Simulate throughput data
+        base_throughput = max(1, metrics.get('files_processed', 0) / 30)
+        throughput_data = []
+        
+        for i, date in enumerate(dates):
+            daily_files = max(0, base_throughput + np.random.normal(0, base_throughput * 0.3))
+            throughput_data.append({
+                'Date': date,
+                'Files Processed': daily_files,
+                'Success Rate': 85 + np.random.normal(0, 10)
+            })
+        
+        throughput_df = pd.DataFrame(throughput_data)
+        
+        fig_throughput = px.line(throughput_df, x='Date', y='Files Processed',
+                                title='Daily File Processing Throughput')
+        fig_throughput.update_layout(height=300)
+        st.plotly_chart(fig_throughput, use_container_width=True)
+    
+    with col2:
+        # Agent usage distribution
+        st.markdown("#### 🤖 Agent Usage Distribution")
+        
+        agent_usage = []
+        for agent_type, status in st.session_state.agent_status.items():
+            calls = status.get('total_calls', 0)
+            if calls > 0:
+                agent_usage.append({
+                    'Agent': agent_type.replace('_', ' ').title(),
+                    'Calls': calls,
+                    'Errors': status.get('errors', 0)
+                })
+        
+        if agent_usage:
+            usage_df = pd.DataFrame(agent_usage)
+            fig_usage = px.bar(usage_df, x='Agent', y='Calls',
+                              title='Agent Usage Statistics',
+                              hover_data=['Errors'])
+            fig_usage.update_layout(height=300, xaxis_tickangle=-45)
+            st.plotly_chart(fig_usage, use_container_width=True)
+        else:
+            st.info("No agent usage data available yet")
+    
+    # System resource utilization
+    st.markdown("#### 💻 System Resource Utilization")
+    
+    try:
+        # Get server metrics if available
+        health = st.session_state.coordinator.get_health_status()
+        server_stats = health.get('server_stats', {})
+        
+        if server_stats:
+            resource_data = []
+            
+            for server_name, stats in server_stats.items():
+                if stats.get('available', False):
+                    resource_data.append({
+                        'Server': server_name,
+                        'Active Requests': stats.get('active_requests', 0),
+                        'Avg Latency (s)': stats.get('average_latency', 0),
+                        'Success Rate (%)': stats.get('success_rate', 0)
+                    })
+            
+            if resource_data:
+                resource_df = pd.DataFrame(resource_data)
+                
+                # Create subplots
+                fig = make_subplots(
+                    rows=1, cols=3,
+                    subplot_titles=('Active Requests', 'Average Latency', 'Success Rate'),
+                    specs=[[{'type': 'bar'}, {'type': 'bar'}, {'type': 'bar'}]]
+                )
+                
+                # Add traces
+                fig.add_trace(
+                    go.Bar(x=resource_df['Server'], y=resource_df['Active Requests'], name='Active Requests'),
+                    row=1, col=1
+                )
+                
+                fig.add_trace(
+                    go.Bar(x=resource_df['Server'], y=resource_df['Avg Latency (s)'], name='Avg Latency'),
+                    row=1, col=2
+                )
+                
+                fig.add_trace(
+                    go.Bar(x=resource_df['Server'], y=resource_df['Success Rate (%)'], name='Success Rate'),
+                    row=1, col=3
+                )
+                
+                fig.update_layout(height=400, showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No server resource data available")
+        else:
+            st.info("No server statistics available")
+    
+    except Exception as e:
+        st.error(f"Failed to get resource utilization: {str(e)}")
+
+# ============================================================================
+# DASHBOARD UTILITY FUNCTIONS
+# ============================================================================
+
+def update_dashboard_metrics():
+    """Update dashboard metrics in session state"""
+    try:
+        if st.session_state.coordinator:
+            metrics = get_dashboard_metrics()
+            st.session_state.dashboard_metrics.update(metrics)
+    except Exception as e:
+        st.error(f"Failed to update dashboard metrics: {str(e)}")
+
+def export_dashboard_data():
+    """Export dashboard data to CSV"""
+    try:
+        # Prepare export data
+        export_data = {
+            'timestamp': dt.now().isoformat(),
+            'system_metrics': st.session_state.dashboard_metrics,
+            'processing_history': st.session_state.processing_history,
+            'agent_status': st.session_state.agent_status
+        }
+        
+        # Convert to JSON string for download
+        json_data = json.dumps(export_data, indent=2)
+        
+        st.download_button(
+            label="📥 Download Dashboard Data",
+            data=json_data,
+            file_name=f"opulence_dashboard_{dt.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json"
+        )
+        
+    except Exception as e:
+        st.error(f"Failed to export dashboard data: {str(e)}")
+
+def reset_dashboard_metrics():
+    """Reset dashboard metrics"""
+    try:
+        st.session_state.dashboard_metrics = {
+            'files_processed': 0,
+            'queries_answered': 0,
+            'components_analyzed': 0,
+            'system_uptime': 0
+        }
+        st.session_state.processing_history = []
+        st.session_state.chat_history = []
+        st.session_state.analysis_results = {}
+        
+        st.success("✅ Dashboard metrics reset successfully")
+        st.rerun()
+        
+    except Exception as e:
+        st.error(f"Failed to reset metrics: {str(e)}")
+
+# ============================================================================
+# ENHANCED CHAT ANALYSIS IMPLEMENTATION
+# ============================================================================
+
+def show_enhanced_chat_analysis():
+    """Enhanced chat analysis interface with conversation management"""
+    st.markdown('<div class="sub-header">💬 Enhanced Chat Analysis</div>', unsafe_allow_html=True)
+    
+    if not st.session_state.coordinator:
+        st.error("🔴 System not initialized. Please initialize in the sidebar.")
+        show_initialization_interface()
+        return
+    
+    # Chat interface layout
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        st.markdown("### 🤖 Mainframe Code Assistant")
+    
+    with col2:
+        # Chat controls
+        if st.button("🗑️ Clear Chat", use_container_width=True):
+            clear_chat_history()
+        
+        if st.button("💾 Export Chat", use_container_width=True):
+            export_chat_history()
+    
+    # Chat configuration
+    with st.expander("⚙️ Chat Configuration", expanded=False):
+        show_chat_configuration()
+    
+    # Main chat interface
+    show_chat_interface()
+    
+    # Chat history and conversation management
+    show_conversation_management()
+    
+    # Chat analytics
+    if st.session_state.chat_history:
+        show_chat_analytics()
+
+def show_chat_configuration():
+    """Show chat configuration options"""
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        response_mode = st.selectbox(
+            "Response Mode",
+            ["Detailed", "Concise", "Technical", "Business-friendly"],
+            help="Choose the style of responses"
+        )
+        st.session_state.chat_response_mode = response_mode
+    
+    with col2:
+        include_context = st.checkbox(
+            "Include Context", 
+            value=True,
+            help="Include relevant code/data context in responses"
+        )
+        st.session_state.chat_include_context = include_context
+    
+    with col3:
+        max_history = st.number_input(
+            "Conversation History Length",
+            min_value=1,
+            max_value=20,
+            value=5,
+            help="Number of previous messages to include as context"
+        )
+        st.session_state.chat_max_history = max_history
+
+def show_chat_interface():
+    """Show main chat interface"""
+    # Chat input
+    user_query = st.chat_input(
+        "Ask about your mainframe code, data lineage, or system architecture...",
+        key="chat_input"
+    )
+    
+    # Suggested queries
+    st.markdown("#### 💡 Suggested Queries")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("📄 Analyze this program", use_container_width=True):
+            user_query = "Can you analyze the structure and functionality of the COBOL programs in my system?"
+    
+    with col2:
+        if st.button("🔍 Find data lineage", use_container_width=True):
+            user_query = "Show me the data lineage for customer records in the system"
+    
+    with col3:
+        if st.button("🏗️ System architecture", use_container_width=True):
+            user_query = "Explain the overall architecture and data flow of the mainframe system"
+    
+    # Process user query
+    if user_query:
+        process_chat_query(user_query)
+    
+    # Display conversation
+    display_chat_conversation()
+
+def process_chat_query(query: str):
+    """Process user chat query"""
+    if not query.strip():
+        return
+    
+    # Add user message to history
+    user_message = {
+        'role': 'user',
+        'content': query,
+        'timestamp': dt.now().isoformat(),
+        'query_id': str(time.time())
+    }
+    
+    st.session_state.chat_history.append(user_message)
+    
+    # Show processing indicator
+    with st.spinner("🤖 Processing your query..."):
+        try:
+            # Get conversation context
+            conversation_history = get_conversation_context()
+            
+            # Add query configuration
+            query_config = {
+                'response_mode': st.session_state.get('chat_response_mode', 'Detailed'),
+                'include_context': st.session_state.get('chat_include_context', True),
+                'max_history': st.session_state.get('chat_max_history', 5)
+            }
+            
+            # Process with coordinator
+            start_time = time.time()
+            result = safe_run_async(
+                st.session_state.coordinator.process_chat_query(
+                    query, 
+                    conversation_history,
+                    **query_config
+                )
+            )
+            
+            processing_time = time.time() - start_time
+            
+            if result and not result.get('error'):
+                # Add assistant response to history
+                assistant_message = {
+                    'role': 'assistant',
+                    'content': result.get('response', 'No response generated'),
+                    'response_type': result.get('response_type', 'general'),
+                    'suggestions': result.get('suggestions', []),
+                    'context_used': result.get('context_used', []),
+                    'processing_time': processing_time,
+                    'timestamp': dt.now().isoformat(),
+                    'query_id': user_message['query_id']
+                }
+                
+                st.session_state.chat_history.append(assistant_message)
+                
+                # Update agent status
+                st.session_state.agent_status['chat_agent']['total_calls'] += 1
+                st.session_state.agent_status['chat_agent']['last_used'] = dt.now().isoformat()
+                st.session_state.agent_status['chat_agent']['status'] = 'available'
+                
+                st.success(f"✅ Response generated in {processing_time:.2f} seconds")
+            
+            else:
+                error_message = result.get('error', 'Unknown error') if result else 'Processing failed'
+                
+                # Add error response
+                error_response = {
+                    'role': 'assistant',
+                    'content': f"I apologize, but I encountered an error: {error_message}",
+                    'response_type': 'error',
+                    'processing_time': processing_time,
+                    'timestamp': dt.now().isoformat(),
+                    'query_id': user_message['query_id'],
+                    'error': error_message
+                }
+                
+                st.session_state.chat_history.append(error_response)
+                st.session_state.agent_status['chat_agent']['errors'] += 1
+                
+                st.error(f"❌ Query failed: {error_message}")
+        
+        except Exception as e:
+            error_msg = str(e)
+            
+            # Add exception response
+            exception_response = {
+                'role': 'assistant',
+                'content': f"I encountered an unexpected error: {error_msg}",
+                'response_type': 'exception',
+                'timestamp': dt.now().isoformat(),
+                'query_id': user_message['query_id'],
+                'error': error_msg
+            }
+            
+            st.session_state.chat_history.append(exception_response)
+            st.session_state.agent_status['chat_agent']['errors'] += 1
+            
+            st.error(f"❌ Unexpected error: {error_msg}")
+    
+    # Rerun to show new messages
+    st.rerun()
+
+def get_conversation_context():
+    """Get conversation context for chat agent"""
+    max_history = st.session_state.get('chat_max_history', 5)
+    
+    # Get recent conversation history
+    recent_history = st.session_state.chat_history[-(max_history * 2):] if st.session_state.chat_history else []
+    
+    # Format for chat agent
+    formatted_history = []
+    for message in recent_history:
+        formatted_history.append({
+            'role': message['role'],
+            'content': message['content'],
+            'timestamp': message.get('timestamp', ''),
+            'response_type': message.get('response_type', 'general')
+        })
+    
+    return formatted_history
+
+def display_chat_conversation():
+    """Display chat conversation"""
+    st.markdown("#### 💬 Conversation")
+    
+    if not st.session_state.chat_history:
+        st.info("👋 Welcome! Ask me anything about your mainframe system. I can help with:")
+        st.markdown("""
+        - **Code Analysis**: Understanding COBOL, JCL, and other mainframe programs
+        - **Data Lineage**: Tracing how data flows through your system
+        - **System Architecture**: Explaining overall system structure and dependencies
+        - **Best Practices**: Recommendations for maintenance and optimization
+        """)
+        return
+    
+    # Display messages in chronological order
+    for i, message in enumerate(st.session_state.chat_history):
+        display_chat_message(message, i)
+
+def display_chat_message(message: Dict[str, Any], index: int):
+    """Display individual chat message"""
+    role = message.get('role', 'unknown')
+    content = message.get('content', '')
+    timestamp = message.get('timestamp', '')
+    
+    # Format timestamp
+    time_str = timestamp[:19].replace('T', ' ') if timestamp else 'Unknown time'
+    
+    if role == 'user':
+        # User message
+        st.markdown(f"""
+        <div style="text-align: right; margin: 10px 0;">
+            <div style="background-color: #007bff; color: white; padding: 10px; border-radius: 15px; display: inline-block; max-width: 80%;">
+                <strong>You</strong><br>
+                {content}
+            </div>
+            <br><small style="color: #666;">🕒 {time_str}</small>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    elif role == 'assistant':
+        # Assistant message
+        response_type = message.get('response_type', 'general')
+        processing_time = message.get('processing_time', 0)
+        suggestions = message.get('suggestions', [])
+        context_used = message.get('context_used', [])
+        error = message.get('error')
+        
+        # Determine message style based on response type
+        if response_type == 'error' or error:
+            bg_color = "#f8d7da"
+            border_color = "#dc3545"
+            icon = "🚨"
+        elif response_type == 'success':
+            bg_color = "#d4edda"
+            border_color = "#28a745"
+            icon = "✅"
+        else:
+            bg_color = "#f8f9fa"
+            border_color = "#6c757d"
+            icon = "🤖"
+        
+        st.markdown(f"""
+        <div style="margin: 10px 0;">
+            <div style="background-color: {bg_color}; padding: 15px; border-radius: 15px; border-left: 4px solid {border_color}; max-width: 90%;">
+                <strong>{icon} Assistant</strong><br><br>
+                {content}
+            </div>
+            <small style="color: #666;">
+                🕒 {time_str} | ⏱️ {processing_time:.2f}s
+            </small>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Show additional information
+        if suggestions or context_used:
+            with st.expander(f"📋 Additional Information (Message {index + 1})", expanded=False):
+                
+                if suggestions:
+                    st.markdown("**💡 Suggestions:**")
+                    for suggestion in suggestions:
+                        st.markdown(f"- {suggestion}")
+                
+                if context_used:
+                    st.markdown("**📚 Context Used:**")
+                    for context in context_used:
+                        st.markdown(f"- {context}")
+
+def show_conversation_management():
+    """Show conversation management options"""
+    st.markdown("#### 🔧 Conversation Management")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if st.button("💾 Save Conversation", use_container_width=True):
+            save_conversation()
+    
+    with col2:
+        if st.button("📤 Share Conversation", use_container_width=True):
+            share_conversation()
+    
+    with col3:
+        if st.button("🔄 New Conversation", use_container_width=True):
+            start_new_conversation()
+    
+    with col4:
+        if st.button("📊 Chat Stats", use_container_width=True):
+            st.session_state.show_chat_stats = True
+
+def show_chat_analytics():
+    """Show chat analytics"""
+    if not st.session_state.get('show_chat_stats', False):
+        return
+    
+    st.markdown("#### 📊 Chat Analytics")
+    
+    # Basic statistics
+    total_messages = len(st.session_state.chat_history)
+    user_messages = sum(1 for msg in st.session_state.chat_history if msg.get('role') == 'user')
+    assistant_messages = sum(1 for msg in st.session_state.chat_history if msg.get('role') == 'assistant')
+    
+    # Processing times
+    processing_times = [msg.get('processing_time', 0) for msg in st.session_state.chat_history 
+                       if msg.get('role') == 'assistant' and msg.get('processing_time')]
+    avg_processing_time = sum(processing_times) / len(processing_times) if processing_times else 0
+    
+    # Response types
+    response_types = {}
+    for msg in st.session_state.chat_history:
+        if msg.get('role') == 'assistant':
+            resp_type = msg.get('response_type', 'general')
+            response_types[resp_type] = response_types.get(resp_type, 0) + 1
+    
+    # Display analytics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Messages", total_messages)
+    
+    with col2:
+        st.metric("User Queries", user_messages)
+    
+    with col3:
+        st.metric("Assistant Responses", assistant_messages)
+    
+    with col4:
+        st.metric("Avg Response Time", f"{avg_processing_time:.2f}s")
+    
+    # Response type distribution
+    if response_types:
+        st.markdown("**Response Type Distribution:**")
+        
+        response_df = pd.DataFrame([
+            {'Type': resp_type.title(), 'Count': count}
+            for resp_type, count in response_types.items()
+        ])
+        
+        fig = px.pie(response_df, values='Count', names='Type',
+                     title="Response Types")
+        fig.update_layout(height=300)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Processing time trends
+    if len(processing_times) > 1:
+        st.markdown("**Response Time Trends:**")
+        
+        time_df = pd.DataFrame({
+            'Response #': range(1, len(processing_times) + 1),
+            'Processing Time (s)': processing_times
+        })
+        
+        fig_time = px.line(time_df, x='Response #', y='Processing Time (s)',
+                          title="Response Time Over Conversation")
+        fig_time.update_layout(height=300)
+        st.plotly_chart(fig_time, use_container_width=True)
+
+def clear_chat_history():
+    """Clear chat history"""
+    st.session_state.chat_history = []
+    st.session_state.show_chat_stats = False
+    st.success("✅ Chat history cleared")
+    st.rerun()
+
+def export_chat_history():
+    """Export chat history"""
+    try:
+        if not st.session_state.chat_history:
+            st.warning("No chat history to export")
+            return
+        
+        # Prepare export data
+        export_data = {
+            'export_timestamp': dt.now().isoformat(),
+            'total_messages': len(st.session_state.chat_history),
+            'conversation_history': st.session_state.chat_history,
+            'chat_settings': {
+                'response_mode': st.session_state.get('chat_response_mode', 'Detailed'),
+                'include_context': st.session_state.get('chat_include_context', True),
+                'max_history': st.session_state.get('chat_max_history', 5)
+            }
+        }
+        
+        # Convert to JSON
+        json_data = json.dumps(export_data, indent=2)
+        
+        st.download_button(
+            label="💾 Download Chat History",
+            data=json_data,
+            file_name=f"opulence_chat_{dt.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json"
+        )
+        
+        st.success("✅ Chat history ready for download")
+        
+    except Exception as e:
+        st.error(f"❌ Export failed: {str(e)}")
+
+def save_conversation():
+    """Save conversation to database"""
+    try:
+        if not st.session_state.chat_history:
+            st.warning("No conversation to save")
+            return
+        
+        # Save to session state with a name
+        conversation_name = f"Conversation_{dt.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        if 'saved_conversations' not in st.session_state:
+            st.session_state.saved_conversations = {}
+        
+        st.session_state.saved_conversations[conversation_name] = {
+            'history': st.session_state.chat_history.copy(),
+            'saved_at': dt.now().isoformat(),
+            'message_count': len(st.session_state.chat_history)
+        }
+        
+        st.success(f"✅ Conversation saved as '{conversation_name}'")
+        
+    except Exception as e:
+        st.error(f"❌ Save failed: {str(e)}")
+
+def share_conversation():
+    """Share conversation (generate shareable link/code)"""
+    try:
+        if not st.session_state.chat_history:
+            st.warning("No conversation to share")
+            return
+        
+        # Generate a simple share code
+        conversation_data = {
+            'messages': len(st.session_state.chat_history),
+            'timestamp': dt.now().isoformat()
+        }
+        
+        share_code = hashlib.md5(json.dumps(conversation_data).encode()).hexdigest()[:8]
+        
+        st.info(f"🔗 Share Code: `{share_code}`")
+        st.caption("Share this code with others to reference this conversation")
+        
+    except Exception as e:
+        st.error(f"❌ Share generation failed: {str(e)}")
+
+def start_new_conversation():
+    """Start a new conversation"""
+    if st.session_state.chat_history:
+        # Ask for confirmation
+        if st.button("⚠️ Confirm: Start New Conversation (current will be lost)"):
+            st.session_state.chat_history = []
+            st.session_state.show_chat_stats = False
+            st.success("✅ New conversation started")
+            st.rerun()
+    else:
+        st.info("Already in a new conversation")
+
+# ============================================================================
+# ADVANCED CHAT FEATURES
+# ============================================================================
+
+def show_advanced_chat_features():
+    """Show advanced chat features"""
+    st.markdown("#### 🔬 Advanced Chat Features")
+    
+    with st.expander("🧠 Knowledge Base Query", expanded=False):
+        show_knowledge_base_query()
+    
+    with st.expander("🔍 Code Search & Analysis", expanded=False):
+        show_code_search_interface()
+    
+    with st.expander("📊 Data Flow Analysis", expanded=False):
+        show_data_flow_analysis()
+
+def show_knowledge_base_query():
+    """Show knowledge base query interface"""
+    st.markdown("Search your processed codebase and documentation:")
+    
+    kb_query = st.text_input(
+        "Knowledge Base Query",
+        placeholder="e.g., 'customer data structures', 'error handling patterns'"
+    )
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        search_type = st.selectbox(
+            "Search Type",
+            ["Semantic", "Keyword", "Code Pattern", "Data Structure"]
+        )
+    
+    with col2:
+        result_limit = st.number_input("Result Limit", min_value=1, max_value=50, value=10)
+    
+    if st.button("🔍 Search Knowledge Base") and kb_query:
+        search_knowledge_base(kb_query, search_type, result_limit)
+
+def search_knowledge_base(query: str, search_type: str, limit: int):
+    """Search the knowledge base"""
+    try:
+        with st.spinner("🔍 Searching knowledge base..."):
+            # Use vector index agent for search
+            result = safe_run_async(
+                st.session_state.coordinator.search_code_patterns(query, limit)
+            )
+            
+            if result and result.get('status') == 'success':
+                results = result.get('results', [])
+                
+                if results:
+                    st.success(f"✅ Found {len(results)} results")
+                    
+                    for i, item in enumerate(results):
+                        with st.expander(f"📄 Result {i+1}: {item.get('title', 'Unknown')}", expanded=False):
+                            st.markdown(f"**Score:** {item.get('score', 0):.3f}")
+                            st.markdown(f"**Type:** {item.get('type', 'Unknown')}")
+                            st.code(item.get('content', 'No content'), language='cobol')
+                            
+                            if item.get('metadata'):
+                                st.json(item['metadata'])
+                else:
+                    st.info("No results found for your query")
+            else:
+                error_msg = result.get('error', 'Unknown error') if result else 'Search failed'
+                st.error(f"❌ Search failed: {error_msg}")
+    
+    except Exception as e:
+        st.error(f"❌ Knowledge base search error: {str(e)}")
+
+def show_code_search_interface():
+    """Show code search interface"""
+    st.markdown("Search for specific code patterns and structures:")
+    
+    code_query = st.text_area(
+        "Code Pattern",
+        placeholder="Enter COBOL code pattern, SQL query, or JCL snippet to find similar code"
+    )
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        file_types = st.multiselect(
+            "File Types",
+            ["COBOL", "JCL", "SQL", "PL/I", "CICS"],
+            default=["COBOL"]
+        )
+    
+    with col2:
+        similarity_threshold = st.slider(
+            "Similarity Threshold",
+            min_value=0.1,
+            max_value=1.0,
+            value=0.7,
+            step=0.1
+        )
+    
+    if st.button("🔍 Find Similar Code") and code_query:
+        find_similar_code(code_query, file_types, similarity_threshold)
+
+def find_similar_code(query: str, file_types: List[str], threshold: float):
+    """Find similar code patterns"""
+    try:
+        with st.spinner("🔍 Searching for similar code..."):
+            # Process through vector index agent
+            vector_agent = st.session_state.coordinator.get_agent("vector_index")
+            
+            if vector_agent:
+                result = safe_run_async(
+                    vector_agent.semantic_search(query, top_k=20)
+                )
+                
+                if result:
+                    # Filter by similarity threshold and file types
+                    filtered_results = []
+                    for item in result:
+                        if (item.get('score', 0) >= threshold and 
+                            any(ft.lower() in item.get('type', '').lower() for ft in file_types)):
+                            filtered_results.append(item)
+                    
+                    if filtered_results:
+                        st.success(f"✅ Found {len(filtered_results)} similar code patterns")
+                        
+                        for i, item in enumerate(filtered_results):
+                            similarity = item.get('score', 0) * 100
+                            
+                            with st.expander(f"📄 Match {i+1}: {similarity:.1f}% similar", expanded=False):
+                                st.markdown(f"**File:** {item.get('source', 'Unknown')}")
+                                st.markdown(f"**Type:** {item.get('type', 'Unknown')}")
+                                st.markdown(f"**Similarity:** {similarity:.1f}%")
+                                
+                                code_content = item.get('content', 'No content available')
+                                st.code(code_content, language='cobol')
+                    else:
+                        st.info(f"No code patterns found above {threshold*100:.0f}% similarity")
+                else:
+                    st.error("❌ Code search failed")
+            else:
+                st.error("❌ Vector index agent not available")
+    
+    except Exception as e:
+        st.error(f"❌ Code search error: {str(e)}")
+
+def show_data_flow_analysis():
+    """Show data flow analysis interface"""
+    st.markdown("Analyze data flow and dependencies:")
+    
+    analysis_target = st.text_input(
+        "Analysis Target",
+        placeholder="Enter field name, table name, or program name"
+    )
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        analysis_type = st.selectbox(
+            "Analysis Type",
+            ["Field Lineage", "Program Dependencies", "Data Flow", "Impact Analysis"]
+        )
+    
+    with col2:
+        depth_level = st.selectbox(
+            "Analysis Depth",
+            ["Shallow (1 level)", "Medium (2-3 levels)", "Deep (full trace)"]
+        )
+    
+    if st.button("🔍 Analyze Data Flow") and analysis_target:
+        analyze_data_flow(analysis_target, analysis_type, depth_level)
+
+def analyze_data_flow(target: str, analysis_type: str, depth: str):
+    """Analyze data flow for target"""
+    try:
+        with st.spinner(f"🔍 Analyzing {analysis_type.lower()} for {target}..."):
+            
+            if analysis_type == "Field Lineage":
+                lineage_agent = st.session_state.coordinator.get_agent("lineage_analyzer")
+                if lineage_agent:
+                    result = safe_run_async(
+                        lineage_agent.analyze_field_lineage(target)
+                    )
+                    display_lineage_results(result, target)
+                else:
+                    st.error("❌ Lineage analyzer not available")
+            
+            elif analysis_type == "Program Dependencies":
+                logic_agent = st.session_state.coordinator.get_agent("logic_analyzer")
+                if logic_agent:
+                    result = safe_run_async(
+                        logic_agent.find_dependencies(target)
+                    )
+                    display_dependency_results(result, target)
+                else:
+                    st.error("❌ Logic analyzer not available")
+            
+            else:
+                # Use component analysis for other types
+                result = safe_run_async(
+                    st.session_state.coordinator.analyze_component(target, analysis_type.lower())
+                )
+                display_component_analysis_results(result, target)
+    
+    except Exception as e:
+        st.error(f"❌ Data flow analysis error: {str(e)}")
+
+def display_lineage_results(result: Dict[str, Any], target: str):
+    """Display lineage analysis results"""
+    if not result:
+        st.error("❌ No lineage data found")
+        return
+    
+    st.success(f"✅ Lineage analysis completed for {target}")
+    
+    # Display lineage information
+    if isinstance(result, dict):
+        for key, value in result.items():
+            if key == 'lineage_path' and isinstance(value, list):
+                st.markdown("**📊 Data Lineage Path:**")
+                for i, step in enumerate(value):
+                    st.markdown(f"{i+1}. {step}")
+            
+            elif key == 'dependencies' and isinstance(value, list):
+                st.markdown("**🔗 Dependencies:**")
+                for dep in value:
+                    st.markdown(f"- {dep}")
+            
+            elif key == 'usage_patterns':
+                st.markdown("**📈 Usage Patterns:**")
+                st.json(value)
+    else:
+        st.json(result)
+
+def display_dependency_results(result: Dict[str, Any], target: str):
+    """Display dependency analysis results"""
+    if not result:
+        st.error("❌ No dependency data found")
+        return
+    
+    st.success(f"✅ Dependency analysis completed for {target}")
+    
+    # Create dependency visualization
+    if isinstance(result, dict):
+        dependencies = result.get('dependencies', [])
+        
+        if dependencies:
+            # Create a simple dependency graph
+            dep_data = []
+            for dep in dependencies:
+                if isinstance(dep, dict):
+                    dep_data.append({
+                        'Source': target,
+                        'Target': dep.get('name', 'Unknown'),
+                        'Type': dep.get('type', 'Unknown'),
+                        'Relationship': dep.get('relationship', 'depends_on')
+                    })
+            
+            if dep_data:
+                dep_df = pd.DataFrame(dep_data)
+                st.dataframe(dep_df, use_container_width=True)
+        
+        # Display other analysis results
+        for key, value in result.items():
+            if key != 'dependencies':
+                st.markdown(f"**{key.replace('_', ' ').title()}:**")
+                if isinstance(value, (list, dict)):
+                    st.json(value)
+                else:
+                    st.markdown(str(value))
+
+def display_component_analysis_results(result: Dict[str, Any], target: str):
+    """Display component analysis results"""
+    if not result:
+        st.error("❌ No analysis data found")
+        return
+    
+    status = result.get('status', 'unknown')
+    
+    if status == 'completed':
+        st.success(f"✅ Component analysis completed for {target}")
+    elif status == 'partial':
+        st.warning(f"⚠️ Partial analysis completed for {target}")
+    else:
+        st.error(f"❌ Analysis failed for {target}")
+    
+    # Display analysis results
+    analyses = result.get('analyses', {})
+    
+    for analysis_name, analysis_data in analyses.items():
+        with st.expander(f"📊 {analysis_name.replace('_', ' ').title()}", expanded=True):
+            
+            if analysis_data.get('status') == 'success':
+                data = analysis_data.get('data', {})
+                
+                if isinstance(data, dict):
+                    for key, value in data.items():
+                        st.markdown(f"**{key.replace('_', ' ').title()}:**")
+                        
+                        if isinstance(value, list) and len(value) > 0:
+                            for item in value:
+                                st.markdown(f"- {item}")
+                        elif isinstance(value, dict):
+                            st.json(value)
+                        else:
+                            st.markdown(str(value))
+                else:
+                    st.json(data)
+            else:
+                st.error(f"❌ {analysis_name} failed: {analysis_data.get('error', 'Unknown error')}")
+
+# ============================================================================
+# ENHANCED COMPONENT ANALYSIS IMPLEMENTATION
+# ============================================================================
+
+def show_enhanced_component_analysis():
+    """Enhanced component analysis with comprehensive investigation tools"""
+    st.markdown('<div class="sub-header">🔍 Enhanced Component Analysis</div>', unsafe_allow_html=True)
+    
+    if not st.session_state.coordinator:
+        st.error("🔴 System not initialized. Please initialize in the sidebar.")
+        show_initialization_interface()
+        return
+    
+    # Component analysis interface layout
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.markdown("### 🎯 Component Investigation")
+    
+    with col2:
+        # Analysis controls
+        if st.button("📊 View Analysis History", use_container_width=True):
+            st.session_state.show_analysis_history = True
+        
+        if st.button("📈 Analysis Reports", use_container_width=True):
+            st.session_state.show_analysis_reports = True
+    
+    # Main analysis interface
+    show_component_analysis_interface()
+    
+    # Analysis configuration
+    with st.expander("⚙️ Analysis Configuration", expanded=False):
+        show_analysis_configuration()
+    
+    # Quick analysis shortcuts
+    show_quick_analysis_shortcuts()
+    
+    # Analysis results display
+    show_analysis_results_display()
+    
+    # Analysis history and reports
+    if st.session_state.get('show_analysis_history', False):
+        show_analysis_history()
+    
+    if st.session_state.get('show_analysis_reports', False):
+        show_analysis_reports()
+
+def show_component_analysis_interface():
+    """Show main component analysis interface"""
+    st.markdown("#### 🎯 Component Target Selection")
+    
+    # Component input methods
+    input_method = st.radio(
+        "Input Method",
+        ["Manual Entry", "Database Search", "File Upload"],
+        horizontal=True
+    )
+    
+    if input_method == "Manual Entry":
+        show_manual_component_entry()
+    elif input_method == "Database Search":
+        show_database_component_search()
+    else:
+        show_file_component_extraction()
+
+def show_manual_component_entry():
+    """Show manual component entry interface"""
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        component_name = st.text_input(
+            "Component Name",
+            placeholder="e.g., CUSTOMER-RECORD, CALC-INTEREST, PAY001",
+            help="Enter the exact name of the component to analyze"
+        )
+        
+        component_type = st.selectbox(
+            "Component Type",
+            ["Auto-detect", "Field", "Program", "COBOL", "JCL", "Copybook", "Table", "File"],
+            help="Select the type of component or use auto-detect"
+        )
+    
+    with col2:
+        analysis_scope = st.selectbox(
+            "Analysis Scope",
+            ["Comprehensive", "Quick", "Custom"],
+            help="Choose the depth of analysis"
+        )
+        
+        include_dependencies = st.checkbox(
+            "Include Dependencies",
+            value=True,
+            help="Analyze component dependencies and relationships"
+        )
+    
+    if st.button("🚀 Start Analysis", type="primary") and component_name:
+        start_component_analysis(
+            component_name, 
+            component_type if component_type != "Auto-detect" else None,
+            analysis_scope,
+            include_dependencies
+        )
+
+def show_database_component_search():
+    """Show database component search interface"""
+    st.markdown("Search for components in your processed database:")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        search_query = st.text_input(
+            "Search Query",
+            placeholder="Search for component names, patterns, or descriptions"
+        )
+        
+        search_type = st.selectbox(
+            "Search Type",
+            ["Name Match", "Pattern Match", "Description Search", "Full Text"]
+        )
+    
+    with col2:
+        component_filter = st.multiselect(
+            "Component Types",
+            ["Field", "Program", "COBOL", "JCL", "Copybook", "Table", "File"],
+            help="Filter by component types"
+        )
+        
+        result_limit = st.number_input(
+            "Result Limit",
+            min_value=1,
+            max_value=100,
+            value=20
+        )
+    
+    if st.button("🔍 Search Components") and search_query:
+        search_database_components(search_query, search_type, component_filter, result_limit)
+
+def show_file_component_extraction():
+    """Show file component extraction interface"""
+    st.markdown("Extract components from uploaded files for analysis:")
+    
+    uploaded_file = st.file_uploader(
+        "Upload File for Component Extraction",
+        type=['cbl', 'cob', 'jcl', 'sql', 'txt'],
+        help="Upload a mainframe file to extract and analyze its components"
+    )
+    
+    if uploaded_file:
         col1, col2 = st.columns(2)
         
         with col1:
-            # RPS chart
-            fig_rps = px.bar(df_perf, x='server', y='rps',
-                            title='Requests Per Second by Server')
-            fig_rps.update_layout(height=400)
-            st.plotly_chart(fig_rps, use_container_width=True)
+            extraction_mode = st.selectbox(
+                "Extraction Mode",
+                ["All Components", "Programs Only", "Fields Only", "Dependencies Only"]
+            )
         
         with col2:
-            # GPU utilization chart
-            fig_gpu = px.bar(df_perf, x='server', y='gpu_utilization',
-                            title='GPU Utilization by Server')
-            fig_gpu.update_layout(height=400)
-            st.plotly_chart(fig_gpu, use_container_width=True)
+            auto_analyze = st.checkbox(
+                "Auto-analyze Extracted Components",
+                value=True,
+                help="Automatically start analysis for extracted components"
+            )
+        
+        if st.button("📤 Extract Components"):
+            extract_file_components(uploaded_file, extraction_mode, auto_analyze)
+
+def show_analysis_configuration():
+    """Show analysis configuration options"""
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("**Analysis Types:**")
+        enable_lineage = st.checkbox("📊 Lineage Analysis", value=True)
+        enable_logic = st.checkbox("🧠 Logic Analysis", value=True)
+        enable_semantic = st.checkbox("🔍 Semantic Analysis", value=True)
+        
+        st.session_state.analysis_config = {
+            'enable_lineage': enable_lineage,
+            'enable_logic': enable_logic,
+            'enable_semantic': enable_semantic
+        }
+    
+    with col2:
+        st.markdown("**Analysis Depth:**")
+        lineage_depth = st.selectbox("Lineage Depth", ["Shallow", "Medium", "Deep"], index=1)
+        dependency_levels = st.number_input("Dependency Levels", min_value=1, max_value=5, value=3)
+        
+        st.session_state.analysis_config.update({
+            'lineage_depth': lineage_depth,
+            'dependency_levels': dependency_levels
+        })
+    
+    with col3:
+        st.markdown("**Output Options:**")
+        generate_report = st.checkbox("📄 Generate Report", value=True)
+        save_results = st.checkbox("💾 Save to Database", value=True)
+        export_format = st.selectbox("Export Format", ["JSON", "CSV", "HTML"])
+        
+        st.session_state.analysis_config.update({
+            'generate_report': generate_report,
+            'save_results': save_results,
+            'export_format': export_format
+        })
+
+def show_quick_analysis_shortcuts():
+    """Show quick analysis shortcuts"""
+    st.markdown("#### ⚡ Quick Analysis Shortcuts")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if st.button("🏢 Analyze Customer Data", use_container_width=True):
+            start_predefined_analysis("customer", "Customer data components")
+    
+    with col2:
+        if st.button("💰 Analyze Payment Flow", use_container_width=True):
+            start_predefined_analysis("payment", "Payment processing components")
+    
+    with col3:
+        if st.button("📊 Analyze Reports", use_container_width=True):
+            start_predefined_analysis("report", "Reporting components")
+    
+    with col4:
+        if st.button("🔄 Analyze Batch Jobs", use_container_width=True):
+            start_predefined_analysis("batch", "Batch processing components")
+
+def start_component_analysis(name: str, component_type: str, scope: str, include_deps: bool):
+    """Start comprehensive component analysis"""
+    try:
+        with st.spinner(f"🔍 Analyzing component: {name}..."):
+            start_time = time.time()
+            
+            # Determine analysis parameters based on scope
+            if scope == "Quick":
+                analysis_types = ["lineage_analysis"]
+            elif scope == "Comprehensive":
+                analysis_types = ["lineage_analysis", "logic_analysis", "semantic_analysis"]
+            else:  # Custom
+                config = st.session_state.get('analysis_config', {})
+                analysis_types = []
+                if config.get('enable_lineage', True):
+                    analysis_types.append("lineage_analysis")
+                if config.get('enable_logic', True):
+                    analysis_types.append("logic_analysis")
+                if config.get('enable_semantic', True):
+                    analysis_types.append("semantic_analysis")
+            
+            # Start analysis with coordinator
+            result = safe_run_async(
+                st.session_state.coordinator.analyze_component(
+                    name, 
+                    component_type,
+                    analysis_types=analysis_types,
+                    include_dependencies=include_deps
+                )
+            )
+            
+            processing_time = time.time() - start_time
+            
+            if result:
+                # Store results
+                analysis_id = f"{name}_{int(time.time())}"
+                
+                st.session_state.analysis_results[analysis_id] = {
+                    'component_name': name,
+                    'component_type': component_type,
+                    'analysis_scope': scope,
+                    'result': result,
+                    'processing_time': processing_time,
+                    'timestamp': dt.now().isoformat(),
+                    'analysis_id': analysis_id
+                }
+                
+                # Update dashboard metrics
+                st.session_state.dashboard_metrics['components_analyzed'] += 1
+                
+                # Show success and results
+                status = result.get('status', 'unknown')
+                
+                if status == 'completed':
+                    st.success(f"✅ Analysis completed for {name} in {processing_time:.2f} seconds")
+                elif status == 'partial':
+                    st.warning(f"⚠️ Partial analysis completed for {name} in {processing_time:.2f} seconds")
+                else:
+                    st.error(f"❌ Analysis failed for {name}")
+                
+                # Display results immediately
+                display_analysis_result(result, name)
+                
+            else:
+                st.error(f"❌ Analysis failed for {name}")
+    
+    except Exception as e:
+        st.error(f"❌ Analysis error: {str(e)}")
+
+def start_predefined_analysis(category: str, description: str):
+    """Start predefined category analysis"""
+    try:
+        with st.spinner(f"🔍 Searching for {description}..."):
+            # Search for components matching the category
+            search_results = search_components_by_category(category)
+            
+            if search_results:
+                st.success(f"✅ Found {len(search_results)} {description}")
+                
+                # Show found components
+                st.markdown(f"#### 📋 Found {description.title()}:")
+                
+                selected_components = []
+                
+                for i, component in enumerate(search_results):
+                    col1, col2, col3 = st.columns([1, 2, 1])
+                    
+                    with col1:
+                        if st.checkbox(f"Select", key=f"comp_{i}"):
+                            selected_components.append(component)
+                    
+                    with col2:
+                        st.markdown(f"**{component['name']}** ({component['type']})")
+                        st.caption(component.get('description', 'No description'))
+                    
+                    with col3:
+                        if st.button(f"Analyze", key=f"analyze_{i}"):
+                            start_component_analysis(
+                                component['name'],
+                                component['type'],
+                                "Comprehensive",
+                                True
+                            )
+                
+                if selected_components and st.button(f"🚀 Analyze Selected ({len(selected_components)})"):
+                    analyze_multiple_components(selected_components)
+            
+            else:
+                st.info(f"No {description} found in the database")
+    
+    except Exception as e:
+        st.error(f"❌ Predefined analysis error: {str(e)}")
+
+def search_database_components(query: str, search_type: str, filters: List[str], limit: int):
+    """Search for components in database"""
+    try:
+        with st.spinner("🔍 Searching database..."):
+            # Mock database search - in real implementation, query SQLite database
+            results = mock_database_search(query, search_type, filters, limit)
+            
+            if results:
+                st.success(f"✅ Found {len(results)} components")
+                
+                # Display results in a table
+                results_df = pd.DataFrame(results)
+                
+                # Add selection column
+                selected_indices = []
+                
+                for i, row in results_df.iterrows():
+                    col1, col2, col3, col4, col5 = st.columns([1, 2, 1, 1, 1])
+                    
+                    with col1:
+                        if st.checkbox("Select", key=f"search_result_{i}"):
+                            selected_indices.append(i)
+                    
+                    with col2:
+                        st.markdown(f"**{row['name']}**")
+                        st.caption(row.get('description', 'No description'))
+                    
+                    with col3:
+                        st.markdown(f"*{row['type']}*")
+                    
+                    with col4:
+                        relevance = row.get('relevance', 0)
+                        st.markdown(f"{relevance:.0f}%")
+                    
+                    with col5:
+                        if st.button("Analyze", key=f"analyze_search_{i}"):
+                            start_component_analysis(
+                                row['name'],
+                                row['type'],
+                                "Comprehensive",
+                                True
+                            )
+                
+                # Bulk analysis option
+                if selected_indices and st.button(f"🚀 Analyze Selected ({len(selected_indices)})"):
+                    selected_components = [results[i] for i in selected_indices]
+                    analyze_multiple_components(selected_components)
+            
+            else:
+                st.info("No components found matching your search criteria")
+    
+    except Exception as e:
+        st.error(f"❌ Database search error: {str(e)}")
+
+def extract_file_components(uploaded_file, extraction_mode: str, auto_analyze: bool):
+    """Extract components from uploaded file"""
+    try:
+        with st.spinner("📤 Extracting components from file..."):
+            # Read file content
+            file_content = uploaded_file.read().decode('utf-8', errors='ignore')
+            file_name = uploaded_file.name
+            
+            # Detect file type
+            file_type_info = detect_mainframe_file_type(file_name, file_content)
+            
+            # Extract components based on file type and mode
+            extracted_components = extract_components_from_content(
+                file_content, 
+                file_type_info, 
+                extraction_mode
+            )
+            
+            if extracted_components:
+                st.success(f"✅ Extracted {len(extracted_components)} components from {file_name}")
+                
+                # Display extracted components
+                st.markdown("#### 📋 Extracted Components:")
+                
+                selected_for_analysis = []
+                
+                for i, component in enumerate(extracted_components):
+                    col1, col2, col3, col4 = st.columns([1, 2, 1, 1])
+                    
+                    with col1:
+                        if st.checkbox("Select", key=f"extract_{i}"):
+                            selected_for_analysis.append(component)
+                    
+                    with col2:
+                        st.markdown(f"**{component['name']}**")
+                        st.caption(component.get('description', 'No description'))
+                    
+                    with col3:
+                        st.markdown(f"*{component['type']}*")
+                    
+                    with col4:
+                        if st.button("Analyze", key=f"analyze_extract_{i}"):
+                            start_component_analysis(
+                                component['name'],
+                                component['type'],
+                                "Comprehensive",
+                                True
+                            )
+                
+                # Auto-analyze if enabled
+                if auto_analyze:
+                    st.info("🔄 Auto-analyzing extracted components...")
+                    analyze_multiple_components(extracted_components[:5])  # Limit to first 5
+                
+                # Manual bulk analysis
+                elif selected_for_analysis and st.button(f"🚀 Analyze Selected ({len(selected_for_analysis)})"):
+                    analyze_multiple_components(selected_for_analysis)
+            
+            else:
+                st.warning(f"No components extracted from {file_name}")
+    
+    except Exception as e:
+        st.error(f"❌ Component extraction error: {str(e)}")
+
+def show_analysis_results_display():
+    """Show analysis results display"""
+    if not st.session_state.analysis_results:
+        st.info("💡 No analysis results yet. Start analyzing components above.")
+        return
+    
+    st.markdown("#### 📊 Recent Analysis Results")
+    
+    # Get recent results
+    recent_results = list(st.session_state.analysis_results.items())[-5:]
+    
+    for analysis_id, analysis_data in recent_results:
+        component_name = analysis_data['component_name']
+        result = analysis_data['result']
+        timestamp = analysis_data['timestamp']
+        processing_time = analysis_data['processing_time']
+        
+        with st.expander(
+            f"📄 {component_name} - {result.get('status', 'unknown').title()} "
+            f"({processing_time:.2f}s)", 
+            expanded=False
+        ):
+            display_analysis_result(result, component_name, show_metadata=True)
+
+def display_analysis_result(result: Dict[str, Any], component_name: str, show_metadata: bool = False):
+    """Display comprehensive analysis result"""
+    if not result:
+        st.error("No analysis results to display")
+        return
+    
+    status = result.get('status', 'unknown')
+    analyses = result.get('analyses', {})
+    
+    # Status indicator
+    if status == 'completed':
+        st.success(f"🎯 Complete analysis for **{component_name}**")
+    elif status == 'partial':
+        st.warning(f"⚠️ Partial analysis for **{component_name}**")
+    else:
+        st.error(f"❌ Failed analysis for **{component_name}**")
+    
+    # Metadata if requested
+    if show_metadata:
+        metadata = result.get('processing_metadata', {})
+        if metadata:
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                duration = metadata.get('total_duration_seconds', 0)
+                st.metric("Duration", f"{duration:.2f}s")
+            
+            with col2:
+                completed = metadata.get('analyses_completed', 0)
+                total = metadata.get('analyses_total', 0)
+                st.metric("Completed", f"{completed}/{total}")
+            
+            with col3:
+                success_rate = metadata.get('success_rate', 0)
+                st.metric("Success Rate", f"{success_rate:.1f}%")
+    
+    # Analysis results tabs
+    if analyses:
+        # Create tabs for different analysis types
+        analysis_tabs = st.tabs([
+            f"📊 {name.replace('_', ' ').title()}" 
+            for name in analyses.keys()
+        ])
+        
+        for tab, (analysis_name, analysis_data) in zip(analysis_tabs, analyses.items()):
+            with tab:
+                display_specific_analysis(analysis_name, analysis_data, component_name)
+    
+    # Component summary
+    show_component_summary(result, component_name)
+
+def display_specific_analysis(analysis_name: str, analysis_data: Dict[str, Any], component_name: str):
+    """Display specific analysis results"""
+    status = analysis_data.get('status', 'unknown')
+    
+    if status == 'success':
+        data = analysis_data.get('data', {})
+        agent_used = analysis_data.get('agent_used', 'unknown')
+        completion_time = analysis_data.get('completion_time', 0)
+        
+        # Analysis header
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.markdown(f"**Agent:** {agent_used}")
+        with col2:
+            st.markdown(f"**Time:** {completion_time:.2f}s")
+        
+        # Display based on analysis type
+        if analysis_name == 'lineage_analysis':
+            display_lineage_analysis(data, component_name)
+        elif analysis_name == 'logic_analysis':
+            display_logic_analysis(data, component_name)
+        elif analysis_name == 'semantic_analysis':
+            display_semantic_analysis(data, component_name)
+        else:
+            # Generic display for other analysis types
+            st.json(data)
+    
+    elif status == 'error':
+        error_msg = analysis_data.get('error', 'Unknown error')
+        st.error(f"❌ {analysis_name} failed: {error_msg}")
+    
+    else:
+        st.warning(f"⚠️ {analysis_name} status: {status}")
+
+def display_lineage_analysis(data: Dict[str, Any], component_name: str):
+    """Display lineage analysis results"""
+    st.markdown("#### 📊 Data Lineage Analysis")
+    
+    # Lineage path
+    if 'lineage_path' in data:
+        st.markdown("**📈 Lineage Path:**")
+        lineage_path = data['lineage_path']
+        
+        if isinstance(lineage_path, list) and lineage_path:
+            for i, step in enumerate(lineage_path):
+                icon = "🔹" if i % 2 == 0 else "🔸"
+                st.markdown(f"{icon} {step}")
+        else:
+            st.info("No lineage path found")
+    
+    # Dependencies
+    if 'dependencies' in data:
+        dependencies = data['dependencies']
+        if dependencies:
+            st.markdown("**🔗 Dependencies:**")
+            
+            # Create dependency chart
+            dep_data = []
+            for dep in dependencies:
+                if isinstance(dep, dict):
+                    dep_data.append({
+                        'Component': dep.get('name', 'Unknown'),
+                        'Type': dep.get('type', 'Unknown'),
+                        'Relationship': dep.get('relationship', 'Unknown')
+                    })
+            
+            if dep_data:
+                dep_df = pd.DataFrame(dep_data)
+                st.dataframe(dep_df, use_container_width=True)
+        else:
+            st.info("No dependencies found")
+    
+    # Usage patterns
+    if 'usage_patterns' in data:
+        st.markdown("**📈 Usage Patterns:**")
+        usage_patterns = data['usage_patterns']
+        
+        if isinstance(usage_patterns, dict):
+            for pattern_name, pattern_data in usage_patterns.items():
+                st.markdown(f"- **{pattern_name}**: {pattern_data}")
+        else:
+            st.json(usage_patterns)
+
+def display_logic_analysis(data: Dict[str, Any], component_name: str):
+    """Display logic analysis results"""
+    st.markdown("#### 🧠 Logic Analysis")
+    
+    # Program structure
+    if 'program_structure' in data:
+        st.markdown("**🏗️ Program Structure:**")
+        structure = data['program_structure']
+        
+        if isinstance(structure, dict):
+            for section, details in structure.items():
+                with st.expander(f"📂 {section.replace('_', ' ').title()}", expanded=False):
+                    if isinstance(details, list):
+                        for detail in details:
+                            st.markdown(f"- {detail}")
+                    else:
+                        st.markdown(str(details))
+    
+    # Logic flows
+    if 'logic_flows' in data:
+        st.markdown("**🔄 Logic Flows:**")
+        flows = data['logic_flows']
+        
+        if isinstance(flows, list):
+            for i, flow in enumerate(flows):
+                st.markdown(f"{i+1}. {flow}")
+        else:
+            st.json(flows)
+    
+    # Variables and operations
+    if 'variables' in data:
+        st.markdown("**📝 Variables:**")
+        variables = data['variables']
+        
+        if isinstance(variables, list) and variables:
+            var_df = pd.DataFrame(variables)
+            st.dataframe(var_df, use_container_width=True)
+        else:
+            st.json(variables)
+
+def display_semantic_analysis(data: Dict[str, Any], component_name: str):
+    """Display semantic analysis results"""
+    st.markdown("#### 🔍 Semantic Analysis")
+    
+    # Similar components
+    if 'similar_components' in data:
+        st.markdown("**🔗 Similar Components:**")
+        similar = data['similar_components']
+        
+        if isinstance(similar, list) and similar:
+            for component in similar:
+                similarity = component.get('score', 0) * 100
+                name = component.get('name', 'Unknown')
+                comp_type = component.get('type', 'Unknown')
+                
+                st.markdown(f"- **{name}** ({comp_type}) - {similarity:.1f}% similar")
+        else:
+            st.info("No similar components found")
+    
+    # Semantic search results
+    if 'semantic_search' in data:
+        st.markdown("**🔍 Related Functionality:**")
+        search_results = data['semantic_search']
+        
+        if isinstance(search_results, list) and search_results:
+            for result in search_results:
+                score = result.get('score', 0) * 100
+                content = result.get('content', 'No content')
+                source = result.get('source', 'Unknown source')
+                
+                with st.expander(f"📄 {source} ({score:.1f}% relevance)", expanded=False):
+                    st.code(content[:500] + "..." if len(content) > 500 else content)
+        else:
+            st.info("No related functionality found")
+
+def show_component_summary(result: Dict[str, Any], component_name: str):
+    """Show component analysis summary"""
+    st.markdown("#### 📋 Analysis Summary")
+    
+    # Component information
+    component_type = result.get('component_type', 'Unknown')
+    timestamp = result.get('analysis_timestamp', '')
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown(f"**Component:** {component_name}")
+        st.markdown(f"**Type:** {component_type}")
+    
+    with col2:
+        st.markdown(f"**Analysis Date:** {timestamp[:10] if timestamp else 'Unknown'}")
+        status = result.get('status', 'Unknown')
+        st.markdown(f"**Status:** {status.title()}")
+    
+    with col3:
+        analyses = result.get('analyses', {})
+        successful_analyses = sum(1 for a in analyses.values() if a.get('status') == 'success')
+        st.markdown(f"**Analyses Completed:** {successful_analyses}/{len(analyses)}")
+        
+        if 'processing_metadata' in result:
+            duration = result['processing_metadata'].get('total_duration_seconds', 0)
+            st.markdown(f"**Total Time:** {duration:.2f}s")
+
+def show_analysis_history():
+    """Show analysis history"""
+    st.markdown("#### 📈 Analysis History")
+    
+    if not st.session_state.analysis_results:
+        st.info("No analysis history available")
+        return
+    
+    # Analysis history table
+    history_data = []
+    for analysis_id, analysis_data in st.session_state.analysis_results.items():
+        history_data.append({
+            'Component': analysis_data['component_name'],
+            'Type': analysis_data['component_type'],
+            'Scope': analysis_data['analysis_scope'],
+            'Status': analysis_data['result'].get('status', 'unknown'),
+            'Duration': f"{analysis_data['processing_time']:.2f}s",
+            'Timestamp': analysis_data['timestamp'][:19].replace('T', ' '),
+            'ID': analysis_id
+        })
+    
+    history_df = pd.DataFrame(history_data)
+    
+    # Filters
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        status_filter = st.multiselect(
+            "Filter by Status",
+            options=history_df['Status'].unique(),
+            default=history_df['Status'].unique()
+        )
+    
+    with col2:
+        type_filter = st.multiselect(
+            "Filter by Type",
+            options=history_df['Type'].unique(),
+            default=history_df['Type'].unique()
+        )
+    
+    with col3:
+        if st.button("🗑️ Clear History"):
+            st.session_state.analysis_results = {}
+            st.rerun()
+    
+    # Apply filters
+    filtered_df = history_df[
+        (history_df['Status'].isin(status_filter)) &
+        (history_df['Type'].isin(type_filter))
+    ]
+    
+    # Display filtered results
+    st.dataframe(filtered_df, use_container_width=True)
+    
+    # Re-analyze option
+    if st.selectbox("Re-analyze Component", ["Select..."] + filtered_df['Component'].tolist()) != "Select...":
+        selected_component = st.selectbox("Re-analyze Component", ["Select..."] + filtered_df['Component'].tolist())
+        if selected_component != "Select..." and st.button("🔄 Re-analyze"):
+            start_component_analysis(selected_component, None, "Comprehensive", True)
+
+def show_analysis_reports():
+    """Show analysis reports"""
+    st.markdown("#### 📊 Analysis Reports")
+    
+    if not st.session_state.analysis_results:
+        st.info("No analysis data available for reports")
+        return
+    
+    # Report type selection
+    report_type = st.selectbox(
+        "Report Type",
+        ["Summary Report", "Detailed Report", "Comparison Report", "Trend Analysis"]
+    )
+    
+    if report_type == "Summary Report":
+        generate_summary_report()
+    elif report_type == "Detailed Report":
+        generate_detailed_report()
+    elif report_type == "Comparison Report":
+        generate_comparison_report()
+    else:
+        generate_trend_analysis_report()
+
+def generate_summary_report():
+    """Generate summary report"""
+    results = st.session_state.analysis_results
+    
+    # Summary statistics
+    total_analyses = len(results)
+    successful = sum(1 for r in results.values() if r['result'].get('status') == 'completed')
+    avg_duration = sum(r['processing_time'] for r in results.values()) / total_analyses
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Total Analyses", total_analyses)
+    
+    with col2:
+        st.metric("Success Rate", f"{(successful/total_analyses*100):.1f}%")
+    
+    with col3:
+        st.metric("Avg Duration", f"{avg_duration:.2f}s")
+    
+    # Component type distribution
+    type_counts = {}
+    for analysis in results.values():
+        comp_type = analysis.get('component_type', 'Unknown')
+        type_counts[comp_type] = type_counts.get(comp_type, 0) + 1
+    
+    if type_counts:
+        type_df = pd.DataFrame([
+            {'Type': comp_type, 'Count': count}
+            for comp_type, count in type_counts.items()
+        ])
+        
+        fig = px.pie(type_df, values='Count', names='Type',
+                     title="Component Types Analyzed")
+        st.plotly_chart(fig, use_container_width=True)
+
+# ============================================================================
+# UTILITY FUNCTIONS FOR COMPONENT ANALYSIS
+# ============================================================================
+
+def search_components_by_category(category: str) -> List[Dict[str, Any]]:
+    """Mock function to search components by category"""
+    # In real implementation, this would query the database
+    mock_components = {
+        'customer': [
+            {'name': 'CUSTOMER-RECORD', 'type': 'Field', 'description': 'Main customer data structure'},
+            {'name': 'CUST-VALIDATE', 'type': 'Program', 'description': 'Customer validation routine'},
+            {'name': 'CUSTOMER-FILE', 'type': 'File', 'description': 'Customer master file'}
+        ],
+        'payment': [
+            {'name': 'PAYMENT-CALC', 'type': 'Program', 'description': 'Payment calculation logic'},
+            {'name': 'PAY-AMOUNT', 'type': 'Field', 'description': 'Payment amount field'},
+            {'name': 'PROCESS-PAYMENT', 'type': 'Program', 'description': 'Payment processing routine'}
+        ],
+        'report': [
+            {'name': 'MONTHLY-REPORT', 'type': 'Program', 'description': 'Monthly reporting program'},
+            {'name': 'RPT-HEADER', 'type': 'Field', 'description': 'Report header structure'},
+            {'name': 'GENERATE-RPT', 'type': 'Program', 'description': 'Report generation utility'}
+        ],
+        'batch': [
+            {'name': 'BATCH-JOB', 'type': 'JCL', 'description': 'Main batch processing job'},
+            {'name': 'BATCH-CONTROL', 'type': 'Program', 'description': 'Batch job controller'},
+            {'name': 'JOB-STATUS', 'type': 'Field', 'description': 'Job execution status'}
+        ]
+    }
+    
+    return mock_components.get(category, [])
+
+def mock_database_search(query: str, search_type: str, filters: List[str], limit: int) -> List[Dict[str, Any]]:
+    """Mock database search function"""
+    # In real implementation, this would query SQLite database
+    mock_results = [
+        {
+            'name': f'COMPONENT-{i}',
+            'type': filters[i % len(filters)] if filters else 'Program',
+            'description': f'Mock component matching {query}',
+            'relevance': max(50, 100 - i * 5)
+        }
+        for i in range(min(limit, 10))
+    ]
+    
+    return mock_results
+
+def extract_components_from_content(content: str, file_type_info: Dict[str, Any], mode: str) -> List[Dict[str, Any]]:
+    """Extract components from file content"""
+    components = []
+    file_type = file_type_info.get('type', 'unknown')
+    
+    if file_type == 'cobol':
+        # Extract COBOL components
+        if mode in ['All Components', 'Programs Only']:
+            # Look for program name
+            import re
+            program_match = re.search(r'PROGRAM-ID\.\s+(\S+)', content, re.IGNORECASE)
+            if program_match:
+                components.append({
+                    'name': program_match.group(1),
+                    'type': 'Program',
+                    'description': 'COBOL Program'
+                })
+        
+        if mode in ['All Components', 'Fields Only']:
+            # Look for field definitions
+            field_matches = re.findall(r'^\s*\d+\s+([A-Z][A-Z0-9-]+)', content, re.MULTILINE)
+            for field in field_matches[:10]:  # Limit to first 10
+                components.append({
+                    'name': field,
+                    'type': 'Field',
+                    'description': 'COBOL Data Field'
+                })
+    
+    elif file_type == 'jcl':
+        # Extract JCL components
+        job_matches = re.findall(r'//(\w+)\s+JOB', content)
+        for job in job_matches:
+            components.append({
+                'name': job,
+                'type': 'JCL',
+                'description': 'JCL Job'
+            })
+    
+    return components
+
+def analyze_multiple_components(components: List[Dict[str, Any]]):
+    """Analyze multiple components"""
+    try:
+        total_components = len(components)
+        st.info(f"🔄 Starting analysis of {total_components} components...")
+        
+        progress_bar = st.progress(0)
+        
+        for i, component in enumerate(components):
+            start_component_analysis(
+                component['name'],
+                component['type'],
+                "Quick",  # Use quick analysis for bulk processing
+                False     # Skip dependencies for speed
+            )
+            
+            # Update progress
+            progress_bar.progress((i + 1) / total_components)
+        
+        st.success(f"✅ Completed analysis of {total_components} components")
+        
+    except Exception as e:
+        st.error(f"❌ Bulk analysis error: {str(e)}")
+
+def generate_detailed_report():
+    """Generate detailed analysis report"""
+    st.info("📄 Detailed report generation would be implemented here")
+
+def generate_comparison_report():
+    """Generate comparison report"""
+    st.info("📊 Comparison report generation would be implemented here")
+
+def generate_trend_analysis_report():
+    """Generate trend analysis report"""
+    st.info("📈 Trend analysis report generation would be implemented here")
 
 # ============================================================================
 # MAIN APPLICATION WITH ENHANCED NAVIGATION
 # ============================================================================
 
 def main():
-    """Enhanced main application with comprehensive mainframe support"""
+    """Enhanced main application with comprehensive single GPU support"""
+    
+    # Page configuration
+    st.set_page_config(
+        page_title="Opulence Mainframe Analysis Platform",
+        page_icon="🌐",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
     
     # Initialize session state
     initialize_session_state()
@@ -2475,56 +2943,244 @@ def main():
     # Add custom CSS
     add_custom_css()
     
-    # Header
-    st.markdown('<div class="main-header">🌐 Opulence Enhanced Mainframe Analysis Platform</div>', unsafe_allow_html=True)
-    
-    # Show system status in header
-    if COORDINATOR_AVAILABLE and st.session_state.coordinator:
-        show_header_status()
-    elif not COORDINATOR_AVAILABLE:
-        st.error("⚠️ API Coordinator module not available - Running in demo mode")
+    # Header with system status
+    show_application_header()
     
     # Enhanced sidebar navigation
     with st.sidebar:
-        st.image("https://via.placeholder.com/150x50/059669/ffffff?text=OPULENCE", use_container_width=True)
+        show_enhanced_sidebar()
+    
+    # Main content area
+    show_main_content()
+    
+    # Footer with system information
+    show_application_footer()
+
+def show_application_header():
+    """Show application header with system status"""
+    st.markdown('<div class="main-header">🌐 Opulence Enhanced Mainframe Analysis Platform</div>', unsafe_allow_html=True)
+    
+    # System status bar
+    if COORDINATOR_AVAILABLE and st.session_state.coordinator:
+        show_header_status_bar()
+    elif not COORDINATOR_AVAILABLE:
+        st.error("⚠️ API Coordinator module not available - Please check installation")
+    else:
+        st.warning("🟡 System not initialized - Please initialize in the sidebar")
+
+def show_header_status_bar():
+    """Show condensed status bar in header"""
+    try:
+        health = st.session_state.coordinator.get_health_status()
+        available_servers = health.get('available_servers', 0)
+        total_servers = health.get('total_servers', 0)
         
-        # Navigation with mainframe focus
-        page = st.selectbox(
-            "Navigation",
-            [
-                "🏠 Dashboard", 
-                "📂 Mainframe File Upload", 
-                "💬 Chat Analysis", 
-                "🔍 Component Analysis",
-                "🤖 Agent Status",
-                "🎮 GPU Monitoring",
-                "⚙️ System Health",
-                "📊 Analytics & Reports"
-            ]
-        )
-        
-        # Quick actions
-        st.markdown("### Quick Actions")
-        
-        col1, col2 = st.columns(2)
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            if st.button("🔄 Refresh", use_container_width=True):
-                st.rerun()
+            if available_servers > 0:
+                st.success(f"🟢 {available_servers}/{total_servers} GPU Servers")
+            else:
+                st.error(f"🔴 {available_servers}/{total_servers} GPU Servers")
         
         with col2:
-            if st.button("🧹 Clear Cache", use_container_width=True):
-                clear_application_cache()
+            available_agents = sum(1 for status in st.session_state.agent_status.values() 
+                                 if status['status'] == 'available')
+            total_agents = len(AGENT_TYPES)
+            
+            if available_agents == total_agents:
+                st.success(f"🤖 {available_agents}/{total_agents} Agents")
+            elif available_agents > 0:
+                st.warning(f"🤖 {available_agents}/{total_agents} Agents")
+            else:
+                st.error(f"🤖 {available_agents}/{total_agents} Agents")
         
-        # Debug mode toggle
-        debug_mode = st.checkbox("🐛 Debug Mode", value=st.session_state.get('debug_mode', False))
-        st.session_state.debug_mode = debug_mode
+        with col3:
+            files_processed = len(st.session_state.processing_history)
+            if files_processed > 0:
+                success_rate = sum(1 for h in st.session_state.processing_history 
+                                 if h.get('status') == 'success') / files_processed * 100
+                st.info(f"📄 {files_processed} files ({success_rate:.0f}% success)")
+            else:
+                st.info("📄 0 files processed")
+        
+        with col4:
+            queries = len(st.session_state.chat_history)
+            st.info(f"💬 {queries} queries answered")
     
-    # Main content routing
+    except Exception as e:
+        st.warning(f"🟡 Status check failed: {str(e)}")
+
+def show_enhanced_sidebar():
+    """Show enhanced sidebar with navigation and controls"""
+    # Logo and branding
+    st.image("https://via.placeholder.com/150x50/059669/ffffff?text=OPULENCE", use_container_width=True)
+    
+    # System initialization section
+    with st.expander("🚀 System Control", expanded=not st.session_state.coordinator):
+        show_sidebar_system_control()
+    
+    # Navigation
+    st.markdown("### 📋 Navigation")
+    
+    page = st.selectbox(
+        "Choose Page",
+        [
+            "🏠 Dashboard", 
+            "📂 File Upload & Processing", 
+            "💬 Chat Analysis", 
+            "🔍 Component Analysis",
+            "🤖 Agent Status",
+            "🎮 GPU Monitoring",
+            "⚙️ System Health",
+            "📊 Analytics & Reports"
+        ],
+        key="main_navigation"
+    )
+    
+    st.session_state.current_page = page
+    
+    # Quick actions
+    st.markdown("### ⚡ Quick Actions")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🔄 Refresh", use_container_width=True):
+            st.rerun()
+    
+    with col2:
+        if st.button("🧹 Clear", use_container_width=True):
+            show_clear_options()
+    
+    # System information
+    show_sidebar_system_info()
+    
+    # Advanced options
+    with st.expander("🔧 Advanced Options", expanded=False):
+        show_advanced_options()
+
+def show_sidebar_system_control():
+    """Show system control in sidebar"""
+    if not COORDINATOR_AVAILABLE:
+        st.error("❌ Coordinator Not Available")
+        st.caption(f"Error: {st.session_state.get('import_error', 'Unknown error')}")
+        return
+    
+    # Initialization status
+    status = st.session_state.initialization_status
+    
+    if status == 'not_started':
+        st.warning("🟡 System Not Initialized")
+        if st.button("🚀 Initialize System", use_container_width=True, type="primary"):
+            initialize_system()
+    
+    elif status == 'completed':
+        st.success("🟢 System Ready")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔄 Restart", use_container_width=True):
+                restart_system()
+        with col2:
+            if st.button("🏥 Health", use_container_width=True):
+                check_system_health()
+    
+    else:
+        st.error(f"🔴 Status: {status}")
+    else:
+        st.error(f"🔴 Status: {status}")
+        if st.button("🔄 Retry", use_container_width=True):
+            retry_initialization()
+
+def show_sidebar_system_info():
+    """Show system information in sidebar"""
+    st.markdown("### 📊 System Info")
+    
+    try:
+        if st.session_state.coordinator:
+            health = st.session_state.coordinator.get_health_status()
+            
+            # System metrics
+            st.metric("GPU Servers", f"{health.get('available_servers', 0)}")
+            st.metric("Uptime", f"{health.get('uptime_seconds', 0):.0f}s")
+            
+            # Processing stats
+            files = len(st.session_state.processing_history)
+            queries = len(st.session_state.chat_history)
+            
+            st.metric("Files Processed", files)
+            st.metric("Queries Handled", queries)
+        else:
+            st.info("System not initialized")
+    
+    except Exception as e:
+        st.error(f"Info error: {str(e)}")
+
+def show_advanced_options():
+    """Show advanced options"""
+    # Debug mode
+    debug_mode = st.checkbox(
+        "🐛 Debug Mode", 
+        value=st.session_state.get('debug_mode', False),
+        help="Enable detailed error messages and logging"
+    )
+    st.session_state.debug_mode = debug_mode
+    
+    # Performance settings
+    st.markdown("**Performance:**")
+    
+    auto_refresh = st.checkbox(
+        "🔄 Auto-refresh", 
+        value=st.session_state.get('auto_refresh_enabled', False),
+        help="Automatically refresh data periodically"
+    )
+    st.session_state.auto_refresh_enabled = auto_refresh
+    
+    if auto_refresh:
+        refresh_interval = st.slider(
+            "Refresh Interval (s)",
+            min_value=5,
+            max_value=60,
+            value=10
+        )
+        st.session_state.refresh_interval = refresh_interval
+
+def show_clear_options():
+    """Show clear options modal"""
+    st.markdown("#### 🧹 Clear Options")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🗑️ Clear Chat", use_container_width=True):
+            st.session_state.chat_history = []
+            st.success("Chat history cleared")
+            st.rerun()
+        
+        if st.button("📄 Clear Files", use_container_width=True):
+            st.session_state.processing_history = []
+            st.session_state.uploaded_files = []
+            st.success("File history cleared")
+            st.rerun()
+    
+    with col2:
+        if st.button("🔍 Clear Analysis", use_container_width=True):
+            st.session_state.analysis_results = {}
+            st.success("Analysis results cleared")
+            st.rerun()
+        
+        if st.button("🧹 Clear All", use_container_width=True, type="secondary"):
+            clear_all_data()
+
+def show_main_content():
+    """Show main content based on navigation"""
+    page = st.session_state.get('current_page', '🏠 Dashboard')
+    
     try:
         if page == "🏠 Dashboard":
             show_enhanced_dashboard()
-        elif page == "📂 Mainframe File Upload":
+        elif page == "📂 File Upload & Processing":
             show_enhanced_file_upload()
         elif page == "💬 Chat Analysis":
             show_enhanced_chat_analysis()
@@ -2538,70 +3194,478 @@ def main():
             show_enhanced_system_health()
         elif page == "📊 Analytics & Reports":
             show_analytics_and_reports()
+        else:
+            st.error(f"Unknown page: {page}")
             
     except Exception as e:
         st.error(f"Error loading page: {str(e)}")
         if st.session_state.get('debug_mode', False):
             st.exception(e)
 
-def show_header_status():
-    """Show condensed status in header"""
+def show_application_footer():
+    """Show application footer"""
+    st.markdown("---")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.caption("🌐 Opulence Mainframe Analysis Platform")
+    
+    with col2:
+        if st.session_state.coordinator:
+            health = st.session_state.coordinator.get_health_status()
+            coordinator_type = health.get('coordinator_type', 'unknown')
+            st.caption(f"🔧 Coordinator: {coordinator_type}")
+        else:
+            st.caption("🔧 Coordinator: Not initialized")
+    
+    with col3:
+        current_time = dt.now().strftime("%Y-%m-%d %H:%M:%S")
+        st.caption(f"🕒 {current_time}")
+
+# ============================================================================
+# ENHANCED FILE UPLOAD WITH MAINFRAME SUPPORT
+# ============================================================================
+
+def show_enhanced_file_upload():
+    """Enhanced file upload with comprehensive mainframe support"""
+    st.markdown('<div class="sub-header">📂 Mainframe File Upload & Processing</div>', unsafe_allow_html=True)
+    
+    if not st.session_state.coordinator:
+        st.error("🔴 System not initialized. Please initialize in the sidebar.")
+        return
+    
+    # File upload interface
+    show_file_upload_interface()
+    
+    # Processing configuration
+    with st.expander("⚙️ Processing Configuration", expanded=False):
+        show_processing_configuration()
+    
+    # Processing history
+    show_processing_history()
+
+def show_file_upload_interface():
+    """Show file upload interface"""
+    st.markdown("#### 📤 Upload Mainframe Files")
+    
+    # File type information
+    with st.expander("📋 Supported File Types", expanded=False):
+        show_supported_file_types()
+    
+    # Upload area
+    uploaded_files = st.file_uploader(
+        "Choose mainframe files to upload",
+        accept_multiple_files=True,
+        type=None,  # Accept all file types
+        help="Upload COBOL, JCL, SQL, PL/I, and other mainframe files"
+    )
+    
+    if uploaded_files:
+        process_uploaded_files(uploaded_files)
+
+def show_supported_file_types():
+    """Show supported file types"""
+    for file_type, info in MAINFRAME_FILE_TYPES.items():
+        st.markdown(f"**{info['description']}**")
+        st.markdown(f"- Extensions: {', '.join(info['extensions'])}")
+        st.markdown(f"- Processed by: {info['agent']} agent")
+        st.markdown("---")
+
+def show_processing_configuration():
+    """Show processing configuration"""
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        auto_detect = st.checkbox("🔍 Auto-detect file types", value=True)
+        parallel_processing = st.checkbox("⚡ Parallel processing", value=False)
+    
+    with col2:
+        save_to_db = st.checkbox("💾 Save to database", value=True)
+        generate_reports = st.checkbox("📄 Generate reports", value=False)
+    
+    with col3:
+        processing_timeout = st.number_input("Timeout (seconds)", min_value=30, value=120)
+        batch_size = st.number_input("Batch size", min_value=1, value=5)
+    
+    st.session_state.processing_config = {
+        'auto_detect': auto_detect,
+        'parallel_processing': parallel_processing,
+        'save_to_db': save_to_db,
+        'generate_reports': generate_reports,
+        'timeout': processing_timeout,
+        'batch_size': batch_size
+    }
+
+def process_uploaded_files(uploaded_files):
+    """Process uploaded files"""
+    st.markdown("#### 📊 File Analysis & Processing")
+    
+    # Analyze uploaded files
+    file_analysis = []
+    
+    for uploaded_file in uploaded_files:
+        try:
+            file_content = uploaded_file.read().decode('utf-8', errors='ignore')
+            uploaded_file.seek(0)
+        except:
+            file_content = None
+        
+        file_type_info = detect_mainframe_file_type(uploaded_file.name, file_content)
+        file_hash = hashlib.md5(uploaded_file.getvalue()).hexdigest()
+        
+        file_info = {
+            'name': uploaded_file.name,
+            'size': uploaded_file.size,
+            'type': file_type_info['type'],
+            'description': file_type_info['description'],
+            'agent': file_type_info['agent'],
+            'confidence': file_type_info['confidence'],
+            'hash': file_hash,
+            'content_preview': file_content[:200] + '...' if file_content and len(file_content) > 200 else file_content,
+            'upload_time': dt.now().isoformat()
+        }
+        
+        file_analysis.append(file_info)
+    
+    # Display file analysis
+    for i, file_info in enumerate(file_analysis):
+        with st.expander(f"📄 {file_info['name']} ({file_info['size']} bytes)", expanded=False):
+            show_file_analysis_details(file_info)
+    
+    # Processing controls
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("🚀 Process All Files", type="primary", use_container_width=True):
+            process_files_batch(uploaded_files, file_analysis)
+    
+    with col2:
+        if st.button("👁️ Preview Processing", use_container_width=True):
+            preview_processing(file_analysis)
+    
+    with col3:
+        if st.button("📋 Save File List", use_container_width=True):
+            save_file_list(file_analysis)
+
+def show_file_analysis_details(file_info):
+    """Show detailed file analysis"""
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown(f"**Type:** {file_info['type'].upper()}")
+        st.markdown(f"**Agent:** {file_info['agent']}")
+    
+    with col2:
+        st.markdown(f"**Size:** {file_info['size']:,} bytes")
+        st.markdown(f"**Confidence:** {file_info['confidence']}")
+    
+    with col3:
+        st.markdown(f"**Hash:** {file_info['hash'][:8]}...")
+        st.markdown(f"**Uploaded:** {file_info['upload_time'][:19]}")
+    
+    if file_info['content_preview']:
+        st.markdown("**Content Preview:**")
+        st.code(file_info['content_preview'], language='text')
+
+def process_files_batch(uploaded_files, file_analysis):
+    """Process files in batch"""
+    try:
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        results_container = st.container()
+        
+        total_files = len(uploaded_files)
+        results = []
+        
+        for i, (uploaded_file, file_info) in enumerate(zip(uploaded_files, file_analysis)):
+            status_text.text(f"Processing {file_info['name']} ({i+1}/{total_files})...")
+            
+            # Save file temporarily
+            with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix=f"_{file_info['name']}") as temp_file:
+                temp_file.write(uploaded_file.getvalue())
+                temp_file_path = temp_file.name
+            
+            try:
+                # Process with coordinator
+                start_time = time.time()
+                
+                result = safe_run_async(
+                    st.session_state.coordinator.process_batch_files(
+                        [Path(temp_file_path)], 
+                        file_info['type']
+                    )
+                )
+                
+                processing_time = time.time() - start_time
+                
+                # Record result
+                processing_result = {
+                    'file_name': file_info['name'],
+                    'file_type': file_info['type'],
+                    'agent_used': file_info['agent'],
+                    'status': 'success' if result and not result.get('error') else 'error',
+                    'processing_time': processing_time,
+                    'result': result,
+                    'timestamp': dt.now().isoformat(),
+                    'error': result.get('error') if result else 'Unknown error'
+                }
+                
+                results.append(processing_result)
+                st.session_state.processing_history.append(processing_result)
+                
+                # Update agent status
+                agent_type = file_info['agent']
+                st.session_state.agent_status[agent_type]['total_calls'] += 1
+                st.session_state.agent_status[agent_type]['last_used'] = dt.now().isoformat()
+                
+                if processing_result['status'] == 'success':
+                    st.session_state.agent_status[agent_type]['status'] = 'available'
+                    with results_container:
+                        st.success(f"✅ {file_info['name']} processed successfully in {processing_time:.2f}s")
+                else:
+                    st.session_state.agent_status[agent_type]['errors'] += 1
+                    with results_container:
+                        st.error(f"❌ {file_info['name']} processing failed: {processing_result['error']}")
+            
+            finally:
+                # Clean up temp file
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+            
+            progress_bar.progress((i + 1) / total_files)
+        
+        # Final summary
+        status_text.text("Processing complete!")
+        success_count = sum(1 for r in results if r['status'] == 'success')
+        error_count = len(results) - success_count
+        
+        st.success(f"🎉 Processing Summary: {success_count} successful, {error_count} errors")
+        
+        # Update dashboard metrics
+        st.session_state.dashboard_metrics['files_processed'] += success_count
+        
+    except Exception as e:
+        st.error(f"❌ Batch processing failed: {str(e)}")
+
+def show_processing_history():
+    """Show processing history"""
+    st.markdown("#### 📈 Processing History")
+    
+    if not st.session_state.processing_history:
+        st.info("No files processed yet. Upload and process files to see history.")
+        return
+    
+    # Summary metrics
+    total_files = len(st.session_state.processing_history)
+    successful = sum(1 for h in st.session_state.processing_history if h['status'] == 'success')
+    failed = total_files - successful
+    avg_time = sum(h.get('processing_time', 0) for h in st.session_state.processing_history) / total_files
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Files", total_files)
+    with col2:
+        st.metric("Successful", successful)
+    with col3:
+        st.metric("Failed", failed)
+    with col4:
+        st.metric("Avg Time", f"{avg_time:.2f}s")
+    
+    # Recent files table
+    recent_files = st.session_state.processing_history[-20:]  # Last 20 files
+    
+    if recent_files:
+        history_data = []
+        for h in recent_files:
+            history_data.append({
+                'File': h['file_name'],
+                'Type': h['file_type'].upper(),
+                'Agent': h['agent_used'],
+                'Status': '✅' if h['status'] == 'success' else '❌',
+                'Time': f"{h.get('processing_time', 0):.2f}s",
+                'Timestamp': h['timestamp'][:19].replace('T', ' ')
+            })
+        
+        history_df = pd.DataFrame(history_data)
+        st.dataframe(history_df, use_container_width=True)
+        
+        # Export option
+        if st.button("📥 Export Processing History"):
+            export_processing_history()
+
+# ============================================================================
+# SYSTEM CONTROL FUNCTIONS
+# ============================================================================
+
+def initialize_system():
+    """Initialize the system"""
+    with st.spinner("🚀 Initializing system..."):
+        result = safe_run_async(init_api_coordinator_single_gpu())
+        
+        if result and result.get('success'):
+            st.success("✅ System initialized successfully!")
+            st.rerun()
+        else:
+            error_msg = result.get('error') if result else "Unknown error"
+            st.error(f"❌ Initialization failed: {error_msg}")
+
+def restart_system():
+    """Restart the system"""
+    try:
+        if st.session_state.coordinator:
+            st.session_state.coordinator.cleanup()
+        
+        st.session_state.coordinator = None
+        st.session_state.initialization_status = 'not_started'
+        
+        # Reset agent status
+        for agent_type in AGENT_TYPES:
+            st.session_state.agent_status[agent_type] = {
+                'status': 'unknown', 
+                'last_used': None, 
+                'total_calls': 0, 
+                'errors': 0
+            }
+        
+        st.success("✅ System restarted successfully")
+        st.rerun()
+        
+    except Exception as e:
+        st.error(f"❌ Restart failed: {str(e)}")
+
+def retry_initialization():
+    """Retry initialization"""
+    st.session_state.initialization_status = 'not_started'
+    st.rerun()
+
+def check_system_health():
+    """Check system health"""
+    if not st.session_state.coordinator:
+        st.error("❌ No coordinator available")
+        return
+    
     try:
         health = st.session_state.coordinator.get_health_status()
-        available_servers = health.get('available_servers', 0)
-        total_servers = health.get('total_servers', 0)
         
-        if available_servers == total_servers and total_servers > 0:
-            st.success(f"🟢 System Operational: {available_servers} servers, {len(st.session_state.agent_status)} agents")
-        elif available_servers > 0:
-            st.warning(f"⚠️ Partial Service: {available_servers}/{total_servers} servers available")
+        if health.get('status') == 'healthy':
+            st.success(f"🟢 System Healthy - {health.get('available_servers', 0)} servers available")
         else:
-            st.error(f"🔴 Service Issues: {available_servers}/{total_servers} servers available")
-    except:
-        st.warning("🟡 System status unknown")
+            st.warning(f"⚠️ System Issues - {health.get('available_servers', 0)} servers available")
+        
+        with st.expander("📊 Detailed Health Information"):
+            st.json(health)
+    
+    except Exception as e:
+        st.error(f"❌ Health check failed: {str(e)}")
 
-def clear_application_cache():
-    """Clear application cache and temporary data"""
-    try:
-        # Clear processing history
-        st.session_state.processing_history = []
-        
-        # Clear chat history
+def clear_all_data():
+    """Clear all application data"""
+    if st.button("⚠️ Confirm: Clear All Data"):
         st.session_state.chat_history = []
-        
-        # Clear uploaded files
+        st.session_state.processing_history = []
+        st.session_state.analysis_results = {}
         st.session_state.uploaded_files = []
-        
-        # Clear file analysis results
         st.session_state.file_analysis_results = {}
         
-        st.success("✅ Application cache cleared")
+        # Reset dashboard metrics
+        st.session_state.dashboard_metrics = {
+            'files_processed': 0,
+            'queries_answered': 0,
+            'components_analyzed': 0,
+            'system_uptime': 0
+        }
+        
+        st.success("✅ All data cleared successfully")
+        st.rerun()
+
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
+def preview_processing(file_analysis):
+    """Preview what processing would do"""
+    st.markdown("#### 👁️ Processing Preview")
+    
+    for file_info in file_analysis:
+        st.markdown(f"**{file_info['name']}**")
+        st.markdown(f"- Will be processed by: {file_info['agent']} agent")
+        st.markdown(f"- Detected as: {file_info['description']}")
+        st.markdown(f"- Detection confidence: {file_info['confidence']}")
+        st.markdown("---")
+
+def save_file_list(file_analysis):
+    """Save file list for later processing"""
+    try:
+        file_list = {
+            'timestamp': dt.now().isoformat(),
+            'files': file_analysis
+        }
+        
+        json_data = json.dumps(file_list, indent=2)
+        
+        st.download_button(
+            label="💾 Download File List",
+            data=json_data,
+            file_name=f"file_list_{dt.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json"
+        )
+        
+        st.success("✅ File list ready for download")
+        
     except Exception as e:
-        st.error(f"❌ Failed to clear cache: {str(e)}")
+        st.error(f"❌ Save failed: {str(e)}")
 
-# Placeholder functions for missing components
-def show_enhanced_dashboard():
-    """Show enhanced dashboard"""
-    st.markdown("### 🏠 Enhanced Dashboard")
-    st.info("Dashboard implementation goes here")
+def export_processing_history():
+    """Export processing history"""
+    try:
+        export_data = {
+            'export_timestamp': dt.now().isoformat(),
+            'total_files': len(st.session_state.processing_history),
+            'processing_history': st.session_state.processing_history
+        }
+        
+        json_data = json.dumps(export_data, indent=2)
+        
+        st.download_button(
+            label="💾 Download Processing History",
+            data=json_data,
+            file_name=f"processing_history_{dt.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json"
+        )
+        
+        st.success("✅ Processing history ready for download")
+        
+    except Exception as e:
+        st.error(f"❌ Export failed: {str(e)}")
 
-def show_enhanced_chat_analysis():
-    """Show enhanced chat analysis"""
-    st.markdown("### 💬 Enhanced Chat Analysis")
-    st.info("Chat analysis implementation goes here")
+# ============================================================================
+# PLACEHOLDER IMPLEMENTATIONS
+# ============================================================================
 
-def show_enhanced_component_analysis():
-    """Show enhanced component analysis"""
-    st.markdown("### 🔍 Enhanced Component Analysis")
-    st.info("Component analysis implementation goes here")
+def show_comprehensive_agent_status():
+    """Show comprehensive agent status - placeholder"""
+    st.markdown("### 🤖 Agent Status & Monitoring")
+    st.info("Comprehensive agent status implementation goes here")
+
+def show_enhanced_gpu_monitoring():
+    """Show enhanced GPU monitoring - placeholder"""
+    st.markdown("### 🎮 GPU Monitoring & Performance")
+    st.info("Enhanced GPU monitoring implementation goes here")
+
+def show_enhanced_system_health():
+    """Show enhanced system health - placeholder"""
+    st.markdown("### ⚙️ System Health & Configuration")
+    st.info("Enhanced system health implementation goes here")
 
 def show_analytics_and_reports():
-    """Show analytics and reports"""
+    """Show analytics and reports - placeholder"""
     st.markdown("### 📊 Analytics & Reports")
     st.info("Analytics and reports implementation goes here")
 
 # ============================================================================
-# RUN APPLICATION
+# APPLICATION ENTRY POINT
 # ============================================================================
 
 if __name__ == "__main__":
@@ -2616,7 +3680,7 @@ if __name__ == "__main__":
             "error": str(e),
             "traceback": traceback.format_exc(),
             "coordinator_available": COORDINATOR_AVAILABLE,
-            "session_state_keys": list(st.session_state.keys()),
+            "session_state_keys": list(st.session_state.keys()) if 'st' in globals() else [],
             "mainframe_file_types_supported": len(MAINFRAME_FILE_TYPES),
             "agent_types_configured": len(AGENT_TYPES)
         })
@@ -2634,7 +3698,8 @@ if __name__ == "__main__":
         
         with col2:
             if st.button("🧹 Clear Cache"):
-                clear_application_cache()
+                if 'clear_all_data' in globals():
+                    clear_all_data()
         
         with col3:
             if st.button("📊 Show Debug Info"):
