@@ -1,19 +1,19 @@
 # Opulence Mainframe Deep Research Agent Architecture
-
+  
 ## 1. Simple System Overview 
-
+  
 The Opulence system has been enhanced to take legacy mainframe code, data and file structure and makes it understandable program logic in a structured manner, data flow within the subsystem using legacy mainframe code and data storage from vsam files, to determine if the usage processing for files and programs, field usage and duplication of fields and files and determine obsolete or duplicated data structures.
-
-
+  
+  
 - **Orchestration**: A Coordinator Agent manages the workflow across various specialized research agents
 - **Output**: Provides lineage maps showing how customer data flows, business logic summaries explaining trading rules, comprehensive documentation, and an interactive chat interface for asking questions
-
+  
 **Example Scenario**: Understanding how a customer's security purchase order flows through 50+ COBOL programs, what validation rules apply, and how it updates the portfolio database.
-
+  
 ---
-
+  
 ## 2. Core Components
-
+  
 | Component               | Function                                     | Value                                                 |
 |-------------------------|----------------------------------------------|-------------------------------------------------------------|
 | **Code Parser**         | Converts COBOL/JCL into structured AST        | Enables structured understanding of 40-year-old logic |
@@ -26,141 +26,25 @@ The Opulence system has been enhanced to take legacy mainframe code, data and fi
 | **Chat Agent**          | Interfaces with user to answer questions      | "How does stop-loss order processing work?" gets instant answers |
 | **Coordinator Agent**   | Orchestrates flow and agent sequencing        | Ensures systematic analysis of interconnected trading systems |
 | **GPU LLM API**         | CodeLLaMA exposed via API for summarization  | Core intelligence for understanding legacy financial code    |
-
+  
 ---
-
+  
 ## 3. System Flow and Individual Agent Workflows
-
+  
 ### Overall System Architecture Flow
+  
 
-```mermaid
-graph TB
-    subgraph "Input Layer"
-        A[COBOL Programs] 
-        B[JCL Jobs]
-        C[DB2 DDL]
-        D[CSV Data]
-        E[DCLGEN Files]
-    end
-    
-    subgraph "Processing Layer"
-        F[Code Parser Agent]
-        G[Data Loader Agent] 
-        H[Vector Index Agent]
-        I[Lineage Analyzer Agent]
-        J[Logic Analyzer Agent]
-        K[Comparator Agent]
-        L[Documentation Agent]
-        M[Chat Agent]
-    end
-    
-    subgraph "Coordinator Layer"
-        N[API Coordinator]
-        O[Load Balancer]
-        P[GPU API Servers]
-    end
-    
-    subgraph "Storage Layer"
-        Q[SQLite Database]
-        R[FAISS Index]
-        S[ChromaDB]
-    end
-    
-    subgraph "Output Layer"
-        T[Lineage Reports]
-        U[Documentation]
-        V[Chat Responses]
-        W[Analysis Reports]
-        X[Comparison Reports]
-    end
-    
-    A --> F
-    B --> F
-    C --> G
-    D --> G
-    E --> G
-    
-    F --> Q
-    G --> Q
-    F --> H
-    G --> H
-    
-    H --> R
-    H --> S
-    
-    Q --> I
-    Q --> J
-    Q --> K
-    R --> I
-    R --> J
-    R --> K
-    
-    I --> L
-    J --> L
-    K --> L
-    
-    L --> U
-    I --> T
-    J --> W
-    K --> X
-    M --> V
-    
-    N --> O
-    O --> P
-    P --> F
-    P --> G
-    P --> I
-    P --> J
-    P --> K
-    P --> L
-    P --> M
-```
-
+![](../assets/74a638e8917507af1158db609cd9ea5f0.png?0.26164942493984755)  
+  
 ---
-
+  
 ## 4. Individual Agent Workflows
-
+  
 ### 4.1 Code Parser Agent Flow
+  
 
-```mermaid
-flowchart LR
-    subgraph "Inputs (Top Left)"
-        A1[SECTRD01.cbl<br/>Security Trading Program]
-        A2[PORTFOLIO.jcl<br/>Portfolio Update Job]
-        A3[CUSTMAST.proc<br/>Customer Master Procedure]
-        A4[SETTLEMENT.cbl<br/>Settlement Processing]
-    end
-    
-    subgraph "Processing Workflow (Center - Horizontal)"
-        B1[📄 File Type Detection<br/>• COBOL vs JCL vs PROC<br/>• Business rule validation<br/>• Structure verification] --> B2[🔍 Content Parsing<br/>• Extract divisions/sections<br/>• Parse data definitions<br/>• Identify paragraphs<br/>• Extract PERFORM calls] --> B3[🧠 API-Based Analysis<br/>• Send code to CodeLLaMA<br/>• Extract business logic<br/>• Identify patterns<br/>• Generate descriptions] --> B4[📊 Chunk Creation<br/>• Create structured chunks<br/>• Add business context<br/>• Generate metadata<br/>• Calculate complexity] --> B5[💾 Database Storage<br/>• Store in SQLite<br/>• Create relationships<br/>• Index for search<br/>• Validate integrity]
-    end
-    
-    subgraph "Outputs (Bottom Right)"
-        C1[📋 Structured Chunks<br/>• 2,500 code segments<br/>• Business context metadata<br/>• Complexity scores]
-        
-        C2[🗄️ Database Records<br/>• program_chunks table<br/>• Field lineage data<br/>• Control flow paths]
-        
-        C3[📈 Analysis Metrics<br/>• Complexity: 6.2/10<br/>• Business rules: 15<br/>• Performance issues: 3]
-    end
-    
-    A1 --> B1
-    A2 --> B1
-    A3 --> B1
-    A4 --> B1
-    
-    B5 --> C1
-    B5 --> C2
-    B5 --> C3
-    
-    style A1 fill:#e1f5fe
-    style A2 fill:#e1f5fe
-    style A3 fill:#e1f5fe
-    style A4 fill:#e1f5fe
-    style C1 fill:#e8f5e8
-    style C2 fill:#e8f5e8
-    style C3 fill:#e8f5e8
-```
-
+![](../assets/74a638e8917507af1158db609cd9ea5f1.png?0.2343594503943751)  
+  
 **Sample Output:**
 ```json
 {
@@ -180,48 +64,12 @@ flowchart LR
   ]
 }
 ```
-
+  
 ### 4.2 Data Loader Agent Flow
+  
 
-```mermaid
-flowchart LR
-    subgraph "Inputs (Top Left)"
-        D1[SECURITY_TXN.ddl<br/>Transaction Table Definition]
-        D2[customer_data.csv<br/>Customer Master Data]
-        D3[CUSTOMER_RECORD.cpy<br/>COBOL Copybook]
-        D4[trades_sample.csv<br/>10000 Transaction Records]
-    end
-    
-    subgraph "Processing Workflow (Center - Horizontal)"
-        E1[🔍 File Analysis<br/>• Detect CSV vs DDL vs Copybook<br/>• Analyze structure patterns<br/>• Validate data formats<br/>• Estimate complexity] --> E2[📋 Schema Generation<br/>• Infer column types<br/>• Map COBOL PIC to SQL<br/>• Extract field relationships<br/>• Create constraints] --> E3[🧠 API Enhancement<br/>• Generate field descriptions<br/>• Classify data types<br/>• Identify business meaning<br/>• Add quality metrics] --> E4[🏗️ Table Creation<br/>• Create SQLite tables<br/>• Load sample data<br/>• Establish indexes<br/>• Validate integrity] --> E5[📊 Quality Analysis<br/>• Calculate completeness<br/>• Check data consistency<br/>• Identify anomalies<br/>• Generate metrics]
-    end
-    
-    subgraph "Outputs (Bottom Right)"
-        F1[🗃️ Data Tables<br/>• SECURITY_TXN 50 fields<br/>• CUSTOMER_DATA 25 fields<br/>• Sample data loaded]
-        
-        F2[📖 Data Catalog<br/>• Field descriptions<br/>• Business classifications<br/>• Quality scores 0.85/1.0]
-        
-        F3[🔗 Lineage Metadata<br/>• Source file mappings<br/>• Field relationships<br/>• Dependencies tracked]
-    end
-    
-    D1 --> E1
-    D2 --> E1
-    D3 --> E1
-    D4 --> E1
-    
-    E5 --> F1
-    E5 --> F2
-    E5 --> F3
-    
-    style D1 fill:#fff3e0
-    style D2 fill:#fff3e0
-    style D3 fill:#fff3e0
-    style D4 fill:#fff3e0
-    style F1 fill:#f3e5f5
-    style F2 fill:#f3e5f5
-    style F3 fill:#f3e5f5
-```
-
+![](../assets/74a638e8917507af1158db609cd9ea5f2.png?0.9696493752570905)  
+  
 **Sample Output:**
 ```json
 {
@@ -245,42 +93,12 @@ flowchart LR
   }
 }
 ```
-
+  
 ### 4.3 Vector Index Agent Flow
+  
 
-```mermaid
-flowchart LR
-    subgraph "Inputs (Top Left)"
-        G1[Parsed Code Chunks<br/>• 2,500 COBOL segments<br/>• Business context metadata<br/>• Field definitions]
-        G2[Local CodeBERT Model<br/>• microsoft/codebert-base<br/>• CPU-based processing<br/>• Airgap compatible]
-    end
-    
-    subgraph "Processing Workflow (Center - Horizontal)"
-        H1[🔧 Model Initialization<br/>• Load CodeBERT on CPU<br/>• Initialize tokenizer<br/>• Setup embedding function<br/>• Avoid GPU conflicts] --> H2[⚡ Embedding Generation<br/>• Process chunks in batches<br/>• Generate 768-dim vectors<br/>• Normalize for similarity<br/>• Add business context] --> H3[🗂️ Index Creation<br/>• Build FAISS index<br/>• Store in ChromaDB<br/>• Create relationships<br/>• Optimize for search] --> H4[🔍 Search Capabilities<br/>• Semantic similarity<br/>• Business logic patterns<br/>• Code functionality<br/>• Cross-component analysis] --> H5[💾 Persistence<br/>• Save FAISS index<br/>• Store embeddings<br/>• Maintain metadata<br/>• Enable incremental updates]
-    end
-    
-    subgraph "Outputs (Bottom Right)"
-        I1[🎯 FAISS Index<br/>• 2,500 vectors stored<br/>• Sub-second search<br/>• Cosine similarity]
-        
-        I2[🔍 Search Results<br/>• Semantic code search<br/>• Similarity scores<br/>• Related components]
-        
-        I3[🌐 Knowledge Graph<br/>• Component relationships<br/>• Code pattern clusters<br/>• Dependency mappings]
-    end
-    
-    G1 --> H1
-    G2 --> H1
-    
-    H5 --> I1
-    H5 --> I2
-    H5 --> I3
-    
-    style G1 fill:#e8eaf6
-    style G2 fill:#e8eaf6
-    style I1 fill:#fff8e1
-    style I2 fill:#fff8e1
-    style I3 fill:#fff8e1
-```
-
+![](../assets/74a638e8917507af1158db609cd9ea5f3.png?0.4473512682239875)  
+  
 **Sample Output:**
 ```json
 {
@@ -305,42 +123,12 @@ flowchart LR
   ]
 }
 ```
-
+  
 ### 4.4 Lineage Analyzer Agent Flow
+  
 
-```mermaid
-flowchart LR
-    subgraph "Inputs (Top Left)"
-        J1[Field References<br/>• CUSTOMER-ID usage<br/>• TRADE-AMOUNT flows<br/>• ACCOUNT-BALANCE updates]
-        J2[Program Relationships<br/>• CALL statements<br/>• PERFORM references<br/>• File operations]
-    end
-    
-    subgraph "Processing Workflow (Center - Horizontal)"
-        K1[🔍 Reference Discovery<br/>• Search code patterns<br/>• Extract field usage<br/>• Map data flows<br/>• Identify transformations] --> K2[🧠 API Analysis<br/>• Analyze usage context<br/>• Extract business logic<br/>• Determine data flow<br/>• Classify operations] --> K3[📊 Impact Assessment<br/>• Calculate complexity<br/>• Assess risk levels<br/>• Identify dependencies<br/>• Generate recommendations] --> K4[🗺️ Lineage Mapping<br/>• Create flow diagrams<br/>• Build dependency graph<br/>• Track lifecycle stages<br/>• Document relationships] --> K5[📋 Report Generation<br/>• Compile findings<br/>• Generate summaries<br/>• Create recommendations<br/>• Export lineage data]
-    end
-    
-    subgraph "Outputs (Bottom Right)"
-        L1[🗺️ Lineage Maps<br/>• CUSTOMER-ID: 15 programs<br/>• 45 total references<br/>• Complete data flow]
-        
-        L2[⚠️ Impact Analysis<br/>• Risk Level: MEDIUM<br/>• 8 affected programs<br/>• Change recommendations]
-        
-        L3[📊 Lifecycle Reports<br/>• Creation → Usage → Archive<br/>• Business context<br/>• Compliance tracking]
-    end
-    
-    J1 --> K1
-    J2 --> K1
-    
-    K5 --> L1
-    K5 --> L2
-    K5 --> L3
-    
-    style J1 fill:#e0f2f1
-    style J2 fill:#e0f2f1
-    style L1 fill:#fce4ec
-    style L2 fill:#fce4ec
-    style L3 fill:#fce4ec
-```
-
+![](../assets/74a638e8917507af1158db609cd9ea5f4.png?0.8177672473000095)  
+  
 **Sample Output:**
 ```json
 {
@@ -374,42 +162,12 @@ flowchart LR
   }
 }
 ```
-
+  
 ### 4.5 Logic Analyzer Agent Flow
+  
 
-```mermaid
-flowchart LR
-    subgraph "Inputs (Top Left)"
-        M1[COBOL Programs<br/>• Business logic chunks<br/>• Conditional statements<br/>• Calculation rules]
-        M2[JCL Job Flows<br/>• Step dependencies<br/>• Control statements<br/>• Error handling]
-    end
-    
-    subgraph "Processing Workflow (Center - Horizontal)"
-        N1[🔍 Pattern Detection<br/>• Identify IF-THEN logic<br/>• Extract calculations<br/>• Find validation rules<br/>• Map control flow] --> N2[🧮 Complexity Analysis<br/>• Calculate cyclomatic complexity<br/>• Assess nesting levels<br/>• Count decision points<br/>• Evaluate maintainability] --> N3[🧠 API Logic Extraction<br/>• Extract business rules<br/>• Identify optimization opportunities<br/>• Generate explanations<br/>• Document processes] --> N4[📊 Quality Assessment<br/>• Code quality metrics<br/>• Performance analysis<br/>• Risk identification<br/>• Best practice evaluation] --> N5[📋 Recommendation Engine<br/>• Generate improvements<br/>• Suggest refactoring<br/>• Identify technical debt<br/>• Prioritize changes]
-    end
-    
-    subgraph "Outputs (Bottom Right)"
-        O1[📊 Logic Analysis<br/>• 15 business rules found<br/>• Complexity score: 6.2/10<br/>• 3 optimization opportunities]
-        
-        O2[🔧 Recommendations<br/>• Refactor 3 high-complexity methods<br/>• Add error handling<br/>• Optimize loops]
-        
-        O3[📈 Quality Metrics<br/>• Maintainability: 7.5/10<br/>• Code quality: 8.1/10<br/>• Technical debt: Medium]
-    end
-    
-    M1 --> N1
-    M2 --> N1
-    
-    N5 --> O1
-    N5 --> O2
-    N5 --> O3
-    
-    style M1 fill:#f1f8e9
-    style M2 fill:#f1f8e9
-    style O1 fill:#e3f2fd
-    style O2 fill:#e3f2fd
-    style O3 fill:#e3f2fd
-```
-
+![](../assets/74a638e8917507af1158db609cd9ea5f5.png?0.4290587114294917)  
+  
 **Sample Output:**
 ```json
 {
@@ -438,42 +196,12 @@ flowchart LR
   ]
 }
 ```
-
+  
 ### 4.6 Comparator Agent Flow
+  
 
-```mermaid
-flowchart LR
-    subgraph "Inputs (Top Left)"
-        P1[Similar Programs<br/>• SECTRD01.cbl<br/>• SECTRD02.cbl<br/>• SECTRD03.cbl]
-        P2[Analysis Results<br/>• Parsed chunks<br/>• Field mappings<br/>• Logic patterns]
-    end
-    
-    subgraph "Processing Workflow (Center - Horizontal)"
-        Q1[🔍 Similarity Detection<br/>• Compare code structures<br/>• Identify duplicate logic<br/>• Find common patterns<br/>• Analyze variations] --> Q2[📊 Pattern Analysis<br/>• Extract shared functions<br/>• Identify copy-paste code<br/>• Find redundant validations<br/>• Map common fields] --> Q3[🧠 API Comparison<br/>• Generate similarity reports<br/>• Explain differences<br/>• Identify optimization areas<br/>• Suggest consolidation] --> Q4[📈 Efficiency Analysis<br/>• Calculate redundancy metrics<br/>• Assess maintenance burden<br/>• Identify refactoring opportunities<br/>• Generate consolidation plan] --> Q5[📋 Report Generation<br/>• Create comparison matrix<br/>• Generate recommendations<br/>• Document findings<br/>• Prioritize actions]
-    end
-    
-    subgraph "Outputs (Bottom Right)"
-        R1[🔄 Comparison Matrix<br/>• 85% code similarity<br/>• 12 duplicate functions<br/>• 5 optimization areas]
-        
-        R2[🎯 Consolidation Plan<br/>• Merge 3 programs<br/>• Extract common library<br/>• Reduce maintenance by 40%]
-        
-        R3[📊 Redundancy Report<br/>• Duplicate logic: 35%<br/>• Unused functions: 8<br/>• Optimization potential: HIGH]
-    end
-    
-    P1 --> Q1
-    P2 --> Q1
-    
-    Q5 --> R1
-    Q5 --> R2
-    Q5 --> R3
-    
-    style P1 fill:#e8f5e8
-    style P2 fill:#e8f5e8
-    style R1 fill:#fff3e0
-    style R2 fill:#fff3e0
-    style R3 fill:#fff3e0
-```
-
+![](../assets/74a638e8917507af1158db609cd9ea5f6.png?0.9983815966468368)  
+  
 **Sample Output:**
 ```json
 {
@@ -501,42 +229,12 @@ flowchart LR
   ]
 }
 ```
-
+  
 ### 4.7 Documentation Agent Flow
+  
 
-```mermaid
-flowchart LR
-    subgraph "Inputs (Top Left)"
-        S1[Analysis Results<br/>• Logic analysis data<br/>• Lineage mappings<br/>• Code complexity metrics]
-        S2[Business Context<br/>• Field classifications<br/>• Process descriptions<br/>• Compliance requirements]
-    end
-    
-    subgraph "Processing Workflow (Center - Horizontal)"
-        T1[📋 Content Aggregation<br/>• Collect analysis results<br/>• Merge related data<br/>• Organize by component<br/>• Structure information] --> T2[🧠 API Documentation<br/>• Generate descriptions<br/>• Create summaries<br/>• Explain processes<br/>• Add context] --> T3[📝 Format Generation<br/>• Create markdown docs<br/>• Generate HTML reports<br/>• Build cross-references<br/>• Add navigation] --> T4[🎨 Enhancement<br/>• Add diagrams<br/>• Include examples<br/>• Create glossaries<br/>• Improve readability] --> T5[✅ Validation<br/>• Check completeness<br/>• Verify accuracy<br/>• Ensure consistency<br/>• Final review]
-    end
-    
-    subgraph "Outputs (Bottom Right)"
-        U1[📚 Technical Documentation<br/>• 50+ pages generated<br/>• Component descriptions<br/>• Process flows]
-        
-        U2[📊 Executive Reports<br/>• System overview<br/>• Risk assessments<br/>• Recommendations]
-        
-        U3[🔗 Interactive Docs<br/>• Searchable content<br/>• Cross-referenced<br/>• Hyperlinked navigation]
-    end
-    
-    S1 --> T1
-    S2 --> T1
-    
-    T5 --> U1
-    T5 --> U2
-    T5 --> U3
-    
-    style S1 fill:#f9fbe7
-    style S2 fill:#f9fbe7
-    style U1 fill:#ede7f6
-    style U2 fill:#ede7f6
-    style U3 fill:#ede7f6
-```
-
+![](../assets/74a638e8917507af1158db609cd9ea5f7.png?0.25613096337541563)  
+  
 **Sample Output:**
 ```json
 {
@@ -567,42 +265,12 @@ flowchart LR
   }
 }
 ```
-
+  
 ### 4.8 Chat Agent Flow
+  
 
-```mermaid
-flowchart LR
-    subgraph "Inputs (Top Left)"
-        V1[User Question<br/>How does the system<br/>handle large sell orders?]
-        V2[Context Data<br/>• Conversation history<br/>• Available analysis<br/>• System knowledge]
-    end
-    
-    subgraph "Processing Workflow (Center - Horizontal)"
-        W1[🧩 Query Classification<br/>• Identify intent type<br/>• Extract components<br/>• Determine complexity<br/>• Plan response strategy] --> W2[🔍 Context Gathering<br/>• Search vector index<br/>• Query databases<br/>• Get analysis results<br/>• Collect relevant data] --> W3[🧠 API Response Generation<br/>• Generate explanation<br/>• Add technical details<br/>• Include examples<br/>• Provide guidance] --> W4[💡 Enhancement<br/>• Add suggestions<br/>• Include references<br/>• Format response<br/>• Ensure clarity] --> W5[✅ Quality Check<br/>• Validate accuracy<br/>• Check completeness<br/>• Ensure helpfulness<br/>• Final formatting]
-    end
-    
-    subgraph "Outputs (Bottom Right)"
-        X1[💬 Intelligent Response<br/>Large sell orders trigger<br/>LARGE-ORDER-CHECK<br/>validation in SECTRD01]
-        
-        X2[📋 Follow-up Suggestions<br/>• Show validation logic<br/>• Analyze risk controls<br/>• Find similar patterns]
-        
-        X3[🔗 Context Links<br/>• Related components<br/>• Additional resources<br/>• Cross-references]
-    end
-    
-    V1 --> W1
-    V2 --> W1
-    
-    W5 --> X1
-    W5 --> X2
-    W5 --> X3
-    
-    style V1 fill:#e1f5fe
-    style V2 fill:#e1f5fe
-    style X1 fill:#e8f5e8
-    style X2 fill:#e8f5e8
-    style X3 fill:#e8f5e8
-```
-
+![](../assets/74a638e8917507af1158db609cd9ea5f8.png?0.03668042512953429)  
+  
 **Sample Output:**
 ```json
 {
@@ -627,67 +295,22 @@ flowchart LR
   ]
 }
 ```
-
+  
 ---
-
+  
 ## 5. Agent Coordination Flow
+  
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant Coordinator as Coordinator<br/>Orchestrates flow and<br/>agent sequencing
-    participant CodeParser as Code Parser<br/>Converts COBOL/JCL<br/>into structured AST
-    participant DataLoader as Data Loader<br/>Loads DB2 tables and<br/>sample transaction files
-    participant VectorIndex as Vector Index<br/>Embeds and indexes<br/>all elements in FAISS
-    participant Lineage as Lineage Agent<br/>Tracks fields across<br/>jobs and programs
-    participant Logic as Logic Analyzer<br/>Extracts business logic<br/>and conditional rules
-    participant Comparator as Comparator Agent<br/>Compares similar files<br/>and identifies patterns
-    participant Docs as Documentation Agent<br/>Summarizes components<br/>and logic
-    participant Chat as Chat Agent<br/>Interfaces with user<br/>to answer questions
-    participant GPU_API as GPU LLM API<br/>CodeLLaMA exposed<br/>via API for analysis
-    
-    User->>Coordinator: Upload components
-    Coordinator->>CodeParser: Process COBOL files
-    CodeParser->>GPU_API: Analyze business logic
-    GPU_API-->>CodeParser: Business rule extraction
-    CodeParser-->>Coordinator: 250 code chunks created
-    
-    Coordinator->>DataLoader: Process transaction.csv
-    DataLoader->>GPU_API: Generate field descriptions
-    GPU_API-->>DataLoader: Enhanced schema
-    DataLoader-->>Coordinator: Tables created, data loaded
-    
-    Coordinator->>VectorIndex: Index all chunks
-    VectorIndex->>VectorIndex: Generate embeddings (local)
-    VectorIndex-->>Coordinator: FAISS index ready
-    
-    Coordinator->>Comparator: Compare similar files
-    Comparator->>GPU_API: Analyze similarities and differences
-    GPU_API-->>Comparator: Comparison analysis
-    Comparator-->>Coordinator: Similarity matrix and optimization recommendations
-    
-    User->>Chat: "Analyze CUSTOMER-ID lineage"
-    Chat->>Coordinator: Request lineage analysis
-    Coordinator->>Lineage: Analyze CUSTOMER-ID
-    Lineage->>GPU_API: Analyze field usage patterns
-    GPU_API-->>Lineage: Usage context analysis
-    Lineage-->>Chat: Lineage map with 15 programs
-    Chat->>GPU_API: Generate response
-    GPU_API-->>Chat: Natural language explanation
-    Chat-->>User: "CUSTOMER-ID flows through..."
-    
-    Coordinator->>Coordinator: Generate final analysis output
-    Coordinator-->>User: Complete file analysis with field categorization
-```
-
+![](../assets/74a638e8917507af1158db609cd9ea5f9.png?0.8063467502052817)  
+  
 ---
-
+  
 ## 6. Final Analysis Output Structure
-
+  
 The Coordinator Agent produces a comprehensive file analysis report with the following structure:
-
+  
 ### 6.1 Field Classification Analysis
-
+  
 ```json
 {
   "file_analysis_summary": {
@@ -1203,9 +826,9 @@ The Coordinator Agent produces a comprehensive file analysis report with the fol
   ]
 }
 ```
-
+  
 ### 6.2 Summary Metrics Dashboard
-
+  
 ```json
 {
   "executive_summary": {
@@ -1231,56 +854,56 @@ The Coordinator Agent produces a comprehensive file analysis report with the fol
   }
 }
 ```
-
+  
 ---
-
+  
 ## 7. Output Artifacts
-
+  
 The Opulence system produces these deliverables for the bank's security trading system:
-
+  
 ✅ **Field-level data lineage reports**  
    - "CUSTOMER-ID flows from CUSTMAST → SECTRD01 → PORTFOLIO-UPDATE → TRADE-HISTORY"
    - Compliance-ready audit trails
-
+  
 ✅ **Extracted business logic summaries**  
    - "Stop-loss orders: IF CURRENT-PRICE < (STOP-PRICE * 0.95) THEN EXECUTE-SELL"
    - Trading rule documentation in plain English
-
+  
 ✅ **Annotated markdown documentation of code modules**  
    - Complete explanation of settlement processing
    - Cross-references between related programs
-
+  
 ✅ **Interactive chat interface for querying understanding**  
    - "What happens when a trade fails settlement?"
    - "Show me all programs that update customer portfolios"
-
+  
 ✅ **Comprehensive field categorization analysis**
    - Fields from input: 125 fields identified with source tracking
    - Fields updated through processing: 156 fields with calculation logic
    - Fields unused and static: 66 fields marked for optimization
-
+  
 ✅ **Comparison and optimization reports**
    - Similar file analysis with 85% code similarity detection
    - Duplicate function identification across 3 trading programs
    - 40% maintenance reduction potential through consolidation
-
+  
 ---
-
-## 8. Sample Data Context: PB Security Transactions
-
+  
+## 8. Sample Data Context: Private Wealth Bank Security Transactions
+  
 ### Input Files for Analysis:
-
+  
 **COBOL Programs:**
 - `SECTRD01.cbl` - Main security trading program (2,500 lines)
 - `VALIDATE.cbl` - Order validation logic (800 lines)  
 - `SETTLE.cbl` - Settlement processing (1,200 lines)
 - `PORTFOLIO.cbl` - Portfolio update logic (900 lines)
-
+  
 **JCL Jobs:**
 - `DAILYTRD.jcl` - Daily trade processing batch job
 - `SETTLEMENT.jcl` - End-of-day settlement job
 - `RECON.jcl` - Trade reconciliation job
-
+  
 **DB2 Tables:**
 ```sql
 -- SECURITY_TRANSACTION table
@@ -1296,7 +919,7 @@ CREATE TABLE SECURITY_TXN (
     STATUS         CHAR(3)     -- PEN/SET/FAI
 );
 ```
-
+  
 **Sample Transaction Data:**
 ```csv
 CUST_ID,TRADE_ID,SECURITY_CODE,TRADE_TYPE,QUANTITY,PRICE,TRADE_DATE,STATUS
@@ -1304,119 +927,103 @@ PWB0001234,TRD20241201001,AAPL,BUY,100,150.25,2024-12-01,PEN
 PWB0001234,TRD20241201002,TSLA,SELL,50,245.80,2024-12-01,SET
 PWB0001567,TRD20241201003,MSFT,BUY,200,380.15,2024-12-01,FAI
 ```
-
+  
 ---
-
+  
 ## 9. Individual Agent Explanations
-
+  
 ### Vector Index Agent
 **Purpose**: Creates searchable embeddings of all code segments and business logic.
-
-**Example**: When analyzing the security trading system, this agent:
+  
+**Bank Example**: When analyzing the security trading system, this agent:
 - Embeds all COBOL paragraphs dealing with order validation
 - Creates vectors for trading rule conditions  
 - Enables semantic search like "find all margin calculation logic"
-
+  
 **API Integration**: Makes HTTP calls to CodeLLaMA to generate embeddings and understand code semantics.
-
+  
 ### Lineage Agent  
 **Purpose**: Tracks how data fields flow through the entire system.
-
-**Example**: For a customer security purchase:
+  
+**Bank Example**: For a customer security purchase:
 1. **CUSTOMER-ID** enters via online trading platform
-2. Flows through `VALIDATE.cbl` for user validation checks
+2. Flows through `VALIDATE.cbl` for KYC checks
 3. Processed in `SECTRD01.cbl` for order execution
 4. Updates `PORTFOLIO.cbl` for position management
 5. Records in `TRADE-HISTORY` table for audit
-
+  
 **Critical for Compliance**: Regulators require complete audit trails showing how customer data is processed.
-
+  
 ### Logic Analyzer Agent
 **Purpose**: Extracts and explains complex business rules embedded in COBOL logic.
-
-**Example**: Discovers trading rules like:
+  
+**Bank Example**: Discovers trading rules like:
 ```cobol
 IF TRADE-AMOUNT > DAILY-LIMIT
    AND CUSTOMER-TIER NOT = 'PLATINUM'
    THEN MOVE 'HOLD' TO TRADE-STATUS
    PERFORM MANUAL-APPROVAL-PROCESS
 ```
-
+  
 Translates to: "Trades over daily limit require manual approval unless customer is Platinum tier."
-
+  
 ### Comparator Agent
 **Purpose**: Identifies similarities, duplications, and optimization opportunities across similar files.
-
-**Example**: Analyzes multiple trading programs:
+  
+**Bank Example**: Analyzes multiple trading programs:
 - Finds 85% code similarity between SECTRD01, SECTRD02, and SECTRD03
 - Identifies 12 duplicate validation functions across programs
 - Recommends consolidation to reduce maintenance burden by 40%
 - Discovers unused legacy fields that can be safely removed
-
+  
 ### Documentation Agent
 **Purpose**: Creates human-readable documentation explaining system functionality.
-
-**Example**: Generates documentation like:
+  
+**Bank Example**: Generates documentation like:
 - "Settlement Process Overview: How T+2 settlement works"
 - "Stop-Loss Order Processing: Automated selling when price thresholds are breached"
 - "Customer Portfolio Updates: Real-time vs. batch processing logic"
-
+  
 ### Chat Agent
 **Purpose**: Provides conversational interface for querying system knowledge.
-
-**Example Queries**:
+  
+**Bank Example Queries**:
 - "How does the system handle partial fills on large orders?"
 - "What validation checks are performed before executing a trade?"
 - "Show me the settlement process for international securities"
-
+  
 **Response Example**: "When a large order cannot be filled completely, the PARTIAL-FILL-HANDLER in SECTRD01 splits it into smaller chunks and processes them separately, updating the customer's available cash after each partial execution..."
-
+  
 ---
-
+  
 ## 10. Coordination Flow: Processing a Security Transaction
-
-### Real-World Scenario: Customer Places $500K Apple Stock Purchase
-
-1. **File Processing Phase**:
-   - Code Parser analyzes `SECTRD01.cbl` and extracts order processing logic
-   - Data Loader imports recent Apple trading data and customer portfolio info
-   - System identifies all programs involved in large order processing
-
-2. **Analysis Phase**:
-   - **Vector Index Agent**: Finds all code segments related to large order handling
-   - **Lineage Agent**: Maps how customer cash balance flows through the system
-   - **Logic Analyzer**: Extracts validation rules for large orders (credit checks, position limits)
-   - **Comparator Agent**: Identifies similar order processing logic across different trading programs
-   - **Documentation Agent**: Summarizes the complete order-to-settlement workflow
-
-3. **Query Phase**:
-   - Risk manager asks: "What approvals are needed for this trade size?"
-   - Chat Agent searches indexed knowledge and responds: "Orders over $250K require senior trader approval per LARGE-ORDER-CHECK paragraph, plus real-time margin calculation..."
-
+  
+### Real-World Scenario: Customer Places <img src="https://latex.codecogs.com/gif.latex?500K%20Apple%20Stock%20Purchase1.%20**File%20Processing%20Phase**:%20%20%20-%20Code%20Parser%20analyzes%20`SECTRD01.cbl`%20and%20extracts%20order%20processing%20logic%20%20%20-%20Data%20Loader%20imports%20recent%20Apple%20trading%20data%20and%20customer%20portfolio%20info%20%20%20-%20System%20identifies%20all%20programs%20involved%20in%20large%20order%20processing2.%20**Analysis%20Phase**:%20%20%20-%20**Vector%20Index%20Agent**:%20Finds%20all%20code%20segments%20related%20to%20large%20order%20handling%20%20%20-%20**Lineage%20Agent**:%20Maps%20how%20customer%20cash%20balance%20flows%20through%20the%20system%20%20%20-%20**Logic%20Analyzer**:%20Extracts%20validation%20rules%20for%20large%20orders%20(credit%20checks,%20position%20limits)%20%20%20-%20**Comparator%20Agent**:%20Identifies%20similar%20order%20processing%20logic%20across%20different%20trading%20programs%20%20%20-%20**Documentation%20Agent**:%20Summarizes%20the%20complete%20order-to-settlement%20workflow3.%20**Query%20Phase**:%20%20%20-%20Risk%20manager%20asks:%20&quot;What%20approvals%20are%20needed%20for%20this%20trade%20size?&quot;%20%20%20-%20Chat%20Agent%20searches%20indexed%20knowledge%20and%20responds:%20&quot;Orders%20over"/>250K require senior trader approval per LARGE-ORDER-CHECK paragraph, plus real-time margin calculation..."
+  
 4. **Compliance Phase**:
    - Lineage reports show complete audit trail
    - Logic summaries document all decision points
    - Documentation provides regulatory-compliant process descriptions
    - Field analysis categorizes all data elements for regulatory reporting
-
+  
 5. **Final Output**:
    - **Fields from input**: Customer ID, Trade Amount, Security Code (from user interface)
    - **Fields updated through processing**: Commission Amount, Net Settlement, Risk Score (calculated)
    - **Fields unused and static**: Legacy account types, obsolete status codes (optimization targets)
-
+  
 This architecture transforms decades-old, undocumented mainframe code into an accessible, searchable knowledge base that supports both operational teams and regulatory compliance requirements.
-
+  
 ---
-
+  
 ## 11. Technical Implementation Notes
-
+  
 ### API-Based Architecture
 The Opulence system uses HTTP APIs to communicate with GPU-hosted CodeLLaMA models, enabling:
 - **Scalability**: Multiple model servers can handle concurrent analysis requests
 - **Load Balancing**: Requests are distributed across available GPU resources
 - **Fault Tolerance**: Circuit breakers and retry logic ensure robust operation
 - **Resource Efficiency**: No need for local GPU allocation per agent
-
+  
 ### Database Design
 SQLite database stores:
 - **program_chunks**: Parsed code segments with metadata
@@ -1425,12 +1032,13 @@ SQLite database stores:
 - **processing_stats**: Performance monitoring and audit trails
 - **comparison_results**: Similar file analysis and optimization recommendations
 - **field_classifications**: Input/processed/unused field categorizations
-
+  
 ### Field Analysis Engine
 The system maintains a comprehensive field registry that tracks:
 - **Source identification**: Where each field originates (user input, external systems, calculations)
 - **Processing lineage**: How fields are transformed through business logic
 - **Usage patterns**: Frequency and context of field utilization
 - **Optimization opportunities**: Unused, duplicate, or obsolete field identification
-
+  
 This architecture enables users to understand and maintain critical legacy systems while meeting modern regulatory and operational requirements.
+  
