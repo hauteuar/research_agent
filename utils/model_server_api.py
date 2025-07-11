@@ -42,11 +42,57 @@ logger = logging.getLogger(__name__)
 # ==================== GPU Detection and Management ====================
 
 class GPUManager:
-    """Manages GPU detection and allocation"""
+    """Manages GPU detection and allocation with memory usage awareness"""
     
     @staticmethod
-    def get_available_gpus() -> List[int]:
-        """Get list of available GPU IDs"""
+    def get_gpu_memory_usage(gpu_id: int) -> Dict[str, Any]:
+        """Get detailed memory usage for a specific GPU"""
+        try:
+            # Store current device
+            current_device = torch.cuda.current_device()
+            
+            # Switch to target GPU
+            torch.cuda.set_device(gpu_id)
+            
+            properties = torch.cuda.get_device_properties(gpu_id)
+            memory_allocated = torch.cuda.memory_allocated(gpu_id)
+            memory_reserved = torch.cuda.memory_reserved(gpu_id)
+            memory_free = properties.total_memory - memory_reserved
+            
+            usage_percent = (memory_reserved / properties.total_memory) * 100
+            
+            # Restore original device
+            torch.cuda.set_device(current_device)
+            
+            return {
+                "gpu_id": gpu_id,
+                "name": properties.name,
+                "total_memory": properties.total_memory,
+                "total_memory_gb": properties.total_memory / (1024**3),
+                "memory_allocated": memory_allocated,
+                "memory_allocated_gb": memory_allocated / (1024**3),
+                "memory_reserved": memory_reserved,
+                "memory_reserved_gb": memory_reserved / (1024**3),
+                "memory_free": memory_free,
+                "memory_free_gb": memory_free / (1024**3),
+                "usage_percent": usage_percent,
+                "is_heavily_used": usage_percent > 20,  # Consider >20% as heavily used
+                "compute_capability": f"{properties.major}.{properties.minor}",
+                "multiprocessor_count": properties.multiprocessor_count
+            }
+        except Exception as e:
+            logger.error(f"Failed to get GPU {gpu_id} memory usage: {str(e)}")
+            return {}
+    
+    @staticmethod
+    def get_available_gpus(memory_threshold_percent: float = 20.0, 
+                          min_free_memory_gb: float = 4.0) -> List[Dict[str, Any]]:
+        """Get list of available GPUs with memory usage details
+        
+        Args:
+            memory_threshold_percent: Consider GPU unavailable if usage > this percent
+            min_free_memory_gb: Minimum free memory required in GB
+        """
         if not torch.cuda.is_available():
             logger.error("CUDA is not available")
             return []
@@ -54,67 +100,195 @@ class GPUManager:
         available_gpus = []
         gpu_count = torch.cuda.device_count()
         
+        logger.info(f"Scanning {gpu_count} GPUs for availability...")
+        
         for gpu_id in range(gpu_count):
             try:
+                # Get memory usage info
+                gpu_info = GPUManager.get_gpu_memory_usage(gpu_id)
+                
+                if not gpu_info:
+                    continue
+                
                 # Check if GPU is accessible
+                current_device = torch.cuda.current_device()
                 torch.cuda.set_device(gpu_id)
-                # Try to allocate a small tensor to test availability
+                
+                # Try to allocate a small tensor to test accessibility
                 test_tensor = torch.cuda.FloatTensor([1.0])
                 del test_tensor
                 torch.cuda.empty_cache()
-                available_gpus.append(gpu_id)
-                logger.info(f"GPU {gpu_id} is available: {torch.cuda.get_device_name(gpu_id)}")
+                
+                # Restore original device
+                torch.cuda.set_device(current_device)
+                
+                # Evaluate GPU availability based on memory usage
+                is_available = (
+                    gpu_info["usage_percent"] <= memory_threshold_percent and
+                    gpu_info["memory_free_gb"] >= min_free_memory_gb
+                )
+                
+                gpu_info["is_available"] = is_available
+                gpu_info["availability_reason"] = GPUManager._get_availability_reason(gpu_info, memory_threshold_percent, min_free_memory_gb)
+                
+                available_gpus.append(gpu_info)
+                
+                # Log GPU status
+                status = "✅ AVAILABLE" if is_available else "❌ BUSY/FULL"
+                logger.info(
+                    f"GPU {gpu_id} ({gpu_info['name']}): {status} - "
+                    f"Usage: {gpu_info['usage_percent']:.1f}%, "
+                    f"Free: {gpu_info['memory_free_gb']:.1f}GB, "
+                    f"Total: {gpu_info['total_memory_gb']:.1f}GB"
+                )
+                
             except Exception as e:
-                logger.warning(f"GPU {gpu_id} is not available: {str(e)}")
+                logger.warning(f"GPU {gpu_id} is not accessible: {str(e)}")
         
         return available_gpus
     
     @staticmethod
-    def get_gpu_memory_info(gpu_id: int) -> Dict[str, Any]:
-        """Get memory information for a specific GPU"""
-        try:
-            properties = torch.cuda.get_device_properties(gpu_id)
-            memory_allocated = torch.cuda.memory_allocated(gpu_id)
-            memory_cached = torch.cuda.memory_reserved(gpu_id)
-            
-            return {
-                "name": properties.name,
-                "total_memory": properties.total_memory,
-                "memory_allocated": memory_allocated,
-                "memory_cached": memory_cached,
-                "memory_free": properties.total_memory - memory_cached,
-                "utilization": (memory_cached / properties.total_memory) * 100
-            }
-        except Exception as e:
-            logger.error(f"Failed to get GPU {gpu_id} memory info: {str(e)}")
-            return {}
+    def _get_availability_reason(gpu_info: Dict[str, Any], 
+                                memory_threshold: float, 
+                                min_free_memory: float) -> str:
+        """Get human-readable reason for GPU availability status"""
+        if gpu_info["is_available"]:
+            return "Available for use"
+        
+        reasons = []
+        if gpu_info["usage_percent"] > memory_threshold:
+            reasons.append(f"High memory usage ({gpu_info['usage_percent']:.1f}% > {memory_threshold}%)")
+        
+        if gpu_info["memory_free_gb"] < min_free_memory:
+            reasons.append(f"Insufficient free memory ({gpu_info['memory_free_gb']:.1f}GB < {min_free_memory}GB)")
+        
+        return "; ".join(reasons)
     
     @staticmethod
-    def allocate_gpus_for_servers(num_servers: int = 2) -> List[List[int]]:
-        """Allocate GPUs for multiple server instances"""
-        available_gpus = GPUManager.get_available_gpus()
+    def get_best_available_gpus(num_gpus_needed: int, 
+                               memory_threshold_percent: float = 20.0,
+                               min_free_memory_gb: float = 4.0) -> List[int]:
+        """Get the best available GPUs sorted by availability and free memory
         
-        if len(available_gpus) < num_servers:
-            logger.warning(f"Only {len(available_gpus)} GPUs available, but {num_servers} servers requested")
-            # If we have fewer GPUs than servers, some servers will share GPUs
-            gpu_allocations = []
-            for i in range(num_servers):
-                gpu_allocations.append([available_gpus[i % len(available_gpus)]])
-            return gpu_allocations
-        
-        # Distribute GPUs evenly across servers
-        gpu_allocations = []
-        gpus_per_server = len(available_gpus) // num_servers
-        remaining_gpus = len(available_gpus) % num_servers
-        
-        start_idx = 0
-        for i in range(num_servers):
-            end_idx = start_idx + gpus_per_server
-            if i < remaining_gpus:
-                end_idx += 1
+        Args:
+            num_gpus_needed: Number of GPUs needed
+            memory_threshold_percent: Consider GPU unavailable if usage > this percent  
+            min_free_memory_gb: Minimum free memory required in GB
             
-            gpu_allocations.append(available_gpus[start_idx:end_idx])
-            start_idx = end_idx
+        Returns:
+            List of GPU IDs sorted by preference (most available first)
+        """
+        all_gpus = GPUManager.get_available_gpus(memory_threshold_percent, min_free_memory_gb)
+        
+        if not all_gpus:
+            logger.error("No GPUs detected or accessible")
+            return []
+        
+        # Filter available GPUs
+        available_gpus = [gpu for gpu in all_gpus if gpu["is_available"]]
+        
+        if len(available_gpus) >= num_gpus_needed:
+            # Sort by free memory (descending) and usage (ascending)
+            available_gpus.sort(key=lambda x: (-x["memory_free_gb"], x["usage_percent"]))
+            selected_gpus = [gpu["gpu_id"] for gpu in available_gpus[:num_gpus_needed]]
+            
+            logger.info(f"Selected {len(selected_gpus)} best available GPUs: {selected_gpus}")
+            for gpu_id in selected_gpus:
+                gpu_info = next(gpu for gpu in available_gpus if gpu["gpu_id"] == gpu_id)
+                logger.info(f"  GPU {gpu_id}: {gpu_info['memory_free_gb']:.1f}GB free, {gpu_info['usage_percent']:.1f}% used")
+            
+            return selected_gpus
+        
+        # If not enough "available" GPUs, fall back to least used ones
+        logger.warning(f"Only {len(available_gpus)} GPUs meet criteria, but {num_gpus_needed} needed")
+        logger.warning("Falling back to least used GPUs (may have memory constraints)")
+        
+        # Sort all GPUs by usage and free memory
+        all_gpus.sort(key=lambda x: (x["usage_percent"], -x["memory_free_gb"]))
+        fallback_gpus = [gpu["gpu_id"] for gpu in all_gpus[:num_gpus_needed]]
+        
+        logger.info(f"Fallback selection: GPUs {fallback_gpus}")
+        for gpu_id in fallback_gpus:
+            gpu_info = next(gpu for gpu in all_gpus if gpu["gpu_id"] == gpu_id)
+            logger.warning(f"  GPU {gpu_id}: {gpu_info['memory_free_gb']:.1f}GB free, {gpu_info['usage_percent']:.1f}% used - {gpu_info['availability_reason']}")
+        
+        return fallback_gpus
+    
+    @staticmethod
+    def allocate_gpus_for_servers(num_servers: int = 2, 
+                                 memory_threshold_percent: float = None,
+                                 min_free_memory_gb: float = None) -> List[List[int]]:
+        """Allocate GPUs for multiple server instances based on memory availability
+        
+        Args:
+            num_servers: Number of server instances to create
+            memory_threshold_percent: GPU usage threshold (default from env or 20%)
+            min_free_memory_gb: Minimum free memory per GPU (default from env or 4GB)
+        """
+        # Get thresholds from environment or use defaults
+        if memory_threshold_percent is None:
+            memory_threshold_percent = float(os.getenv("GPU_MEMORY_THRESHOLD_PERCENT", "20.0"))
+        
+        if min_free_memory_gb is None:
+            min_free_memory_gb = float(os.getenv("GPU_MIN_FREE_MEMORY_GB", "4.0"))
+        
+        logger.info(f"GPU allocation criteria: <{memory_threshold_percent}% usage, >{min_free_memory_gb}GB free")
+        
+        # Calculate total GPUs needed (assuming 1 GPU per server by default)
+        gpus_per_server = int(os.getenv("GPUS_PER_SERVER", "1"))
+        total_gpus_needed = num_servers * gpus_per_server
+        
+        # Get best available GPUs
+        best_gpus = GPUManager.get_best_available_gpus(
+            total_gpus_needed, 
+            memory_threshold_percent, 
+            min_free_memory_gb
+        )
+        
+        if not best_gpus:
+            raise RuntimeError("No suitable GPUs found for server deployment")
+        
+        # Allocate GPUs to servers
+        gpu_allocations = []
+        
+        if len(best_gpus) >= total_gpus_needed:
+            # We have enough GPUs - distribute evenly
+            for i in range(num_servers):
+                start_idx = i * gpus_per_server
+                end_idx = start_idx + gpus_per_server
+                server_gpus = best_gpus[start_idx:end_idx]
+                gpu_allocations.append(server_gpus)
+        else:
+            # Not enough GPUs - distribute what we have
+            logger.warning(f"Only {len(best_gpus)} GPUs available for {num_servers} servers")
+            
+            if len(best_gpus) >= num_servers:
+                # At least one GPU per server
+                for i in range(num_servers):
+                    gpu_allocations.append([best_gpus[i % len(best_gpus)]])
+            else:
+                # Fewer GPUs than servers - some servers will share
+                for i in range(num_servers):
+                    gpu_allocations.append([best_gpus[i % len(best_gpus)]])
+        
+        # Log allocation results
+        logger.info(f"GPU allocation for {num_servers} servers:")
+        total_memory_needed = 0
+        
+        for i, gpu_ids in enumerate(gpu_allocations):
+            server_id = f"server_{i}"
+            gpu_info_list = []
+            server_memory_needed = 0
+            
+            for gpu_id in gpu_ids:
+                gpu_info = GPUManager.get_gpu_memory_usage(gpu_id)
+                gpu_info_list.append(f"GPU{gpu_id}({gpu_info.get('memory_free_gb', 0):.1f}GB free)")
+                server_memory_needed += 2.0  # Estimate 2GB per model
+            
+            total_memory_needed += server_memory_needed
+            logger.info(f"  {server_id}: {gpu_ids} - {', '.join(gpu_info_list)} - Est. {server_memory_needed:.1f}GB needed")
+        
+        logger.info(f"Total estimated memory needed: {total_memory_needed:.1f}GB")
         
         return gpu_allocations
 
@@ -328,7 +502,7 @@ class GPUModelLoader:
         self.gpu_info = {}
         for gpu_id in self.config.gpu_ids:
             try:
-                gpu_info = GPUManager.get_gpu_memory_info(gpu_id)
+                gpu_info = GPUManager.get_gpu_memory_usage(gpu_id)
                 if gpu_info:
                     self.gpu_info[f"gpu_{gpu_id}"] = gpu_info
             except Exception as e:
@@ -787,27 +961,103 @@ class MultiServerManager:
         self.server_configs = []
         
     def setup_servers(self, num_servers: int = 2, base_port: int = 8000):
-        """Setup configuration for multiple servers"""
-        # Get available GPUs and allocate them
-        gpu_allocations = GPUManager.allocate_gpus_for_servers(num_servers)
+        """Setup configuration for multiple servers with intelligent GPU allocation"""
         
-        if not gpu_allocations:
-            raise RuntimeError("No GPUs available for server deployment")
+        # Get configuration parameters
+        memory_threshold = float(os.getenv("GPU_MEMORY_THRESHOLD_PERCENT", "20.0"))
+        min_free_memory = float(os.getenv("GPU_MIN_FREE_MEMORY_GB", "4.0"))
         
-        logger.info(f"Setting up {num_servers} servers with GPU allocations: {gpu_allocations}")
+        logger.info("=== GPU Memory Analysis ===")
+        
+        # Get detailed GPU information first
+        all_gpu_info = GPUManager.get_available_gpus(memory_threshold, min_free_memory)
+        
+        if not all_gpu_info:
+            raise RuntimeError("No GPUs detected or accessible")
+        
+        # Show current GPU status
+        logger.info("Current GPU Status:")
+        for gpu_info in all_gpu_info:
+            status_icon = "✅" if gpu_info["is_available"] else "❌"
+            logger.info(f"  {status_icon} GPU {gpu_info['gpu_id']}: {gpu_info['name']}")
+            logger.info(f"     Memory: {gpu_info['memory_free_gb']:.1f}GB free / {gpu_info['total_memory_gb']:.1f}GB total ({gpu_info['usage_percent']:.1f}% used)")
+            logger.info(f"     Status: {gpu_info['availability_reason']}")
+        
+        # Get GPU allocations
+        try:
+            gpu_allocations = GPUManager.allocate_gpus_for_servers(
+                num_servers=num_servers,
+                memory_threshold_percent=memory_threshold,
+                min_free_memory_gb=min_free_memory
+            )
+        except RuntimeError as e:
+            logger.error(f"GPU allocation failed: {str(e)}")
+            
+            # Emergency fallback - try with relaxed constraints
+            logger.warning("Attempting fallback with relaxed memory constraints...")
+            try:
+                gpu_allocations = GPUManager.allocate_gpus_for_servers(
+                    num_servers=num_servers,
+                    memory_threshold_percent=50.0,  # More relaxed
+                    min_free_memory_gb=2.0         # Lower memory requirement
+                )
+                logger.warning("Using relaxed constraints - monitor for OOM errors!")
+            except Exception as fallback_error:
+                raise RuntimeError(f"GPU allocation failed even with fallback: {str(fallback_error)}")
+        
+        logger.info("=== Server Configuration ===")
         
         # Create server configurations
         for i, gpu_ids in enumerate(gpu_allocations):
             server_id = f"server_{i}"
             port = base_port + i
             
+            # Estimate memory usage for this server
+            estimated_memory_gb = len(gpu_ids) * 2.0  # Rough estimate: 2GB per GPU
+            
             self.server_configs.append({
                 'server_id': server_id,
                 'port': port,
-                'gpu_ids': gpu_ids
+                'gpu_ids': gpu_ids,
+                'estimated_memory_gb': estimated_memory_gb
             })
             
-            logger.info(f"Server {server_id} will use GPUs {gpu_ids} on port {port}")
+            # Log detailed server config
+            gpu_details = []
+            for gpu_id in gpu_ids:
+                gpu_info = next((g for g in all_gpu_info if g["gpu_id"] == gpu_id), None)
+                if gpu_info:
+                    gpu_details.append(f"GPU{gpu_id}({gpu_info['memory_free_gb']:.1f}GB)")
+                else:
+                    gpu_details.append(f"GPU{gpu_id}")
+            
+            logger.info(f"✅ {server_id}: Port {port}, GPUs {gpu_ids}")
+            logger.info(f"   Memory: {', '.join(gpu_details)}, Est. usage: {estimated_memory_gb:.1f}GB")
+        
+        # Final validation
+        logger.info("=== Deployment Validation ===")
+        total_estimated_memory = sum(config['estimated_memory_gb'] for config in self.server_configs)
+        logger.info(f"Total estimated memory usage: {total_estimated_memory:.1f}GB")
+        
+        # Check for potential issues
+        warnings = []
+        for config in self.server_configs:
+            for gpu_id in config['gpu_ids']:
+                gpu_info = next((g for g in all_gpu_info if g["gpu_id"] == gpu_id), None)
+                if gpu_info and gpu_info['memory_free_gb'] < config['estimated_memory_gb']:
+                    warnings.append(f"⚠️  {config['server_id']} may exceed available memory on GPU {gpu_id}")
+        
+        if warnings:
+            logger.warning("Potential memory issues detected:")
+            for warning in warnings:
+                logger.warning(f"  {warning}")
+            logger.warning("Consider reducing model size or batch size if OOM occurs")
+        else:
+            logger.info("✅ All servers should have sufficient memory")
+        
+        logger.info("=== Ready to Deploy ===")
+        
+        return True
     
     def start_servers(self):
         """Start all server instances in separate processes"""
@@ -899,57 +1149,109 @@ class SimpleLoadBalancer:
 # ==================== Main Entry Point ====================
 
 def main():
-    """Main entry point"""
+    """Main entry point with intelligent GPU allocation"""
     try:
         # Check if we should run in single server mode or multi-server mode
         num_servers = int(os.getenv("NUM_SERVERS", "2"))
         base_port = int(os.getenv("BASE_PORT", "8000"))
         
+        # Display startup banner
+        logger.info("🚀 Starting Opulence Multi-GPU Model Server")
+        logger.info("=" * 50)
+        
         if num_servers == 1:
             # Single server mode (backward compatibility)
-            logger.info("Running in single server mode")
-            available_gpus = GPUManager.get_available_gpus()
-            if not available_gpus:
-                raise RuntimeError("No GPUs available")
+            logger.info("📍 Single Server Mode")
+            
+            # Get best available GPU
+            best_gpus = GPUManager.get_best_available_gpus(
+                num_gpus_needed=1,
+                memory_threshold_percent=float(os.getenv("GPU_MEMORY_THRESHOLD_PERCENT", "20.0")),
+                min_free_memory_gb=float(os.getenv("GPU_MIN_FREE_MEMORY_GB", "4.0"))
+            )
+            
+            if not best_gpus:
+                raise RuntimeError("No suitable GPUs found")
+            
+            logger.info(f"🎯 Selected GPU {best_gpus[0]} for single server")
             
             config = ModelServerConfig.from_env(
                 server_id="server_0", 
                 port=base_port, 
-                gpu_ids=[available_gpus[0]]
+                gpu_ids=best_gpus[:1]
             )
             launcher = ServerLauncher(config)
             launcher.run()
+            
         else:
             # Multi-server mode
-            logger.info(f"Running in multi-server mode with {num_servers} servers")
+            logger.info(f"🌐 Multi-Server Mode ({num_servers} servers)")
             
             # Set multiprocessing start method
             multiprocessing.set_start_method('spawn', force=True)
             
-            # Create and start multi-server manager
+            # Create and setup multi-server manager
             manager = MultiServerManager()
-            manager.setup_servers(num_servers=num_servers, base_port=base_port)
             
-            # Display server configuration
-            logger.info("Server Configuration:")
+            try:
+                success = manager.setup_servers(num_servers=num_servers, base_port=base_port)
+                if not success:
+                    raise RuntimeError("Failed to setup servers")
+                
+            except Exception as e:
+                logger.error(f"❌ Server setup failed: {str(e)}")
+                
+                # Try emergency single server mode
+                logger.warning("🔄 Attempting emergency single server fallback...")
+                try:
+                    best_gpus = GPUManager.get_best_available_gpus(1, 50.0, 1.0)  # Very relaxed
+                    if best_gpus:
+                        logger.info(f"🆘 Emergency mode: Using GPU {best_gpus[0]}")
+                        config = ModelServerConfig.from_env(
+                            server_id="emergency_server", 
+                            port=base_port, 
+                            gpu_ids=best_gpus[:1]
+                        )
+                        launcher = ServerLauncher(config)
+                        launcher.run()
+                        return
+                except Exception:
+                    pass
+                
+                raise e
+            
+            # Display final server configuration
+            logger.info("📋 Final Server Configuration:")
             for config in manager.server_configs:
-                logger.info(f"  {config['server_id']}: Port {config['port']}, GPUs {config['gpu_ids']}")
+                logger.info(f"  🖥️  {config['server_id']}: Port {config['port']}, GPUs {config['gpu_ids']}")
             
             # Start all servers
+            logger.info("🚀 Launching all servers...")
             manager.start_servers()
+            
+            # Display access URLs
+            logger.info("🌐 Server Access URLs:")
+            for config in manager.server_configs:
+                logger.info(f"  📡 {config['server_id']}: http://localhost:{config['port']}")
+            
+            logger.info("✅ All servers started successfully!")
+            logger.info("Press Ctrl+C to stop all servers")
             
             # Wait for servers or handle shutdown
             try:
                 manager.wait_for_servers()
             except KeyboardInterrupt:
-                logger.info("Received interrupt signal")
+                logger.info("🛑 Shutdown signal received")
             finally:
+                logger.info("🧹 Cleaning up...")
                 manager.stop_servers()
+                logger.info("✅ Shutdown complete")
         
     except KeyboardInterrupt:
-        logger.info("Server interrupted by user")
+        logger.info("🛑 Server interrupted by user")
     except Exception as e:
-        logger.error(f"Server failed to start: {str(e)}")
+        logger.error(f"❌ Server failed to start: {str(e)}")
+        logger.error("💡 Try adjusting GPU_MEMORY_THRESHOLD_PERCENT or GPU_MIN_FREE_MEMORY_GB environment variables")
         sys.exit(1)
 
 if __name__ == "__main__":
