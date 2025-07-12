@@ -1,67 +1,33 @@
 #!/usr/bin/env python3
 """
-API-Based Opulence Coordinator System - FIXED VERSION
-Replaces direct GPU management with HTTP API calls to model servers
-Keeps ALL existing class names and function signatures for compatibility
+Production-ready Multi-GPU Model Server API System for Opulence
+Loads LLM models on multiple GPUs and exposes them via HTTP/REST API on different ports
 """
 
 import asyncio
-import aiohttp
 import json
 import logging
+import os
+import sys
 import time
 import uuid
-import random
-from typing import Dict, List, Optional, Any, Tuple, AsyncGenerator
-from dataclasses import dataclass, field
-from datetime import datetime as dt
+import multiprocessing
 from contextlib import asynccontextmanager
-from urllib.parse import urljoin
-import sqlite3
-from pathlib import Path
-import os
-from enum import Enum
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Union, AsyncGenerator
 
-# Import existing agents unchanged
-try:
-    from agents.code_parser_agent_api import CodeParserAgent
-except ImportError:
-    CodeParserAgent = None
-
-try:
-    from agents.chat_agent_api import OpulenceChatAgent
-except ImportError:
-    OpulenceChatAgent = None
-
-try:
-    from agents.vector_index_agent_api import VectorIndexAgent
-except ImportError:
-    VectorIndexAgent = None
-
-try:
-    from agents.data_loader_agent_api import DataLoaderAgent
-except ImportError:
-    DataLoaderAgent = None
-
-try:
-    from agents.lineage_analyzer_agent_api import LineageAnalyzerAgent    
-except ImportError:
-    LineageAnalyzerAgent = None
-
-try:
-    from agents.logic_analyzer_agent_api import LogicAnalyzerAgent
-except ImportError:
-    LogicAnalyzerAgent = None
-
-try:
-    from agents.documentation_agent_api import DocumentationAgent
-except ImportError:
-    DocumentationAgent = None
-
-try:
-    from agents.db2_comparator_agent_api import DB2ComparatorAgent
-except ImportError:
-    DB2ComparatorAgent = None
+import psutil
+import torch
+import uvicorn
+from fastapi import FastAPI, HTTPException, Request, Response, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field, field_validator
+from vllm.engine.arg_utils import AsyncEngineArgs
+from vllm.engine.async_llm_engine import AsyncLLMEngine
+from vllm.sampling_params import SamplingParams
+from vllm.utils import random_uuid
 
 # Configure logging
 logging.basicConfig(
@@ -70,1447 +36,1380 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ==================== Configuration Classes ====================
+# Log version information for debugging
+logger.info(f"PyTorch version: {torch.__version__}")
+logger.info(f"CUDA available: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    logger.info(f"CUDA version: {torch.version.cuda}")
+    logger.info(f"GPU count: {torch.cuda.device_count()}")
 
-class LoadBalancingStrategy(Enum):
-    ROUND_ROBIN = "round_robin"
-    LEAST_BUSY = "least_busy"
-    LEAST_LATENCY = "least_latency"
-    RANDOM = "random"
+# Check vLLM version compatibility
+try:
+    import vllm
+    logger.info(f"vLLM version: {vllm.__version__}")
+except:
+    logger.warning("Could not determine vLLM version")
+
+# ==================== GPU Detection and Management ====================
+
+class GPUManager:
+    """Manages GPU detection and allocation with memory usage awareness"""
+    
+    @staticmethod
+    def get_gpu_memory_usage(gpu_id: int) -> Dict[str, Any]:
+        """Get detailed memory usage for a specific GPU"""
+        try:
+            # Store current device
+            current_device = torch.cuda.current_device()
+            
+            # Switch to target GPU
+            torch.cuda.set_device(gpu_id)
+            
+            properties = torch.cuda.get_device_properties(gpu_id)
+            memory_allocated = torch.cuda.memory_allocated(gpu_id)
+            memory_reserved = torch.cuda.memory_reserved(gpu_id)
+            
+            # Use reserved memory as the "used" memory since it's more accurate
+            # for detecting if GPU is busy with other processes
+            memory_used = memory_reserved
+            memory_free = properties.total_memory - memory_used
+            
+            # If reserved memory is very low, check allocated memory instead
+            # This handles cases where memory is allocated but not reserved by PyTorch
+            if memory_reserved < memory_allocated:
+                memory_used = memory_allocated
+                memory_free = properties.total_memory - memory_allocated
+            
+            # Calculate usage percentage based on used memory
+            usage_percent = (memory_used / properties.total_memory) * 100
+            
+            # Try to get more accurate memory info using nvidia-ml-py if available
+            try:
+                import pynvml
+                pynvml.nvmlInit()
+                handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_id)
+                nvidia_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                
+                # Use NVIDIA's more accurate memory reporting
+                nvidia_used = nvidia_info.used
+                nvidia_free = nvidia_info.free
+                nvidia_total = nvidia_info.total
+                nvidia_usage_percent = (nvidia_used / nvidia_total) * 100
+                
+                # Use NVIDIA data if it shows higher usage (more accurate)
+                if nvidia_usage_percent > usage_percent:
+                    memory_used = nvidia_used
+                    memory_free = nvidia_free
+                    usage_percent = nvidia_usage_percent
+                    properties.total_memory = nvidia_total
+                    
+                logger.debug(f"GPU {gpu_id} NVIDIA-ML: {nvidia_usage_percent:.1f}% used ({nvidia_used/1024**3:.1f}GB/{nvidia_total/1024**3:.1f}GB)")
+                
+            except ImportError:
+                logger.debug(f"pynvml not available, using PyTorch memory stats only")
+            except Exception as e:
+                logger.debug(f"Failed to get NVIDIA-ML stats for GPU {gpu_id}: {str(e)}")
+            
+            # Restore original device
+            torch.cuda.set_device(current_device)
+            
+            # Handle multiprocessor_count attribute safely
+            multiprocessor_count = getattr(properties, 'multiprocessor_count', 'unknown')
+            
+            # More conservative availability check
+            is_heavily_used = usage_percent > 15  # Lowered threshold for better detection
+            
+            return {
+                "gpu_id": gpu_id,
+                "name": properties.name,
+                "total_memory": properties.total_memory,
+                "total_memory_gb": properties.total_memory / (1024**3),
+                "memory_allocated": memory_allocated,
+                "memory_allocated_gb": memory_allocated / (1024**3),
+                "memory_reserved": memory_reserved,
+                "memory_reserved_gb": memory_reserved / (1024**3),
+                "memory_used": memory_used,
+                "memory_used_gb": memory_used / (1024**3),
+                "memory_free": memory_free,
+                "memory_free_gb": memory_free / (1024**3),
+                "usage_percent": usage_percent,
+                "is_heavily_used": is_heavily_used,
+                "compute_capability": f"{properties.major}.{properties.minor}",
+                "multiprocessor_count": multiprocessor_count
+            }
+        except Exception as e:
+            logger.error(f"Failed to get GPU {gpu_id} memory usage: {str(e)}")
+            return {}
+    
+    @staticmethod
+    def get_available_gpus(memory_threshold_percent: float = 15.0, 
+                          min_free_memory_gb: float = 6.0) -> List[Dict[str, Any]]:
+        """Get list of available GPUs with memory usage details
+        
+        Args:
+            memory_threshold_percent: Consider GPU unavailable if usage > this percent (lowered to 15%)
+            min_free_memory_gb: Minimum free memory required in GB (increased to 6GB)
+        """
+        if not torch.cuda.is_available():
+            logger.error("CUDA is not available")
+            return []
+        
+        available_gpus = []
+        gpu_count = torch.cuda.device_count()
+        
+        logger.info(f"Scanning {gpu_count} GPUs for availability...")
+        logger.info(f"Criteria: Usage < {memory_threshold_percent}%, Free > {min_free_memory_gb}GB")
+        
+        for gpu_id in range(gpu_count):
+            try:
+                # Get memory usage info
+                gpu_info = GPUManager.get_gpu_memory_usage(gpu_id)
+                
+                if not gpu_info:
+                    continue
+                
+                # Check if GPU is accessible
+                current_device = torch.cuda.current_device()
+                torch.cuda.set_device(gpu_id)
+                
+                # Try to allocate a small tensor to test accessibility
+                test_tensor = torch.cuda.FloatTensor([1.0])
+                del test_tensor
+                torch.cuda.empty_cache()
+                
+                # Restore original device
+                torch.cuda.set_device(current_device)
+                
+                # Evaluate GPU availability based on memory usage
+                is_available = (
+                    gpu_info["usage_percent"] <= memory_threshold_percent and
+                    gpu_info["memory_free_gb"] >= min_free_memory_gb
+                )
+                
+                gpu_info["is_available"] = is_available
+                gpu_info["availability_reason"] = GPUManager._get_availability_reason(
+                    gpu_info, memory_threshold_percent, min_free_memory_gb
+                )
+                
+                available_gpus.append(gpu_info)
+                
+                # Log GPU status with more detail
+                status = "✅ AVAILABLE" if is_available else "❌ BUSY/FULL"
+                logger.info(
+                    f"GPU {gpu_id} ({gpu_info['name']}): {status}"
+                )
+                logger.info(
+                    f"  Usage: {gpu_info['usage_percent']:.1f}% "
+                    f"({gpu_info['memory_used_gb']:.1f}GB used / {gpu_info['total_memory_gb']:.1f}GB total)"
+                )
+                logger.info(
+                    f"  Free: {gpu_info['memory_free_gb']:.1f}GB"
+                )
+                if not is_available:
+                    logger.info(f"  Reason: {gpu_info['availability_reason']}")
+                
+            except Exception as e:
+                logger.warning(f"GPU {gpu_id} is not accessible: {str(e)}")
+        
+        return available_gpus
+    
+    @staticmethod
+    def _get_availability_reason(gpu_info: Dict[str, Any], 
+                                memory_threshold: float, 
+                                min_free_memory: float) -> str:
+        """Get human-readable reason for GPU availability status"""
+        if gpu_info["is_available"]:
+            return "Available for use"
+        
+        reasons = []
+        if gpu_info["usage_percent"] > memory_threshold:
+            reasons.append(f"High memory usage ({gpu_info['usage_percent']:.1f}% > {memory_threshold}%)")
+        
+        if gpu_info["memory_free_gb"] < min_free_memory:
+            reasons.append(f"Insufficient free memory ({gpu_info['memory_free_gb']:.1f}GB < {min_free_memory}GB)")
+        
+        return "; ".join(reasons)
+    
+    @staticmethod
+    def get_best_available_gpus(num_gpus_needed: int, 
+                               memory_threshold_percent: float = 20.0,
+                               min_free_memory_gb: float = 4.0) -> List[int]:
+        """Get the best available GPUs sorted by availability and free memory
+        
+        Args:
+            num_gpus_needed: Number of GPUs needed
+            memory_threshold_percent: Consider GPU unavailable if usage > this percent  
+            min_free_memory_gb: Minimum free memory required in GB
+            
+        Returns:
+            List of GPU IDs sorted by preference (most available first)
+        """
+        all_gpus = GPUManager.get_available_gpus(memory_threshold_percent, min_free_memory_gb)
+        
+        if not all_gpus:
+            logger.error("No GPUs detected or accessible")
+            return []
+        
+        # Filter available GPUs
+        available_gpus = [gpu for gpu in all_gpus if gpu["is_available"]]
+        
+        if len(available_gpus) >= num_gpus_needed:
+            # Sort by free memory (descending) and usage (ascending)
+            available_gpus.sort(key=lambda x: (-x["memory_free_gb"], x["usage_percent"]))
+            selected_gpus = [gpu["gpu_id"] for gpu in available_gpus[:num_gpus_needed]]
+            
+            logger.info(f"Selected {len(selected_gpus)} best available GPUs: {selected_gpus}")
+            for gpu_id in selected_gpus:
+                gpu_info = next(gpu for gpu in available_gpus if gpu["gpu_id"] == gpu_id)
+                logger.info(f"  GPU {gpu_id}: {gpu_info['memory_free_gb']:.1f}GB free, {gpu_info['usage_percent']:.1f}% used")
+            
+            return selected_gpus
+        
+        # If not enough "available" GPUs, fall back to least used ones
+        logger.warning(f"Only {len(available_gpus)} GPUs meet criteria, but {num_gpus_needed} needed")
+        logger.warning("Falling back to least used GPUs (may have memory constraints)")
+        
+        # Sort all GPUs by usage and free memory
+        all_gpus.sort(key=lambda x: (x["usage_percent"], -x["memory_free_gb"]))
+        fallback_gpus = [gpu["gpu_id"] for gpu in all_gpus[:num_gpus_needed]]
+        
+        logger.info(f"Fallback selection: GPUs {fallback_gpus}")
+        for gpu_id in fallback_gpus:
+            gpu_info = next(gpu for gpu in all_gpus if gpu["gpu_id"] == gpu_id)
+            logger.warning(f"  GPU {gpu_id}: {gpu_info['memory_free_gb']:.1f}GB free, {gpu_info['usage_percent']:.1f}% used - {gpu_info['availability_reason']}")
+        
+        return fallback_gpus
+    
+    @staticmethod
+    def allocate_gpus_for_servers(num_servers: int = 2, 
+                                 memory_threshold_percent: float = None,
+                                 min_free_memory_gb: float = None) -> List[List[int]]:
+        """Allocate GPUs for multiple server instances based on memory availability
+        
+        Args:
+            num_servers: Number of server instances to create
+            memory_threshold_percent: GPU usage threshold (default from env or 15%)
+            min_free_memory_gb: Minimum free memory per GPU (default from env or 6GB)
+        """
+        # Get thresholds from environment or use defaults
+        if memory_threshold_percent is None:
+            memory_threshold_percent = float(os.getenv("GPU_MEMORY_THRESHOLD_PERCENT", "15.0"))
+        
+        if min_free_memory_gb is None:
+            min_free_memory_gb = float(os.getenv("GPU_MIN_FREE_MEMORY_GB", "6.0"))
+        
+        logger.info("=" * 60)
+        logger.info("🔍 DETAILED GPU MEMORY ANALYSIS")
+        logger.info("=" * 60)
+        logger.info(f"GPU allocation criteria: <{memory_threshold_percent}% usage, >{min_free_memory_gb}GB free")
+        
+        # Try to install pynvml for better GPU monitoring
+        try:
+            import pynvml
+            logger.info("✅ Using NVIDIA-ML for accurate memory detection")
+        except ImportError:
+            logger.warning("⚠️  pynvml not found - install with: pip install nvidia-ml-py")
+            logger.warning("   Using PyTorch memory stats (may be less accurate)")
+        
+        # Calculate total GPUs needed (assuming 1 GPU per server by default)
+        gpus_per_server = int(os.getenv("GPUS_PER_SERVER", "1"))
+        total_gpus_needed = num_servers * gpus_per_server
+        
+        # Get best available GPUs
+        best_gpus = GPUManager.get_best_available_gpus(
+            total_gpus_needed, 
+            memory_threshold_percent, 
+            min_free_memory_gb
+        )
+        
+        if not best_gpus:
+            logger.error("❌ No suitable GPUs found!")
+            logger.error("💡 Try relaxing constraints:")
+            logger.error(f"   GPU_MEMORY_THRESHOLD_PERCENT=30 (current: {memory_threshold_percent})")
+            logger.error(f"   GPU_MIN_FREE_MEMORY_GB=3 (current: {min_free_memory_gb})")
+            raise RuntimeError("No suitable GPUs found for server deployment")
+        
+        # Allocate GPUs to servers
+        gpu_allocations = []
+        
+        if len(best_gpus) >= total_gpus_needed:
+            # We have enough GPUs - distribute evenly
+            for i in range(num_servers):
+                start_idx = i * gpus_per_server
+                end_idx = start_idx + gpus_per_server
+                server_gpus = best_gpus[start_idx:end_idx]
+                gpu_allocations.append(server_gpus)
+        else:
+            # Not enough GPUs - distribute what we have
+            logger.warning(f"Only {len(best_gpus)} GPUs available for {num_servers} servers")
+            
+            if len(best_gpus) >= num_servers:
+                # At least one GPU per server
+                for i in range(num_servers):
+                    gpu_allocations.append([best_gpus[i % len(best_gpus)]])
+            else:
+                # Fewer GPUs than servers - some servers will share
+                for i in range(num_servers):
+                    gpu_allocations.append([best_gpus[i % len(best_gpus)]])
+        
+        # Log allocation results
+        logger.info("=" * 60)
+        logger.info("📋 FINAL GPU ALLOCATION")
+        logger.info("=" * 60)
+        total_memory_needed = 0
+        
+        for i, gpu_ids in enumerate(gpu_allocations):
+            server_id = f"server_{i}"
+            gpu_info_list = []
+            server_memory_needed = 0
+            
+            for gpu_id in gpu_ids:
+                gpu_info = GPUManager.get_gpu_memory_usage(gpu_id)
+                gpu_info_list.append(f"GPU{gpu_id}({gpu_info.get('memory_free_gb', 0):.1f}GB free)")
+                server_memory_needed += 3.0  # Estimate 3GB per model (conservative)
+            
+            total_memory_needed += server_memory_needed
+            logger.info(f"🖥️  {server_id}: {gpu_ids}")
+            logger.info(f"   Available: {', '.join(gpu_info_list)}")
+            logger.info(f"   Estimated need: {server_memory_needed:.1f}GB")
+        
+        logger.info(f"📊 Total estimated memory needed: {total_memory_needed:.1f}GB")
+        logger.info("=" * 60)
+        
+        return gpu_allocations
+
+# ==================== Configuration Classes ====================
 
 @dataclass
 class ModelServerConfig:
-    """Configuration for individual model server"""
-    endpoint: str
-    gpu_id: int  # Keep for compatibility but used as identifier only
-    name: str = ""
-    max_concurrent_requests: int = 10
+    """Configuration for the model server"""
+    # Model configuration - Conservative settings for low memory
+    model_name: str = "codellama/CodeLlama-7b-Python-hf"
+    model_path: Optional[str] = None
+    gpu_memory_utilization: float = 0.6  # Reduced from 0.9
+    max_model_len: int = 2048  # Reduced from 4096
+    tensor_parallel_size: int = 1
+    
+    # Server configuration
+    host: str = "0.0.0.0"
+    port: int = 8100
+    workers: int = 1
     timeout: int = 300
+    server_id: str = "server_0"
     
-    def __post_init__(self):
-        if not self.name:
-            self.name = f"gpu_{self.gpu_id}"
-
-@dataclass
-class APIOpulenceConfig:
-    """Configuration for API-based Opulence Coordinator"""
-    # Model server endpoints
-    model_servers: List[ModelServerConfig] = field(default_factory=list)
+    # GPU configuration
+    gpu_ids: List[int] = field(default_factory=lambda: [0])
+    batch_size: int = 128
+    max_waiting_requests: int = 256
     
-    # Load balancing
-    load_balancing_strategy: LoadBalancingStrategy = LoadBalancingStrategy.LEAST_BUSY
+    # Performance settings
+    enable_batching: bool = True
+    max_batch_size: int = 32
+    streaming_timeout: float = 30.0
     
-    # Connection pool settings
-    connection_pool_size: int = 50
-    connection_timeout: int = 30
-    request_timeout: int = 300
+    # Security and rate limiting
+    max_tokens_per_request: int = 2048
+    rate_limit_requests_per_minute: int = 1000
     
-    # Retry settings
-    max_retries: int = 3
-    retry_delay: float = 1.0
-    exponential_backoff: bool = True
-    
-    # Health checking
-    health_check_interval: int = 30
-    circuit_breaker_threshold: int = 5
-    circuit_breaker_timeout: int = 60
-    
-    # Database
-    db_path: str = "opulence_api_data.db"
-    
-    # Backwards compatibility settings
-    max_tokens: int = 1024
-    temperature: float = 0.1
-    auto_cleanup: bool = True
+    # Monitoring
+    enable_metrics: bool = True
+    log_level: str = "INFO"
+    request_logging: bool = True
     
     @classmethod
-    def from_gpu_endpoints(cls, gpu_endpoints: Dict[int, str]) -> 'APIOpulenceConfig':
-        """Create config from GPU ID to endpoint mapping"""
-        servers = []
-        for gpu_id, endpoint in gpu_endpoints.items():
-            servers.append(ModelServerConfig(
-                endpoint=endpoint,
-                gpu_id=gpu_id,
-                name=f"gpu_{gpu_id}"
-            ))
-        return cls(model_servers=servers)
+    def from_env(cls, server_id: str = "server_0", port: int = 8100, gpu_ids: List[int] = None) -> 'ModelServerConfig':
+        """Load configuration from environment variables"""
+        config = cls()
+        
+        # Server-specific settings
+        config.server_id = server_id
+        config.port = port
+        config.gpu_ids = gpu_ids or [0]
+        
+        # Update tensor parallel size based on GPU count
+        config.tensor_parallel_size = len(config.gpu_ids)
+        
+        # Model settings
+        config.model_name = os.getenv("MODEL_NAME", config.model_name)
+        config.model_path = os.getenv("MODEL_PATH", config.model_path)
+        config.gpu_memory_utilization = float(os.getenv("GPU_MEMORY_UTILIZATION", config.gpu_memory_utilization))
+        config.max_model_len = int(os.getenv("MAX_MODEL_LEN", config.max_model_len))
+        
+        # Server settings
+        config.host = os.getenv("HOST", config.host)
+        config.workers = int(os.getenv("WORKERS", config.workers))
+        config.timeout = int(os.getenv("TIMEOUT", config.timeout))
+        
+        # Performance settings
+        config.enable_batching = os.getenv("ENABLE_BATCHING", "true").lower() == "true"
+        config.max_batch_size = int(os.getenv("MAX_BATCH_SIZE", config.max_batch_size))
+        config.streaming_timeout = float(os.getenv("STREAMING_TIMEOUT", config.streaming_timeout))
+        
+        # Security settings
+        config.max_tokens_per_request = int(os.getenv("MAX_TOKENS_PER_REQUEST", config.max_tokens_per_request))
+        config.rate_limit_requests_per_minute = int(os.getenv("RATE_LIMIT_RPM", config.rate_limit_requests_per_minute))
+        
+        # Monitoring settings
+        config.enable_metrics = os.getenv("ENABLE_METRICS", "true").lower() == "true"
+        config.log_level = os.getenv("LOG_LEVEL", config.log_level)
+        config.request_logging = os.getenv("REQUEST_LOGGING", "true").lower() == "true"
+        
+        return config
 
-# ==================== Model Server Management ====================
+# ==================== Request/Response Models ====================
 
-class ModelServerStatus(Enum):
-    HEALTHY = "healthy"
-    UNHEALTHY = "unhealthy"
-    CIRCUIT_OPEN = "circuit_open"
-    UNKNOWN = "unknown"
+class GenerationRequest(BaseModel):
+    """Request model for text generation"""
+    prompt: str = Field(..., description="Input prompt for generation")
+    max_tokens: int = Field(default=512, ge=1, le=4096, description="Maximum tokens to generate")
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Sampling temperature")
+    top_p: float = Field(default=0.9, ge=0.0, le=1.0, description="Top-p sampling parameter")
+    top_k: int = Field(default=50, ge=1, le=100, description="Top-k sampling parameter")
+    frequency_penalty: float = Field(default=0.0, ge=-2.0, le=2.0, description="Frequency penalty")
+    presence_penalty: float = Field(default=0.0, ge=-2.0, le=2.0, description="Presence penalty")
+    stop: Optional[List[str]] = Field(default=None, description="Stop sequences")
+    stream: bool = Field(default=False, description="Enable streaming response")
+    seed: Optional[int] = Field(default=None, description="Random seed for reproducibility")
+    
+    @field_validator('max_tokens')
+    @classmethod
+    def validate_max_tokens(cls, v, info):
+        config = getattr(cls, '_config', None)
+        if config and v > config.max_tokens_per_request:
+            raise ValueError(f"max_tokens cannot exceed {config.max_tokens_per_request}")
+        return v
 
-class ModelServer:
-    """Represents a single model server instance"""
+class GenerationResponse(BaseModel):
+    """Response model for text generation"""
+    id: str = Field(..., description="Unique request ID")
+    text: str = Field(..., description="Generated text")
+    prompt: str = Field(..., description="Original prompt")
+    finish_reason: str = Field(..., description="Reason for completion")
+    usage: Dict[str, int] = Field(..., description="Token usage statistics")
+    created: int = Field(..., description="Unix timestamp")
+    model: str = Field(..., description="Model name used")
+    server_id: str = Field(..., description="Server ID that processed the request")
+
+class StreamingChunk(BaseModel):
+    """Streaming response chunk"""
+    id: str = Field(..., description="Unique request ID")
+    text: str = Field(..., description="Generated text chunk")
+    finish_reason: Optional[str] = Field(None, description="Reason for completion if finished")
+    usage: Optional[Dict[str, int]] = Field(None, description="Token usage (final chunk only)")
+    server_id: str = Field(..., description="Server ID that processed the request")
+
+class HealthResponse(BaseModel):
+    """Health check response"""
+    status: str = Field(..., description="Health status")
+    timestamp: str = Field(..., description="Current timestamp")
+    version: str = Field(..., description="Server version")
+    uptime: float = Field(..., description="Server uptime in seconds")
+    server_id: str = Field(..., description="Server ID")
+
+class StatusResponse(BaseModel):
+    """Status response with detailed information"""
+    status: str = Field(..., description="Server status")
+    model: str = Field(..., description="Loaded model name")
+    gpu_info: Dict[str, Any] = Field(..., description="GPU information")
+    memory_info: Dict[str, Any] = Field(..., description="Memory usage information")
+    active_requests: int = Field(..., description="Number of active requests")
+    total_requests: int = Field(..., description="Total requests processed")
+    uptime: float = Field(..., description="Server uptime in seconds")
+    server_id: str = Field(..., description="Server ID")
+
+class MetricsResponse(BaseModel):
+    """Metrics response for monitoring"""
+    requests_per_second: float = Field(..., description="Current RPS")
+    average_latency: float = Field(..., description="Average response latency")
+    gpu_utilization: float = Field(..., description="GPU utilization percentage")
+    memory_usage: float = Field(..., description="Memory usage percentage")
+    active_connections: int = Field(..., description="Active connections")
+    error_rate: float = Field(..., description="Error rate percentage")
+    server_id: str = Field(..., description="Server ID")
+
+# ==================== GPU Model Loader ====================
+
+class GPUModelLoader:
+    """Manages model loading and GPU resources"""
     
     def __init__(self, config: ModelServerConfig):
         self.config = config
-        self.status = ModelServerStatus.UNKNOWN
+        self.engine: Optional[AsyncLLMEngine] = None
+        self.model_loaded = False
+        self.gpu_info = {}
+        self.start_time = time.time()
+        
+    async def initialize(self):
+        """Initialize the model and GPU resources"""
+        try:
+            logger.info(f"[{self.config.server_id}] Initializing model: {self.config.model_name}")
+            logger.info(f"[{self.config.server_id}] Using GPUs: {self.config.gpu_ids}")
+            
+            # Check GPU availability
+            if not torch.cuda.is_available():
+                raise RuntimeError("CUDA is not available")
+            
+            # Verify GPU IDs
+            available_gpus = torch.cuda.device_count()
+            for gpu_id in self.config.gpu_ids:
+                if gpu_id >= available_gpus:
+                    raise ValueError(f"GPU {gpu_id} not available. Available GPUs: {available_gpus}")
+            
+            # Set CUDA visible devices
+            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, self.config.gpu_ids))
+            
+            # Create engine arguments - handle compatibility issues
+            engine_kwargs = {
+                "model": self.config.model_path or self.config.model_name,
+                "tensor_parallel_size": self.config.tensor_parallel_size,
+                "gpu_memory_utilization": 0.7,  # Reduced from 0.9 to leave room for CUDA graphs
+                "max_model_len": min(self.config.max_model_len, 2048),  # Reduce context length
+                "trust_remote_code": True,
+            }
+            
+            # Add optional parameters that may not exist in all vLLM versions
+            try:
+                # Try to add newer parameters safely
+                engine_kwargs.update({
+                    "enforce_eager": True,  # Use eager execution instead of CUDA graphs to save memory
+                    "max_num_seqs": 16,  # Reduce batch size to save memory
+                })
+            except Exception as e:
+                logger.warning(f"[{self.config.server_id}] Some vLLM parameters not supported in this version: {str(e)}")
+                # Fallback to older parameter names if needed
+                try:
+                    engine_kwargs.update({
+                        "disable_cuda_graph": True,  # Legacy parameter name
+                        "max_num_seqs": 16,
+                    })
+                except Exception as e2:
+                    logger.warning(f"[{self.config.server_id}] Legacy parameters also not supported: {str(e2)}")
+                    logger.info(f"[{self.config.server_id}] Continuing with basic parameters only")
+            
+            # Create engine arguments
+            engine_args = AsyncEngineArgs(**engine_kwargs)
+            
+            # Create async engine
+            self.engine = AsyncLLMEngine.from_engine_args(engine_args)
+            
+            # Collect GPU information
+            self._collect_gpu_info()
+            
+            self.model_loaded = True
+            logger.info(f"[{self.config.server_id}] Model loaded successfully on GPUs: {self.config.gpu_ids}")
+            
+        except Exception as e:
+            logger.error(f"[{self.config.server_id}] Failed to initialize model: {str(e)}")
+            # Log more detailed error info for debugging
+            logger.error(f"[{self.config.server_id}] PyTorch version: {torch.__version__}")
+            logger.error(f"[{self.config.server_id}] CUDA available: {torch.cuda.is_available()}")
+            if torch.cuda.is_available():
+                logger.error(f"[{self.config.server_id}] CUDA version: {torch.version.cuda}")
+                logger.error(f"[{self.config.server_id}] GPU count: {torch.cuda.device_count()}")
+            raise
+    
+    def _collect_gpu_info(self):
+        """Collect GPU information for monitoring"""
+        self.gpu_info = {}
+        for gpu_id in self.config.gpu_ids:
+            try:
+                gpu_info = GPUManager.get_gpu_memory_usage(gpu_id)
+                if gpu_info:
+                    self.gpu_info[f"gpu_{gpu_id}"] = gpu_info
+            except Exception as e:
+                logger.warning(f"[{self.config.server_id}] Failed to collect GPU {gpu_id} info: {str(e)}")
+    
+    async def cleanup(self):
+        """Clean up GPU resources"""
+        if self.engine:
+            logger.info(f"[{self.config.server_id}] Cleaning up GPU resources...")
+            # vLLM doesn't have explicit cleanup, but we can clear CUDA cache
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            self.engine = None
+            self.model_loaded = False
+    
+    def get_gpu_utilization(self) -> float:
+        """Get current GPU utilization percentage"""
+        if not self.gpu_info:
+            return 0.0
+        
+        total_utilization = 0.0
+        for gpu_data in self.gpu_info.values():
+            total_utilization += gpu_data.get("utilization", 0.0)
+        
+        return total_utilization / len(self.gpu_info) if self.gpu_info else 0.0
+
+# ==================== Generation Handler ====================
+
+class GenerationHandler:
+    """Handles text generation requests"""
+    
+    def __init__(self, model_loader: GPUModelLoader, config: ModelServerConfig):
+        self.model_loader = model_loader
+        self.config = config
         self.active_requests = 0
         self.total_requests = 0
-        self.successful_requests = 0
-        self.failed_requests = 0
-        self.total_latency = 0.0
-        self.consecutive_failures = 0
-        self.circuit_breaker_open_time = 0
-        self.logger = logging.getLogger(f"{__name__}.{config.name}")
-    
-    @property
-    def average_latency(self) -> float:
-        if self.successful_requests == 0:
-            return 0.0
-        return self.total_latency / self.successful_requests
-    
-    def is_available(self) -> bool:
-        """Check if server is available for requests"""
-        if self.status == ModelServerStatus.CIRCUIT_OPEN:
-            # Check if circuit breaker should be reset
-            if time.time() - self.circuit_breaker_open_time > 60:
-                self.status = ModelServerStatus.UNKNOWN
-                return True
-            return False
+        self.request_times = []
+        self.error_count = 0
         
-        return (self.status in [ModelServerStatus.HEALTHY, ModelServerStatus.UNKNOWN] and 
-                self.active_requests < self.config.max_concurrent_requests)
-    
-    def record_success(self, latency: float):
-        """Record successful request"""
-        self.successful_requests += 1
-        self.total_latency += latency
-        self.consecutive_failures = 0
-        
-    def record_failure(self):
-        """Record failed request"""
-        self.failed_requests += 1
-        self.consecutive_failures += 1
-        
-    def should_open_circuit(self, threshold: int) -> bool:
-        """Check if circuit breaker should open"""
-        return self.consecutive_failures >= threshold
-    
-    def open_circuit(self):
-        """Open circuit breaker"""
-        self.status = ModelServerStatus.CIRCUIT_OPEN
-        self.circuit_breaker_open_time = time.time()
-        self.logger.warning(f"Circuit breaker opened for {self.config.name}")
-
-# ==================== Load Balancer ====================
-
-class LoadBalancer:
-    """Load balancer for routing requests to available model servers"""
-    
-    def __init__(self, config: APIOpulenceConfig):
-        self.config = config
-        self.servers: List[ModelServer] = []
-        self.current_index = 0
-        self.logger = logging.getLogger(f"{__name__}.LoadBalancer")
-        
-        # Initialize servers
-        for server_config in config.model_servers:
-            self.servers.append(ModelServer(server_config))
-    
-    def get_available_servers(self) -> List[ModelServer]:
-        """Get list of available servers"""
-        return [server for server in self.servers if server.is_available()]
-    
-    def select_server(self) -> Optional[ModelServer]:
-        """Select best server based on load balancing strategy"""
-        available_servers = self.get_available_servers()
-        
-        if not available_servers:
-            return None
-        
-        if self.config.load_balancing_strategy == LoadBalancingStrategy.ROUND_ROBIN:
-            server = available_servers[self.current_index % len(available_servers)]
-            self.current_index += 1
-            return server
-        
-        elif self.config.load_balancing_strategy == LoadBalancingStrategy.LEAST_BUSY:
-            return min(available_servers, key=lambda s: s.active_requests)
-        
-        elif self.config.load_balancing_strategy == LoadBalancingStrategy.LEAST_LATENCY:
-            return min(available_servers, key=lambda s: s.average_latency)
-        
-        elif self.config.load_balancing_strategy == LoadBalancingStrategy.RANDOM:
-            return random.choice(available_servers)
-        
-        else:
-            return available_servers[0]
-    
-    def get_server_by_gpu_id(self, gpu_id: int) -> Optional[ModelServer]:
-        """Get server by GPU ID - for compatibility only"""
-        for server in self.servers:
-            if server.config.gpu_id == gpu_id:
-                return server
-        return None
-
-# ==================== API Client for Model Servers ====================
-
-class ModelServerClient:
-    """HTTP client for calling model servers"""
-    
-    def __init__(self, config: APIOpulenceConfig):
-        self.config = config
-        self.session: Optional[aiohttp.ClientSession] = None
-        self.logger = logging.getLogger(f"{__name__}.ModelServerClient")
-        
-    async def initialize(self):
-        """Initialize HTTP session"""
-        connector = aiohttp.TCPConnector(
-            limit=self.config.connection_pool_size,
-            limit_per_host=10,
-            ttl_dns_cache=300,
-            keepalive_timeout=30,
-            enable_cleanup_closed=True
-        )
-        
-        timeout = aiohttp.ClientTimeout(
-            total=self.config.request_timeout,
-            connect=self.config.connection_timeout
-        )
-        
-        self.session = aiohttp.ClientSession(
-            connector=connector,
-            timeout=timeout,
-            headers={
-                'Content-Type': 'application/json',
-                'User-Agent': 'OpulenceCoordinator/1.0.0'
-            }
-        )
-        
-        self.logger.info("Model server client initialized")
-    
-    async def close(self):
-        """Close HTTP session"""
-        if self.session:
-            await self.session.close()
-            self.session = None
-    
-    async def call_generate(self, server: ModelServer, prompt: str, 
-                      params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Call model server generate endpoint"""
-        if not self.session:
-            raise RuntimeError("Client not initialized")
-        
-        params = params or {}
-        
-        # Prepare request data with proper validation
-        request_data = {
-            "prompt": prompt,
-            "max_tokens": min(params.get("max_tokens", 512), 2048),
-            "temperature": max(0.0, min(params.get("temperature", 0.1), 1.0)),
-            "top_p": max(0.1, min(params.get("top_p", 0.9), 1.0)),
-            "stream": False  # Always disable streaming
-        }
-        
-        # Remove None values
-        request_data = {k: v for k, v in request_data.items() if v is not None}
-        
-        server.active_requests += 1
-        server.total_requests += 1
-        start_time = time.time()
+    async def generate(self, request: GenerationRequest, request_id: str) -> Union[GenerationResponse, AsyncGenerator]:
+        """Generate text based on the request"""
+        if not self.model_loader.model_loaded:
+            raise HTTPException(status_code=503, detail="Model not loaded")
         
         try:
-            for attempt in range(self.config.max_retries + 1):
-                try:
-                    generate_url = urljoin(server.config.endpoint, "/generate")
-                    
-                    async with self.session.post(
-                        generate_url,
-                        json=request_data,
-                        timeout=aiohttp.ClientTimeout(total=server.config.timeout)
-                    ) as response:
-                        
-                        if response.status == 200:
-                            result = await response.json()
-                            
-                            # Record success
-                            latency = time.time() - start_time
-                            server.record_success(latency)
-                            
-                            # Add metadata
-                            result["server_used"] = server.config.name
-                            result["gpu_id"] = server.config.gpu_id  # For compatibility
-                            result["latency"] = latency
-                            
-                            return result
-                        
-                        else:
-                            error_text = await response.text()
-                            raise aiohttp.ClientError(f"HTTP {response.status}: {error_text}")
+            self.active_requests += 1
+            self.total_requests += 1
+            start_time = time.time()
+            
+            # Create sampling parameters
+            sampling_params = SamplingParams(
+                max_tokens=request.max_tokens,
+                temperature=request.temperature,
+                top_p=request.top_p,
+                top_k=request.top_k,
+                frequency_penalty=request.frequency_penalty,
+                presence_penalty=request.presence_penalty,
+                stop=request.stop,
+                seed=request.seed,
+            )
+            
+            if request.stream:
+                return self._generate_stream(request, request_id, sampling_params, start_time)
+            else:
+                return await self._generate_complete(request, request_id, sampling_params, start_time)
                 
-                except (asyncio.TimeoutError, aiohttp.ClientError) as e:
-                    if attempt < self.config.max_retries:
-                        delay = self.config.retry_delay * (2 ** attempt if self.config.exponential_backoff else 1)
-                        self.logger.warning(f"Request failed, retrying in {delay:.1f}s: {e}")
-                        await asyncio.sleep(delay)
-                        continue
-                    raise
-        
         except Exception as e:
-            server.record_failure()
-            
-            # Check if circuit breaker should open
-            if server.should_open_circuit(self.config.circuit_breaker_threshold):
-                server.open_circuit()
-            
-            raise RuntimeError(f"Model server call failed: {e}")
-        
+            self.error_count += 1
+            logger.error(f"[{self.config.server_id}] Generation error for request {request_id}: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
         finally:
-            server.active_requests -= 1
+            self.active_requests -= 1
     
-    async def health_check(self, server: ModelServer) -> bool:
-        """Check server health"""
+    async def _generate_complete(self, request: GenerationRequest, request_id: str, 
+                               sampling_params: SamplingParams, start_time: float) -> GenerationResponse:
+        """Generate complete response"""
         try:
-            health_url = urljoin(server.config.endpoint, "/health")
+            # Generate text
+            results = self.model_loader.engine.generate(
+                request.prompt,
+                sampling_params,
+                request_id=request_id
+            )
             
-            async with self.session.get(
-                health_url,
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as response:
-                if response.status == 200:
-                    server.status = ModelServerStatus.HEALTHY
-                    return True
-                else:
-                    server.status = ModelServerStatus.UNHEALTHY
-                    return False
+            # Get the final result
+            final_output = None
+            async for request_output in results:
+                final_output = request_output
+            
+            if not final_output:
+                raise RuntimeError("No output generated")
+            
+            # Extract generated text
+            generated_text = final_output.outputs[0].text
+            finish_reason = final_output.outputs[0].finish_reason
+            
+            # Calculate token usage
+            prompt_tokens = len(final_output.prompt_token_ids)
+            completion_tokens = len(final_output.outputs[0].token_ids)
+            
+            # Record timing
+            end_time = time.time()
+            self.request_times.append(end_time - start_time)
+            
+            # Keep only last 1000 request times for metrics
+            if len(self.request_times) > 1000:
+                self.request_times = self.request_times[-1000:]
+            
+            return GenerationResponse(
+                id=request_id,
+                text=generated_text,
+                prompt=request.prompt,
+                finish_reason=finish_reason,
+                usage={
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens
+                },
+                created=int(time.time()),
+                model=self.config.model_name,
+                server_id=self.config.server_id
+            )
+            
+        except Exception as e:
+            logger.error(f"[{self.config.server_id}] Complete generation error: {str(e)}")
+            raise
+    
+    async def _generate_stream(self, request: GenerationRequest, request_id: str, 
+                             sampling_params: SamplingParams, start_time: float) -> AsyncGenerator:
+        """Generate streaming response"""
+        try:
+            # Generate text with streaming
+            results = self.model_loader.engine.generate(
+                request.prompt,
+                sampling_params,
+                request_id=request_id
+            )
+            
+            previous_text = ""
+            async for request_output in results:
+                # Extract current generated text
+                current_text = request_output.outputs[0].text
+                
+                # Get the new text chunk
+                new_text = current_text[len(previous_text):]
+                
+                # Create chunk response
+                chunk = StreamingChunk(
+                    id=request_id,
+                    text=new_text,
+                    finish_reason=request_output.outputs[0].finish_reason if request_output.finished else None,
+                    server_id=self.config.server_id
+                )
+                
+                # Add usage info to final chunk
+                if request_output.finished:
+                    prompt_tokens = len(request_output.prompt_token_ids)
+                    completion_tokens = len(request_output.outputs[0].token_ids)
+                    chunk.usage = {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": prompt_tokens + completion_tokens
+                    }
                     
-        except Exception:
-            server.status = ModelServerStatus.UNHEALTHY
-            return False
-
-# ==================== API-Compatible Engine Context ====================
-
-class APIEngineContext:
-    """Provides engine-like interface for existing agents using API calls"""
+                    # Record timing
+                    end_time = time.time()
+                    self.request_times.append(end_time - start_time)
+                    
+                    # Keep only last 1000 request times for metrics
+                    if len(self.request_times) > 1000:
+                        self.request_times = self.request_times[-1000:]
+                
+                yield f"data: {chunk.json()}\n\n"
+                previous_text = current_text
+                
+        except Exception as e:
+            logger.error(f"[{self.config.server_id}] Streaming generation error: {str(e)}")
+            error_chunk = StreamingChunk(
+                id=request_id,
+                text="",
+                finish_reason="error",
+                server_id=self.config.server_id
+            )
+            yield f"data: {error_chunk.json()}\n\n"
     
-    def __init__(self, coordinator, preferred_gpu_id: int = None):
-        self.coordinator = coordinator
-        self.preferred_gpu_id = preferred_gpu_id  # Keep for compatibility but ignore
-        self.logger = logging.getLogger(f"{__name__}.APIEngineContext")
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get performance metrics"""
+        current_time = time.time()
+        
+        # Calculate RPS (requests in last 60 seconds)
+        recent_requests = sum(1 for t in self.request_times if current_time - t < 60)
+        rps = recent_requests / 60.0
+        
+        # Calculate average latency
+        avg_latency = sum(self.request_times) / len(self.request_times) if self.request_times else 0.0
+        
+        # Calculate error rate
+        error_rate = (self.error_count / self.total_requests * 100) if self.total_requests > 0 else 0.0
+        
+        return {
+            "requests_per_second": rps,
+            "average_latency": avg_latency,
+            "error_rate": error_rate,
+            "active_requests": self.active_requests,
+            "total_requests": self.total_requests,
+            "error_count": self.error_count
+        }
+
+# ==================== Health Monitor ====================
+
+class HealthMonitor:
+    """Monitors system health and provides status information"""
     
-    async def generate(self, prompt: str, sampling_params, request_id: str = None):
-        """Generate text via API (compatible with vLLM interface)"""
-        # Convert sampling_params to API parameters
-        params = {}
+    def __init__(self, model_loader: GPUModelLoader, generation_handler: GenerationHandler):
+        self.model_loader = model_loader
+        self.generation_handler = generation_handler
+        self.start_time = time.time()
+        self.version = "1.0.0"
+    
+    def get_health(self) -> HealthResponse:
+        """Get basic health status"""
+        status = "healthy" if self.model_loader.model_loaded else "unhealthy"
         
-        if hasattr(sampling_params, '__dict__'):
-            for attr in ['max_tokens', 'temperature', 'top_p', 'top_k', 
-                        'frequency_penalty', 'presence_penalty', 'stop', 'seed']:
-                if hasattr(sampling_params, attr):
-                    value = getattr(sampling_params, attr)
-                    if value is not None:
-                        params[attr] = value
-        elif isinstance(sampling_params, dict):
-            params = sampling_params.copy()
-        else:
-            params = {"max_tokens": 512, "temperature": 0.7, "top_p": 0.9}
+        return HealthResponse(
+            status=status,
+            timestamp=datetime.now().isoformat(),
+            version=self.version,
+            uptime=time.time() - self.start_time,
+            server_id=self.model_loader.config.server_id
+        )
+    
+    def get_status(self) -> StatusResponse:
+        """Get detailed status information"""
+        # Update GPU info
+        self.model_loader._collect_gpu_info()
         
-        # Clean parameters
-        validated_params = {}
-        for key, value in params.items():
-            if value is not None:
-                if key == "max_tokens":
-                    validated_params[key] = max(1, min(value, 4096))
-                elif key == "temperature":
-                    validated_params[key] = max(0.0, min(value, 2.0))
-                elif key == "top_p":
-                    validated_params[key] = max(0.0, min(value, 1.0))
-                else:
-                    validated_params[key] = value
+        # Get system memory info
+        memory_info = {
+            "total": psutil.virtual_memory().total,
+            "available": psutil.virtual_memory().available,
+            "percent": psutil.virtual_memory().percent,
+            "used": psutil.virtual_memory().used
+        }
         
-        # Call API - ignore preferred_gpu_id, just use load balancer
-        result = await self.coordinator.call_model_api(
-            prompt=prompt, 
-            params=validated_params
+        status = "healthy" if self.model_loader.model_loaded else "unhealthy"
+        
+        return StatusResponse(
+            status=status,
+            model=self.model_loader.config.model_name,
+            gpu_info=self.model_loader.gpu_info,
+            memory_info=memory_info,
+            active_requests=self.generation_handler.active_requests,
+            total_requests=self.generation_handler.total_requests,
+            uptime=time.time() - self.start_time,
+            server_id=self.model_loader.config.server_id
+        )
+    
+    def get_metrics(self) -> MetricsResponse:
+        """Get performance metrics"""
+        metrics = self.generation_handler.get_metrics()
+        
+        return MetricsResponse(
+            requests_per_second=metrics["requests_per_second"],
+            average_latency=metrics["average_latency"],
+            gpu_utilization=self.model_loader.get_gpu_utilization(),
+            memory_usage=psutil.virtual_memory().percent,
+            active_connections=metrics["active_requests"],
+            error_rate=metrics["error_rate"],
+            server_id=self.model_loader.config.server_id
+        )
+
+# ==================== Main FastAPI Application ====================
+
+class ModelServer:
+    """Main model server application"""
+    
+    def __init__(self, config: ModelServerConfig):
+        self.config = config
+        self.model_loader = GPUModelLoader(config)
+        self.generation_handler = GenerationHandler(self.model_loader, config)
+        self.health_monitor = HealthMonitor(self.model_loader, self.generation_handler)
+        self.app = None
+        
+    def create_app(self) -> FastAPI:
+        """Create FastAPI application"""
+        
+        @asynccontextmanager
+        async def lifespan(app: FastAPI):
+            # Startup
+            logger.info(f"[{self.config.server_id}] Starting model server...")
+            await self.model_loader.initialize()
+            logger.info(f"[{self.config.server_id}] Model server started successfully")
+            yield
+            # Shutdown
+            logger.info(f"[{self.config.server_id}] Shutting down model server...")
+            await self.model_loader.cleanup()
+            logger.info(f"[{self.config.server_id}] Model server shut down")
+        
+        app = FastAPI(
+            title=f"Model Server API - {self.config.server_id}",
+            description="Production-ready Multi-GPU Model Server for LLM inference",
+            version="1.0.0",
+            lifespan=lifespan
         )
         
-        # Convert API response to vLLM-compatible format
-        class MockOutput:
-            def __init__(self, text: str, finish_reason: str):
-                self.text = text
-                self.finish_reason = finish_reason
-                self.token_ids = []
+        # Add CORS middleware
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
         
-        class MockRequestOutput:
-            def __init__(self, result: Dict[str, Any]):
-                if isinstance(result, dict):
-                    text = (
-                        result.get('text') or 
-                        result.get('response') or 
-                        result.get('content') or
-                        result.get('generated_text') or
-                        str(result.get('choices', [{}])[0].get('text', '')) or
-                        ''
-                    )
-                    finish_reason = result.get('finish_reason', 'stop')
-                else:
-                    text = str(result)
-                    finish_reason = 'stop'
+        # Add request logging middleware
+        if self.config.request_logging:
+            @app.middleware("http")
+            async def log_requests(request: Request, call_next):
+                request_id = str(uuid.uuid4())
+                start_time = time.time()
                 
-                self.outputs = [MockOutput(text, finish_reason)]
-                self.finished = True
-                self.prompt_token_ids = []
-        
-        yield MockRequestOutput(result)
-
-# ==================== API-Based Coordinator (Keep exact class name) ====================
-
-class APIOpulenceCoordinator:
-    """API-based Opulence Coordinator - orchestrates existing agents through API calls"""
-    
-    def __init__(self, config: APIOpulenceConfig):
-        self.config = config
-        self.load_balancer = LoadBalancer(config)
-        self.client = ModelServerClient(config)
-        self.db_path = config.db_path
-        
-        # Agent storage - keep existing agents unchanged
-        self.agents = {}
-        
-        # Health check task
-        self.health_check_task: Optional[asyncio.Task] = None
-        
-        # Initialize database
-        self._init_database()
-
-        # Keep these for compatibility
-        self.primary_gpu_id = None
-        self.available_gpu_ids = [server.config.gpu_id for server in self.load_balancer.servers]
-        
-        # Statistics
-        self.stats = {
-            "total_files_processed": 0,
-            "total_queries": 0,
-            "total_api_calls": 0,
-            "avg_response_time": 0,
-            "start_time": time.time(),
-            "coordinator_type": "api_based"
-        }
-        
-        self.agent_configs = {
-            "code_parser": {
-                "max_tokens": 2000,
-                "temperature": 0.1,
-                "top_p": 0.9,
-                "description": "Analyzes and parses code structures"
-            },
-            "vector_index": {
-                "max_tokens": 1000,
-                "temperature": 0.2,
-                "top_p": 0.9,
-                "description": "Handles vector embeddings and similarity search"
-            },
-            "data_loader": {
-                "max_tokens": 1500,
-                "temperature": 0.1,
-                "top_p": 0.9,
-                "description": "Processes and loads data files"
-            },
-            "lineage_analyzer": {
-                "max_tokens": 2000,
-                "temperature": 0.2,
-                "top_p": 0.9,
-                "description": "Analyzes data and code lineage"
-            },
-            "logic_analyzer": {
-                "max_tokens": 2500,
-                "temperature": 0.1,
-                "top_p": 0.9,
-                "description": "Analyzes program logic and flow"
-            },
-            "documentation": {
-                "max_tokens": 3000,
-                "temperature": 0.3,
-                "top_p": 0.95,
-                "description": "Generates documentation"
-            },
-            "db2_comparator": {
-                "max_tokens": 1500,
-                "temperature": 0.1,
-                "top_p": 0.9,
-                "description": "Compares database schemas and data"
-            },
-            "chat_agent": {
-                "max_tokens": 1000,
-                "temperature": 0.4,
-                "top_p": 0.9,
-                "description": "Handles interactive chat queries"
-            }
-        }
-
-        # For backwards compatibility
-        self.selected_gpus = [server.config.gpu_id for server in self.load_balancer.servers]
-        
-        self.logger = logging.getLogger(f"{__name__}.APIOpulenceCoordinator")
-        self.logger.info(f"API Coordinator initialized with servers: {[s.config.name for s in self.load_balancer.servers]}")
-    
-    async def initialize(self):
-        """Initialize the coordinator"""
-        await self.client.initialize()
-        
-        # Test server connectivity
-        await self._test_connectivity()
-        
-        # Start health checking
-        self.health_check_task = asyncio.create_task(self._health_check_loop())
-        
-        self.logger.info("API Coordinator initialized successfully")
-    
-    async def _test_connectivity(self):
-        """Test connectivity to all servers"""
-        healthy_count = 0
-        for server in self.load_balancer.servers:
-            if await self.client.health_check(server):
-                healthy_count += 1
-                self.logger.info(f"✅ {server.config.name} ({server.config.endpoint}) - Connected")
-            else:
-                self.logger.warning(f"❌ {server.config.name} ({server.config.endpoint}) - Failed")
-        
-        if healthy_count == 0:
-            raise RuntimeError("No model servers are accessible!")
-        
-        self.logger.info(f"Connected to {healthy_count}/{len(self.load_balancer.servers)} servers")
-    
-    async def shutdown(self):
-        """Shutdown the coordinator"""
-        try:
-            if self.health_check_task and not self.health_check_task.done():
-                self.health_check_task.cancel()
-                try:
-                    await self.health_check_task
-                except asyncio.CancelledError:
-                    pass
-            
-            await self.client.close()
-            self.logger.info("API Coordinator shut down successfully")
-        
-        except Exception as e:
-            self.logger.error(f"Error during shutdown: {str(e)}")
-    
-    def _init_database(self):
-        """Initialize database (same as original)"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA cache_size=10000")
-            conn.execute("PRAGMA temp_store=memory")
-            
-            cursor = conn.cursor()
-            
-            cursor.executescript("""
-                CREATE TABLE IF NOT EXISTS file_metadata (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    file_name TEXT UNIQUE NOT NULL,
-                    file_type TEXT,
-                    table_name TEXT,
-                    fields TEXT,
-                    source_type TEXT,
-                    last_modified TIMESTAMP,
-                    processing_status TEXT DEFAULT 'pending',
-                    created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
+                # Log request
+                logger.info(f"[{self.config.server_id}] Request {request_id}: {request.method} {request.url}")
                 
-                CREATE INDEX IF NOT EXISTS idx_file_metadata_name ON file_metadata(file_name);
-                CREATE INDEX IF NOT EXISTS idx_file_metadata_type ON file_metadata(file_type);
+                # Process request
+                response = await call_next(request)
                 
-                CREATE TABLE IF NOT EXISTS field_lineage (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    field_name TEXT NOT NULL,
-                    program_name TEXT,
-                    paragraph TEXT,
-                    operation TEXT,
-                    source_file TEXT,
-                    last_used TIMESTAMP,
-                    read_in TEXT,
-                    updated_in TEXT,
-                    purged_in TEXT,
-                    created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
+                # Log response
+                process_time = time.time() - start_time
+                logger.info(f"[{self.config.server_id}] Request {request_id} completed in {process_time:.4f}s with status {response.status_code}")
                 
-                CREATE INDEX IF NOT EXISTS idx_field_lineage_field ON field_lineage(field_name);
-                CREATE INDEX IF NOT EXISTS idx_field_lineage_program ON field_lineage(program_name);
-                
-                CREATE TABLE IF NOT EXISTS program_chunks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    program_name TEXT NOT NULL,
-                    chunk_id TEXT NOT NULL,
-                    chunk_type TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    metadata TEXT,
-                    embedding_id TEXT,
-                    file_hash TEXT,
-                    created_timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
-                    line_start INTEGER,
-                    line_end INTEGER,
-                    UNIQUE(program_name, chunk_id)
-                );
-                
-                CREATE INDEX IF NOT EXISTS idx_program_chunks_name ON program_chunks(program_name);
-                CREATE INDEX IF NOT EXISTS idx_program_chunks_type ON program_chunks(chunk_type);
-                CREATE INDEX IF NOT EXISTS idx_file_hash ON program_chunks(file_hash);
-                
-                CREATE TABLE IF NOT EXISTS processing_stats (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    operation TEXT,
-                    duration REAL,
-                    server_used TEXT,
-                    gpu_id INTEGER,
-                    status TEXT,
-                    details TEXT
-                );
-                
-                CREATE INDEX IF NOT EXISTS idx_processing_stats_timestamp ON processing_stats(timestamp);
-                
-                CREATE TABLE IF NOT EXISTS vector_embeddings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    chunk_id INTEGER,
-                    embedding_id TEXT,
-                    faiss_id INTEGER,
-                    embedding_vector TEXT,
-                    created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (chunk_id) REFERENCES program_chunks (id)
-                );
-                
-                CREATE INDEX IF NOT EXISTS idx_vector_embeddings_chunk ON vector_embeddings(chunk_id);
-                CREATE INDEX IF NOT EXISTS idx_vector_embeddings_faiss ON vector_embeddings(faiss_id);
-            """)
-            
-            conn.commit()
-            conn.close()
-            
-            self.logger.info("Database initialized successfully")
-            
-        except Exception as e:
-            self.logger.error(f"Database initialization failed: {str(e)}")
-            raise
-    
-    async def _health_check_loop(self):
-        """Background health checking loop"""
-        try:
-            while True:
-                await asyncio.sleep(self.config.health_check_interval)
-                
-                for server in self.load_balancer.servers:
-                    try:
-                        await self.client.health_check(server)
-                    except Exception as e:
-                        self.logger.warning(f"Health check failed for {server.config.name}: {e}")
-            
-        except asyncio.CancelledError:
-            self.logger.info("Health check loop cancelled")
-            raise
-        except Exception as e:
-            self.logger.error(f"Health check loop error: {e}")
-    
-    async def call_model_api(self, prompt: str, params: Dict[str, Any] = None, 
-                           preferred_gpu_id: int = None) -> Dict[str, Any]:
-        """FIXED: Call model API without GPU dependency"""
+                return response
         
-        # IGNORE preferred_gpu_id - just use load balancer to select best server
-        server = self.load_balancer.select_server()
+        # Configure GenerationRequest with config
+        GenerationRequest._config = self.config
         
-        if not server:
-            raise RuntimeError("No available servers found")
-        
-        try:
-            self.logger.debug(f"Routing request to {server.config.name} at {server.config.endpoint}")
-            result = await self.client.call_generate(server, prompt, params)
-            self.stats["total_api_calls"] += 1
+        # API Routes
+        @app.post("/generate", response_model=GenerationResponse)
+        async def generate_text(request: GenerationRequest):
+            """Generate text from prompt"""
+            request_id = str(uuid.uuid4())
             
-            return result
+            if self.config.request_logging:
+                logger.info(f"[{self.config.server_id}] Generation request {request_id}: {len(request.prompt)} chars, max_tokens={request.max_tokens}")
             
-        except Exception as e:
-            self.logger.warning(f"Request failed on {server.config.name}: {e}")
-            
-            # Try one more server if available
-            retry_server = self.load_balancer.select_server()
-            if retry_server and retry_server != server:
-                try:
-                    self.logger.info(f"Retrying with {retry_server.config.name}")
-                    result = await self.client.call_generate(retry_server, prompt, params)
-                    self.stats["total_api_calls"] += 1
-                    return result
-                except Exception as retry_e:
-                    self.logger.error(f"Retry failed on {retry_server.config.name}: {retry_e}")
-            
-            raise RuntimeError(f"All servers failed: {str(e)}")
-    
-    # ==================== Keep all existing methods unchanged ====================
-    
-    def get_agent(self, agent_type: str):
-        """Get agent - creates instances that use API calls instead of direct GPU access"""
-        if agent_type not in self.agents:
-            self.agents[agent_type] = self._create_agent(agent_type)
-        return self.agents[agent_type]
-    
-    def _create_agent(self, agent_type: str):
-        """Create agent using API-based engine context"""
-        self.logger.info(f"🔗 Creating {agent_type} agent (API-based)")
-        
-        # Get agent configuration
-        agent_config = self.agent_configs.get(agent_type, {})
-        
-        # Use first available server's GPU ID for compatibility
-        selected_gpu_id = self.available_gpu_ids[0] if self.available_gpu_ids else 0
-        
-        try:
-            # Import the base agent class
-            from agents.base_agent_api import BaseOpulenceAgent
-            
-            # Create agents
-            if agent_type == "code_parser" and CodeParserAgent:
-                agent = CodeParserAgent(
-                    llm_engine=None,
-                    db_path=self.db_path,
-                    gpu_id=selected_gpu_id,
-                    coordinator=self
-                )
-            elif agent_type == "vector_index" and VectorIndexAgent:
-                agent = VectorIndexAgent(
-                    llm_engine=None,
-                    db_path=self.db_path,
-                    gpu_id=selected_gpu_id,
-                    coordinator=self
-                )
-            elif agent_type == "data_loader" and DataLoaderAgent:
-                agent = DataLoaderAgent(
-                    llm_engine=None,
-                    db_path=self.db_path,
-                    gpu_id=selected_gpu_id,
-                    coordinator=self
-                )
-            elif agent_type == "lineage_analyzer" and LineageAnalyzerAgent:
-                agent = LineageAnalyzerAgent(
-                    llm_engine=None,
-                    db_path=self.db_path,
-                    gpu_id=selected_gpu_id,
-                    coordinator=self
-                )
-            elif agent_type == "logic_analyzer" and LogicAnalyzerAgent:
-                agent = LogicAnalyzerAgent(
-                    llm_engine=None,
-                    db_path=self.db_path,
-                    gpu_id=selected_gpu_id,
-                    coordinator=self
-                )
-            elif agent_type == "documentation" and DocumentationAgent:
-                agent = DocumentationAgent(
-                    llm_engine=None,
-                    db_path=self.db_path,
-                    gpu_id=selected_gpu_id,
-                    coordinator=self
-                )
-            elif agent_type == "db2_comparator" and DB2ComparatorAgent:
-                agent = DB2ComparatorAgent(
-                    llm_engine=None,
-                    db_path=self.db_path,
-                    gpu_id=selected_gpu_id,
-                    max_rows=10000,
-                    coordinator=self
-                )
-            elif agent_type == "chat_agent" and OpulenceChatAgent:
-                agent = OpulenceChatAgent(
-                    coordinator=self,
-                    llm_engine=None,
-                    db_path=self.db_path,
-                    gpu_id=selected_gpu_id
+            if request.stream:
+                return StreamingResponse(
+                    self.generation_handler.generate(request, request_id),
+                    media_type="text/plain"
                 )
             else:
-                # Fallback to base agent
-                agent = BaseOpulenceAgent(
-                    coordinator=self,
-                    agent_type=agent_type,
-                    db_path=self.db_path,
-                    gpu_id=selected_gpu_id
-                )
-            
-            # Configure agent with API parameters
-            if hasattr(agent, 'update_api_params') and agent_config:
-                conservative_params = {
-                    'max_tokens': min(agent_config.get('max_tokens', 512), 1024),
-                    'temperature': min(agent_config.get('temperature', 0.1), 0.3),
-                    'top_p': min(agent_config.get('top_p', 0.9), 0.9),
-                    'stream': False
-                }
-                agent.update_api_params(**conservative_params)
-                self.logger.info(f"Applied configuration to {agent_type}: {conservative_params}")
-            
-            # Inject API-based engine context
-            agent.get_engine_context = self._create_engine_context_for_agent(agent)
-            
-            return agent
-            
-        except Exception as e:
-            self.logger.error(f"Failed to create {agent_type} agent: {str(e)}")
-            raise RuntimeError(f"Agent creation failed for {agent_type}: {str(e)}")
-    
-    def _create_engine_context_for_agent(self, agent):
-        """Create API-based engine context for agent"""
-        @asynccontextmanager
-        async def api_engine_context():
-            # Create API-based engine context - ignore GPU ID preference
-            api_context = APIEngineContext(self, preferred_gpu_id=None)
-            try:
-                yield api_context
-            finally:
-                # No cleanup needed for API calls
-                pass
+                return await self.generation_handler.generate(request, request_id)
         
-        return api_engine_context
-    
-    def list_available_agents(self) -> Dict[str, Any]:
-        """List all available agent types and their configurations"""
-        return {
-            agent_type: {
-                "config": config,
-                "available": agent_type in [
-                    "code_parser", "vector_index", "data_loader", 
-                    "lineage_analyzer", "logic_analyzer", "documentation",
-                    "db2_comparator", "chat_agent"
-                ],
-                "loaded": agent_type in self.agents
-            }
-            for agent_type, config in self.agent_configs.items()
-        }
-    
-    def get_agent_status(self) -> Dict[str, Any]:
-        """Get status of all loaded agents"""
-        status = {}
-        for agent_type, agent in self.agents.items():
-            if hasattr(agent, 'get_agent_stats'):
-                status[agent_type] = agent.get_agent_stats()
-            else:
-                status[agent_type] = {
-                    "agent_type": agent_type,
-                    "gpu_id": getattr(agent, 'gpu_id', None),
-                    "api_based": True,
-                    "status": "loaded"
-                }
-        return status
-    
-    def update_agent_config(self, agent_type: str, **config_updates):
-        """Update configuration for a specific agent type"""
-        if agent_type not in self.agent_configs:
-            raise ValueError(f"Unknown agent type: {agent_type}")
+        @app.get("/health", response_model=HealthResponse)
+        async def health_check():
+            """Health check endpoint for load balancers"""
+            return self.health_monitor.get_health()
         
-        # Update stored configuration
-        self.agent_configs[agent_type].update(config_updates)
+        @app.get("/status", response_model=StatusResponse)
+        async def get_status():
+            """Get detailed server status"""
+            return self.health_monitor.get_status()
         
-        # Update live agent if it exists
-        if agent_type in self.agents:
-            agent = self.agents[agent_type]
-            if hasattr(agent, 'update_api_params'):
-                api_params = {k: v for k, v in config_updates.items() 
-                             if k in ['max_tokens', 'temperature', 'top_p', 'top_k', 
-                                     'frequency_penalty', 'presence_penalty']}
-                if api_params:
-                    agent.update_api_params(**api_params)
-                    self.logger.info(f"Updated live agent {agent_type} configuration: {api_params}")
-    
-    def reload_agent(self, agent_type: str):
-        """Reload a specific agent with updated configuration"""
-        if agent_type in self.agents:
-            # Cleanup old agent
-            old_agent = self.agents[agent_type]
-            if hasattr(old_agent, 'cleanup'):
-                old_agent.cleanup()
-            
-            # Remove from cache
-            del self.agents[agent_type]
-            
-            self.logger.info(f"Reloaded {agent_type} agent")
+        @app.get("/metrics", response_model=MetricsResponse)
+        async def get_metrics():
+            """Get performance metrics"""
+            return self.health_monitor.get_metrics()
         
-        # Agent will be recreated on next access
-        return self.get_agent(agent_type)
-    
-    # ==================== Existing Interface Methods (Keep Unchanged) ====================
-    
-    async def process_batch_files(self, file_paths: List[Path], file_type: str = "auto") -> Dict[str, Any]:
-        """Process files - same interface as original"""
-        start_time = time.time()
-        results = []
-        total_files = len(file_paths)
-        
-        self.logger.info(f"🚀 Processing {total_files} files using API-based agents")
-        
-        for i, file_path in enumerate(file_paths):
-            try:
-                self.logger.info(f"📄 Processing file {i+1}/{total_files}: {file_path.name}")
-                
-                # Get appropriate agent (same logic as original)
-                if file_type == "cobol" or file_path.suffix.lower() in ['.cbl', '.cob']:
-                    agent = self.get_agent("code_parser")
-                elif file_type == "csv" or file_path.suffix.lower() == '.csv':
-                    agent = self.get_agent("data_loader")
-                else:
-                    agent = self.get_agent("code_parser")
-                
-                # Process with API-based agent
-                result = await agent.process_file(file_path)
-                await self._ensure_file_stored_in_db(file_path, result, file_type)
-                
-                results.append(result)
-                
-            except Exception as e:
-                self.logger.error(f"❌ Failed to process {file_path}: {str(e)}")
-                results.append({
-                    "status": "error",
-                    "file": str(file_path),
-                    "error": str(e)
-                })
-        
-        # Update statistics
-        processing_time = time.time() - start_time
-        self.stats["total_files_processed"] += total_files
-        
-        return {
-            "status": "success",
-            "files_processed": total_files,
-            "processing_time": processing_time,
-            "results": results,
-            "servers_used": [s.config.name for s in self.load_balancer.servers]
-        }
-    
-    async def analyze_component(self, component_name: str, component_type: str = None) -> Dict[str, Any]:
-        """Analyze component - same interface as original"""
-        start_time = time.time()
-        
-        try:
-            if not component_type or component_type == "auto-detect":
-                component_type = await self._determine_component_type(component_name)
-            
-            analysis_result = {
-                "component_name": component_name,
-                "component_type": component_type,
-                "analysis_timestamp": dt.now().isoformat(),
-                "status": "in_progress",
-                "analyses": {},
-                "processing_metadata": {
-                    "start_time": start_time,
-                    "coordinator_type": "api_based"
-                }
-            }
-            
-            completed_count = 0
-            
-            # Lineage Analysis
-            try:
-                self.logger.info(f"🔄 Running lineage analysis for {component_name}")
-                lineage_agent = self.get_agent("lineage_analyzer")
-                
-                if component_type == "field":
-                    lineage_result = await lineage_agent.analyze_field_lineage(component_name)
-                else:
-                    lineage_result = await lineage_agent.analyze_full_lifecycle(component_name, component_type)
-                
-                analysis_result["analyses"]["lineage_analysis"] = {
-                    "status": "success",
-                    "data": lineage_result,
-                    "agent_used": "lineage_analyzer",
-                    "completion_time": time.time() - start_time
-                }
-                completed_count += 1
-                
-            except Exception as e:
-                self.logger.error(f"❌ Lineage analysis failed: {str(e)}")
-                analysis_result["analyses"]["lineage_analysis"] = {
-                    "status": "error",
-                    "error": str(e),
-                    "agent_used": "lineage_analyzer"
-                }
-            
-            # Logic Analysis
-            if component_type in ["program", "cobol", "copybook"]:
+        @app.post("/reload")
+        async def reload_model(background_tasks: BackgroundTasks):
+            """Reload the model (admin endpoint)"""
+            async def reload_task():
                 try:
-                    self.logger.info(f"🔄 Running logic analysis for {component_name}")
-                    logic_agent = self.get_agent("logic_analyzer")
-                    
-                    if component_type in ["program", "cobol"]:
-                        logic_result = await logic_agent.analyze_program(component_name)
-                    else:
-                        logic_result = await logic_agent.find_dependencies(component_name)
-                    
-                    analysis_result["analyses"]["logic_analysis"] = {
-                        "status": "success",
-                        "data": logic_result,
-                        "agent_used": "logic_analyzer",
-                        "completion_time": time.time() - start_time
-                    }
-                    completed_count += 1
-                    
+                    logger.info(f"[{self.config.server_id}] Reloading model...")
+                    await self.model_loader.cleanup()
+                    await self.model_loader.initialize()
+                    logger.info(f"[{self.config.server_id}] Model reloaded successfully")
                 except Exception as e:
-                    self.logger.error(f"❌ Logic analysis failed: {str(e)}")
-                    analysis_result["analyses"]["logic_analysis"] = {
-                        "status": "error",
-                        "error": str(e),
-                        "agent_used": "logic_analyzer"
-                    }
+                    logger.error(f"[{self.config.server_id}] Failed to reload model: {str(e)}")
             
-            # Semantic Analysis
+            background_tasks.add_task(reload_task)
+            return {"message": "Model reload initiated", "server_id": self.config.server_id}
+        
+        @app.get("/")
+        async def root():
+            """Root endpoint"""
+            return {
+                "message": "Model Server API",
+                "version": "1.0.0",
+                "model": self.config.model_name,
+                "server_id": self.config.server_id,
+                "gpu_ids": self.config.gpu_ids,
+                "port": self.config.port,
+                "status": "healthy" if self.model_loader.model_loaded else "loading"
+            }
+        
+        self.app = app
+        return app
+
+# ==================== Server Launcher ====================
+
+class ServerLauncher:
+    """Launches and manages a single model server instance"""
+    
+    def __init__(self, config: ModelServerConfig):
+        self.config = config
+        self.server = ModelServer(config)
+        
+    def run(self):
+        """Run the server"""
+        # Set up logging
+        logging.getLogger().setLevel(getattr(logging, self.config.log_level.upper()))
+        
+        # Create app
+        app = self.server.create_app()
+        
+        # Configure uvicorn
+        uvicorn_config = uvicorn.Config(
+            app,
+            host=self.config.host,
+            port=self.config.port,
+            workers=self.config.workers,
+            timeout_keep_alive=self.config.timeout,
+            access_log=self.config.request_logging,
+            log_level=self.config.log_level.lower()
+        )
+        
+        # Run server
+        server = uvicorn.Server(uvicorn_config)
+        logger.info(f"[{self.config.server_id}] Starting server on {self.config.host}:{self.config.port} with GPUs {self.config.gpu_ids}")
+        server.run()
+
+def run_server_instance(server_id: str, port: int, gpu_ids: List[int]):
+    """Function to run a single server instance in a separate process"""
+    try:
+        # Create configuration for this server instance
+        config = ModelServerConfig.from_env(server_id=server_id, port=port, gpu_ids=gpu_ids)
+        
+        # Create and run server
+        launcher = ServerLauncher(config)
+        launcher.run()
+        
+    except KeyboardInterrupt:
+        logger.info(f"[{server_id}] Server interrupted by user")
+    except Exception as e:
+        logger.error(f"[{server_id}] Server failed to start: {str(e)}")
+        sys.exit(1)
+
+# ==================== Multi-Server Manager ====================
+
+class MultiServerManager:
+    """Manages multiple server instances across different GPUs and ports"""
+    
+    def __init__(self):
+        self.processes = []
+        self.server_configs = []
+        
+    def setup_servers(self, num_servers: int = 2, base_port: int = 8100):
+        """Setup configuration for multiple servers with intelligent GPU allocation"""
+        
+        # Get configuration parameters
+        memory_threshold = float(os.getenv("GPU_MEMORY_THRESHOLD_PERCENT", "20.0"))
+        min_free_memory = float(os.getenv("GPU_MIN_FREE_MEMORY_GB", "4.0"))
+        
+        logger.info("=== GPU Memory Analysis ===")
+        
+        # Get detailed GPU information first
+        all_gpu_info = GPUManager.get_available_gpus(memory_threshold, min_free_memory)
+        
+        if not all_gpu_info:
+            raise RuntimeError("No GPUs detected or accessible")
+        
+        # Show current GPU status
+        logger.info("Current GPU Status:")
+        for gpu_info in all_gpu_info:
+            status_icon = "✅" if gpu_info["is_available"] else "❌"
+            logger.info(f"  {status_icon} GPU {gpu_info['gpu_id']}: {gpu_info['name']}")
+            logger.info(f"     Memory: {gpu_info['memory_free_gb']:.1f}GB free / {gpu_info['total_memory_gb']:.1f}GB total ({gpu_info['usage_percent']:.1f}% used)")
+            logger.info(f"     Status: {gpu_info['availability_reason']}")
+        
+        # Get GPU allocations
+        try:
+            gpu_allocations = GPUManager.allocate_gpus_for_servers(
+                num_servers=num_servers,
+                memory_threshold_percent=memory_threshold,
+                min_free_memory_gb=min_free_memory
+            )
+        except RuntimeError as e:
+            logger.error(f"GPU allocation failed: {str(e)}")
+            
+            # Emergency fallback - try with relaxed constraints
+            logger.warning("Attempting fallback with relaxed memory constraints...")
             try:
-                self.logger.info(f"🔄 Running semantic analysis for {component_name}")
-                vector_agent = self.get_agent("vector_index")
-                
-                similarity_result = await vector_agent.search_similar_components(component_name, top_k=10)
-                semantic_result = await vector_agent.semantic_search(f"{component_name} similar functionality", top_k=5)
-                
-                analysis_result["analyses"]["semantic_analysis"] = {
-                    "status": "success",
-                    "data": {
-                        "similar_components": similarity_result,
-                        "semantic_search": semantic_result
-                    },
-                    "agent_used": "vector_index",
-                    "completion_time": time.time() - start_time
-                }
-                completed_count += 1
-                
-            except Exception as e:
-                self.logger.error(f"❌ Semantic analysis failed: {str(e)}")
-                analysis_result["analyses"]["semantic_analysis"] = {
-                    "status": "error",
-                    "error": str(e),
-                    "agent_used": "vector_index"
-                }
+                gpu_allocations = GPUManager.allocate_gpus_for_servers(
+                    num_servers=num_servers,
+                    memory_threshold_percent=50.0,  # More relaxed
+                    min_free_memory_gb=2.0         # Lower memory requirement
+                )
+                logger.warning("Using relaxed constraints - monitor for OOM errors!")
+            except Exception as fallback_error:
+                raise RuntimeError(f"GPU allocation failed even with fallback: {str(fallback_error)}")
+        
+        logger.info("=== Server Configuration ===")
+        
+        # Create server configurations
+        for i, gpu_ids in enumerate(gpu_allocations):
+            server_id = f"server_{i}"
+            port = base_port + i
             
-            # Determine final status
-            total_analyses = len(analysis_result["analyses"])
-            if completed_count == total_analyses:
-                analysis_result["status"] = "completed"
-            elif completed_count > 0:
-                analysis_result["status"] = "partial"
-            else:
-                analysis_result["status"] = "failed"
+            # Estimate memory usage for this server
+            estimated_memory_gb = len(gpu_ids) * 2.0  # Rough estimate: 2GB per GPU
             
-            # Add final metadata
-            analysis_result["processing_metadata"].update({
-                "end_time": time.time(),
-                "total_duration_seconds": time.time() - start_time,
-                "analyses_completed": completed_count,
-                "analyses_total": total_analyses,
-                "success_rate": (completed_count / total_analyses) * 100 if total_analyses > 0 else 0
+            self.server_configs.append({
+                'server_id': server_id,
+                'port': port,
+                'gpu_ids': gpu_ids,
+                'estimated_memory_gb': estimated_memory_gb
             })
             
-            return analysis_result
-            
-        except Exception as e:
-            self.logger.error(f"❌ Component analysis failed: {str(e)}")
-            return {
-                "component_name": component_name,
-                "status": "system_error",
-                "error": str(e),
-                "processing_time": time.time() - start_time,
-                "coordinator_type": "api_based"
-            }
-    
-    async def process_chat_query(self, query: str, conversation_history: List[Dict] = None) -> Dict[str, Any]:
-        """Process chat query - same interface as original"""
-        try:
-            chat_agent = self.get_agent("chat_agent")
-            result = await chat_agent.process_chat_query(query, conversation_history)
-            
-            self.stats["total_queries"] += 1
-            return result
-            
-        except Exception as e:
-            self.logger.error(f"❌ Chat query failed: {str(e)}")
-            return {
-                "response": f"I encountered an error: {str(e)}",
-                "response_type": "error",
-                "suggestions": ["Try rephrasing your question", "Check system status"],
-                "coordinator_type": "api_based"
-            }
-    
-    async def search_code_patterns(self, query: str, limit: int = 10) -> Dict[str, Any]:
-        """Search code patterns - same interface as original"""
-        try:
-            vector_agent = self.get_agent("vector_index")
-            results = await vector_agent.semantic_search(query, top_k=limit)
-            
-            return {
-                "status": "success",
-                "query": query,
-                "results": results,
-                "total_found": len(results),
-                "coordinator_type": "api_based"
-            }
-            
-        except Exception as e:
-            self.logger.error(f"❌ Pattern search failed: {str(e)}")
-            return {
-                "status": "error",
-                "error": str(e),
-                "query": query,
-                "coordinator_type": "api_based"
-            }
-    
-    # ==================== Helper Methods (Same as Original) ====================
-    
-    async def _ensure_file_stored_in_db(self, file_path: Path, result: Dict, file_type: str):
-        """Store file processing result in database"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute("BEGIN TRANSACTION")
-            
-            try:
-                cursor.execute("""
-                    INSERT OR REPLACE INTO file_metadata 
-                    (file_name, file_type, processing_status, last_modified)
-                    VALUES (?, ?, ?, ?)
-                """, (
-                    file_path.name,
-                    file_type,
-                    result.get("status", "processed"),
-                    dt.now().isoformat()
-                ))
-                
-                cursor.execute("COMMIT")
-                self.logger.debug(f"✅ Stored {file_path.name} in database")
-                
-            except Exception as e:
-                cursor.execute("ROLLBACK")
-                raise e
-                
-            finally:
-                conn.close()
-                
-        except Exception as e:
-            self.logger.error(f"❌ Failed to store {file_path} in database: {str(e)}")
-    
-    async def _determine_component_type(self, component_name: str) -> str:
-        """Determine component type from database"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute("""
-                SELECT chunk_type, COUNT(*) as count 
-                FROM program_chunks 
-                WHERE program_name = ?
-                GROUP BY chunk_type
-                ORDER BY count DESC
-            """, (component_name,))
-            
-            chunk_types = cursor.fetchall()
-            
-            if chunk_types:
-                if any('job' in ct.lower() for ct, _ in chunk_types):
-                    return "jcl"
-                elif any(ct in ['working_storage', 'procedure_division', 'data_division'] for ct, _ in chunk_types):
-                    return "program"
+            # Log detailed server config
+            gpu_details = []
+            for gpu_id in gpu_ids:
+                gpu_info = next((g for g in all_gpu_info if g["gpu_id"] == gpu_id), None)
+                if gpu_info:
+                    gpu_details.append(f"GPU{gpu_id}({gpu_info['memory_free_gb']:.1f}GB)")
                 else:
-                    return "program"
+                    gpu_details.append(f"GPU{gpu_id}")
             
-            # Check if it's a field
-            cursor.execute("""
-                SELECT COUNT(*) FROM program_chunks
-                WHERE content LIKE ? OR metadata LIKE ?
-                LIMIT 1
-            """, (f"%{component_name}%", f"%{component_name}%"))
-            
-            if cursor.fetchone()[0] > 0:
-                if component_name.isupper() and ('_' in component_name or len(component_name) <= 20):
-                    return "field"
-            
-            return "program"  # Default
-            
-        except Exception as e:
-            self.logger.error(f"❌ Component type determination failed: {e}")
-            return "program"
-        finally:
-            conn.close()
-    
-    def get_health_status(self) -> Dict[str, Any]:
-        """Get coordinator health status"""
-        available_servers = len(self.load_balancer.get_available_servers())
-        total_servers = len(self.load_balancer.servers)
+            logger.info(f"✅ {server_id}: Port {port}, GPUs {gpu_ids}")
+            logger.info(f"   Memory: {', '.join(gpu_details)}, Est. usage: {estimated_memory_gb:.1f}GB")
         
-        server_stats = {}
-        for server in self.load_balancer.servers:
-            try:
-                status_value = server.status.value if hasattr(server.status, 'value') else str(server.status)
+        # Final validation
+        logger.info("=== Deployment Validation ===")
+        total_estimated_memory = sum(config['estimated_memory_gb'] for config in self.server_configs)
+        logger.info(f"Total estimated memory usage: {total_estimated_memory:.1f}GB")
+        
+        # Check for potential issues
+        warnings = []
+        for config in self.server_configs:
+            for gpu_id in config['gpu_ids']:
+                gpu_info = next((g for g in all_gpu_info if g["gpu_id"] == gpu_id), None)
+                if gpu_info and gpu_info['memory_free_gb'] < config['estimated_memory_gb']:
+                    warnings.append(f"⚠️  {config['server_id']} may exceed available memory on GPU {gpu_id}")
+        
+        if warnings:
+            logger.warning("Potential memory issues detected:")
+            for warning in warnings:
+                logger.warning(f"  {warning}")
+            logger.warning("Consider reducing model size or batch size if OOM occurs")
+        else:
+            logger.info("✅ All servers should have sufficient memory")
+        
+        logger.info("=== Ready to Deploy ===")
+        
+        return True
+    
+    def start_servers(self):
+        """Start all server instances in separate processes"""
+        logger.info(f"Starting {len(self.server_configs)} server instances...")
+        
+        for config in self.server_configs:
+            # Create process for each server
+            process = multiprocessing.Process(
+                target=run_server_instance,
+                args=(config['server_id'], config['port'], config['gpu_ids']),
+                name=f"ModelServer-{config['server_id']}"
+            )
+            
+            process.start()
+            self.processes.append(process)
+            logger.info(f"Started {config['server_id']} on port {config['port']} with GPUs {config['gpu_ids']} (PID: {process.pid})")
+    
+    def wait_for_servers(self):
+        """Wait for all server processes to complete"""
+        try:
+            for process in self.processes:
+                process.join()
+        except KeyboardInterrupt:
+            logger.info("Received interrupt signal, shutting down servers...")
+            self.stop_servers()
+    
+    def stop_servers(self):
+        """Stop all server processes"""
+        logger.info("Stopping all server instances...")
+        
+        for process in self.processes:
+            if process.is_alive():
+                logger.info(f"Terminating process {process.name} (PID: {process.pid})")
+                process.terminate()
+                process.join(timeout=10)
                 
-                server_stats[server.config.name] = {
-                    "endpoint": server.config.endpoint,
-                    "status": status_value,
-                    "active_requests": getattr(server, 'active_requests', 0),
-                    "total_requests": getattr(server, 'total_requests', 0),
-                    "success_rate": (
-                        (server.successful_requests / server.total_requests * 100) 
-                        if getattr(server, 'total_requests', 0) > 0 else 0
-                    ),
-                    "average_latency": getattr(server, 'average_latency', 0),
-                    "available": server.is_available() if hasattr(server, 'is_available') else False
-                }
-            except Exception as e:
-                server_stats[server.config.name] = {
-                    "status": "error",
-                    "error": str(e),
-                    "available": False
-                }
+                if process.is_alive():
+                    logger.warning(f"Force killing process {process.name} (PID: {process.pid})")
+                    process.kill()
+                    process.join()
         
-        try:
-            agent_status = self.get_agent_status()
-            available_agent_types = self.list_available_agents()
-        except Exception as e:
-            agent_status = {"error": str(e)}
-            available_agent_types = {}
+        logger.info("All servers stopped")
+    
+    def get_server_status(self):
+        """Get status of all server processes"""
+        status = {}
+        for i, process in enumerate(self.processes):
+            config = self.server_configs[i]
+            status[config['server_id']] = {
+                'pid': process.pid,
+                'alive': process.is_alive(),
+                'port': config['port'],
+                'gpu_ids': config['gpu_ids']
+            }
+        return status
+
+# ==================== Load Balancer (Optional) ====================
+
+class SimpleLoadBalancer:
+    """Simple round-robin load balancer for multiple servers"""
+    
+    def __init__(self, server_ports: List[int], host: str = "localhost"):
+        self.server_ports = server_ports
+        self.host = host
+        self.current_server = 0
         
-        return {
-            "status": "healthy" if available_servers > 0 else "unhealthy",
-            "coordinator_type": "api_based",
-            "selected_gpus": getattr(self, 'selected_gpus', []),
-            "available_servers": available_servers,
-            "total_servers": total_servers,
-            "server_stats": server_stats,
-            "active_agents": len(getattr(self, 'agents', {})),
-            "agent_status": agent_status,
-            "available_agent_types": available_agent_types,
-            "stats": getattr(self, 'stats', {}),
-            "uptime_seconds": time.time() - self.stats.get("start_time", time.time()),
-            "database_available": os.path.exists(self.db_path),
-            "load_balancing_strategy": self.config.load_balancing_strategy.value
-        }
+    def get_next_server_url(self) -> str:
+        """Get the next server URL using round-robin"""
+        port = self.server_ports[self.current_server]
+        self.current_server = (self.current_server + 1) % len(self.server_ports)
+        return f"http://{self.host}:{port}"
     
-    async def get_statistics(self) -> Dict[str, Any]:
-        """Get comprehensive system statistics"""
-        try:
-            # Get database stats
-            database_stats = await self._get_database_stats()
-            
-            # Get server stats
-            server_stats = []
-            for server in self.load_balancer.servers:
-                server_stats.append({
-                    "name": server.config.name,
-                    "gpu_id": server.config.gpu_id,
-                    "endpoint": server.config.endpoint,
-                    "status": server.status.value,
-                    "active_requests": server.active_requests,
-                    "total_requests": server.total_requests,
-                    "successful_requests": server.successful_requests,
-                    "failed_requests": server.failed_requests,
-                    "success_rate": (server.successful_requests / server.total_requests * 100) if server.total_requests > 0 else 0,
-                    "average_latency": server.average_latency,
-                    "consecutive_failures": server.consecutive_failures,
-                    "available": server.is_available()
-                })
-            
-            return {
-                "system_stats": self.stats,
-                "server_stats": server_stats,
-                "database_stats": database_stats,
-                "timestamp": dt.now().isoformat(),
-                "coordinator_type": "api_based"
-            }
-            
-        except Exception as e:
-            self.logger.error(f"❌ Failed to get statistics: {str(e)}")
-            return {
-                "system_stats": self.stats,
-                "error": str(e),
-                "coordinator_type": "api_based"
-            }
-    
-    async def _get_database_stats(self) -> Dict[str, Any]:
-        """Get database statistics"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            stats = {}
-            tables = ['program_chunks', 'file_metadata', 'field_lineage', 'vector_embeddings']
-            
-            for table in tables:
+    async def health_check_servers(self) -> Dict[int, bool]:
+        """Check health of all servers"""
+        import aiohttp
+        
+        health_status = {}
+        
+        async with aiohttp.ClientSession() as session:
+            for port in self.server_ports:
                 try:
-                    cursor.execute(f"SELECT COUNT(*) FROM {table}")
-                    stats[f"{table}_count"] = cursor.fetchone()[0]
-                except sqlite3.OperationalError:
-                    stats[f"{table}_count"] = 0
-            
-            if os.path.exists(self.db_path):
-                stats["database_size_bytes"] = os.path.getsize(self.db_path)
-            else:
-                stats["database_size_bytes"] = 0
-            
-            conn.close()
-            return stats
-            
-        except Exception as e:
-            self.logger.error(f"❌ Database stats failed: {str(e)}")
-            return {"error": str(e)}
-    
-    # ==================== Backwards Compatibility Methods ====================
-    
-    def cleanup(self):
-        """Cleanup method for backwards compatibility"""
-        self.logger.info("🧹 Cleaning up API coordinator resources...")
+                    async with session.get(f"http://{self.host}:{port}/health", timeout=5) as response:
+                        health_status[port] = response.status == 200
+                except Exception:
+                    health_status[port] = False
         
-        # Clean up agents
-        for agent_type, agent in self.agents.items():
+        return health_status
+
+# ==================== Main Entry Point ====================
+
+def main():
+    """Main entry point with intelligent GPU allocation and auto-detection"""
+    try:
+        # Get configuration
+        num_servers_env = os.getenv("NUM_SERVERS", "auto")
+        base_port = int(os.getenv("BASE_PORT", "8100"))
+        
+        # Display startup banner
+        logger.info("🚀 Starting Opulence Multi-GPU Model Server")
+        logger.info("=" * 50)
+        
+        # Auto-detect optimal number of servers if not specified
+        if num_servers_env.lower() == "auto" or num_servers_env == "0":
+            logger.info("🔍 Auto-detecting optimal server configuration...")
+            
+            # Get available GPUs with current settings
+            available_gpus = GPUManager.get_best_available_gpus(
+                num_gpus_needed=10,  # Get all available
+                memory_threshold_percent=float(os.getenv("GPU_MEMORY_THRESHOLD_PERCENT", "20.0")),
+                min_free_memory_gb=float(os.getenv("GPU_MIN_FREE_MEMORY_GB", "4.0"))
+            )
+            
+            if len(available_gpus) == 0:
+                logger.warning("🔍 No GPUs meet ideal criteria, checking with relaxed constraints...")
+                available_gpus = GPUManager.get_best_available_gpus(
+                    num_gpus_needed=10, 
+                    memory_threshold_percent=50.0, 
+                    min_free_memory_gb=2.0
+                )
+            
+            # Determine optimal server count
+            if len(available_gpus) == 0:
+                logger.error("❌ No GPUs available at all")
+                raise RuntimeError("No GPUs available")
+            elif len(available_gpus) == 1:
+                num_servers = 1
+                logger.info("🎯 Auto-detected: 1 server (single GPU available)")
+            elif len(available_gpus) == 2:
+                num_servers = 2
+                logger.info("🎯 Auto-detected: 2 servers (optimal for 2 GPUs)")
+            elif len(available_gpus) == 3:
+                num_servers = 2  # Use 2 servers, one gets 2 GPUs
+                logger.info("🎯 Auto-detected: 2 servers (3 GPUs available - uneven split)")
+            elif len(available_gpus) >= 4:
+                num_servers = min(4, len(available_gpus) // 2)  # Max 4 servers, 2+ GPUs each
+                logger.info(f"🎯 Auto-detected: {num_servers} servers ({len(available_gpus)} GPUs available)")
+            
+            logger.info(f"💡 To override auto-detection, set NUM_SERVERS={num_servers}")
+            
+        else:
+            # Manual override
+            num_servers = int(num_servers_env)
+            logger.info(f"📍 Manual override: {num_servers} servers requested")
+        
+        if num_servers == 1:
+            # Single server mode
+            logger.info("📍 Single Server Mode")
+            
+            # Get best available GPU
+            best_gpus = GPUManager.get_best_available_gpus(
+                num_gpus_needed=1,
+                memory_threshold_percent=float(os.getenv("GPU_MEMORY_THRESHOLD_PERCENT", "20.0")),
+                min_free_memory_gb=float(os.getenv("GPU_MIN_FREE_MEMORY_GB", "4.0"))
+            )
+            
+            if not best_gpus:
+                raise RuntimeError("No suitable GPUs found")
+            
+            logger.info(f"🎯 Selected GPU {best_gpus[0]} for single server")
+            
+            config = ModelServerConfig.from_env(
+                server_id="server_0", 
+                port=base_port, 
+                gpu_ids=best_gpus[:1]
+            )
+            launcher = ServerLauncher(config)
+            launcher.run()
+            
+        else:
+            # Multi-server mode
+            logger.info(f"🌐 Multi-Server Mode ({num_servers} servers)")
+            
+            # Set multiprocessing start method
+            multiprocessing.set_start_method('spawn', force=True)
+            
+            # Create and setup multi-server manager
+            manager = MultiServerManager()
+            
             try:
-                if hasattr(agent, 'cleanup'):
-                    agent.cleanup()
-                    self.logger.info(f"✅ Cleaned up {agent_type} agent")
+                success = manager.setup_servers(num_servers=num_servers, base_port=base_port)
+                if not success:
+                    raise RuntimeError("Failed to setup servers")
+                
             except Exception as e:
-                self.logger.error(f"❌ Failed to cleanup {agent_type}: {e}")
+                logger.error(f"❌ Server setup failed: {str(e)}")
+                
+                # Try emergency single server mode
+                logger.warning("🔄 Attempting emergency single server fallback...")
+                try:
+                    best_gpus = GPUManager.get_best_available_gpus(1, 50.0, 1.0)  # Very relaxed
+                    if best_gpus:
+                        logger.info(f"🆘 Emergency mode: Using GPU {best_gpus[0]}")
+                        config = ModelServerConfig.from_env(
+                            server_id="emergency_server", 
+                            port=base_port, 
+                            gpu_ids=best_gpus[:1]
+                        )
+                        launcher = ServerLauncher(config)
+                        launcher.run()
+                        return
+                except Exception:
+                    pass
+                
+                raise e
+            
+            # Display final server configuration
+            logger.info("📋 Final Server Configuration:")
+            for config in manager.server_configs:
+                logger.info(f"  🖥️  {config['server_id']}: Port {config['port']}, GPUs {config['gpu_ids']}")
+            
+            # Start all servers
+            logger.info("🚀 Launching all servers...")
+            manager.start_servers()
+            
+            # Display access URLs
+            logger.info("🌐 Server Access URLs:")
+            for config in manager.server_configs:
+                logger.info(f"  📡 {config['server_id']}: http://localhost:{config['port']}")
+            
+            logger.info("✅ All servers started successfully!")
+            logger.info("📝 Usage examples:")
+            logger.info("  curl -X POST http://localhost:8100/generate -d '{\"prompt\":\"Hello\"}' -H 'Content-Type: application/json'")
+            logger.info("Press Ctrl+C to stop all servers")
+            
+            # Wait for servers or handle shutdown
+            try:
+                manager.wait_for_servers()
+            except KeyboardInterrupt:
+                logger.info("🛑 Shutdown signal received")
+            finally:
+                logger.info("🧹 Cleaning up...")
+                manager.stop_servers()
+                logger.info("✅ Shutdown complete")
         
-        # Clear agent cache
-        self.agents.clear()
-        
-        self.logger.info("✅ API Coordinator cleanup completed")
-    
-    def __enter__(self):
-        """Context manager entry"""
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit"""
-        self.cleanup()
-    
-    def __repr__(self):
-        return (f"APIOpulenceCoordinator("
-                f"servers={len(self.load_balancer.servers)}, "
-                f"agents={len(self.agents)}, "
-                f"strategy={self.config.load_balancing_strategy.value})")
-
-# ==================== Keep ALL Factory Functions Unchanged ====================
-
-def create_api_coordinator_from_endpoints(gpu_endpoints: Dict[int, str]) -> APIOpulenceCoordinator:
-    """Create API coordinator from GPU endpoints mapping"""
-    config = APIOpulenceConfig.from_gpu_endpoints(gpu_endpoints)
-    return APIOpulenceCoordinator(config)
-
-def create_api_coordinator_from_config(
-    model_servers: List[Dict[str, Any]],
-    load_balancing_strategy: str = "least_busy",
-    **kwargs
-) -> APIOpulenceCoordinator:
-    """Create API coordinator from configuration"""
-    server_configs = []
-    for server_config in model_servers:
-        server_configs.append(ModelServerConfig(
-            endpoint=server_config["endpoint"],
-            gpu_id=server_config["gpu_id"],
-            name=server_config.get("name", f"gpu_{server_config['gpu_id']}"),
-            max_concurrent_requests=server_config.get("max_concurrent_requests", 10),
-            timeout=server_config.get("timeout", 300)
-        ))
-    
-    config = APIOpulenceConfig(
-        model_servers=server_configs,
-        load_balancing_strategy=LoadBalancingStrategy(load_balancing_strategy),
-        **kwargs
-    )
-    
-    return APIOpulenceCoordinator(config)
-
-def create_dual_gpu_coordinator_api(
-    model_servers: List[Dict[str, Any]] = None,
-    load_balancing_strategy: str = "least_busy"
-) -> APIOpulenceCoordinator:
-    """Drop-in replacement for create_dual_gpu_coordinator using API"""
-    if model_servers is None:
-        # Default to localhost model servers
-        model_servers = [
-            {"endpoint": "http://localhost:8100", "gpu_id": 2, "name": "gpu_2"},
-            {"endpoint": "http://localhost:8101", "gpu_id": 3, "name": "gpu_3"}
-        ]
-    
-    return create_api_coordinator_from_config(model_servers, load_balancing_strategy)
-
-def get_global_api_coordinator() -> APIOpulenceCoordinator:
-    """Get or create global API coordinator instance"""
-    global _global_api_coordinator
-    if _global_api_coordinator is None:
-        _global_api_coordinator = create_dual_gpu_coordinator_api()
-    return _global_api_coordinator
-
-# Global coordinator instance
-_global_api_coordinator: Optional[APIOpulenceCoordinator] = None
-
-# ==================== Keep ALL Utility Functions Unchanged ====================
-
-async def quick_file_processing_api(file_paths: List[Path], file_type: str = "auto") -> Dict[str, Any]:
-    """Quick file processing using API coordinator"""
-    coordinator = get_global_api_coordinator()
-    await coordinator.initialize()
-    try:
-        return await coordinator.process_batch_files(file_paths, file_type)
-    finally:
-        await coordinator.shutdown()
-
-async def quick_component_analysis_api(component_name: str, component_type: str = None) -> Dict[str, Any]:
-    """Quick component analysis using API coordinator"""
-    coordinator = get_global_api_coordinator()
-    await coordinator.initialize()
-    try:
-        return await coordinator.analyze_component(component_name, component_type)
-    finally:
-        await coordinator.shutdown()
-
-async def quick_chat_query_api(query: str, conversation_history: List[Dict] = None) -> Dict[str, Any]:
-    """Quick chat query using API coordinator"""
-    coordinator = get_global_api_coordinator()
-    await coordinator.initialize()
-    try:
-        return await coordinator.process_chat_query(query, conversation_history)
-    finally:
-        await coordinator.shutdown()
-
-def get_system_status_api() -> Dict[str, Any]:
-    """Get system status using API coordinator"""
-    coordinator = get_global_api_coordinator()
-    return coordinator.get_health_status()
-
-# ==================== Example Usage ====================
-
-async def example_usage():
-    """Example of how to use the API coordinator"""
-    
-    # Define your model server endpoints
-    model_servers = [
-        {"endpoint": "http://localhost:8100", "gpu_id": 2, "name": "gpu_2"},
-        {"endpoint": "http://localhost:8101", "gpu_id": 3, "name": "gpu_3"}
-    ]
-    
-    # Create coordinator
-    coordinator = create_api_coordinator_from_config(
-        model_servers=model_servers,
-        load_balancing_strategy="least_busy"
-    )
-    
-    # Initialize
-    await coordinator.initialize()
-    
-    try:
-        # Process files (same interface as before)
-        file_paths = [Path("example.cbl"), Path("example.jcl")]
-        result = await coordinator.process_batch_files(file_paths)
-        print(f"Processed {result['files_processed']} files")
-        
-        # Analyze component (same interface as before)
-        analysis = await coordinator.analyze_component("CUSTOMER-RECORD", "field")
-        print(f"Analysis status: {analysis['status']}")
-        
-        # Chat query (same interface as before)
-        chat_result = await coordinator.process_chat_query("What is the purpose of CUSTOMER-RECORD?")
-        print(f"Chat response: {chat_result['response']}")
-        
-        # Get health status
-        health = coordinator.get_health_status()
-        print(f"System health: {health['status']}")
-        
-    finally:
-        await coordinator.shutdown()
+    except KeyboardInterrupt:
+        logger.info("🛑 Server interrupted by user")
+    except Exception as e:
+        logger.error(f"❌ Server failed to start: {str(e)}")
+        logger.error("💡 Try adjusting GPU_MEMORY_THRESHOLD_PERCENT or GPU_MIN_FREE_MEMORY_GB environment variables")
+        logger.error("💡 Or set NUM_SERVERS=1 to force single server mode")
+        sys.exit(1)
 
 if __name__ == "__main__":
-    asyncio.run(example_usage())
+    main()
