@@ -77,6 +77,13 @@ class BaseOpulenceAgent:
         start_time = time.time()
         
         try:
+            # Check if coordinator is available and not shutting down
+            if not self.coordinator:
+                raise RuntimeError("No coordinator available")
+                
+            if getattr(self.coordinator, '_shutting_down', False):
+                raise RuntimeError("Coordinator is shutting down")
+            
             # Merge agent-specific params with call-specific params
             final_params = self.api_params.copy()
             if params:
@@ -100,11 +107,19 @@ class BaseOpulenceAgent:
                         cleaned_params[key] = value
             
             # Make API call through coordinator - GPU ID is ignored in coordinator
-            result = await self.coordinator.call_model_api(
-                prompt=prompt,
-                params=cleaned_params,
-                preferred_gpu_id=self.gpu_id  # This will be ignored by coordinator
-            )
+            try:
+                result = await self.coordinator.call_model_api(
+                    prompt=prompt,
+                    params=cleaned_params,
+                    preferred_gpu_id=self.gpu_id  # This will be ignored by coordinator
+                )
+            except RuntimeError as e:
+                if "event loop" in str(e).lower() or "closed" in str(e).lower():
+                    # Event loop is closed, return a fallback response
+                    self.logger.warning(f"Event loop closed during API call, returning fallback response")
+                    return f"API call failed due to event loop closure: {str(e)}"
+                else:
+                    raise
             
             # Extract response text from various response formats
             if isinstance(result, dict):
@@ -130,16 +145,20 @@ class BaseOpulenceAgent:
             return response_text
             
         except Exception as e:
-            self.logger.error(f"API call failed for {self.agent_type}: {str(e)}")
             # More specific error handling
-            if "422" in str(e):
-                raise RuntimeError(f"API validation error - check parameters: {str(e)}")
-            elif "503" in str(e):
-                raise RuntimeError(f"Model server unavailable: {str(e)}")
-            elif "timeout" in str(e).lower():
-                raise RuntimeError(f"API call timeout: {str(e)}")
+            error_msg = str(e)
+            if "event loop" in error_msg.lower() or "closed" in error_msg.lower():
+                self.logger.error(f"Event loop error in {self.agent_type}: {error_msg}")
+                return f"Event loop error: {error_msg}"
+            elif "422" in error_msg:
+                raise RuntimeError(f"API validation error - check parameters: {error_msg}")
+            elif "503" in error_msg:
+                raise RuntimeError(f"Model server unavailable: {error_msg}")
+            elif "timeout" in error_msg.lower():
+                raise RuntimeError(f"API call timeout: {error_msg}")
             else:
-                raise RuntimeError(f"API call failed: {str(e)}")
+                self.logger.error(f"API call failed for {self.agent_type}: {error_msg}")
+                raise RuntimeError(f"API call failed: {error_msg}")
     
     async def get_engine(self):
         """DEPRECATED: For backwards compatibility - use get_engine_context() instead"""

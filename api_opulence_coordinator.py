@@ -585,7 +585,7 @@ class APIOpulenceCoordinator:
         await self._test_connectivity()
         
         # Start health checking
-        self.health_check_task = asyncio.create_task(self._health_check_loop())
+        #self.health_check_task = asyncio.create_task(self._health_check_loop())
         
         self.logger.info("API Coordinator initialized successfully")
     
@@ -742,12 +742,29 @@ class APIOpulenceCoordinator:
             self.logger.error(f"Health check loop error: {e}")
     
     async def call_model_api(self, prompt: str, params: Dict[str, Any] = None, 
-                           preferred_gpu_id: int = None) -> Dict[str, Any]:
-        """FIXED: Call model API without GPU dependency"""
+                       preferred_gpu_id: int = None) -> Dict[str, Any]:
+        """Call model API without GPU dependency"""
         
-        # IGNORE preferred_gpu_id - just use load balancer to select best server
-        server = self.load_balancer.select_server()
+        # Check if we're shutting down or event loop is problematic
+        if getattr(self, '_shutting_down', False):
+            raise RuntimeError("Coordinator is shutting down")
         
+        try:
+            # Check if current event loop is still valid
+            current_loop = asyncio.get_running_loop()
+            if current_loop.is_closed():
+                raise RuntimeError("Event loop is closed")
+        except RuntimeError as e:
+            if "no running event loop" in str(e):
+                raise RuntimeError("No event loop available")
+            elif "closed" in str(e):
+                raise RuntimeError("Event loop is closed")
+            else:
+                # Re-raise other runtime errors
+                raise
+        
+        # ... rest of existing method unchanged    server = self.load_balancer.select_server()
+        server = self.load_balancer.select_server()        
         if not server:
             raise RuntimeError("No available servers found")
         

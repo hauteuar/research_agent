@@ -96,36 +96,75 @@ AGENT_TYPES = [
 # UTILITY FUNCTIONS
 # ============================================================================
 def safe_run_async(coroutine, timeout=30):
-    """Safe async function runner for Streamlit with timeout"""
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    """Safe async function runner for Streamlit with timeout - COMPLETELY REWRITTEN"""
+    import threading
+    import concurrent.futures
+    
+    def run_async_in_thread():
+        """Run async code in a separate thread with its own event loop"""
         try:
-            return loop.run_until_complete(asyncio.wait_for(coroutine, timeout=timeout))
-        finally:
-            # Cancel all pending tasks safely
+            # Create a completely fresh event loop for this thread
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            
             try:
-                pending = asyncio.all_tasks(loop)
-                if pending:
-                    for task in pending:
-                        task.cancel()
-                    
-                    # Wait for cancellation with timeout
-                    loop.run_until_complete(
-                        asyncio.wait_for(
-                            asyncio.gather(*pending, return_exceptions=True),
-                            timeout=5.0
-                        )
-                    )
-            except (asyncio.TimeoutError, RuntimeError):
-                pass  # Ignore if we can't clean up properly
-    finally:
+                # Run the coroutine with timeout
+                result = new_loop.run_until_complete(
+                    asyncio.wait_for(coroutine, timeout=timeout)
+                )
+                return {"success": True, "result": result}
+            except asyncio.TimeoutError:
+                return {"success": False, "error": f"Operation timed out after {timeout} seconds"}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+            finally:
+                # Clean shutdown of the loop
                 try:
-                    if not loop.is_closed():
-                        loop.close()
-                except RuntimeError:
-                    pass  # Loop already closed
-
+                    # Cancel all remaining tasks
+                    pending_tasks = asyncio.all_tasks(new_loop)
+                    if pending_tasks:
+                        for task in pending_tasks:
+                            task.cancel()
+                        
+                        # Wait briefly for cancellation
+                        try:
+                            new_loop.run_until_complete(
+                                asyncio.wait_for(
+                                    asyncio.gather(*pending_tasks, return_exceptions=True),
+                                    timeout=1.0
+                                )
+                            )
+                        except asyncio.TimeoutError:
+                            pass
+                except Exception:
+                    pass
+                finally:
+                    # Close the loop
+                    if not new_loop.is_closed():
+                        new_loop.close()
+        
+        except Exception as e:
+            return {"success": False, "error": f"Thread execution failed: {str(e)}"}
+    
+    try:
+        # Run in a separate thread to avoid event loop conflicts
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_async_in_thread)
+            thread_result = future.result(timeout=timeout + 10)
+            
+            if thread_result["success"]:
+                return thread_result["result"]
+            else:
+                st.error(f"Async operation failed: {thread_result['error']}")
+                return {"error": thread_result["error"]}
+                
+    except concurrent.futures.TimeoutError:
+        st.error(f"Operation timed out after {timeout} seconds")
+        return {"error": "Operation timed out"}
+    except Exception as e:
+        st.error(f"Failed to execute async operation: {str(e)}")
+        return {"error": str(e)}
+    
 def with_error_handling(func):
     """Decorator to add error handling to functions"""
     def wrapper(*args, **kwargs):
