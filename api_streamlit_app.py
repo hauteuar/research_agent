@@ -149,13 +149,9 @@ def initialize_session_state():
 
 def detect_single_gpu_servers():
     """Auto-detect single GPU server configurations - FIXED VERSION"""
-    # Your actual working server should be first in the list
+    # FIXED: Use only your working server
     potential_endpoints = [
-        "http://171.201.3.165:8100",  # Your actual working server - FIRST!
-        "http://localhost:8100",
-        "http://localhost:8101", 
-        "http://localhost:8102",
-        "http://localhost:8103"
+        "http://171.201.3.165:8100",  # Your working server
     ]
     detected_servers = []
     
@@ -166,19 +162,15 @@ def detect_single_gpu_servers():
             with st.spinner(f"Checking {endpoint}..."):
                 response = requests.get(f"{endpoint}/health", timeout=5)
                 if response.status_code == 200:
-                    # FIXED: Use consistent GPU ID for your server
-                    gpu_id = 2 if endpoint == "http://171.201.3.165:8100" else i
-                    
                     detected_servers.append({
-                        "name": f"gpu_server_{gpu_id}",
+                        "name": "gpu_server_2",
                         "endpoint": endpoint,
-                        "gpu_id": gpu_id,  # FIXED: Use GPU ID 2 for your server
-                        "max_concurrent_requests": 3,  # REDUCED for single GPU
-                        "timeout": 120  # INCREASED timeout
+                        "gpu_id": 2,
+                        "max_concurrent_requests": 3,
+                        "timeout": 120
                     })
-                    st.success(f"✅ Detected server at {endpoint} (GPU {gpu_id})")
-                else:
-                    st.warning(f"⚠️ Server at {endpoint} returned status {response.status_code}")
+                    st.success(f"✅ Detected server at {endpoint} (GPU 2)")
+                    break  # Stop after finding the working server
         except requests.exceptions.ConnectionError:
             st.info(f"ℹ️ No server found at {endpoint}")
         except Exception as e:
@@ -1551,7 +1543,7 @@ def test_manual_api_call():
         except Exception as e:
             st.error(f"❌ API call exception: {str(e)}")
             st.exception(e)
-            
+
 def show_quick_diagnostic():
     """Show quick diagnostic in Streamlit sidebar"""
     st.sidebar.markdown("### 🔧 Quick Diagnostic")
