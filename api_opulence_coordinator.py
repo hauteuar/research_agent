@@ -166,7 +166,7 @@ class ModelServer:
         return self.total_latency / self.successful_requests
     
     def is_available(self) -> bool:
-        """Check if server is available for requests"""
+        """FIXED: Check if server is available for requests"""
         if self.status == ModelServerStatus.CIRCUIT_OPEN:
             # Check if circuit breaker should be reset
             if time.time() - self.circuit_breaker_open_time > 60:
@@ -174,7 +174,8 @@ class ModelServer:
                 return True
             return False
         
-        return (self.status == ModelServerStatus.HEALTHY and 
+        # FIXED: Allow both HEALTHY and UNKNOWN status to be available
+        return (self.status in [ModelServerStatus.HEALTHY, ModelServerStatus.UNKNOWN] and 
                 self.active_requests < self.config.max_concurrent_requests)
     
     def record_success(self, latency: float):
