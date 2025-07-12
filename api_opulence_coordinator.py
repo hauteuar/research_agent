@@ -742,28 +742,20 @@ class APIOpulenceCoordinator:
             self.logger.error(f"Health check loop error: {e}")
     
     async def call_model_api(self, prompt: str, params: Dict[str, Any] = None, 
-                       preferred_gpu_id: int = None) -> Dict[str, Any]:
-        """Call model API without GPU dependency"""
+                   preferred_gpu_id: int = None) -> Dict[str, Any]:
+        """Call model API with event loop safety checks"""
         
-        # Check if we're shutting down or event loop is problematic
-        if getattr(self, '_shutting_down', False):
-            raise RuntimeError("Coordinator is shutting down")
-        
+        # EVENT LOOP CHECK - Add this at the very beginning
         try:
-            # Check if current event loop is still valid
             current_loop = asyncio.get_running_loop()
             if current_loop.is_closed():
-                raise RuntimeError("Event loop is closed")
+                raise RuntimeError("Event loop is closed - cannot make API calls")
         except RuntimeError as e:
             if "no running event loop" in str(e):
-                raise RuntimeError("No event loop available")
-            elif "closed" in str(e):
-                raise RuntimeError("Event loop is closed")
+                raise RuntimeError("No event loop available - cannot make API calls")
             else:
-                # Re-raise other runtime errors
-                raise
-        
-        # ... rest of existing method unchanged    server = self.load_balancer.select_server()
+                # Loop exists but might be closed
+                raise RuntimeError(f"Event loop issue: {str(e)}")
         server = self.load_balancer.select_server()        
         if not server:
             raise RuntimeError("No available servers found")
