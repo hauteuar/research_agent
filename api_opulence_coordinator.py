@@ -512,6 +512,9 @@ class APIOpulenceCoordinator:
         
         # Initialize database
         self._init_database()
+
+        self.primary_gpu_id = None  # Will be set dynamically
+        self.available_gpu_ids = []
         
         # Statistics
         self.stats = {
@@ -728,42 +731,170 @@ class APIOpulenceCoordinator:
             self.logger.error(f"Health check loop error: {e}")
     
     async def call_model_api(self, prompt: str, params: Dict[str, Any] = None, 
-                       preferred_gpu_id: int = None) -> Dict[str, Any]:
-        """FIXED: Call model API with better server selection and error handling"""
+                           preferred_gpu_id: int = None) -> Dict[str, Any]:
+        """ENHANCED: Dynamic GPU selection instead of hardcoded values"""
         
-        # FIXED: Always use GPU ID 2 for your setup
-        if preferred_gpu_id is None:
-            preferred_gpu_id = 2
+        # Step 1: Determine the best GPU ID to use
+        target_gpu_id = self._determine_optimal_gpu_id(preferred_gpu_id)
         
-        # Try preferred GPU first (which should be your server)
-        server = self.load_balancer.get_server_by_gpu_id(preferred_gpu_id)
-        if server and server.is_available():
-            try:
-                self.logger.debug(f"Using preferred server {server.config.name} at {server.config.endpoint}")
-                result = await self.client.call_generate(server, prompt, params)
-                self.stats["total_api_calls"] += 1
-                return result
-            except Exception as e:
-                self.logger.warning(f"Preferred GPU {preferred_gpu_id} failed: {e}")
-                # Don't fallback to load balancer for single GPU setup
-                raise RuntimeError(f"Primary server (GPU {preferred_gpu_id}) failed: {str(e)}")
+        if target_gpu_id is None:
+            raise RuntimeError("No available GPU servers found")
         
-        # For single GPU setup, don't use load balancer fallback
+        # Step 2: Get server for the selected GPU
+        server = self.load_balancer.get_server_by_gpu_id(target_gpu_id)
+        
         if not server:
-            raise RuntimeError(f"Server with GPU ID {preferred_gpu_id} not found")
+            # Fallback: try any available server
+            available_servers = self.load_balancer.get_available_servers()
+            if available_servers:
+                server = available_servers[0]
+                target_gpu_id = server.config.gpu_id
+                self.logger.info(f"Fallback to available server: GPU {target_gpu_id}")
+            else:
+                raise RuntimeError("No available servers found")
         
         if not server.is_available():
-            # Debug why server is not available
-            debug_info = {
-                'server_name': server.config.name,
-                'status': server.status.value,
-                'active_requests': server.active_requests,
-                'max_requests': server.config.max_concurrent_requests,
-                'consecutive_failures': server.consecutive_failures,
-                'circuit_breaker_open': server.status.value == 'circuit_open'
-            }
-            raise RuntimeError(f"Server not available: {debug_info}")
-
+            # Try to find alternative
+            alternative_gpu = self._find_alternative_gpu(target_gpu_id)
+            if alternative_gpu:
+                server = self.load_balancer.get_server_by_gpu_id(alternative_gpu)
+                target_gpu_id = alternative_gpu
+                self.logger.info(f"Using alternative GPU: {target_gpu_id}")
+            else:
+                raise RuntimeError(f"GPU {target_gpu_id} server not available and no alternatives found")
+        
+        # Step 3: Make the API call
+        try:
+            self.logger.debug(f"Using GPU {target_gpu_id} server: {server.config.name} at {server.config.endpoint}")
+            result = await self.client.call_generate(server, prompt, params)
+            self.stats["total_api_calls"] += 1
+            
+            # Update primary GPU tracking
+            self._update_gpu_usage_stats(target_gpu_id, success=True)
+            
+            return result
+            
+        except Exception as e:
+            self.logger.warning(f"GPU {target_gpu_id} failed: {e}")
+            self._update_gpu_usage_stats(target_gpu_id, success=False)
+            raise RuntimeError(f"API call failed on GPU {target_gpu_id}: {str(e)}")
+    
+    def _determine_optimal_gpu_id(self, preferred_gpu_id: int = None) -> int:
+        """Dynamically determine the best GPU ID to use"""
+        
+        # Option 1: Use explicitly preferred GPU if provided
+        if preferred_gpu_id is not None:
+            if self._is_gpu_available(preferred_gpu_id):
+                self.logger.debug(f"Using preferred GPU: {preferred_gpu_id}")
+                return preferred_gpu_id
+            else:
+                self.logger.warning(f"Preferred GPU {preferred_gpu_id} not available, finding alternative")
+        
+        # Option 2: Use primary GPU if set and available
+        if self.primary_gpu_id is not None and self._is_gpu_available(self.primary_gpu_id):
+            self.logger.debug(f"Using primary GPU: {self.primary_gpu_id}")
+            return self.primary_gpu_id
+        
+        # Option 3: Auto-detect the best available GPU
+        best_gpu = self._auto_detect_best_gpu()
+        if best_gpu is not None:
+            self.logger.debug(f"Auto-detected best GPU: {best_gpu}")
+            return best_gpu
+        
+        # Option 4: Fallback to first available
+        available_servers = self.load_balancer.get_available_servers()
+        if available_servers:
+            fallback_gpu = available_servers[0].config.gpu_id
+            self.logger.debug(f"Fallback to first available GPU: {fallback_gpu}")
+            return fallback_gpu
+        
+        # No GPUs available
+        self.logger.error("No available GPUs found")
+        return None
+    
+    def _is_gpu_available(self, gpu_id: int) -> bool:
+        """Check if a specific GPU is available"""
+        server = self.load_balancer.get_server_by_gpu_id(gpu_id)
+        return server is not None and server.is_available()
+    
+    def _auto_detect_best_gpu(self) -> int:
+        """Auto-detect the best GPU based on current load and performance"""
+        available_servers = self.load_balancer.get_available_servers()
+        
+        if not available_servers:
+            return None
+        
+        # Strategy 1: Least busy server
+        if self.config.load_balancing_strategy == LoadBalancingStrategy.LEAST_BUSY:
+            best_server = min(available_servers, key=lambda s: s.active_requests)
+            return best_server.config.gpu_id
+        
+        # Strategy 2: Lowest latency server
+        elif self.config.load_balancing_strategy == LoadBalancingStrategy.LEAST_LATENCY:
+            best_server = min(available_servers, key=lambda s: s.average_latency)
+            return best_server.config.gpu_id
+        
+        # Strategy 3: Round robin (first in list)
+        elif self.config.load_balancing_strategy == LoadBalancingStrategy.ROUND_ROBIN:
+            return available_servers[0].config.gpu_id
+        
+        # Default: first available
+        return available_servers[0].config.gpu_id
+    
+    def _find_alternative_gpu(self, failed_gpu_id: int) -> int:
+        """Find alternative GPU when preferred one fails"""
+        available_servers = self.load_balancer.get_available_servers()
+        
+        # Filter out the failed GPU
+        alternative_servers = [s for s in available_servers if s.config.gpu_id != failed_gpu_id]
+        
+        if alternative_servers:
+            return alternative_servers[0].config.gpu_id
+        
+        return None
+    
+    def _update_gpu_usage_stats(self, gpu_id: int, success: bool):
+        """Track GPU usage statistics for better selection"""
+        if not hasattr(self, 'gpu_stats'):
+            self.gpu_stats = {}
+        
+        if gpu_id not in self.gpu_stats:
+            self.gpu_stats[gpu_id] = {'total_calls': 0, 'successful_calls': 0, 'last_used': None}
+        
+        self.gpu_stats[gpu_id]['total_calls'] += 1
+        if success:
+            self.gpu_stats[gpu_id]['successful_calls'] += 1
+        self.gpu_stats[gpu_id]['last_used'] = time.time()
+        
+        # Update primary GPU if this one is performing well
+        if success and (
+            self.primary_gpu_id is None or 
+            self.gpu_stats[gpu_id]['successful_calls'] > self.gpu_stats.get(self.primary_gpu_id, {}).get('successful_calls', 0)
+        ):
+            self.primary_gpu_id = gpu_id
+            self.logger.debug(f"Updated primary GPU to: {gpu_id}")
+    
+    def set_preferred_gpu(self, gpu_id: int):
+        """Manually set preferred GPU for future calls"""
+        if self._is_gpu_available(gpu_id):
+            self.primary_gpu_id = gpu_id
+            self.logger.info(f"Set preferred GPU to: {gpu_id}")
+            return True
+        else:
+            self.logger.warning(f"Cannot set GPU {gpu_id} as preferred - not available")
+            return False
+    
+    def get_available_gpus(self) -> List[int]:
+        """Get list of all available GPU IDs"""
+        available_servers = self.load_balancer.get_available_servers()
+        return [server.config.gpu_id for server in available_servers]
+    
+    def get_gpu_stats(self) -> Dict[int, Dict[str, Any]]:
+        """Get GPU usage statistics"""
+        if not hasattr(self, 'gpu_stats'):
+            return {}
+        
+        return self.gpu_stats.copy()
     
     
     async def call_generate(self, server: ModelServer, prompt: str, 
