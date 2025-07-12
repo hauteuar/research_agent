@@ -3166,6 +3166,1979 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         # Parse as COBOL first, then add CICS-specific analysis
         return await self._parse_cobol_with_enhanced_analysis(content, filename)
 
+    # ==================== MAIN PROCESSING METHOD ====================
+
+    async def process_file(self, file_path: Path) -> Dict[str, Any]:
+        """Process a single code file with enhanced business rule validation and LLM analysis"""
+        try:
+            self.logger.info(f"Processing file: {file_path}")
+            
+            if not file_path.exists():
+                return self._add_processing_info({
+                    "status": "error",
+                    "file_name": str(file_path.name),
+                    "error": "File not found"
+                })
+            
+            # Enhanced file reading with multiple encoding attempts
+            content = await self._read_file_with_encoding(file_path)
+            if content is None:
+                return self._add_processing_info({
+                    "status": "error",
+                    "file_name": str(file_path.name),
+                    "error": "Unable to decode file"
+                })
+
+            if not content.strip():
+                return self._add_processing_info({
+                    "status": "error",
+                    "file_name": str(file_path.name),
+                    "error": "File is empty"
+                })
+
+            # Check for duplicates
+            if self._is_duplicate_file(file_path, content):
+                return self._add_processing_info({
+                    "status": "skipped",
+                    "file_name": str(file_path.name),
+                    "message": "File already processed (duplicate detected)"
+                })
+            
+            file_type = self._detect_file_type(content, file_path.suffix)
+            self.logger.info(f"Detected file type: {file_type}")
+            
+            # Business rule validation before parsing
+            business_violations = []
+            if file_type in self.business_validators:
+                violations = await self.business_validators[file_type].validate_structure(content)
+                business_violations.extend(violations)
+            
+            # Parse based on file type with enhanced business context and LLM analysis
+            if file_type == 'cobol':
+                chunks = await self._parse_cobol_with_enhanced_analysis(content, str(file_path.name))
+            elif file_type == 'jcl':
+                chunks = await self._parse_jcl_with_enhanced_analysis(content, str(file_path.name))
+            elif file_type == 'copybook':
+                chunks = await self._parse_copybook_with_enhanced_analysis(content, str(file_path.name))
+            elif file_type == 'bms':
+                chunks = await self._parse_bms_with_enhanced_analysis(content, str(file_path.name))
+            elif file_type == 'cics':
+                chunks = await self._parse_cics_with_enhanced_analysis(content, str(file_path.name))
+            elif file_type == 'db2_procedure':
+                chunks = await self._parse_db2_procedure_with_enhanced_analysis(content, str(file_path.name))
+            elif file_type == 'cobol_stored_procedure':
+                chunks = await self._parse_cobol_stored_procedure_with_enhanced_analysis(content, str(file_path.name))
+            elif file_type == 'mq_program':
+                chunks = await self._parse_mq_program_with_enhanced_analysis(content, str(file_path.name))
+            else:
+                chunks = await self._parse_generic(content, str(file_path.name))
+            
+            self.logger.info(f"Generated {len(chunks)} chunks")
+            
+            if not chunks:
+                return self._add_processing_info({
+                    "status": "warning",
+                    "file_name": str(file_path.name),
+                    "file_type": file_type,
+                    "chunks_created": 0,
+                    "message": "No chunks were created from this file"
+                })
+            
+            # Store business violations
+            if business_violations:
+                await self._store_business_violations(business_violations, self._extract_program_name(content, file_path))
+            
+            # Add file hash to all chunks
+            file_hash = self._generate_file_hash(content, file_path)
+            for chunk in chunks:
+                chunk.metadata['file_hash'] = file_hash
+            
+            # Store chunks with verification
+            await self._store_chunks_enhanced(chunks, file_hash)
+            
+            # Verify chunks were stored
+            stored_chunks = await self._verify_chunks_stored(self._extract_program_name(content, file_path))
+            
+            # Generate enhanced metadata with business context
+            metadata = await self._generate_metadata_enhanced(chunks, file_type, business_violations)
+
+            # Generate control flow analysis for applicable file types
+            if file_type in ['cobol', 'cics', 'cobol_stored_procedure']:
+                control_flow = await self._analyze_control_flow(chunks)
+                await self._store_control_flow_analysis(control_flow, self._extract_program_name(content, file_path))
+            
+            # Generate and store field lineage for data-intensive file types
+            if file_type in ['cobol', 'cics', 'copybook', 'cobol_stored_procedure']:
+                lineage_records = await self._generate_field_lineage(self._extract_program_name(content, file_path), chunks)
+                await self._store_field_lineage(lineage_records)
+            
+            # Store specialized analysis for specific file types
+            if file_type == 'copybook':
+                await self._store_copybook_analysis(chunks, self._extract_program_name(content, file_path))
+            elif file_type == 'mq_program':
+                await self._store_mq_analysis(chunks, content, self._extract_program_name(content, file_path))
+            elif file_type == 'db2_procedure':
+                await self._store_db2_procedure_analysis(chunks, self._extract_program_name(content, file_path))
+            
+            result = {
+                "status": "success",
+                "file_name": str(file_path.name),
+                "file_type": file_type,
+                "chunks_created": len(chunks),
+                "chunks_verified": stored_chunks,
+                "business_violations": len(business_violations),
+                "metadata": metadata,
+                "processing_timestamp": dt.now().isoformat(),
+                "file_hash": file_hash
+            }
+            
+            return self._add_processing_info(result)
+            
+        except Exception as e:
+            self.logger.error(f"Processing failed for {file_path}: {str(e)}")
+            return self._add_processing_info({
+                "status": "error",
+                "file_name": file_path.name,
+                "error": str(e)
+            })
+    
+    # ==================== MISSING ENHANCED PARSING METHODS ====================
+
+    async def _parse_cobol_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
+        """Enhanced COBOL parsing with comprehensive LLM analysis"""
+        chunks = []
+        program_name = self._extract_program_name(content, Path(filename))
+        
+        # Get LLM analysis for overall program structure
+        program_analysis = await self._llm_analyze_complex_pattern(content, 'business_logic')
+        
+        # Parse divisions with enhanced validation and LLM insights
+        division_chunks = await self._parse_cobol_divisions_enhanced(content, program_name, program_analysis)
+        chunks.extend(division_chunks)
+        
+        # Parse sections with comprehensive context
+        section_chunks = await self._parse_cobol_sections_enhanced(content, program_name, program_analysis)
+        chunks.extend(section_chunks)
+        
+        # Parse data items with advanced business rule validation
+        data_chunks = await self._parse_data_items_enhanced(content, program_name, program_analysis)
+        chunks.extend(data_chunks)
+        
+        # Parse procedure division with comprehensive flow analysis
+        procedure_chunks = await self._parse_procedure_division_enhanced(content, program_name, program_analysis)
+        chunks.extend(procedure_chunks)
+        
+        # Parse SQL blocks with enhanced host variable validation
+        sql_chunks = await self._parse_sql_blocks_enhanced(content, program_name)
+        chunks.extend(sql_chunks)
+        
+        # Parse CICS commands with transaction context
+        cics_chunks = await self._parse_cics_commands_enhanced(content, program_name)
+        chunks.extend(cics_chunks)
+        
+        # Parse COPY statements with replacement analysis
+        copy_chunks = await self._parse_copy_statements_enhanced(content, program_name)
+        chunks.extend(copy_chunks)
+        
+        return chunks
+
+    async def _parse_copybook_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
+        """Enhanced copybook parsing with comprehensive layout analysis"""
+        chunks = []
+        copybook_name = self._extract_program_name(content, Path(filename))
+        
+        # Analyze copybook structure with LLM
+        structure_analysis = await self._llm_analyze_complex_pattern(content, 'data_relationships')
+        
+        # Detect layout type and complexity
+        layout_info = await self._analyze_copybook_layout(content, copybook_name)
+        
+        # Parse multi-layout copybooks
+        if layout_info['layout_type'] == CopybookLayoutType.MULTI_RECORD:
+            layout_chunks = await self._parse_multi_record_layouts(content, copybook_name, structure_analysis)
+            chunks.extend(layout_chunks)
+        
+        # Parse conditional layouts based on indicators
+        elif layout_info['layout_type'] == CopybookLayoutType.CONDITIONAL_LAYOUT:
+            conditional_chunks = await self._parse_conditional_layouts(content, copybook_name, structure_analysis)
+            chunks.extend(conditional_chunks)
+        
+        # Parse REDEFINES structures
+        elif layout_info['layout_type'] == CopybookLayoutType.REDEFINES_LAYOUT:
+            redefines_chunks = await self._parse_redefines_structures(content, copybook_name, structure_analysis)
+            chunks.extend(redefines_chunks)
+        
+        # Parse OCCURS structures
+        elif layout_info['layout_type'] == CopybookLayoutType.OCCURS_LAYOUT:
+            occurs_chunks = await self._parse_occurs_structures(content, copybook_name, structure_analysis)
+            chunks.extend(occurs_chunks)
+        
+        # Default single record layout
+        else:
+            single_chunks = await self._parse_single_record_layout(content, copybook_name, structure_analysis)
+            chunks.extend(single_chunks)
+        
+        # Parse REPLACING parameters
+        replacing_chunks = await self._parse_replacing_parameters(content, copybook_name)
+        chunks.extend(replacing_chunks)
+        
+        # Parse multi-filler patterns for alignment
+        filler_chunks = await self._parse_multi_filler_patterns(content, copybook_name)
+        chunks.extend(filler_chunks)
+        
+        return chunks
+
+    async def _parse_single_record_layout(self, content: str, copybook_name: str,
+                                        structure_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse single record layout copybook"""
+        chunks = []
+        
+        # Find all data items
+        data_matches = list(self.copybook_patterns['record_type_field'].finditer(content))
+        if not data_matches:
+            # Fallback to general data item pattern
+            data_matches = list(self.cobol_patterns['data_item'].finditer(content))
+        
+        if data_matches:
+            # Group related data items
+            data_groups = self._group_data_items_by_hierarchy(data_matches)
+            
+            for group in data_groups:
+                group_content = '\n'.join([item['match'].group(0) for item in group['items']])
+                
+                # Analyze with LLM
+                layout_analysis = await self._analyze_with_llm_cached(
+                    group_content, 'single_record_layout',
+                    """
+                    Analyze this single record layout:
+                    
+                    {content}
+                    
+                    Identify:
+                    1. Business entity represented
+                    2. Data organization pattern
+                    3. Field relationships
+                    4. Usage context
+                    
+                    Return as JSON:
+                    {{
+                        "business_entity": "customer_record",
+                        "organization_pattern": "hierarchical",
+                        "field_relationships": ["parent_child", "sequential"],
+                        "usage_context": "transaction_processing"
+                    }}
+                    """
+                )
+                
+                business_context = {
+                    'layout_type': 'single_record',
+                    'business_entity': layout_analysis.get('analysis', {}).get('business_entity', ''),
+                    'organization_pattern': layout_analysis.get('analysis', {}).get('organization_pattern', ''),
+                    'field_count': len(group['items'])
+                }
+                
+                chunk = CodeChunk(
+                    program_name=copybook_name,
+                    chunk_id=f"{copybook_name}_SINGLE_LAYOUT_{group['group_id']}",
+                    chunk_type="copybook_single_layout",
+                    content=group_content,
+                    metadata={
+                        'layout_type': 'single_record',
+                        'field_count': len(group['items']),
+                        'llm_analysis': layout_analysis.get('analysis', {})
+                    },
+                    business_context=business_context,
+                    confidence_score=layout_analysis.get('confidence_score', 0.8),
+                    line_start=content[:group['start_pos']].count('\n'),
+                    line_end=content[:group['end_pos']].count('\n')
+                )
+                chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_mq_program_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
+        """Enhanced IBM MQ program parsing with comprehensive message flow analysis"""
+        chunks = []
+        program_name = self._extract_program_name(content, Path(filename))
+        
+        # First parse as COBOL with MQ enhancements
+        base_cobol_chunks = await self._parse_cobol_with_enhanced_analysis(content, filename)
+        chunks.extend(base_cobol_chunks)
+        
+        # Analyze MQ-specific patterns with LLM
+        mq_analysis = await self._llm_analyze_mq_patterns(content)
+        
+        # Parse MQ API call sequences
+        api_chunks = await self._parse_mq_api_sequences(content, program_name, mq_analysis)
+        chunks.extend(api_chunks)
+        
+        # Parse MQ data structures with comprehensive field analysis
+        structure_chunks = await self._parse_mq_data_structures_enhanced(content, program_name, mq_analysis)
+        chunks.extend(structure_chunks)
+        
+        # Parse message flow patterns
+        flow_chunks = await self._parse_mq_message_flows(content, program_name, mq_analysis)
+        chunks.extend(flow_chunks)
+        
+        # Parse error handling patterns specific to MQ
+        error_chunks = await self._parse_mq_error_handling(content, program_name, mq_analysis)
+        chunks.extend(error_chunks)
+        
+        # Parse transaction scope and commit patterns
+        transaction_chunks = await self._parse_mq_transaction_patterns(content, program_name, mq_analysis)
+        chunks.extend(transaction_chunks)
+        
+        return chunks
+
+    async def _parse_mq_data_structures_enhanced(self, content: str, program_name: str,
+                                               mq_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse MQ data structures with enhanced analysis"""
+        chunks = []
+        
+        # MQ data structure patterns
+        mq_structures = {
+            'message_descriptor': self.mq_patterns['mq_message_descriptor'],
+            'object_descriptor': self.mq_patterns['mq_object_descriptor'],
+            'put_options': self.mq_patterns['mq_put_options'],
+            'get_options': self.mq_patterns['mq_get_options'],
+            'connection_options': self.mq_patterns['mq_connection_options']
+        }
+        
+        for struct_type, pattern in mq_structures.items():
+            matches = list(pattern.finditer(content))
+            
+            for match in matches:
+                struct_name = match.group(1) if match.groups() else 'unknown'
+                
+                # Find the complete structure definition
+                start_pos = match.start()
+                end_pos = self._find_structure_end(content, start_pos, struct_name)
+                structure_content = content[start_pos:end_pos]
+                
+                struct_analysis = await self._analyze_with_llm_cached(
+                    structure_content, f'mq_{struct_type}',
+                    """
+                    Analyze this MQ data structure:
+                    
+                    {content}
+                    
+                    Identify:
+                    1. Structure purpose and usage
+                    2. Key fields and their roles
+                    3. Message processing context
+                    4. Performance implications
+                    
+                    Return as JSON:
+                    {{
+                        "structure_purpose": "message_control_block",
+                        "key_fields": ["format", "type", "persistence"],
+                        "processing_context": "async_messaging",
+                        "performance_impact": "low"
+                    }}
+                    """
+                )
+                
+                business_context = {
+                    'structure_type': struct_type,
+                    'structure_name': struct_name,
+                    'structure_purpose': struct_analysis.get('analysis', {}).get('structure_purpose', ''),
+                    'processing_context': struct_analysis.get('analysis', {}).get('processing_context', 'unknown')
+                }
+                
+                chunk = CodeChunk(
+                    program_name=program_name,
+                    chunk_id=f"{program_name}_MQ_STRUCT_{struct_type}_{struct_name}",
+                    chunk_type=f"mq_{struct_type}",
+                    content=structure_content,
+                    metadata={
+                        'structure_type': struct_type,
+                        'structure_name': struct_name,
+                        'llm_analysis': struct_analysis.get('analysis', {})
+                    },
+                    business_context=business_context,
+                    confidence_score=struct_analysis.get('confidence_score', 0.8),
+                    line_start=content[:start_pos].count('\n'),
+                    line_end=content[:end_pos].count('\n')
+                )
+                chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_mq_message_flows(self, content: str, program_name: str,
+                                    mq_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse MQ message flow patterns"""
+        chunks = []
+        
+        # Look for message flow patterns
+        flow_patterns = [
+            (r'MQPUT.*?MQGET', 'request_reply'),
+            (r'MQPUT1', 'fire_and_forget'),
+            (r'MQSUB.*?MQGET', 'publish_subscribe'),
+            (r'MQOPEN.*?MQPUT.*?MQCLOSE', 'persistent_messaging'),
+            (r'MQBEGIN.*?MQPUT.*?MQCMIT', 'transactional_messaging')
+        ]
+        
+        for pattern_regex, flow_type in flow_patterns:
+            matches = list(re.finditer(pattern_regex, content, re.IGNORECASE | re.DOTALL))
+            
+            for match in matches:
+                flow_content = match.group(0)
+                
+                flow_analysis = await self._analyze_with_llm_cached(
+                    flow_content, f'mq_message_flow_{flow_type}',
+                    """
+                    Analyze this MQ message flow pattern:
+                    
+                    {content}
+                    
+                    Identify:
+                    1. Flow characteristics and reliability
+                    2. Error handling strategy
+                    3. Performance considerations
+                    4. Business process alignment
+                    
+                    Return as JSON:
+                    {{
+                        "flow_characteristics": "async_reliable",
+                        "error_handling": "exception_based",
+                        "performance": "high_throughput",
+                        "business_alignment": "order_processing"
+                    }}
+                    """
+                )
+                
+                business_context = {
+                    'flow_type': flow_type,
+                    'flow_characteristics': flow_analysis.get('analysis', {}).get('flow_characteristics', ''),
+                    'business_alignment': flow_analysis.get('analysis', {}).get('business_alignment', 'unknown')
+                }
+                
+                chunk = CodeChunk(
+                    program_name=program_name,
+                    chunk_id=f"{program_name}_MQ_FLOW_{flow_type}_{hash(flow_content)%10000}",
+                    chunk_type="mq_message_flow",
+                    content=flow_content,
+                    metadata={
+                        'flow_type': flow_type,
+                        'llm_analysis': flow_analysis.get('analysis', {})
+                    },
+                    business_context=business_context,
+                    confidence_score=flow_analysis.get('confidence_score', 0.7),
+                    line_start=content[:match.start()].count('\n'),
+                    line_end=content[:match.end()].count('\n')
+                )
+                chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_mq_error_handling(self, content: str, program_name: str,
+                                     mq_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse MQ error handling patterns"""
+        chunks = []
+        
+        # Find error handling patterns
+        error_patterns = list(self.mq_patterns['mq_error_check'].finditer(content))
+        error_patterns.extend(list(self.mq_patterns['mq_rc_check'].finditer(content)))
+        
+        for match in error_patterns:
+            error_field = match.group(1) if match.groups() else 'unknown'
+            
+            # Get surrounding context for error handling
+            start_pos = max(0, match.start() - 200)
+            end_pos = min(len(content), match.end() + 200)
+            error_context = content[start_pos:end_pos]
+            
+            error_analysis = await self._analyze_with_llm_cached(
+                error_context, 'mq_error_handling',
+                """
+                Analyze this MQ error handling:
+                
+                {content}
+                
+                Identify:
+                1. Error detection strategy
+                2. Recovery mechanisms
+                3. Business impact handling
+                4. Logging and monitoring
+                
+                Return as JSON:
+                {{
+                    "detection_strategy": "return_code_checking",
+                    "recovery_mechanisms": ["retry", "deadletter"],
+                    "business_impact": "transaction_rollback",
+                    "monitoring": "comprehensive"
+                }}
+                """
+            )
+            
+            business_context = {
+                'error_type': 'mq_error_handling',
+                'error_field': error_field,
+                'detection_strategy': error_analysis.get('analysis', {}).get('detection_strategy', ''),
+                'business_impact': error_analysis.get('analysis', {}).get('business_impact', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_MQ_ERROR_{error_field}",
+                chunk_type="mq_error_handling",
+                content=error_context,
+                metadata={
+                    'error_field': error_field,
+                    'llm_analysis': error_analysis.get('analysis', {})
+                },
+                business_context=business_context,
+                confidence_score=error_analysis.get('confidence_score', 0.8),
+                line_start=content[:start_pos].count('\n'),
+                line_end=content[:end_pos].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_mq_transaction_patterns(self, content: str, program_name: str,
+                                           mq_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse MQ transaction patterns"""
+        chunks = []
+        
+        # Find transaction patterns
+        transaction_patterns = [
+            (self.mq_patterns['mq_mqbegin'], 'transaction_begin'),
+            (self.mq_patterns['mq_mqcmit'], 'transaction_commit'),
+            (self.mq_patterns['mq_mqback'], 'transaction_rollback')
+        ]
+        
+        for pattern, trans_type in transaction_patterns:
+            matches = list(pattern.finditer(content))
+            
+            for match in matches:
+                trans_analysis = await self._analyze_with_llm_cached(
+                    match.group(0), f'mq_transaction_{trans_type}',
+                    """
+                    Analyze this MQ transaction operation:
+                    
+                    {content}
+                    
+                    Identify:
+                    1. Transaction scope and boundaries
+                    2. Consistency guarantees
+                    3. Recovery implications
+                    4. Performance impact
+                    
+                    Return as JSON:
+                    {{
+                        "transaction_scope": "local_unit_of_work",
+                        "consistency": "strict_acid",
+                        "recovery": "automatic_rollback",
+                        "performance_impact": "medium"
+                    }}
+                    """
+                )
+                
+                business_context = {
+                    'transaction_type': trans_type,
+                    'transaction_scope': trans_analysis.get('analysis', {}).get('transaction_scope', ''),
+                    'consistency': trans_analysis.get('analysis', {}).get('consistency', 'unknown')
+                }
+                
+                chunk = CodeChunk(
+                    program_name=program_name,
+                    chunk_id=f"{program_name}_MQ_TRANS_{trans_type}_{hash(match.group(0))%10000}",
+                    chunk_type="mq_transaction_pattern",
+                    content=match.group(0),
+                    metadata={
+                        'transaction_type': trans_type,
+                        'llm_analysis': trans_analysis.get('analysis', {})
+                    },
+                    business_context=business_context,
+                    confidence_score=trans_analysis.get('confidence_score', 0.8),
+                    line_start=content[:match.start()].count('\n'),
+                    line_end=content[:match.end()].count('\n')
+                )
+                chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_db2_procedure_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
+        """Enhanced DB2 stored procedure parsing with comprehensive SQL analysis"""
+        chunks = []
+        procedure_name = self._extract_program_name(content, Path(filename))
+        
+        # Analyze DB2 procedure structure with LLM
+        db2_analysis = await self._llm_analyze_db2_patterns(content)
+        
+        # Parse procedure signature and parameters
+        signature_chunk = await self._parse_db2_procedure_signature(content, procedure_name, db2_analysis)
+        if signature_chunk:
+            chunks.append(signature_chunk)
+        
+        # Parse variable declarations with type analysis
+        declaration_chunks = await self._parse_db2_declarations_enhanced(content, procedure_name, db2_analysis)
+        chunks.extend(declaration_chunks)
+        
+        # Parse cursor definitions with SQL analysis
+        cursor_chunks = await self._parse_db2_cursors_enhanced(content, procedure_name, db2_analysis)
+        chunks.extend(cursor_chunks)
+        
+        # Parse exception handlers with comprehensive error analysis
+        handler_chunks = await self._parse_db2_exception_handlers_enhanced(content, procedure_name, db2_analysis)
+        chunks.extend(handler_chunks)
+        
+        # Parse SQL statements with performance analysis
+        sql_chunks = await self._parse_db2_sql_statements_enhanced(content, procedure_name, db2_analysis)
+        chunks.extend(sql_chunks)
+        
+        # Parse control flow structures
+        control_chunks = await self._parse_db2_control_flow_enhanced(content, procedure_name, db2_analysis)
+        chunks.extend(control_chunks)
+        
+        # Parse dynamic SQL patterns
+        dynamic_chunks = await self._parse_db2_dynamic_sql(content, procedure_name, db2_analysis)
+        chunks.extend(dynamic_chunks)
+        
+        return chunks
+
+    async def _parse_db2_procedure_signature(self, content: str, procedure_name: str,
+                                           db2_analysis: Dict[str, Any]) -> Optional[CodeChunk]:
+        """Parse DB2 procedure signature"""
+        
+        # Find CREATE PROCEDURE statement
+        proc_match = self.db2_patterns['db2_create_procedure'].search(content)
+        if not proc_match:
+            return None
+        
+        # Extract full procedure signature
+        signature_start = proc_match.start()
+        signature_end = content.find('BEGIN', signature_start)
+        if signature_end == -1:
+            signature_end = signature_start + 500  # Fallback
+        
+        signature_content = content[signature_start:signature_end].strip()
+        
+        # Analyze signature with LLM
+        signature_analysis = await self._analyze_with_llm_cached(
+            signature_content, 'db2_procedure_signature',
+            """
+            Analyze this DB2 procedure signature:
+            
+            {content}
+            
+            Identify:
+            1. Parameter types and purposes
+            2. Return value characteristics
+            3. Security and access patterns
+            4. Performance characteristics
+            
+            Return as JSON:
+            {{
+                "parameter_types": ["input", "output", "inout"],
+                "parameter_purposes": ["customer_id", "result_set"],
+                "return_characteristics": "single_value",
+                "security_level": "standard",
+                "performance_class": "query_intensive"
+            }}
+            """
+        )
+        
+        business_context = {
+            'signature_type': 'procedure_definition',
+            'parameter_types': signature_analysis.get('analysis', {}).get('parameter_types', []),
+            'performance_class': signature_analysis.get('analysis', {}).get('performance_class', 'unknown')
+        }
+        
+        return CodeChunk(
+            program_name=procedure_name,
+            chunk_id=f"{procedure_name}_SIGNATURE",
+            chunk_type="db2_procedure_signature",
+            content=signature_content,
+            metadata={
+                'procedure_name': procedure_name,
+                'llm_analysis': signature_analysis.get('analysis', {})
+            },
+            business_context=business_context,
+            confidence_score=signature_analysis.get('confidence_score', 0.9),
+            line_start=content[:signature_start].count('\n'),
+            line_end=content[:signature_end].count('\n')
+        )
+
+    def _find_structure_end(self, content: str, start_pos: int, struct_name: str) -> int:
+        """Find the end of a data structure definition"""
+        lines = content[start_pos:].split('\n')
+        end_pos = start_pos
+        level_stack = []
+        
+        for i, line in enumerate(lines):
+            stripped_line = line.strip()
+            if not stripped_line or stripped_line.startswith('*'):
+                continue
+            
+            # Look for level numbers
+            level_match = re.match(r'^\s*(\d+)', stripped_line)
+            if level_match:
+                level = int(level_match.group(1))
+                
+                if i == 0:  # First line, establish base level
+                    level_stack = [level]
+                else:
+                    # Check if we're back to same or higher level (end of structure)
+                    if level <= level_stack[0] and i > 0:
+                        break
+            
+            end_pos += len(line) + 1  # +1 for newline
+        
+        return min(start_pos + end_pos, len(content))
+    
+    # ==================== MISSING DB2 PARSING METHODS ====================
+
+    async def _parse_db2_declarations_enhanced(self, content: str, procedure_name: str,
+                                             db2_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse DB2 variable declarations with type analysis"""
+        chunks = []
+        
+        # Find variable declarations
+        var_matches = list(self.db2_patterns['db2_declare_variable'].finditer(content))
+        condition_matches = list(self.db2_patterns['db2_declare_condition'].finditer(content))
+        
+        for match in var_matches:
+            var_name = match.group(1)
+            var_type = match.group(2)
+            default_value = match.group(3) if len(match.groups()) > 2 and match.group(3) else None
+            
+            var_analysis = await self._analyze_with_llm_cached(
+                match.group(0), 'db2_variable_declaration',
+                """
+                Analyze this DB2 variable declaration:
+                
+                {content}
+                
+                Identify:
+                1. Variable purpose and usage pattern
+                2. Data type appropriateness
+                3. Default value significance
+                4. Performance implications
+                
+                Return as JSON:
+                {{
+                    "variable_purpose": "temporary_storage",
+                    "usage_pattern": "loop_counter",
+                    "type_appropriateness": "optimal",
+                    "performance_impact": "minimal"
+                }}
+                """
+            )
+            
+            business_context = {
+                'declaration_type': 'variable',
+                'variable_name': var_name,
+                'variable_type': var_type,
+                'variable_purpose': var_analysis.get('analysis', {}).get('variable_purpose', ''),
+                'has_default': default_value is not None
+            }
+            
+            chunk = CodeChunk(
+                program_name=procedure_name,
+                chunk_id=f"{procedure_name}_VAR_{var_name}",
+                chunk_type="db2_variable_declaration",
+                content=match.group(0),
+                metadata={
+                    'variable_name': var_name,
+                    'variable_type': var_type,
+                    'default_value': default_value,
+                    'llm_analysis': var_analysis.get('analysis', {})
+                },
+                business_context=business_context,
+                confidence_score=var_analysis.get('confidence_score', 0.8),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        # Process condition declarations
+        for match in condition_matches:
+            condition_name = match.group(1)
+            condition_for = match.group(2)
+            
+            condition_analysis = await self._analyze_with_llm_cached(
+                match.group(0), 'db2_condition_declaration',
+                """
+                Analyze this DB2 condition declaration:
+                
+                {content}
+                
+                Identify:
+                1. Error handling strategy
+                2. Condition scope and usage
+                3. Recovery implications
+                4. Business impact
+                
+                Return as JSON:
+                {{
+                    "error_strategy": "specific_handling",
+                    "condition_scope": "procedure_level",
+                    "recovery_approach": "graceful_degradation",
+                    "business_impact": "low"
+                }}
+                """
+            )
+            
+            business_context = {
+                'declaration_type': 'condition',
+                'condition_name': condition_name,
+                'condition_for': condition_for,
+                'error_strategy': condition_analysis.get('analysis', {}).get('error_strategy', '')
+            }
+            
+            chunk = CodeChunk(
+                program_name=procedure_name,
+                chunk_id=f"{procedure_name}_COND_{condition_name}",
+                chunk_type="db2_condition_declaration",
+                content=match.group(0),
+                metadata={
+                    'condition_name': condition_name,
+                    'condition_for': condition_for,
+                    'llm_analysis': condition_analysis.get('analysis', {})
+                },
+                business_context=business_context,
+                confidence_score=condition_analysis.get('confidence_score', 0.8),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_db2_cursors_enhanced(self, content: str, procedure_name: str,
+                                        db2_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse DB2 cursor definitions with SQL analysis"""
+        chunks = []
+        
+        # Find cursor declarations
+        cursor_matches = list(self.db2_patterns['db2_declare_cursor'].finditer(content))
+        
+        for match in cursor_matches:
+            cursor_name = match.group(1)
+            cursor_options = match.group(2) if len(match.groups()) > 1 and match.group(2) else None
+            cursor_sql = match.group(3) if len(match.groups()) > 2 and match.group(3) else None
+            
+            cursor_analysis = await self._analyze_with_llm_cached(
+                match.group(0), 'db2_cursor_declaration',
+                """
+                Analyze this DB2 cursor declaration:
+                
+                {content}
+                
+                Identify:
+                1. Cursor purpose and data access pattern
+                2. Performance characteristics
+                3. Scrollability and updatability
+                4. Business data being processed
+                
+                Return as JSON:
+                {{
+                    "cursor_purpose": "result_set_processing",
+                    "access_pattern": "sequential_forward",
+                    "performance": "optimized_for_throughput",
+                    "scrollable": false,
+                    "updatable": true,
+                    "business_data": "customer_transactions"
+                }}
+                """
+            )
+            
+            business_context = {
+                'cursor_name': cursor_name,
+                'cursor_purpose': cursor_analysis.get('analysis', {}).get('cursor_purpose', ''),
+                'access_pattern': cursor_analysis.get('analysis', {}).get('access_pattern', ''),
+                'business_data': cursor_analysis.get('analysis', {}).get('business_data', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=procedure_name,
+                chunk_id=f"{procedure_name}_CURSOR_{cursor_name}",
+                chunk_type="db2_cursor",
+                content=match.group(0),
+                metadata={
+                    'cursor_name': cursor_name,
+                    'cursor_options': cursor_options,
+                    'cursor_sql': cursor_sql,
+                    'llm_analysis': cursor_analysis.get('analysis', {})
+                },
+                business_context=business_context,
+                confidence_score=cursor_analysis.get('confidence_score', 0.8),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_db2_exception_handlers_enhanced(self, content: str, procedure_name: str,
+                                                   db2_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse DB2 exception handlers with comprehensive error analysis"""
+        chunks = []
+        
+        # Find exception handlers
+        handler_matches = list(self.db2_patterns['db2_declare_handler'].finditer(content))
+        
+        for match in handler_matches:
+            handler_type = match.group(1)  # CONTINUE, EXIT, UNDO
+            handler_condition = match.group(2)
+            handler_action = match.group(3)
+            
+            handler_analysis = await self._analyze_with_llm_cached(
+                match.group(0), 'db2_exception_handler',
+                """
+                Analyze this DB2 exception handler:
+                
+                {content}
+                
+                Identify:
+                1. Error handling strategy and approach
+                2. Recovery mechanisms available
+                3. Business continuity impact
+                4. Logging and monitoring needs
+                
+                Return as JSON:
+                {{
+                    "error_strategy": "graceful_recovery",
+                    "recovery_mechanisms": ["rollback", "retry", "alternative_path"],
+                    "business_continuity": "high",
+                    "monitoring_needs": "comprehensive",
+                    "handler_effectiveness": "robust"
+                }}
+                """
+            )
+            
+            business_context = {
+                'handler_type': handler_type,
+                'handler_condition': handler_condition,
+                'error_strategy': handler_analysis.get('analysis', {}).get('error_strategy', ''),
+                'business_continuity': handler_analysis.get('analysis', {}).get('business_continuity', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=procedure_name,
+                chunk_id=f"{procedure_name}_HANDLER_{handler_type}_{hash(handler_condition)%10000}",
+                chunk_type="db2_exception_handler",
+                content=match.group(0),
+                metadata={
+                    'handler_type': handler_type,
+                    'handler_condition': handler_condition,
+                    'handler_action': handler_action,
+                    'llm_analysis': handler_analysis.get('analysis', {})
+                },
+                business_context=business_context,
+                confidence_score=handler_analysis.get('confidence_score', 0.8),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_db2_sql_statements_enhanced(self, content: str, procedure_name: str,
+                                               db2_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse SQL statements with performance analysis"""
+        chunks = []
+        
+        # SQL statement patterns
+        sql_patterns = {
+            'select_into': self.db2_patterns['db2_select_into'],
+            'insert': self.db2_patterns['db2_insert_statement'],
+            'update': self.db2_patterns['db2_update_statement'],
+            'delete': self.db2_patterns['db2_delete_statement'],
+            'merge': self.db2_patterns['db2_merge_statement']
+        }
+        
+        for sql_type, pattern in sql_patterns.items():
+            matches = list(pattern.finditer(content))
+            
+            for match in matches:
+                sql_analysis = await self._analyze_with_llm_cached(
+                    match.group(0), f'db2_sql_{sql_type}',
+                    """
+                    Analyze this DB2 SQL statement:
+                    
+                    {content}
+                    
+                    Identify:
+                    1. SQL complexity and performance characteristics
+                    2. Tables and data accessed
+                    3. Business operation performed
+                    4. Optimization opportunities
+                    
+                    Return as JSON:
+                    {{
+                        "sql_complexity": "medium",
+                        "performance_characteristics": "index_scan",
+                        "tables_accessed": ["CUSTOMER", "ORDERS"],
+                        "business_operation": "customer_order_lookup",
+                        "optimization_opportunities": ["add_index", "rewrite_join"],
+                        "estimated_cost": "low"
+                    }}
+                    """
+                )
+                
+                business_context = {
+                    'sql_type': sql_type,
+                    'business_operation': sql_analysis.get('analysis', {}).get('business_operation', ''),
+                    'performance_characteristics': sql_analysis.get('analysis', {}).get('performance_characteristics', ''),
+                    'complexity': sql_analysis.get('analysis', {}).get('sql_complexity', 'unknown')
+                }
+                
+                chunk = CodeChunk(
+                    program_name=procedure_name,
+                    chunk_id=f"{procedure_name}_SQL_{sql_type.upper()}_{hash(match.group(0))%10000}",
+                    chunk_type=f"db2_sql_{sql_type}",
+                    content=match.group(0),
+                    metadata={
+                        'sql_type': sql_type,
+                        'tables_accessed': sql_analysis.get('analysis', {}).get('tables_accessed', []),
+                        'llm_analysis': sql_analysis.get('analysis', {}),
+                        'complexity_score': self._calculate_sql_complexity(match.group(0))
+                    },
+                    business_context=business_context,
+                    confidence_score=sql_analysis.get('confidence_score', 0.8),
+                    line_start=content[:match.start()].count('\n'),
+                    line_end=content[:match.end()].count('\n')
+                )
+                chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_db2_control_flow_enhanced(self, content: str, procedure_name: str,
+                                             db2_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse DB2 control flow structures"""
+        chunks = []
+        
+        # Control flow patterns
+        control_patterns = {
+            'if_statement': self.db2_patterns['db2_if_statement'],
+            'case_statement': self.db2_patterns['db2_case_statement'],
+            'while_loop': self.db2_patterns['db2_while_loop'],
+            'for_loop': self.db2_patterns['db2_for_loop'],
+            'repeat_loop': self.db2_patterns['db2_repeat_loop']
+        }
+        
+        for control_type, pattern in control_patterns.items():
+            matches = list(pattern.finditer(content))
+            
+            for match in matches:
+                control_analysis = await self._analyze_with_llm_cached(
+                    match.group(0), f'db2_control_{control_type}',
+                    """
+                    Analyze this DB2 control flow structure:
+                    
+                    {content}
+                    
+                    Identify:
+                    1. Control logic purpose and complexity
+                    2. Loop characteristics and termination
+                    3. Business logic implementation
+                    4. Performance implications
+                    
+                    Return as JSON:
+                    {{
+                        "control_purpose": "data_processing_loop",
+                        "logic_complexity": "medium",
+                        "termination_strategy": "condition_based",
+                        "business_logic": "batch_record_processing",
+                        "performance_impact": "moderate",
+                        "optimization_potential": "high"
+                    }}
+                    """
+                )
+                
+                business_context = {
+                    'control_type': control_type,
+                    'control_purpose': control_analysis.get('analysis', {}).get('control_purpose', ''),
+                    'business_logic': control_analysis.get('analysis', {}).get('business_logic', ''),
+                    'complexity': control_analysis.get('analysis', {}).get('logic_complexity', 'unknown')
+                }
+                
+                chunk = CodeChunk(
+                    program_name=procedure_name,
+                    chunk_id=f"{procedure_name}_CONTROL_{control_type.upper()}_{hash(match.group(0))%10000}",
+                    chunk_type=f"db2_control_{control_type}",
+                    content=match.group(0),
+                    metadata={
+                        'control_type': control_type,
+                        'llm_analysis': control_analysis.get('analysis', {})
+                    },
+                    business_context=business_context,
+                    confidence_score=control_analysis.get('confidence_score', 0.8),
+                    line_start=content[:match.start()].count('\n'),
+                    line_end=content[:match.end()].count('\n')
+                )
+                chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_db2_dynamic_sql(self, content: str, procedure_name: str,
+                                   db2_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse dynamic SQL patterns"""
+        chunks = []
+        
+        # Dynamic SQL patterns
+        dynamic_patterns = {
+            'prepare': self.db2_patterns['db2_prepare'],
+            'execute': self.db2_patterns['db2_execute'],
+            'execute_immediate': self.db2_patterns['db2_execute_immediate']
+        }
+        
+        for dynamic_type, pattern in dynamic_patterns.items():
+            matches = list(pattern.finditer(content))
+            
+            for match in matches:
+                dynamic_analysis = await self._analyze_with_llm_cached(
+                    match.group(0), f'db2_dynamic_{dynamic_type}',
+                    """
+                    Analyze this DB2 dynamic SQL:
+                    
+                    {content}
+                    
+                    Identify:
+                    1. Dynamic SQL purpose and flexibility
+                    2. Security implications and SQL injection risks
+                    3. Performance characteristics
+                    4. Business use case justification
+                    
+                    Return as JSON:
+                    {{
+                        "dynamic_purpose": "flexible_query_construction",
+                        "flexibility_level": "high",
+                        "security_risk": "medium",
+                        "performance_impact": "variable",
+                        "business_justification": "user_defined_queries",
+                        "mitigation_strategies": ["parameter_binding", "validation"]
+                    }}
+                    """
+                )
+                
+                business_context = {
+                    'dynamic_type': dynamic_type,
+                    'dynamic_purpose': dynamic_analysis.get('analysis', {}).get('dynamic_purpose', ''),
+                    'security_risk': dynamic_analysis.get('analysis', {}).get('security_risk', 'unknown'),
+                    'business_justification': dynamic_analysis.get('analysis', {}).get('business_justification', '')
+                }
+                
+                chunk = CodeChunk(
+                    program_name=procedure_name,
+                    chunk_id=f"{procedure_name}_DYNAMIC_{dynamic_type.upper()}_{hash(match.group(0))%10000}",
+                    chunk_type=f"db2_dynamic_{dynamic_type}",
+                    content=match.group(0),
+                    metadata={
+                        'dynamic_type': dynamic_type,
+                        'llm_analysis': dynamic_analysis.get('analysis', {}),
+                        'security_considerations': dynamic_analysis.get('analysis', {}).get('mitigation_strategies', [])
+                    },
+                    business_context=business_context,
+                    confidence_score=dynamic_analysis.get('confidence_score', 0.8),
+                    line_start=content[:match.start()].count('\n'),
+                    line_end=content[:match.end()].count('\n')
+                )
+                chunks.append(chunk)
+        
+        return chunks
+
+    def _calculate_sql_complexity(self, sql_statement: str) -> int:
+        """Calculate SQL complexity score"""
+        complexity = 0
+        sql_upper = sql_statement.upper()
+        
+        # Basic operations
+        if 'SELECT' in sql_upper:
+            complexity += 1
+        if 'INSERT' in sql_upper:
+            complexity += 1
+        if 'UPDATE' in sql_upper:
+            complexity += 2
+        if 'DELETE' in sql_upper:
+            complexity += 2
+        
+        # Joins
+        complexity += sql_upper.count('JOIN') * 2
+        complexity += sql_upper.count('INNER JOIN') * 1
+        complexity += sql_upper.count('LEFT JOIN') * 2
+        complexity += sql_upper.count('RIGHT JOIN') * 2
+        complexity += sql_upper.count('FULL JOIN') * 3
+        
+        # Subqueries
+        complexity += sql_upper.count('(SELECT') * 3
+        
+        # Aggregations
+        complexity += sql_upper.count('GROUP BY') * 2
+        complexity += sql_upper.count('HAVING') * 2
+        complexity += sql_upper.count('ORDER BY') * 1
+        
+        # Window functions
+        complexity += sql_upper.count('OVER(') * 3
+        
+        # CTEs
+        complexity += sql_upper.count('WITH') * 2
+        
+        return min(complexity, 20)  # Cap at 20
+    
+    # ==================== MISSING HELPER METHODS ====================
+
+    async def _analyze_copybook_layout(self, content: str, copybook_name: str) -> Dict[str, Any]:
+        """Analyze copybook layout type and complexity"""
+        
+        # Count different layout indicators
+        layout_indicators = len(self.copybook_patterns['layout_indicator'].findall(content))
+        record_types = len(self.copybook_patterns['record_type_field'].findall(content))
+        redefines_count = len(self.copybook_patterns['redefines_complex'].findall(content))
+        occurs_count = len(self.copybook_patterns['occurs_complex'].findall(content))
+        conditional_fields = len(self.copybook_patterns['conditional_field'].findall(content))
+        
+        # Determine layout type
+        if layout_indicators > 1 or record_types > 1:
+            layout_type = CopybookLayoutType.MULTI_RECORD
+        elif conditional_fields > 0:
+            layout_type = CopybookLayoutType.CONDITIONAL_LAYOUT
+        elif redefines_count > 2:
+            layout_type = CopybookLayoutType.REDEFINES_LAYOUT
+        elif occurs_count > 1:
+            layout_type = CopybookLayoutType.OCCURS_LAYOUT
+        else:
+            layout_type = CopybookLayoutType.SINGLE_RECORD
+        
+        # Calculate complexity score
+        complexity_score = (layout_indicators * 3 + record_types * 2 + 
+                          redefines_count * 2 + occurs_count * 1 + conditional_fields * 2)
+        
+        return {
+            'layout_type': layout_type,
+            'complexity_score': min(complexity_score, 20),
+            'layout_indicators': layout_indicators,
+            'record_types': record_types,
+            'redefines_count': redefines_count,
+            'occurs_count': occurs_count,
+            'conditional_fields': conditional_fields
+        }
+
+    async def _parse_multi_record_layouts(self, content: str, copybook_name: str, 
+                                        structure_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse copybooks with multiple record layouts"""
+        chunks = []
+        
+        # Find record type indicators
+        layout_matches = list(self.copybook_patterns['layout_indicator'].finditer(content))
+        record_type_matches = list(self.copybook_patterns['record_type_field'].finditer(content))
+        
+        # Combine and sort by position
+        all_indicators = []
+        for match in layout_matches:
+            all_indicators.append({
+                'type': 'layout_indicator',
+                'name': match.group(1),
+                'position': match.start(),
+                'match': match
+            })
+        
+        for match in record_type_matches:
+            all_indicators.append({
+                'type': 'record_type',
+                'name': match.group(1),
+                'position': match.start(),
+                'match': match
+            })
+        
+        all_indicators.sort(key=lambda x: x['position'])
+        
+        # Parse each record layout
+        for i, indicator in enumerate(all_indicators):
+            start_pos = indicator['position']
+            
+            # Find end position
+            if i + 1 < len(all_indicators):
+                end_pos = all_indicators[i + 1]['position']
+            else:
+                end_pos = len(content)
+            
+            # Extract layout content
+            layout_content = content[start_pos:end_pos].strip()
+            
+            # Analyze with LLM for business context
+            layout_analysis = await self._analyze_with_llm_cached(
+                layout_content, 'copybook_layout',
+                """
+                Analyze this copybook record layout:
+                
+                {content}
+                
+                Identify:
+                1. Business purpose and domain
+                2. Key data elements and their roles
+                3. Data validation requirements
+                4. Usage patterns and frequency
+                
+                Return as JSON:
+                {{
+                    "business_purpose": "customer data record",
+                    "domain": "customer_management",
+                    "key_elements": [
+                        {{"field": "field1", "role": "identifier", "validation": "required"}}
+                    ],
+                    "usage_patterns": ["batch_processing", "online_inquiry"],
+                    "data_sensitivity": "medium"
+                }}
+                """
+            )
+            
+            business_context = {
+                'layout_type': 'multi_record',
+                'record_indicator': indicator['name'],
+                'business_analysis': layout_analysis.get('analysis', {}),
+                'confidence_score': layout_analysis.get('confidence_score', 0.7)
+            }
+            
+            chunk = CodeChunk(
+                program_name=copybook_name,
+                chunk_id=f"{copybook_name}_LAYOUT_{indicator['name']}",
+                chunk_type="copybook_record_layout",
+                content=layout_content,
+                metadata={
+                    'layout_indicator': indicator['name'],
+                    'layout_position': i + 1,
+                    'total_layouts': len(all_indicators),
+                    'llm_analysis': layout_analysis.get('analysis', {})
+                },
+                business_context=business_context,
+                confidence_score=layout_analysis.get('confidence_score', 0.7),
+                line_start=content[:start_pos].count('\n'),
+                line_end=content[:end_pos].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_conditional_layouts(self, content: str, copybook_name: str,
+                                       structure_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse copybooks with conditional field layouts"""
+        chunks = []
+        
+        # Find conditional fields (DEPENDING ON clauses)
+        conditional_matches = list(self.copybook_patterns['conditional_field'].finditer(content))
+        
+        for match in conditional_matches:
+            field_name = match.group(1)
+            depending_field = match.group(2)
+            
+            # Get context around the conditional field
+            start_pos = max(0, match.start() - 100)
+            end_pos = min(len(content), match.end() + 200)
+            context_content = content[start_pos:end_pos]
+            
+            conditional_analysis = await self._analyze_with_llm_cached(
+                context_content, 'conditional_field',
+                """
+                Analyze this conditional field definition:
+                
+                {content}
+                
+                Focus on field: {field_name} depending on {depending_field}
+                
+                Identify:
+                1. Business logic for the condition
+                2. Possible values and their meanings
+                3. Data integrity implications
+                4. Processing complexity
+                
+                Return as JSON:
+                {{
+                    "business_logic": "variable length based on transaction type",
+                    "condition_values": [
+                        {{"value": "01", "meaning": "customer record", "field_count": 15}}
+                    ],
+                    "integrity_rules": ["depending_field must be set before access"],
+                    "complexity_impact": "medium"
+                }}
+                """,
+                field_name=field_name,
+                depending_field=depending_field
+            )
+            
+            business_context = {
+                'field_type': 'conditional',
+                'depending_on': depending_field,
+                'business_logic': conditional_analysis.get('analysis', {}).get('business_logic', ''),
+                'complexity_impact': conditional_analysis.get('analysis', {}).get('complexity_impact', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=copybook_name,
+                chunk_id=f"{copybook_name}_CONDITIONAL_{field_name}",
+                chunk_type="copybook_conditional_field",
+                content=match.group(0),
+                metadata={
+                    'field_name': field_name,
+                    'depending_field': depending_field,
+                    'conditional_analysis': conditional_analysis.get('analysis', {}),
+                    'confidence_score': conditional_analysis.get('confidence_score', 0.7)
+                },
+                business_context=business_context,
+                confidence_score=conditional_analysis.get('confidence_score', 0.7),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_redefines_structures(self, content: str, copybook_name: str,
+                                        structure_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse copybooks with complex REDEFINES structures"""
+        chunks = []
+        
+        # Find all REDEFINES patterns
+        redefines_matches = list(self.copybook_patterns['redefines_complex'].finditer(content))
+        
+        # Group related redefines
+        redefines_groups = self._group_redefines_structures(redefines_matches, content)
+        
+        for group in redefines_groups:
+            # Extract the complete redefines structure
+            start_pos = group['start_pos']
+            end_pos = group['end_pos']
+            structure_content = content[start_pos:end_pos]
+            
+            # Analyze redefines business purpose with LLM
+            redefines_analysis = await self._analyze_with_llm_cached(
+                structure_content, 'redefines_structure',
+                """
+                Analyze this REDEFINES structure:
+                
+                {content}
+                
+                Identify:
+                1. Business purpose of the overlay
+                2. Different data interpretations
+                3. Usage scenarios for each view
+                4. Data integrity considerations
+                
+                Return as JSON:
+                {{
+                    "business_purpose": "dual interpretation of amount field",
+                    "data_views": [
+                        {{"view": "numeric", "purpose": "calculations", "format": "packed decimal"}},
+                        {{"view": "display", "purpose": "reporting", "format": "formatted text"}}
+                    ],
+                    "usage_scenarios": ["batch calculations", "report generation"],
+                    "integrity_considerations": ["both views must be synchronized"]
+                }}
+                """
+            )
+            
+            business_context = {
+                'structure_type': 'redefines',
+                'original_field': group['original_field'],
+                'redefining_fields': group['redefining_fields'],
+                'business_purpose': redefines_analysis.get('analysis', {}).get('business_purpose', ''),
+                'data_views': redefines_analysis.get('analysis', {}).get('data_views', [])
+            }
+            
+            chunk = CodeChunk(
+                program_name=copybook_name,
+                chunk_id=f"{copybook_name}_REDEFINES_{group['original_field']}",
+                chunk_type="copybook_redefines_structure",
+                content=structure_content,
+                metadata={
+                    'original_field': group['original_field'],
+                    'redefining_fields': group['redefining_fields'],
+                    'redefines_analysis': redefines_analysis.get('analysis', {}),
+                    'structure_complexity': len(group['redefining_fields'])
+                },
+                business_context=business_context,
+                confidence_score=redefines_analysis.get('confidence_score', 0.7),
+                line_start=content[:start_pos].count('\n'),
+                line_end=content[:end_pos].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_occurs_structures(self, content: str, copybook_name: str,
+                                     structure_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse copybooks with OCCURS structures (arrays and tables)"""
+        chunks = []
+        
+        # Find all OCCURS patterns
+        occurs_matches = list(self.copybook_patterns['occurs_complex'].finditer(content))
+        
+        for match in occurs_matches:
+            min_occurs = int(match.group(1)) if match.group(1) else 0
+            max_occurs = int(match.group(2)) if match.group(2) else min_occurs
+            depending_field = match.group(3) if match.group(3) else None
+            indexed_fields = match.group(4) if match.group(4) else None
+            key_fields = match.group(5) if match.group(5) else None
+            
+            # Extract the complete OCCURS structure context
+            start_pos = max(0, match.start() - 100)
+            end_pos = min(len(content), match.end() + 300)
+            occurs_content = content[start_pos:end_pos]
+            
+            # Analyze OCCURS business purpose with LLM
+            occurs_analysis = await self._analyze_with_llm_cached(
+                occurs_content, 'occurs_structure',
+                """
+                Analyze this OCCURS structure:
+                
+                {content}
+                
+                Min occurs: {min_occurs}, Max occurs: {max_occurs}
+                Depending on: {depending_field}
+                Indexed by: {indexed_fields}
+                Key fields: {key_fields}
+                
+                Identify:
+                1. Business purpose of the array/table
+                2. Data organization and access patterns
+                3. Performance implications
+                4. Business rules for sizing
+                
+                Return as JSON:
+                {{
+                    "business_purpose": "customer address history table",
+                    "data_organization": "chronological_array",
+                    "access_patterns": ["sequential_scan", "indexed_lookup"],
+                    "performance_implications": "memory_intensive_for_large_arrays",
+                    "sizing_rules": "max 12 addresses per customer"
+                }}
+                """,
+                min_occurs=min_occurs,
+                max_occurs=max_occurs,
+                depending_field=depending_field or "N/A",
+                indexed_fields=indexed_fields or "N/A",
+                key_fields=key_fields or "N/A"
+            )
+            
+            business_context = {
+                'structure_type': 'occurs',
+                'min_occurs': min_occurs,
+                'max_occurs': max_occurs,
+                'is_variable': max_occurs != min_occurs or depending_field is not None,
+                'depending_field': depending_field,
+                'indexed_fields': indexed_fields.split(',') if indexed_fields else [],
+                'key_fields': key_fields.split(',') if key_fields else [],
+                'business_purpose': occurs_analysis.get('analysis', {}).get('business_purpose', ''),
+                'access_patterns': occurs_analysis.get('analysis', {}).get('access_patterns', [])
+            }
+            
+            chunk = CodeChunk(
+                program_name=copybook_name,
+                chunk_id=f"{copybook_name}_OCCURS_{hash(match.group(0))%10000}",
+                chunk_type="copybook_occurs_structure",
+                content=match.group(0),
+                metadata={
+                    'occurs_details': {
+                        'min_occurs': min_occurs,
+                        'max_occurs': max_occurs,
+                        'depending_field': depending_field,
+                        'indexed_fields': indexed_fields,
+                        'key_fields': key_fields
+                    },
+                    'occurs_analysis': occurs_analysis.get('analysis', {}),
+                    'performance_impact': occurs_analysis.get('analysis', {}).get('performance_implications', 'unknown')
+                },
+                business_context=business_context,
+                confidence_score=occurs_analysis.get('confidence_score', 0.7),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    def _group_redefines_structures(self, redefines_matches: List, content: str) -> List[Dict[str, Any]]:
+        """Group related REDEFINES structures together"""
+        groups = []
+        
+        for match in redefines_matches:
+            level = int(match.group(1))
+            redefining_field = match.group(2)
+            original_field = match.group(3)
+            
+            # Find if this belongs to an existing group
+            group_found = False
+            for group in groups:
+                if original_field == group['original_field']:
+                    group['redefining_fields'].append(redefining_field)
+                    group['end_pos'] = match.end()
+                    group_found = True
+                    break
+            
+            if not group_found:
+                groups.append({
+                    'original_field': original_field,
+                    'redefining_fields': [redefining_field],
+                    'start_pos': match.start(),
+                    'end_pos': match.end()
+                })
+        
+        return groups
+
+    async def _parse_replacing_parameters(self, content: str, copybook_name: str) -> List[CodeChunk]:
+        """Parse REPLACING parameters for copybook customization"""
+        chunks = []
+        
+        # Find all types of replacing patterns
+        replacing_patterns = {
+            'variable': self.copybook_patterns['replacing_variable'],
+            'literal': self.copybook_patterns['replacing_literal'],
+            'numeric': self.copybook_patterns['replacing_numeric'],
+            'pic': self.copybook_patterns['replacing_pic'],
+            'usage': self.copybook_patterns['replacing_usage']
+        }
+        
+        all_replacements = []
+        for pattern_type, pattern in replacing_patterns.items():
+            matches = list(pattern.finditer(content))
+            for match in matches:
+                all_replacements.append({
+                    'type': pattern_type,
+                    'value': match.group(1),
+                    'position': match.start(),
+                    'match': match
+                })
+        
+        if all_replacements:
+            # Group replacements by proximity
+            replacement_groups = self._group_replacing_parameters(all_replacements)
+            
+            for group in replacement_groups:
+                replacements_content = '\n'.join([r['match'].group(0) for r in group['replacements']])
+                
+                business_context = {
+                    'customization_type': 'replacing_parameters',
+                    'parameter_types': list(set([r['type'] for r in group['replacements']])),
+                    'customization_scope': 'copybook_instantiation',
+                    'flexibility_level': 'high' if len(group['replacements']) > 3 else 'medium'
+                }
+                
+                chunk = CodeChunk(
+                    program_name=copybook_name,
+                    chunk_id=f"{copybook_name}_REPLACING_{group['group_id']}",
+                    chunk_type="copybook_replacing_parameters",
+                    content=replacements_content,
+                    metadata={
+                        'replacement_count': len(group['replacements']),
+                        'parameter_types': [r['type'] for r in group['replacements']],
+                        'parameter_values': [r['value'] for r in group['replacements']]
+                    },
+                    business_context=business_context,
+                    confidence_score=0.9,  # High confidence for pattern matching
+                    line_start=content[:group['start_pos']].count('\n'),
+                    line_end=content[:group['end_pos']].count('\n')
+                )
+                chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_multi_filler_patterns(self, content: str, copybook_name: str) -> List[CodeChunk]:
+        """Parse multi-filler patterns for data alignment and padding analysis"""
+        chunks = []
+        
+        # Find all filler patterns
+        filler_matches = list(self.copybook_patterns['multi_filler'].finditer(content))
+        alignment_matches = list(self.copybook_patterns['filler_alignment'].finditer(content))
+        sync_matches = list(self.copybook_patterns['sync_alignment'].finditer(content))
+        
+        # Analyze filler patterns for alignment strategy
+        if filler_matches or alignment_matches or sync_matches:
+            filler_analysis = await self._analyze_filler_patterns(content, filler_matches, alignment_matches, sync_matches)
+            
+            business_context = {
+                'alignment_strategy': filler_analysis['strategy'],
+                'padding_purpose': filler_analysis['purpose'],
+                'memory_impact': filler_analysis['memory_impact'],
+                'performance_consideration': filler_analysis['performance']
+            }
+            
+            # Create a summary chunk for the overall filler strategy
+            filler_content = '\n'.join([match.group(0) for match in filler_matches[:5]])  # Sample of fillers
+            
+            chunk = CodeChunk(
+                program_name=copybook_name,
+                chunk_id=f"{copybook_name}_FILLER_STRATEGY",
+                chunk_type="copybook_filler_analysis",
+                content=filler_content,
+                metadata={
+                    'total_fillers': len(filler_matches),
+                    'alignment_fillers': len(alignment_matches),
+                    'sync_markers': len(sync_matches),
+                    'filler_analysis': filler_analysis
+                },
+                business_context=business_context,
+                confidence_score=0.8,
+                line_start=0,
+                line_end=0
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    def _group_replacing_parameters(self, replacements: List[Dict]) -> List[Dict[str, Any]]:
+        """Group REPLACING parameters by proximity"""
+        if not replacements:
+            return []
+        
+        replacements.sort(key=lambda x: x['position'])
+        groups = []
+        current_group = {'replacements': [replacements[0]], 'group_id': 1}
+        current_group['start_pos'] = replacements[0]['position']
+        current_group['end_pos'] = replacements[0]['position']
+        
+        for i in range(1, len(replacements)):
+            # If the next replacement is within 200 characters, add to current group
+            if replacements[i]['position'] - current_group['end_pos'] < 200:
+                current_group['replacements'].append(replacements[i])
+                current_group['end_pos'] = replacements[i]['position']
+            else:
+                # Start new group
+                groups.append(current_group)
+                current_group = {
+                    'replacements': [replacements[i]], 
+                    'group_id': len(groups) + 1,
+                    'start_pos': replacements[i]['position'],
+                    'end_pos': replacements[i]['position']
+                }
+        
+        groups.append(current_group)
+        return groups
+
+    async def _analyze_filler_patterns(self, content: str, filler_matches: List, 
+                                     alignment_matches: List, sync_matches: List) -> Dict[str, Any]:
+        """Analyze filler patterns to determine alignment strategy"""
+        
+        # Calculate filler sizes
+        filler_sizes = []
+        for match in filler_matches:
+            size = int(match.group(1))
+            filler_sizes.append(size)
+        
+        # Determine alignment strategy
+        if sync_matches:
+            strategy = "hardware_alignment"
+            purpose = "optimize_memory_access"
+            performance = "high_performance"
+        elif any(size % 4 == 0 for size in filler_sizes):
+            strategy = "word_boundary_alignment"
+            purpose = "memory_efficiency"
+            performance = "good_performance"
+        elif filler_sizes and max(filler_sizes) > 100:
+            strategy = "padding_for_compatibility"
+            purpose = "legacy_system_compatibility"
+            performance = "memory_overhead"
+        else:
+            strategy = "minimal_padding"
+            purpose = "structure_completion"
+            performance = "standard"
+        
+        # Calculate memory impact
+        total_filler_bytes = sum(filler_sizes)
+        memory_impact = "high" if total_filler_bytes > 1000 else "medium" if total_filler_bytes > 100 else "low"
+        
+        return {
+            'strategy': strategy,
+            'purpose': purpose,
+            'performance': performance,
+            'memory_impact': memory_impact,
+            'total_filler_bytes': total_filler_bytes,
+            'filler_count': len(filler_matches),
+            'alignment_count': len(alignment_matches),
+            'sync_count': len(sync_matches)
+        }
+
+    async def _llm_analyze_mq_patterns(self, content: str) -> Dict[str, Any]:
+        """Use LLM to analyze MQ patterns and message flows"""
+        return await self._analyze_with_llm_cached(
+            content, 'mq_analysis',
+            """
+            Analyze this IBM MQ program for message queuing patterns:
+            
+            {content}
+            
+            Identify:
+            1. Message flow patterns (point-to-point, publish-subscribe, request-reply)
+            2. Queue management strategy (persistent vs transient connections)
+            3. Transaction boundaries and commit strategies
+            4. Error handling and recovery patterns
+            5. Performance characteristics and bottlenecks
+            
+            Return as JSON:
+            {{
+                "message_patterns": [
+                    {{"pattern": "request_reply", "queues": ["REQUEST.Q", "REPLY.Q"], "volume": "high"}}
+                ],
+                "connection_strategy": "persistent",
+                "transaction_scope": "message_level",
+                "error_handling": [
+                    {{"error_type": "connection_failure", "strategy": "retry_with_backoff"}}
+                ],
+                "performance_characteristics": {{"throughput": "medium", "latency": "low"}},
+                "reliability_level": "high"
+            }}
+            """
+        )
+
+    async def _parse_mq_api_sequences(self, content: str, program_name: str, 
+                                    mq_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse MQ API call sequences to understand message flow"""
+        chunks = []
+        
+        # Find all MQ API calls in sequence
+        api_calls = []
+        for api_name, pattern in self.mq_patterns.items():
+            if api_name.startswith('mq_mq'):  # Only actual API calls
+                matches = list(pattern.finditer(content))
+                for match in matches:
+                    api_calls.append({
+                        'api': api_name,
+                        'position': match.start(),
+                        'match': match,
+                        'parameters': match.group(1) if match.groups() else ""
+                    })
+        
+        # Sort by position to understand call sequence
+        api_calls.sort(key=lambda x: x['position'])
+        
+        # Group API calls into logical sequences
+        sequences = self._group_mq_api_sequences(api_calls)
+        
+        for sequence in sequences:
+            sequence_content = '\n'.join([call['match'].group(0) for call in sequence['calls']])
+            
+            # Analyze sequence with LLM
+            sequence_analysis = await self._analyze_with_llm_cached(
+                sequence_content, 'mq_sequence',
+                """
+                Analyze this MQ API call sequence:
+                
+                {content}
+                
+                Identify:
+                1. Message flow purpose and business function
+                2. Transaction boundaries
+                3. Error handling completeness
+                4. Performance implications
+                
+                Return as JSON:
+                {{
+                    "business_purpose": "customer order processing",
+                    "flow_type": "request_response",
+                    "transaction_safe": true,
+                    "error_handling_complete": false,
+                    "performance_risk": "medium"
+                }}
+                """
+            )
+            
+            business_context = {
+                'sequence_type': sequence['type'],
+                'api_count': len(sequence['calls']),
+                'business_purpose': sequence_analysis.get('analysis', {}).get('business_purpose', ''),
+                'transaction_safe': sequence_analysis.get('analysis', {}).get('transaction_safe', False),
+                'performance_risk': sequence_analysis.get('analysis', {}).get('performance_risk', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_MQ_SEQUENCE_{sequence['sequence_id']}",
+                chunk_type="mq_api_sequence",
+                content=sequence_content,
+                metadata={
+                    'api_calls': [call['api'] for call in sequence['calls']],
+                    'sequence_analysis': sequence_analysis.get('analysis', {}),
+                    'call_count': len(sequence['calls'])
+                },
+                business_context=business_context,
+                confidence_score=sequence_analysis.get('confidence_score', 0.7),
+                line_start=content[:sequence['start_pos']].count('\n'),
+                line_end=content[:sequence['end_pos']].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    def _group_mq_api_sequences(self, api_calls: List[Dict]) -> List[Dict[str, Any]]:
+        """Group MQ API calls into logical sequences"""
+        sequences = []
+        current_sequence = None
+        sequence_id = 1
+        
+        for call in api_calls:
+            api_name = call['api']
+            
+            # Connection sequence
+            if api_name in ['mq_mqconn', 'mq_mqconnx']:
+                if current_sequence:
+                    sequences.append(current_sequence)
+                current_sequence = {
+                    'type': 'connection_sequence',
+                    'sequence_id': sequence_id,
+                    'calls': [call],
+                    'start_pos': call['position'],
+                    'end_pos': call['position']
+                }
+                sequence_id += 1
+            
+            # Message operations
+            elif api_name in ['mq_mqput', 'mq_mqput1', 'mq_mqget']:
+                if current_sequence and current_sequence['type'] in ['connection_sequence', 'message_sequence']:
+                    current_sequence['calls'].append(call)
+                    current_sequence['end_pos'] = call['position']
+                    current_sequence['type'] = 'message_sequence'
+                else:
+                    if current_sequence:
+                        sequences.append(current_sequence)
+                    current_sequence = {
+                        'type': 'message_sequence',
+                        'sequence_id': sequence_id,
+                        'calls': [call],
+                        'start_pos': call['position'],
+                        'end_pos': call['position']
+                    }
+                    sequence_id += 1
+            
+            # Transaction operations
+            elif api_name in ['mq_mqbegin', 'mq_mqcmit', 'mq_mqback']:
+                if current_sequence and current_sequence['type'] in ['connection_sequence', 'message_sequence', 'transaction_sequence']:
+                    current_sequence['calls'].append(call)
+                    current_sequence['end_pos'] = call['position']
+                    current_sequence['type'] = 'transaction_sequence'
+                else:
+                    if current_sequence:
+                        sequences.append(current_sequence)
+                    current_sequence = {
+                        'type': 'transaction_sequence',
+                        'sequence_id': sequence_id,
+                        'calls': [call],
+                        'start_pos': call['position'],
+                        'end_pos': call['position']
+                    }
+                    sequence_id += 1
+            
+            # Other operations - add to current sequence or create new one
+            else:
+                if current_sequence:
+                    current_sequence['calls'].append(call)
+                    current_sequence['end_pos'] = call['position']
+                else:
+                    current_sequence = {
+                        'type': 'general_sequence',
+                        'sequence_id': sequence_id,
+                        'calls': [call],
+                        'start_pos': call['position'],
+                        'end_pos': call['position']
+                    }
+                    sequence_id += 1
+        
+        if current_sequence:
+            sequences.append(current_sequence)
+        
+        return sequences
+    
     async def _parse_generic(self, content: str, filename: str) -> List[CodeChunk]:
         """Generic parsing for unknown file types"""
         chunks = []
