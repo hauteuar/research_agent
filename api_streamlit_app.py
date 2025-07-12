@@ -149,22 +149,28 @@ def initialize_session_state():
 
 def detect_single_gpu_servers():
     """Auto-detect single GPU server configurations"""
-    potential_ports = [8100, 8101, 8102, 8103]
+    # Use your actual GPU server IP and port from the curl test
+    potential_endpoints = [
+        "http://171.201.3.165:8100",  # Your actual working server
+        "http://localhost:8100",
+        "http://localhost:8101", 
+        "http://localhost:8102",
+        "http://localhost:8103"
+    ]
     detected_servers = []
     
     st.info("🔍 Scanning for GPU servers...")
     
-    for i, port in enumerate(potential_ports):
-        endpoint = f"http://localhost:{port}"
+    for i, endpoint in enumerate(potential_endpoints):
         try:
             with st.spinner(f"Checking {endpoint}..."):
-                response = requests.get(f"{endpoint}/health", timeout=2)
+                response = requests.get(f"{endpoint}/health", timeout=5)
                 if response.status_code == 200:
                     detected_servers.append({
-                        "name": f"local_gpu_{i}",
+                        "name": f"gpu_server_{i}",
                         "endpoint": endpoint,
                         "gpu_id": i,
-                        "max_concurrent_requests": 5,  # Conservative for single GPU
+                        "max_concurrent_requests": 5,
                         "timeout": 300
                     })
                     st.success(f"✅ Detected server at {endpoint}")
@@ -176,7 +182,7 @@ def detect_single_gpu_servers():
             st.warning(f"⚠️ Error checking {endpoint}: {str(e)}")
     
     if not detected_servers:
-        st.warning("⚠️ No GPU servers detected on standard ports")
+        st.warning("⚠️ No GPU servers detected")
     
     return detected_servers
 
@@ -365,7 +371,7 @@ async def init_api_coordinator_single_gpu():
         finally:
             st.session_state.coordinator = None
     
-    try:  # This try block was incorrectly indented
+    try:
         with st.spinner("🔍 Detecting available GPU servers..."):
             # Auto-detect servers if none configured
             if not st.session_state.model_servers:
@@ -375,67 +381,92 @@ async def init_api_coordinator_single_gpu():
                     st.session_state.model_servers = detected_servers
                     st.info(f"🎯 Auto-detected {len(detected_servers)} GPU server(s)")
                 else:
-                    # Fallback to default localhost configuration
+                    # Updated fallback to use your actual server
                     st.session_state.model_servers = [{
-                        "name": "local_gpu_0",
-                        "endpoint": "http://localhost:8000",
+                        "name": "main_gpu_server",
+                        "endpoint": "http://171.201.3.165:8100",
                         "gpu_id": 0,
-                        "max_concurrent_requests": 3,  # Conservative for single GPU
+                        "max_concurrent_requests": 3,
                         "timeout": 300
                     }]
-                    st.warning("⚠️ No servers detected, using default localhost:8000")
+                    st.warning("⚠️ No servers detected, using known server at 171.201.3.165:8100")
+            
+            st.info(f"📋 Using servers: {st.session_state.model_servers}")
             
             # Create coordinator with single GPU optimizations
+            st.info("🔧 Creating coordinator...")
             coordinator = create_api_coordinator_from_config(
                 model_servers=st.session_state.model_servers,
-                load_balancing_strategy="round_robin",  # Simple strategy for single GPU
-                max_retries=2,  # Fewer retries for faster response
-                connection_pool_size=10,  # Smaller pool for single GPU
-                request_timeout=120  # Shorter timeout for responsiveness
+                load_balancing_strategy="round_robin",
+                max_retries=2,
+                connection_pool_size=10,
+                request_timeout=120
             )
             
             # Initialize with validation
+            st.info("🚀 Initializing coordinator...")
             await coordinator.initialize()
+            st.success("✅ Coordinator initialized")
             
             # Quick validation for single GPU setup
-            validation_results = await validate_single_gpu_setup(coordinator)
+            st.info("🔍 Running validation...")
+            try:
+                validation_results = await validate_single_gpu_setup(coordinator)
+                st.info(f"📊 Validation results: {validation_results}")
+                
+                if validation_results['success']:
+                    st.session_state.coordinator = coordinator
+                    st.session_state.initialization_status = "completed"
+                    
+                    # Initialize agent status
+                    for agent_type in AGENT_TYPES:
+                        try:
+                            agent = coordinator.get_agent(agent_type)
+                            if agent:
+                                st.session_state.agent_status[agent_type]['status'] = 'available'
+                            else:
+                                st.session_state.agent_status[agent_type]['status'] = 'unavailable'
+                        except Exception as e:
+                            st.session_state.agent_status[agent_type]['status'] = 'error'
+                            st.session_state.agent_status[agent_type]['error_message'] = str(e)
+                    
+                    st.success("🎉 System fully initialized and validated!")
+                    return {"success": True, "validation": validation_results}
+                else:
+                    # Don't shut down on validation failure - keep coordinator running
+                    st.warning(f"⚠️ Validation failed but coordinator is running: {validation_results['message']}")
+                    
+                    # Store coordinator anyway for manual testing
+                    st.session_state.coordinator = coordinator
+                    st.session_state.initialization_status = f"validation_warning: {validation_results['message']}"
+                    
+                    return {"success": True, "warning": validation_results['message'], "coordinator_running": True}
             
-            if validation_results['success']:
+            except Exception as validation_error:
+                st.error(f"❌ Validation failed with exception: {str(validation_error)}")
+                st.exception(validation_error)
+                
+                # Don't shut down - keep coordinator for debugging
                 st.session_state.coordinator = coordinator
-                st.session_state.initialization_status = "completed"
+                st.session_state.initialization_status = f"validation_error: {str(validation_error)}"
                 
-                # Initialize agent status
-                for agent_type in AGENT_TYPES:
-                    try:
-                        agent = coordinator.get_agent(agent_type)
-                        if agent:
-                            st.session_state.agent_status[agent_type]['status'] = 'available'
-                        else:
-                            st.session_state.agent_status[agent_type]['status'] = 'unavailable'
-                    except Exception as e:
-                        st.session_state.agent_status[agent_type]['status'] = 'error'
-                        st.session_state.agent_status[agent_type]['error_message'] = str(e)
-                
-                return {"success": True, "validation": validation_results}
-            else:
-                # Clean up on validation failure
-                await coordinator.shutdown()
-                st.session_state.initialization_status = f"validation_failed: {validation_results['message']}"
-                return {"error": f"Validation failed: {validation_results['message']}"}
+                return {"success": True, "validation_error": str(validation_error), "coordinator_running": True}
     
     except Exception as e:
-        # Clean up on any error
+        st.error(f"❌ Coordinator creation failed: {str(e)}")
+        st.exception(e)
+        
+        # Only clean up if coordinator was actually created
         if 'coordinator' in locals():
             try:
                 await coordinator.shutdown()
+                st.info("🧹 Cleaned up failed coordinator")
             except:
                 pass
         
         st.session_state.initialization_status = f"error: {str(e)}"
         return {"error": str(e)}
     
-    return {"success": True, "message": "Coordinator already initialized"}
-
 def cleanup_on_session_end():
     """Cleanup function to call when session ends"""
     try:
@@ -567,7 +598,7 @@ def show_manual_server_configuration():
         col1, col2 = st.columns(2)
         
         with col1:
-            endpoint = st.text_input("Server Endpoint", value="http://localhost:8000")
+            endpoint = st.text_input("Server Endpoint", value="http://171.201.3.165:8100")
             gpu_id = st.number_input("GPU ID", min_value=0, value=0)
         
         with col2:
