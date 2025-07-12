@@ -290,20 +290,29 @@ class ModelServerClient:
             self.session = None
     
     async def call_generate(self, server: ModelServer, prompt: str, 
-                          params: Dict[str, Any] = None) -> Dict[str, Any]:
+                      params: Dict[str, Any] = None) -> Dict[str, Any]:
         """Call model server generate endpoint"""
         if not self.session:
             raise RuntimeError("Client not initialized")
         
         params = params or {}
+        
+        # Ensure all required fields are present and properly formatted
         request_data = {
             "prompt": prompt,
-            "max_tokens": params.get("max_tokens", 512),
-            "temperature": params.get("temperature", 0.7),
-            "top_p": params.get("top_p", 0.9),
+            "max_tokens": min(params.get("max_tokens", 512), 2048),  # Respect server limits
+            "temperature": max(0.0, min(params.get("temperature", 0.7), 2.0)),
+            "top_p": max(0.0, min(params.get("top_p", 0.9), 1.0)),
+            "top_k": max(1, min(params.get("top_k", 50), 100)),
+            "frequency_penalty": max(-2.0, min(params.get("frequency_penalty", 0.0), 2.0)),
+            "presence_penalty": max(-2.0, min(params.get("presence_penalty", 0.0), 2.0)),
+            "stop": params.get("stop", None),
             "stream": params.get("stream", False),
-            **params
+            "seed": params.get("seed", None)
         }
+        
+        # Remove None values to avoid validation issues
+        request_data = {k: v for k, v in request_data.items() if v is not None}
         
         server.active_requests += 1
         server.total_requests += 1
@@ -316,7 +325,7 @@ class ModelServerClient:
                     
                     async with self.session.post(
                         generate_url,
-                        json=request_data,
+                        json=request_data,  # This should work with your Pydantic model
                         timeout=aiohttp.ClientTimeout(total=server.config.timeout)
                     ) as response:
                         
@@ -333,6 +342,11 @@ class ModelServerClient:
                             result["latency"] = latency
                             
                             return result
+                        
+                        elif response.status == 422:
+                            # Validation error - log the details
+                            error_text = await response.text()
+                            raise aiohttp.ClientError(f"Validation error (422): {error_text}")
                         
                         elif response.status == 503:
                             # Service unavailable - don't retry on same server
