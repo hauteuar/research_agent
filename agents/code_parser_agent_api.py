@@ -5139,6 +5139,621 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         
         return sequences
     
+    """
+    Missing Enhanced Code Parser Agent Functions
+    Complete implementation of missing methods for COBOL stored procedures and related functionality
+    """
+
+    # ==================== MISSING COBOL STORED PROCEDURE PARSING ====================
+
+    async def _parse_cobol_stored_procedure_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
+        """Enhanced COBOL stored procedure parsing with comprehensive SQL integration analysis"""
+        chunks = []
+        procedure_name = self._extract_program_name(content, Path(filename))
+        
+        # Analyze COBOL SP patterns with LLM
+        sp_analysis = await self._llm_analyze_cobol_sp_patterns(content)
+        
+        # First parse as regular COBOL with SP enhancements
+        base_cobol_chunks = await self._parse_cobol_with_enhanced_analysis(content, filename)
+        chunks.extend(base_cobol_chunks)
+        
+        # Parse SQL communication areas (SQLCA, SQLDA)
+        comm_chunks = await self._parse_sql_communication_areas_enhanced(content, procedure_name, sp_analysis)
+        chunks.extend(comm_chunks)
+        
+        # Parse embedded SQL with enhanced host variable validation
+        embedded_sql_chunks = await self._parse_embedded_sql_enhanced(content, procedure_name, sp_analysis)
+        chunks.extend(embedded_sql_chunks)
+        
+        # Parse result set handling patterns
+        result_set_chunks = await self._parse_result_set_handling(content, procedure_name, sp_analysis)
+        chunks.extend(result_set_chunks)
+        
+        # Parse procedure calls with parameter analysis
+        proc_call_chunks = await self._parse_procedure_calls_enhanced(content, procedure_name, sp_analysis)
+        chunks.extend(proc_call_chunks)
+        
+        # Parse host variable declarations and usage
+        host_var_chunks = await self._parse_host_variables_enhanced(content, procedure_name, sp_analysis)
+        chunks.extend(host_var_chunks)
+        
+        # Parse transaction coordination patterns
+        transaction_chunks = await self._parse_cobol_transaction_patterns(content, procedure_name, sp_analysis)
+        chunks.extend(transaction_chunks)
+        
+        return chunks
+
+    async def _parse_host_variables_enhanced(self, content: str, procedure_name: str,
+                                        sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse host variables with enhanced SQL integration analysis"""
+        chunks = []
+        
+        # Find host variable declarations in WORKING-STORAGE
+        ws_section_match = self.cobol_patterns['working_storage'].search(content)
+        if not ws_section_match:
+            return chunks
+        
+        ws_start = ws_section_match.end()
+        # Find end of working storage (next section or procedure division)
+        next_section = None
+        for pattern_name, pattern in self.cobol_patterns.items():
+            if 'section' in pattern_name.lower() or 'division' in pattern_name.lower():
+                match = pattern.search(content, ws_start)
+                if match and (not next_section or match.start() < next_section):
+                    next_section = match.start()
+        
+        if not next_section:
+            next_section = len(content)
+        
+        ws_content = content[ws_start:next_section]
+        
+        # Find all data items that could be host variables
+        data_items = list(self.cobol_patterns['data_item'].finditer(ws_content))
+        
+        # Group related host variables
+        host_var_groups = self._group_host_variables(data_items, ws_content)
+        
+        for group in host_var_groups:
+            group_content = '\n'.join([item['match'].group(0) for item in group['variables']])
+            
+            # Analyze with LLM for SQL integration patterns
+            host_var_analysis = await self._analyze_with_llm_cached(
+                group_content, 'cobol_host_variables',
+                """
+                Analyze these COBOL host variables for SQL integration:
+                
+                {content}
+                
+                Identify:
+                1. SQL data type compatibility
+                2. Parameter passing patterns
+                3. Null indicator usage
+                4. Data conversion requirements
+                5. Performance implications
+                
+                Return as JSON:
+                {{
+                    "sql_compatibility": "fully_compatible",
+                    "parameter_patterns": ["input", "output", "inout"],
+                    "null_indicators": true,
+                    "conversion_needed": ["date_format", "decimal_precision"],
+                    "performance_impact": "minimal",
+                    "usage_context": "batch_processing"
+                }}
+                """
+            )
+            
+            business_context = {
+                'variable_group_type': 'sql_host_variables',
+                'sql_compatibility': host_var_analysis.get('analysis', {}).get('sql_compatibility', ''),
+                'parameter_patterns': host_var_analysis.get('analysis', {}).get('parameter_patterns', []),
+                'usage_context': host_var_analysis.get('analysis', {}).get('usage_context', 'unknown'),
+                'variable_count': len(group['variables'])
+            }
+            
+            chunk = CodeChunk(
+                program_name=procedure_name,
+                chunk_id=f"{procedure_name}_HOST_VARS_{group['group_id']}",
+                chunk_type="cobol_host_variables",
+                content=group_content,
+                metadata={
+                    'variable_count': len(group['variables']),
+                    'variable_names': [var['field_name'] for var in group['variables']],
+                    'llm_analysis': host_var_analysis.get('analysis', {}),
+                    'group_purpose': group['purpose']
+                },
+                business_context=business_context,
+                confidence_score=host_var_analysis.get('confidence_score', 0.7),
+                line_start=ws_content[:group['start_pos']].count('\n'),
+                line_end=ws_content[:group['end_pos']].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_cobol_transaction_patterns(self, content: str, procedure_name: str,
+                                            sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse COBOL transaction coordination patterns"""
+        chunks = []
+        
+        # Find SQL transaction control statements
+        commit_matches = list(self.sql_patterns['sql_commit'].finditer(content))
+        rollback_matches = list(self.sql_patterns['sql_rollback'].finditer(content))
+        
+        for match in commit_matches + rollback_matches:
+            trans_type = 'commit' if 'COMMIT' in match.group(0).upper() else 'rollback'
+            
+            # Get surrounding context
+            start_pos = max(0, match.start() - 200)
+            end_pos = min(len(content), match.end() + 200)
+            context_content = content[start_pos:end_pos]
+            
+            trans_analysis = await self._analyze_with_llm_cached(
+                context_content, f'cobol_transaction_{trans_type}',
+                """
+                Analyze this COBOL transaction control:
+                
+                {content}
+                
+                Identify:
+                1. Transaction boundary management
+                2. Error handling integration
+                3. Data consistency strategy
+                4. Recovery implications
+                5. Business process alignment
+                
+                Return as JSON:
+                {{
+                    "boundary_management": "explicit_control",
+                    "error_integration": "comprehensive",
+                    "consistency_strategy": "acid_compliant",
+                    "recovery_approach": "automatic_rollback",
+                    "business_alignment": "batch_processing"
+                }}
+                """
+            )
+            
+            business_context = {
+                'transaction_type': trans_type,
+                'boundary_management': trans_analysis.get('analysis', {}).get('boundary_management', ''),
+                'consistency_strategy': trans_analysis.get('analysis', {}).get('consistency_strategy', ''),
+                'business_alignment': trans_analysis.get('analysis', {}).get('business_alignment', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=procedure_name,
+                chunk_id=f"{procedure_name}_TRANS_{trans_type.upper()}_{hash(match.group(0))%10000}",
+                chunk_type=f"cobol_transaction_{trans_type}",
+                content=match.group(0),
+                metadata={
+                    'transaction_type': trans_type,
+                    'context_content': context_content,
+                    'llm_analysis': trans_analysis.get('analysis', {})
+                },
+                business_context=business_context,
+                confidence_score=trans_analysis.get('confidence_score', 0.8),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    def _group_host_variables(self, data_items: List, ws_content: str) -> List[Dict[str, Any]]:
+        """Group host variables by their SQL usage patterns"""
+        groups = []
+        current_group = None
+        group_id = 1
+        
+        for i, match in enumerate(data_items):
+            try:
+                level = int(match.group(1))
+                field_name = match.group(2)
+                field_content = match.group(0)
+                
+                # Determine if this looks like a host variable
+                is_host_var = False
+                host_var_indicators = [
+                    ':' in field_name,  # Explicit host variable indicator
+                    'PIC' in field_content.upper(),  # Has picture clause
+                    any(sql_type in field_content.upper() for sql_type in ['COMP-3', 'COMP', 'DISPLAY']),
+                    field_name.upper().endswith(('-IND', '-NULL', '-LEN'))  # Common host var suffixes
+                ]
+                
+                if any(host_var_indicators) or level in [1, 5, 77]:  # Common host variable levels
+                    is_host_var = True
+                
+                if is_host_var:
+                    # Determine grouping strategy
+                    if level == 1:  # Start new group for 01 level
+                        if current_group and current_group['variables']:
+                            groups.append(current_group)
+                        
+                        current_group = {
+                            'group_id': group_id,
+                            'variables': [],
+                            'purpose': self._determine_host_var_purpose(field_name, field_content),
+                            'start_pos': match.start(),
+                            'end_pos': match.end()
+                        }
+                        group_id += 1
+                    
+                    if current_group:
+                        current_group['variables'].append({
+                            'level': level,
+                            'field_name': field_name,
+                            'match': match,
+                            'position': match.start()
+                        })
+                        current_group['end_pos'] = match.end()
+                        
+            except (ValueError, IndexError):
+                continue
+        
+        if current_group and current_group['variables']:
+            groups.append(current_group)
+        
+        return groups
+
+    def _determine_host_var_purpose(self, field_name: str, field_content: str) -> str:
+        """Determine the purpose of host variable group"""
+        field_upper = field_name.upper()
+        content_upper = field_content.upper()
+        
+        if any(indicator in field_upper for indicator in ['CUSTOMER', 'CUST']):
+            return 'customer_data'
+        elif any(indicator in field_upper for indicator in ['ORDER', 'ORD']):
+            return 'order_data'
+        elif any(indicator in field_upper for indicator in ['ACCOUNT', 'ACCT']):
+            return 'account_data'
+        elif any(indicator in field_upper for indicator in ['TRANS', 'TXN']):
+            return 'transaction_data'
+        elif any(indicator in field_upper for indicator in ['IND', 'NULL']):
+            return 'indicator_variables'
+        elif any(indicator in field_upper for indicator in ['WORK', 'TEMP']):
+            return 'working_variables'
+        elif 'PIC S9' in content_upper:
+            return 'numeric_data'
+        elif 'PIC X' in content_upper:
+            return 'character_data'
+        else:
+            return 'general_purpose'
+
+# ==================== MISSING STORAGE METHODS ====================
+
+    async def _store_chunks_enhanced(self, chunks: List[CodeChunk], file_hash: str):
+        """Store chunks with enhanced metadata and validation"""
+        if not chunks:
+            return
+        
+        try:
+            async with self._engine_lock:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                for chunk in chunks:
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO program_chunks 
+                        (program_name, chunk_id, chunk_type, content, metadata, 
+                        business_context, file_hash, confidence_score, llm_analysis,
+                        line_start, line_end)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        chunk.program_name,
+                        chunk.chunk_id,
+                        chunk.chunk_type,
+                        chunk.content,
+                        json.dumps(chunk.metadata),
+                        json.dumps(chunk.business_context),
+                        file_hash,
+                        chunk.confidence_score,
+                        json.dumps(chunk.metadata.get('llm_analysis', {})),
+                        chunk.line_start,
+                        chunk.line_end
+                    ))
+                
+                conn.commit()
+                conn.close()
+                
+                self.logger.info(f"Stored {len(chunks)} enhanced chunks")
+                
+        except Exception as e:
+            self.logger.error(f"Failed to store enhanced chunks: {str(e)}")
+            raise
+
+    async def _verify_chunks_stored(self, program_name: str) -> int:
+        """Verify chunks were stored correctly"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT COUNT(*) FROM program_chunks 
+                WHERE program_name = ?
+            """, (program_name,))
+            
+            count = cursor.fetchone()[0]
+            conn.close()
+            
+            return count
+            
+        except Exception as e:
+            self.logger.error(f"Chunk verification failed: {str(e)}")
+            return 0
+
+    async def _generate_metadata_enhanced(self, chunks: List[CodeChunk], file_type: str, 
+                                        business_violations: List[BusinessRuleViolation]) -> Dict[str, Any]:
+        """Generate enhanced metadata with business insights"""
+        
+        # Calculate chunk statistics
+        chunk_types = {}
+        total_confidence = 0.0
+        llm_analyzed_chunks = 0
+        business_contexts = {}
+        
+        for chunk in chunks:
+            chunk_type = chunk.chunk_type
+            chunk_types[chunk_type] = chunk_types.get(chunk_type, 0) + 1
+            total_confidence += chunk.confidence_score
+            
+            if chunk.metadata.get('llm_analysis'):
+                llm_analyzed_chunks += 1
+            
+            # Aggregate business contexts
+            for key, value in chunk.business_context.items():
+                if key not in business_contexts:
+                    business_contexts[key] = []
+                if value and value not in business_contexts[key]:
+                    business_contexts[key].append(value)
+        
+        # Calculate complexity metrics
+        complexity_indicators = {
+            'high_complexity_chunks': sum(1 for chunk in chunks if chunk.confidence_score < 0.7),
+            'llm_analysis_coverage': llm_analyzed_chunks / len(chunks) if chunks else 0,
+            'average_confidence': total_confidence / len(chunks) if chunks else 0,
+            'business_violation_rate': len(business_violations) / len(chunks) if chunks else 0
+        }
+        
+        # Categorize business violations
+        violation_summary = {}
+        for violation in business_violations:
+            severity = violation.severity
+            violation_summary[severity] = violation_summary.get(severity, 0) + 1
+        
+        return {
+            'file_type': file_type,
+            'total_chunks': len(chunks),
+            'chunk_type_distribution': chunk_types,
+            'complexity_metrics': complexity_indicators,
+            'business_contexts': business_contexts,
+            'business_violations': {
+                'total': len(business_violations),
+                'by_severity': violation_summary
+            },
+            'quality_metrics': {
+                'average_confidence': complexity_indicators['average_confidence'],
+                'llm_coverage': complexity_indicators['llm_analysis_coverage'],
+                'high_quality_chunks': sum(1 for chunk in chunks if chunk.confidence_score >= 0.8)
+            },
+            'analysis_timestamp': dt.now().isoformat()
+        }
+
+    async def _store_copybook_analysis(self, chunks: List[CodeChunk], copybook_name: str):
+        """Store copybook-specific analysis"""
+        try:
+            # Aggregate copybook analysis from chunks
+            layout_types = []
+            field_hierarchies = {}
+            occurs_structures = []
+            redefines_structures = []
+            replacing_parameters = []
+            business_domain = 'unknown'
+            complexity_score = 0
+            
+            for chunk in chunks:
+                if chunk.chunk_type.startswith('copybook_'):
+                    # Extract layout information
+                    if 'layout_type' in chunk.metadata:
+                        layout_types.append(chunk.metadata['layout_type'])
+                    
+                    # Extract business domain
+                    if chunk.business_context.get('business_entity'):
+                        business_domain = chunk.business_context['business_entity']
+                    
+                    # Aggregate complexity
+                    if 'complexity_score' in chunk.metadata:
+                        complexity_score += chunk.metadata['complexity_score']
+                    
+                    # Extract structure information
+                    if chunk.chunk_type == 'copybook_occurs_structure':
+                        occurs_structures.append(chunk.metadata.get('occurs_details', {}))
+                    elif chunk.chunk_type == 'copybook_redefines_structure':
+                        redefines_structures.append({
+                            'original_field': chunk.metadata.get('original_field'),
+                            'redefining_fields': chunk.metadata.get('redefining_fields', [])
+                        })
+                    elif chunk.chunk_type == 'copybook_replacing_parameters':
+                        replacing_parameters.extend(chunk.metadata.get('parameter_values', []))
+            
+            # Store in copybook_structures table
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT OR REPLACE INTO copybook_structures 
+                (copybook_name, layout_type, record_layouts, field_hierarchy,
+                occurs_structures, redefines_structures, replacing_parameters,
+                business_domain, complexity_score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                copybook_name,
+                ','.join(set(layout_types)) if layout_types else 'single_record',
+                json.dumps([]),  # Would need more detailed analysis
+                json.dumps(field_hierarchies),
+                json.dumps(occurs_structures),
+                json.dumps(redefines_structures),
+                json.dumps(replacing_parameters),
+                business_domain,
+                min(complexity_score, 20)  # Cap at 20
+            ))
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"Stored copybook analysis for {copybook_name}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store copybook analysis: {str(e)}")
+
+    async def _store_mq_analysis(self, chunks: List[CodeChunk], content: str, program_name: str):
+        """Store MQ-specific analysis"""
+        try:
+            # Aggregate MQ analysis from chunks
+            connection_types = []
+            message_paradigms = []
+            queue_operations = []
+            flow_patterns = []
+            transaction_scopes = []
+            error_strategies = []
+            performance_chars = {}
+            business_purpose = 'unknown'
+            
+            for chunk in chunks:
+                if chunk.chunk_type.startswith('mq_'):
+                    # Extract MQ-specific metadata
+                    if chunk.business_context.get('connection_strategy'):
+                        connection_types.append(chunk.business_context['connection_strategy'])
+                    
+                    if chunk.business_context.get('flow_type'):
+                        message_paradigms.append(chunk.business_context['flow_type'])
+                    
+                    if chunk.chunk_type == 'mq_api_sequence':
+                        api_calls = chunk.metadata.get('api_calls', [])
+                        queue_operations.extend(api_calls)
+                    
+                    if chunk.chunk_type == 'mq_message_flow':
+                        flow_patterns.append(chunk.business_context.get('flow_type', ''))
+                    
+                    if chunk.chunk_type == 'mq_transaction_pattern':
+                        transaction_scopes.append(chunk.business_context.get('transaction_scope', ''))
+                    
+                    if chunk.chunk_type == 'mq_error_handling':
+                        error_strategies.append(chunk.business_context.get('detection_strategy', ''))
+                    
+                    # Extract business purpose
+                    if chunk.business_context.get('business_alignment'):
+                        business_purpose = chunk.business_context['business_alignment']
+            
+            # Store in mq_analysis table
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT OR REPLACE INTO mq_analysis 
+                (program_name, connection_type, message_paradigm, queue_operations,
+                message_flow_patterns, transaction_scope, error_handling_strategy,
+                performance_characteristics, business_purpose)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                program_name,
+                ','.join(set(connection_types)) if connection_types else 'unknown',
+                ','.join(set(message_paradigms)) if message_paradigms else 'unknown',
+                json.dumps(list(set(queue_operations))),
+                json.dumps(list(set(flow_patterns))),
+                ','.join(set(transaction_scopes)) if transaction_scopes else 'unknown',
+                ','.join(set(error_strategies)) if error_strategies else 'unknown',
+                json.dumps(performance_chars),
+                business_purpose
+            ))
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"Stored MQ analysis for {program_name}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store MQ analysis: {str(e)}")
+
+    async def _store_db2_procedure_analysis(self, chunks: List[CodeChunk], procedure_name: str):
+        """Store DB2 procedure-specific analysis"""
+        try:
+            # Aggregate DB2 analysis from chunks
+            parameters = []
+            sql_operations = []
+            cursors = []
+            exception_handlers = []
+            transaction_control = {}
+            performance_hints = []
+            complexity_score = 0
+            security_classification = 'standard'
+            
+            for chunk in chunks:
+                if chunk.chunk_type.startswith('db2_'):
+                    # Extract DB2-specific metadata
+                    if chunk.chunk_type == 'db2_procedure_signature':
+                        parameters = chunk.metadata.get('llm_analysis', {}).get('parameter_types', [])
+                    
+                    elif chunk.chunk_type.startswith('db2_sql_'):
+                        sql_operations.append({
+                            'type': chunk.business_context.get('sql_type', ''),
+                            'complexity': chunk.business_context.get('complexity', ''),
+                            'tables': chunk.metadata.get('tables_accessed', [])
+                        })
+                        complexity_score += chunk.metadata.get('complexity_score', 0)
+                    
+                    elif chunk.chunk_type == 'db2_cursor':
+                        cursors.append({
+                            'name': chunk.metadata.get('cursor_name', ''),
+                            'purpose': chunk.business_context.get('cursor_purpose', ''),
+                            'performance': chunk.business_context.get('access_pattern', '')
+                        })
+                    
+                    elif chunk.chunk_type == 'db2_exception_handler':
+                        exception_handlers.append({
+                            'type': chunk.metadata.get('handler_type', ''),
+                            'strategy': chunk.business_context.get('error_strategy', '')
+                        })
+                    
+                    elif chunk.chunk_type.startswith('db2_control_'):
+                        if 'transaction' in chunk.metadata.get('llm_analysis', {}).get('control_purpose', ''):
+                            transaction_control = chunk.metadata.get('llm_analysis', {})
+                    
+                    # Extract performance hints
+                    optimization_opportunities = chunk.metadata.get('llm_analysis', {}).get('optimization_opportunities', [])
+                    performance_hints.extend(optimization_opportunities)
+            
+            # Store in db2_procedure_analysis table
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT OR REPLACE INTO db2_procedure_analysis 
+                (procedure_name, parameter_list, sql_operations, cursor_definitions,
+                exception_handlers, transaction_control, performance_hints,
+                business_logic_complexity, security_classification)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                procedure_name,
+                json.dumps(parameters),
+                json.dumps(sql_operations),
+                json.dumps(cursors),
+                json.dumps(exception_handlers),
+                json.dumps(transaction_control),
+                json.dumps(list(set(performance_hints))),
+                min(complexity_score, 20),  # Cap at 20
+                security_classification
+            ))
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"Stored DB2 procedure analysis for {procedure_name}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store DB2 procedure analysis: {str(e)}")
+            
+
     async def _parse_generic(self, content: str, filename: str) -> List[CodeChunk]:
         """Generic parsing for unknown file types"""
         chunks = []
