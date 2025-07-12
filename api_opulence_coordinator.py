@@ -384,6 +384,32 @@ class ModelServerClient:
             return  # Don't re-raise, just return
         except Exception as e:
             self.logger.error(f"Health check loop error: {e}")
+    
+
+    async def health_check(self, server: ModelServer) -> bool:
+        """Check server health"""
+        try:
+            if not self.session:
+                return False
+                
+            health_url = urljoin(server.config.endpoint, "/health")
+            
+            async with self.session.get(
+                health_url,
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                if response.status == 200:
+                    server.status = ModelServerStatus.HEALTHY
+                    return True
+                else:
+                    server.status = ModelServerStatus.UNHEALTHY
+                    return False
+                    
+        except Exception as e:
+            server.status = ModelServerStatus.UNHEALTHY
+            self.logger.debug(f"Health check failed for {server.config.name}: {e}")
+            return False
+        
 # ==================== API-Compatible Engine Context ====================
 
 class APIEngineContext:
