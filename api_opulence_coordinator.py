@@ -463,6 +463,7 @@ class APIOpulenceCoordinator:
     """API-based Opulence Coordinator - orchestrates existing agents through API calls"""
     
     def __init__(self, config: APIOpulenceConfig):
+        self.logger = logging.getLogger(f"{__name__}.APIOpulenceCoordinator")
         self.config = config
         self.load_balancer = LoadBalancer(config)
         self.client = ModelServerClient(config)
@@ -545,7 +546,7 @@ class APIOpulenceCoordinator:
         # For backwards compatibility
         self.selected_gpus = [server.config.gpu_id for server in self.load_balancer.servers]
         
-        self.logger = logging.getLogger(f"{__name__}.APIOpulenceCoordinator")
+        #self.logger = logging.getLogger(f"{__name__}.APIOpulenceCoordinator")
         self.logger.info(f"API Coordinator initialized with servers: {[s.config.name for s in self.load_balancer.servers]}")
     
     async def initialize(self):
