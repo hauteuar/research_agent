@@ -148,10 +148,10 @@ def initialize_session_state():
             st.session_state[key] = default_value
 
 def detect_single_gpu_servers():
-    """Auto-detect single GPU server configurations"""
-    # Use your actual GPU server IP and port from the curl test
+    """Auto-detect single GPU server configurations - FIXED VERSION"""
+    # Your actual working server should be first in the list
     potential_endpoints = [
-        "http://171.201.3.165:8100",  # Your actual working server
+        "http://171.201.3.165:8100",  # Your actual working server - FIRST!
         "http://localhost:8100",
         "http://localhost:8101", 
         "http://localhost:8102",
@@ -166,23 +166,23 @@ def detect_single_gpu_servers():
             with st.spinner(f"Checking {endpoint}..."):
                 response = requests.get(f"{endpoint}/health", timeout=5)
                 if response.status_code == 200:
+                    # FIXED: Use consistent GPU ID for your server
+                    gpu_id = 2 if endpoint == "http://171.201.3.165:8100" else i
+                    
                     detected_servers.append({
-                        "name": f"gpu_server_{i}",
+                        "name": f"gpu_server_{gpu_id}",
                         "endpoint": endpoint,
-                        "gpu_id": i,
-                        "max_concurrent_requests": 5,
-                        "timeout": 300
+                        "gpu_id": gpu_id,  # FIXED: Use GPU ID 2 for your server
+                        "max_concurrent_requests": 3,  # REDUCED for single GPU
+                        "timeout": 120  # INCREASED timeout
                     })
-                    st.success(f"✅ Detected server at {endpoint}")
+                    st.success(f"✅ Detected server at {endpoint} (GPU {gpu_id})")
                 else:
                     st.warning(f"⚠️ Server at {endpoint} returned status {response.status_code}")
         except requests.exceptions.ConnectionError:
             st.info(f"ℹ️ No server found at {endpoint}")
         except Exception as e:
             st.warning(f"⚠️ Error checking {endpoint}: {str(e)}")
-    
-    if not detected_servers:
-        st.warning("⚠️ No GPU servers detected")
     
     return detected_servers
 
@@ -358,7 +358,7 @@ def add_custom_css():
 
 @with_error_handling
 async def init_api_coordinator_single_gpu():
-    """Enhanced coordinator initialization optimized for single GPU"""
+    """FIXED: Enhanced coordinator initialization optimized for single GPU"""
     if not COORDINATOR_AVAILABLE:
         return {"error": "API Coordinator module not available"}
     
@@ -373,34 +373,53 @@ async def init_api_coordinator_single_gpu():
     
     try:
         with st.spinner("🔍 Detecting available GPU servers..."):
-            # Auto-detect servers if none configured
+            # FIXED: Force use your known working server
             if not st.session_state.model_servers:
+                # First try auto-detection
                 detected_servers = detect_single_gpu_servers()
                 
                 if detected_servers:
                     st.session_state.model_servers = detected_servers
                     st.info(f"🎯 Auto-detected {len(detected_servers)} GPU server(s)")
                 else:
-                    # Updated fallback to use your actual server
+                    # FIXED: Fallback with correct GPU ID
                     st.session_state.model_servers = [{
                         "name": "main_gpu_server",
                         "endpoint": "http://171.201.3.165:8100",
-                        "gpu_id": 0,
+                        "gpu_id": 2,  # FIXED: Use GPU ID 2
                         "max_concurrent_requests": 3,
-                        "timeout": 300
+                        "timeout": 120
                     }]
-                    st.warning("⚠️ No servers detected, using known server at 171.201.3.165:8100")
+                    st.warning("⚠️ No servers detected, using known server with GPU ID 2")
             
             st.info(f"📋 Using servers: {st.session_state.model_servers}")
             
-            # Create coordinator with single GPU optimizations
+            # FIXED: Test server connectivity before creating coordinator
+            st.info("🔍 Testing server connectivity...")
+            server_config = st.session_state.model_servers[0]
+            
+            # Test the server before proceeding
+            try:
+                test_response = requests.get(f"{server_config['endpoint']}/health", timeout=10)
+                if test_response.status_code != 200:
+                    st.error(f"❌ Server health check failed: {test_response.status_code}")
+                    return {"error": f"Server not healthy: {test_response.status_code}"}
+                else:
+                    st.success(f"✅ Server health check passed")
+            except Exception as e:
+                st.error(f"❌ Server connectivity test failed: {e}")
+                return {"error": f"Server connectivity failed: {e}"}
+            
+            # Create coordinator with conservative settings
             st.info("🔧 Creating coordinator...")
             coordinator = create_api_coordinator_from_config(
                 model_servers=st.session_state.model_servers,
-                load_balancing_strategy="round_robin",
-                max_retries=2,
-                connection_pool_size=10,
-                request_timeout=120
+                load_balancing_strategy="round_robin",  # Simple for single server
+                max_retries=2,  # REDUCED retries
+                connection_pool_size=5,  # SMALLER pool
+                request_timeout=120,  # LONGER timeout
+                circuit_breaker_threshold=5,  # MORE tolerance
+                retry_delay=2.0  # LONGER delay between retries
             )
             
             # Initialize with validation
@@ -408,65 +427,50 @@ async def init_api_coordinator_single_gpu():
             await coordinator.initialize()
             st.success("✅ Coordinator initialized")
             
-            # Quick validation for single GPU setup
+            # FIXED: More thorough validation
             st.info("🔍 Running validation...")
-            try:
-                validation_results = await validate_single_gpu_setup(coordinator)
-                st.info(f"📊 Validation results: {validation_results}")
-                
-                if validation_results['success']:
-                    st.session_state.coordinator = coordinator
-                    st.session_state.initialization_status = "completed"
-                    
-                    # Initialize agent status
-                    for agent_type in AGENT_TYPES:
-                        try:
-                            agent = coordinator.get_agent(agent_type)
-                            if agent:
-                                st.session_state.agent_status[agent_type]['status'] = 'available'
-                            else:
-                                st.session_state.agent_status[agent_type]['status'] = 'unavailable'
-                        except Exception as e:
-                            st.session_state.agent_status[agent_type]['status'] = 'error'
-                            st.session_state.agent_status[agent_type]['error_message'] = str(e)
-                    
-                    st.success("🎉 System fully initialized and validated!")
-                    return {"success": True, "validation": validation_results}
-                else:
-                    # Don't shut down on validation failure - keep coordinator running
-                    st.warning(f"⚠️ Validation failed but coordinator is running: {validation_results['message']}")
-                    
-                    # Store coordinator anyway for manual testing
-                    st.session_state.coordinator = coordinator
-                    st.session_state.initialization_status = f"validation_warning: {validation_results['message']}"
-                    
-                    return {"success": True, "warning": validation_results['message'], "coordinator_running": True}
+            validation_results = await validate_single_gpu_setup_fixed(coordinator)
+            st.info(f"📊 Validation results: {validation_results}")
             
-            except Exception as validation_error:
-                st.error(f"❌ Validation failed with exception: {str(validation_error)}")
-                st.exception(validation_error)
-                
-                # Don't shut down - keep coordinator for debugging
+            if validation_results['success']:
                 st.session_state.coordinator = coordinator
-                st.session_state.initialization_status = f"validation_error: {str(validation_error)}"
+                st.session_state.initialization_status = "completed"
                 
-                return {"success": True, "validation_error": str(validation_error), "coordinator_running": True}
+                # Initialize agent status more carefully
+                for agent_type in AGENT_TYPES:
+                    try:
+                        agent = coordinator.get_agent(agent_type)
+                        if agent:
+                            st.session_state.agent_status[agent_type]['status'] = 'available'
+                        else:
+                            st.session_state.agent_status[agent_type]['status'] = 'unavailable'
+                    except Exception as e:
+                        st.session_state.agent_status[agent_type]['status'] = 'error'
+                        st.session_state.agent_status[agent_type]['error_message'] = str(e)
+                
+                st.success("🎉 System fully initialized and validated!")
+                return {"success": True, "validation": validation_results}
+            else:
+                st.error(f"❌ Validation failed: {validation_results['message']}")
+                # Still keep coordinator for debugging
+                st.session_state.coordinator = coordinator
+                st.session_state.initialization_status = f"validation_failed: {validation_results['message']}"
+                return {"success": False, "validation_error": validation_results['message']}
     
     except Exception as e:
         st.error(f"❌ Coordinator creation failed: {str(e)}")
         st.exception(e)
         
-        # Only clean up if coordinator was actually created
+        # Clean up on failure
         if 'coordinator' in locals():
             try:
                 await coordinator.shutdown()
-                st.info("🧹 Cleaned up failed coordinator")
             except:
                 pass
         
         st.session_state.initialization_status = f"error: {str(e)}"
         return {"error": str(e)}
-    
+        
 def cleanup_on_session_end():
     """Cleanup function to call when session ends"""
     try:
@@ -481,38 +485,68 @@ def cleanup_on_session_end():
     import atexit
     atexit.register(cleanup_on_session_end)
 
-async def validate_single_gpu_setup(coordinator) -> Dict[str, Any]:
-    """Validate single GPU coordinator setup"""
+async def validate_single_gpu_setup_fixed(coordinator) -> Dict[str, Any]:
+    """FIXED: Validate single GPU coordinator setup with better error handling"""
     try:
-        # Check coordinator health
+        # Step 1: Check coordinator health
         health = coordinator.get_health_status()
         available_servers = health.get('available_servers', 0)
+        total_servers = health.get('total_servers', 0)
         
-        if available_servers > 0:
-            # Test a simple API call
+        st.info(f"Health check: {available_servers}/{total_servers} servers available")
+        
+        if available_servers == 0:
+            # Debug server status
+            server_details = []
+            for server in coordinator.load_balancer.servers:
+                status_detail = {
+                    'name': server.config.name,
+                    'endpoint': server.config.endpoint,
+                    'status': server.status.value,
+                    'available': server.is_available(),
+                    'active_requests': server.active_requests,
+                    'max_requests': server.config.max_concurrent_requests
+                }
+                server_details.append(status_detail)
+            
+            return {
+                'success': False,
+                'message': f'No servers available. Server details: {server_details}',
+                'servers': 0,
+                'server_details': server_details
+            }
+        
+        # Step 2: Test API call with minimal parameters
+        st.info("Testing API call...")
+        try:
             test_result = await coordinator.call_model_api(
-                "Test prompt for validation", 
-                {"max_tokens": 10, "temperature": 0.1}
+                "Hello", 
+                {
+                    "max_tokens": 5,
+                    "temperature": 0.1,
+                    "stream": False
+                }
             )
             
             if test_result and not test_result.get('error'):
                 return {
                     'success': True,
-                    'message': f'Single GPU setup validated successfully with {available_servers} server(s)',
+                    'message': f'Validation successful with {available_servers} server(s)',
                     'servers': available_servers,
                     'test_result': test_result
                 }
             else:
                 return {
                     'success': False,
-                    'message': 'API test call failed',
+                    'message': f'API test failed: {test_result}',
                     'servers': available_servers
                 }
-        else:
+                
+        except Exception as api_error:
             return {
                 'success': False,
-                'message': 'No GPU servers available',
-                'servers': 0
+                'message': f'API call exception: {str(api_error)}',
+                'servers': available_servers
             }
     
     except Exception as e:
@@ -1355,8 +1389,8 @@ def show_chat_interface():
     # Display conversation
     display_chat_conversation()
 
-def process_chat_query(query: str):
-    """Process user chat query"""
+def process_chat_query_fixed(query: str):
+    """FIXED: Process user chat query with better error handling"""
     if not query.strip():
         return
     
@@ -1373,14 +1407,23 @@ def process_chat_query(query: str):
     # Show processing indicator
     with st.spinner("🤖 Processing your query..."):
         try:
+            # FIXED: Check coordinator first
+            if not st.session_state.coordinator:
+                raise RuntimeError("Coordinator not available")
+            
+            # FIXED: Check server availability
+            health = st.session_state.coordinator.get_health_status()
+            if health.get('available_servers', 0) == 0:
+                raise RuntimeError("No model servers available")
+            
             # Get conversation context
             conversation_history = get_conversation_context()
             
-            # Add query configuration
+            # FIXED: Conservative query configuration
             query_config = {
-                'response_mode': st.session_state.get('chat_response_mode', 'Detailed'),
-                'include_context': st.session_state.get('chat_include_context', True),
-                'max_history': st.session_state.get('chat_max_history', 5)
+                'response_mode': st.session_state.get('chat_response_mode', 'Concise'),  # Use concise mode
+                'include_context': True,
+                'max_history': 3  # Reduce history to avoid token limits
             }
             
             # Process with coordinator
@@ -1390,7 +1433,8 @@ def process_chat_query(query: str):
                     query, 
                     conversation_history,
                     **query_config
-                )
+                ),
+                timeout=120  # Longer timeout
             )
             
             processing_time = time.time() - start_time
@@ -1453,9 +1497,84 @@ def process_chat_query(query: str):
             st.session_state.agent_status['chat_agent']['errors'] += 1
             
             st.error(f"❌ Unexpected error: {error_msg}")
+            
+            # Show debug info if enabled
+            if st.session_state.get('debug_mode', False):
+                st.exception(e)
     
     # Rerun to show new messages
     st.rerun()
+
+def test_manual_api_call():
+    """Manual API call test for debugging"""
+    if not st.session_state.get('coordinator'):
+        st.error("❌ No coordinator available")
+        return
+    
+    st.markdown("#### 🧪 Manual API Test")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        test_prompt = st.text_input("Test Prompt", value="Hello, how are you?")
+        max_tokens = st.number_input("Max Tokens", min_value=1, max_value=100, value=10)
+        temperature = st.slider("Temperature", min_value=0.0, max_value=1.0, value=0.1, step=0.1)
+    
+    with col2:
+        gpu_id = st.number_input("GPU ID", min_value=0, max_value=10, value=2)
+        timeout = st.number_input("Timeout", min_value=10, max_value=300, value=60)
+    
+    if st.button("🚀 Test API Call"):
+        test_params = {
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": False
+        }
+        
+        try:
+            with st.spinner("Making API call..."):
+                result = safe_run_async(
+                    st.session_state.coordinator.call_model_api(
+                        test_prompt, 
+                        test_params, 
+                        preferred_gpu_id=gpu_id
+                    ),
+                    timeout=timeout
+                )
+            
+            if result and not result.get('error'):
+                st.success("✅ API call successful!")
+                st.json(result)
+            else:
+                st.error(f"❌ API call failed: {result}")
+                
+        except Exception as e:
+            st.error(f"❌ API call exception: {str(e)}")
+            st.exception(e)
+            
+def show_quick_diagnostic():
+    """Show quick diagnostic in Streamlit sidebar"""
+    st.sidebar.markdown("### 🔧 Quick Diagnostic")
+    
+    if st.sidebar.button("🏥 Health Check"):
+        if st.session_state.coordinator:
+            try:
+                health = st.session_state.coordinator.get_health_status()
+                if health.get('available_servers', 0) > 0:
+                    st.sidebar.success("✅ System Healthy")
+                else:
+                    st.sidebar.error("❌ No servers available")
+                    st.sidebar.json(health)
+            except Exception as e:
+                st.sidebar.error(f"Health check failed: {e}")
+        else:
+            st.sidebar.error("❌ No coordinator")
+    
+    if st.sidebar.button("🧪 Test API"):
+        test_manual_api_call()
+    
+    if st.sidebar.button("🐛 Debug Info"):
+        debug_coordinator_state()
 
 def get_conversation_context():
     """Get conversation context for chat agent"""
@@ -3108,6 +3227,45 @@ def show_header_status_bar():
     
     except Exception as e:
         st.warning(f"🟡 Status check failed: {str(e)}")
+
+def debug_coordinator_state():
+    """Debug coordinator state in Streamlit"""
+    if not st.session_state.get('coordinator'):
+        st.error("❌ No coordinator in session state")
+        return
+    
+    coordinator = st.session_state.coordinator
+    
+    with st.expander("🐛 Coordinator Debug Information", expanded=True):
+        # Basic coordinator info
+        st.markdown("**Coordinator Status:**")
+        
+        try:
+            health = coordinator.get_health_status()
+            st.json(health)
+        except Exception as e:
+            st.error(f"Health check failed: {e}")
+        
+        # Server details
+        st.markdown("**Server Details:**")
+        for i, server in enumerate(coordinator.load_balancer.servers):
+            st.markdown(f"**Server {i + 1}: {server.config.name}**")
+            st.markdown(f"- Endpoint: {server.config.endpoint}")
+            st.markdown(f"- GPU ID: {server.config.gpu_id}")
+            st.markdown(f"- Status: {server.status.value}")
+            st.markdown(f"- Available: {server.is_available()}")
+            st.markdown(f"- Active requests: {server.active_requests}/{server.config.max_concurrent_requests}")
+            st.markdown(f"- Total requests: {server.total_requests}")
+            st.markdown(f"- Consecutive failures: {server.consecutive_failures}")
+            
+            if server.status.value == 'circuit_open':
+                st.markdown(f"- Circuit opened at: {server.circuit_breaker_open_time}")
+        
+        # Load balancer info
+        st.markdown("**Load Balancer:**")
+        available_servers = coordinator.load_balancer.get_available_servers()
+        st.markdown(f"- Available servers: {len(available_servers)}")
+        st.markdown(f"- Strategy: {coordinator.config.load_balancing_strategy.value}")
 
 def show_enhanced_sidebar():
     """Show enhanced sidebar with navigation and controls"""

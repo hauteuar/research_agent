@@ -726,25 +726,140 @@ class APIOpulenceCoordinator:
             self.logger.error(f"Health check loop error: {e}")
     
     async def call_model_api(self, prompt: str, params: Dict[str, Any] = None, 
-                           preferred_gpu_id: int = None) -> Dict[str, Any]:
-        """Call model API with load balancing"""
-        # Try preferred GPU first
-        if preferred_gpu_id is not None:
-            server = self.load_balancer.get_server_by_gpu_id(preferred_gpu_id)
-            if server and server.is_available():
-                try:
-                    return await self.client.call_generate(server, prompt, params)
-                except Exception as e:
-                    self.logger.warning(f"Preferred GPU {preferred_gpu_id} failed: {e}")
+                       preferred_gpu_id: int = None) -> Dict[str, Any]:
+        """FIXED: Call model API with better server selection and error handling"""
         
-        # Use load balancer
-        server = self.load_balancer.select_server()
+        # FIXED: Always use GPU ID 2 for your setup
+        if preferred_gpu_id is None:
+            preferred_gpu_id = 2
+        
+        # Try preferred GPU first (which should be your server)
+        server = self.load_balancer.get_server_by_gpu_id(preferred_gpu_id)
+        if server and server.is_available():
+            try:
+                self.logger.debug(f"Using preferred server {server.config.name} at {server.config.endpoint}")
+                result = await self.client.call_generate(server, prompt, params)
+                self.stats["total_api_calls"] += 1
+                return result
+            except Exception as e:
+                self.logger.warning(f"Preferred GPU {preferred_gpu_id} failed: {e}")
+                # Don't fallback to load balancer for single GPU setup
+                raise RuntimeError(f"Primary server (GPU {preferred_gpu_id}) failed: {str(e)}")
+        
+        # For single GPU setup, don't use load balancer fallback
         if not server:
-            raise RuntimeError("No available model servers")
+            raise RuntimeError(f"Server with GPU ID {preferred_gpu_id} not found")
         
-        result = await self.client.call_generate(server, prompt, params)
-        self.stats["total_api_calls"] += 1
-        return result
+        if not server.is_available():
+            # Debug why server is not available
+            debug_info = {
+                'server_name': server.config.name,
+                'status': server.status.value,
+                'active_requests': server.active_requests,
+                'max_requests': server.config.max_concurrent_requests,
+                'consecutive_failures': server.consecutive_failures,
+                'circuit_breaker_open': server.status.value == 'circuit_open'
+            }
+            raise RuntimeError(f"Server not available: {debug_info}")
+        
+    async def call_generate(self, server: ModelServer, prompt: str, 
+                  params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """FIXED: Call model server generate endpoint with better validation"""
+        if not self.session:
+            raise RuntimeError("Client not initialized")
+        
+        params = params or {}
+        
+        # FIXED: Simplified parameter validation matching your server
+        request_data = {
+            "prompt": prompt,
+            "max_tokens": min(params.get("max_tokens", 512), 1024),  # Conservative limit
+            "temperature": max(0.0, min(params.get("temperature", 0.1), 1.0)),  # Safer range
+            "top_p": max(0.1, min(params.get("top_p", 0.9), 1.0)),
+            "stream": False  # Always disable streaming
+        }
+        
+        # FIXED: Only include parameters that your server expects
+        # Remove any None values and unexpected parameters
+        cleaned_data = {k: v for k, v in request_data.items() if v is not None}
+        
+        self.logger.debug(f"Sending to {server.config.endpoint}/generate: {cleaned_data}")
+        
+        server.active_requests += 1
+        server.total_requests += 1
+        start_time = time.time()
+        
+        try:
+            for attempt in range(self.config.max_retries + 1):
+                try:
+                    generate_url = f"{server.config.endpoint}/generate"
+                    
+                    async with self.session.post(
+                        generate_url,
+                        json=cleaned_data,
+                        timeout=aiohttp.ClientTimeout(total=server.config.timeout),
+                        headers={'Content-Type': 'application/json'}
+                    ) as response:
+                        
+                        response_text = await response.text()
+                        self.logger.debug(f"Server response status: {response.status}")
+                        self.logger.debug(f"Server response: {response_text[:200]}...")
+                        
+                        if response.status == 200:
+                            try:
+                                result = await response.json()
+                            except:
+                                # Fallback for non-JSON responses
+                                result = {"text": response_text, "raw_response": True}
+                            
+                            # Record success
+                            latency = time.time() - start_time
+                            server.record_success(latency)
+                            
+                            # Add metadata
+                            result["server_used"] = server.config.name
+                            result["gpu_id"] = server.config.gpu_id
+                            result["latency"] = latency
+                            
+                            return result
+                        
+                        elif response.status == 422:
+                            # Validation error - don't retry
+                            error_detail = f"Validation error (422): {response_text}"
+                            self.logger.error(error_detail)
+                            raise aiohttp.ClientError(error_detail)
+                        
+                        elif response.status == 503:
+                            # Service unavailable
+                            error_detail = f"Service unavailable (503): {response_text}"
+                            self.logger.error(error_detail)
+                            raise aiohttp.ClientError(error_detail)
+                        
+                        else:
+                            error_detail = f"HTTP {response.status}: {response_text}"
+                            self.logger.error(error_detail)
+                            raise aiohttp.ClientError(error_detail)
+                
+                except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+                    if attempt < self.config.max_retries:
+                        delay = self.config.retry_delay * (2 ** attempt)
+                        self.logger.warning(f"Request failed (attempt {attempt + 1}), retrying in {delay:.1f}s: {e}")
+                        await asyncio.sleep(delay)
+                        continue
+                    raise
+        
+        except Exception as e:
+            server.record_failure()
+            
+            # Check if circuit breaker should open
+            if server.should_open_circuit(self.config.circuit_breaker_threshold):
+                server.open_circuit()
+            
+            raise RuntimeError(f"Model server call failed after {self.config.max_retries + 1} attempts: {e}")
+        
+        finally:
+            server.active_requests -= 1
+
     
     # ==================== Existing Agent Interface (Backwards Compatibility) ====================
     
@@ -755,100 +870,108 @@ class APIOpulenceCoordinator:
         return self.agents[agent_type]
     
     def _create_agent(self, agent_type: str):
-        """Create agent using API-based engine context with proper base agent integration"""
+        """FIXED: Create agent using API-based engine context with better error handling"""
         self.logger.info(f"🔗 Creating {agent_type} agent (API-based)")
         
         # Get agent configuration
         agent_config = self.agent_configs.get(agent_type, {})
         
-        # Select GPU for this agent (round-robin or load-balanced)
-        selected_gpu_id = self._select_gpu_for_agent(agent_type)
+        # FIXED: Always use GPU ID 2 for your setup
+        selected_gpu_id = 2
         
-        # Create agents with base agent integration
-        if agent_type == "code_parser" and CodeParserAgent:
-            agent = CodeParserAgent(
-                llm_engine=None,  # Will be replaced with API context
-                db_path=self.db_path,
-                gpu_id=selected_gpu_id,
-                coordinator=self
-            )
-        elif agent_type == "vector_index" and VectorIndexAgent:
-            agent = VectorIndexAgent(
-                llm_engine=None,
-                db_path=self.db_path,
-                gpu_id=selected_gpu_id,
-                coordinator=self
-            )
-        elif agent_type == "data_loader" and DataLoaderAgent:
-            agent = DataLoaderAgent(
-                llm_engine=None,
-                db_path=self.db_path,
-                gpu_id=selected_gpu_id,
-                coordinator=self
-            )
-        elif agent_type == "lineage_analyzer" and LineageAnalyzerAgent:
-            agent = LineageAnalyzerAgent(
-                llm_engine=None,
-                db_path=self.db_path,
-                gpu_id=selected_gpu_id,
-                coordinator=self
-            )
-        elif agent_type == "logic_analyzer" and LogicAnalyzerAgent:
-            agent = LogicAnalyzerAgent(
-                llm_engine=None,
-                db_path=self.db_path,
-                gpu_id=selected_gpu_id,
-                coordinator=self
-            )
-        elif agent_type == "documentation" and DocumentationAgent:
-            agent = DocumentationAgent(
-                llm_engine=None,
-                db_path=self.db_path,
-                gpu_id=selected_gpu_id,
-                coordinator=self
-            )
-        elif agent_type == "db2_comparator" and DB2ComparatorAgent:
-            agent = DB2ComparatorAgent(
-                llm_engine=None,
-                db_path=self.db_path,
-                gpu_id=selected_gpu_id,
-                max_rows=10000,
-                coordinator=self
-            )
-        elif agent_type == "chat_agent" and OpulenceChatAgent:
-            agent = OpulenceChatAgent(
-                coordinator=self,
-                llm_engine=None,
-                db_path=self.db_path,
-                gpu_id=selected_gpu_id
-            )
-        else:
-            # ADDED: Fallback to base agent if specific agent not available
-            if self.base_agent_class:
-                self.logger.warning(f"Specific {agent_type} agent not available, using base agent")
-                agent = self.base_agent_class(
+        try:
+            # Create agents with error handling
+            if agent_type == "code_parser" and CodeParserAgent:
+                agent = CodeParserAgent(
+                    llm_engine=None,
+                    db_path=self.db_path,
+                    gpu_id=selected_gpu_id,
+                    coordinator=self
+                )
+            elif agent_type == "vector_index" and VectorIndexAgent:
+                agent = VectorIndexAgent(
+                    llm_engine=None,
+                    db_path=self.db_path,
+                    gpu_id=selected_gpu_id,
+                    coordinator=self
+                )
+            elif agent_type == "data_loader" and DataLoaderAgent:
+                agent = DataLoaderAgent(
+                    llm_engine=None,
+                    db_path=self.db_path,
+                    gpu_id=selected_gpu_id,
+                    coordinator=self
+                )
+            elif agent_type == "lineage_analyzer" and LineageAnalyzerAgent:
+                agent = LineageAnalyzerAgent(
+                    llm_engine=None,
+                    db_path=self.db_path,
+                    gpu_id=selected_gpu_id,
+                    coordinator=self
+                )
+            elif agent_type == "logic_analyzer" and LogicAnalyzerAgent:
+                agent = LogicAnalyzerAgent(
+                    llm_engine=None,
+                    db_path=self.db_path,
+                    gpu_id=selected_gpu_id,
+                    coordinator=self
+                )
+            elif agent_type == "documentation" and DocumentationAgent:
+                agent = DocumentationAgent(
+                    llm_engine=None,
+                    db_path=self.db_path,
+                    gpu_id=selected_gpu_id,
+                    coordinator=self
+                )
+            elif agent_type == "db2_comparator" and DB2ComparatorAgent:
+                agent = DB2ComparatorAgent(
+                    llm_engine=None,
+                    db_path=self.db_path,
+                    gpu_id=selected_gpu_id,
+                    max_rows=10000,
+                    coordinator=self
+                )
+            elif agent_type == "chat_agent" and OpulenceChatAgent:
+                agent = OpulenceChatAgent(
                     coordinator=self,
-                    agent_type=agent_type,
+                    llm_engine=None,
                     db_path=self.db_path,
                     gpu_id=selected_gpu_id
                 )
             else:
-                raise ValueError(f"Unknown or unavailable agent type: {agent_type}")
-        
-        # ADDED: Configure agent with type-specific settings
-        if hasattr(agent, 'update_api_params') and agent_config:
-            # Filter out non-API parameters
-            api_params = {k: v for k, v in agent_config.items() 
-                         if k in ['max_tokens', 'temperature', 'top_p', 'top_k', 
-                                 'frequency_penalty', 'presence_penalty']}
-            if api_params:
-                agent.update_api_params(**api_params)
-                self.logger.info(f"Applied configuration to {agent_type}: {api_params}")
-        
-        # ADDED: Inject API-based engine context
-        agent.get_engine_context = self._create_engine_context_for_agent(agent)
-        
-        return agent
+                # FIXED: Fallback to base agent if specific agent not available
+                if self.base_agent_class:
+                    self.logger.warning(f"Specific {agent_type} agent not available, using base agent")
+                    agent = self.base_agent_class(
+                        coordinator=self,
+                        agent_type=agent_type,
+                        db_path=self.db_path,
+                        gpu_id=selected_gpu_id
+                    )
+                else:
+                    raise ValueError(f"Unknown or unavailable agent type: {agent_type}")
+            
+            # FIXED: Configure agent with conservative API parameters
+            if hasattr(agent, 'update_api_params') and agent_config:
+                # Use conservative parameters for stability
+                conservative_params = {
+                    'max_tokens': min(agent_config.get('max_tokens', 512), 512),
+                    'temperature': min(agent_config.get('temperature', 0.1), 0.3),
+                    'top_p': min(agent_config.get('top_p', 0.9), 0.9),
+                    'stream': False  # Always disable streaming for stability
+                }
+                agent.update_api_params(**conservative_params)
+                self.logger.info(f"Applied conservative configuration to {agent_type}: {conservative_params}")
+            
+            # FIXED: Inject API-based engine context with error handling
+            agent.get_engine_context = self._create_engine_context_for_agent(agent)
+            
+            return agent
+            
+        except Exception as e:
+            self.logger.error(f"Failed to create {agent_type} agent: {str(e)}")
+            raise RuntimeError(f"Agent creation failed for {agent_type}: {str(e)}")
+
     
     def _select_gpu_for_agent(self, agent_type: str) -> int:
         """Select optimal GPU for agent based on load balancing"""
