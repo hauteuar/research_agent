@@ -407,9 +407,9 @@ def cleanup_on_session_end():
     except Exception as e:
         print(f"Cleanup error: {e}")  # Use print since st may not be available
 
-# Register cleanup
-import atexit
-atexit.register(cleanup_on_session_end)
+    # Register cleanup
+    import atexit
+    atexit.register(cleanup_on_session_end)
 
 async def validate_single_gpu_setup(coordinator) -> Dict[str, Any]:
     """Validate single GPU coordinator setup"""
