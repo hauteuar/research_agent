@@ -2,6 +2,7 @@
 """
 API-Compatible Base Agent for Opulence System - FIXED VERSION
 Provides common functionality for all agents using API calls instead of direct GPU management
+KEEPS ALL CLASS NAMES AND FUNCTION SIGNATURES FOR COMPATIBILITY
 """
 
 import weakref
@@ -12,13 +13,13 @@ import time
 import json
 
 class BaseOpulenceAgent:
-    """Base class for all API-based Opulence agents"""
+    """Base class for all API-based Opulence agents - EXACT SAME CLASS NAME"""
     
     def __init__(self, coordinator, agent_type: str, db_path: str = "opulence_data.db", gpu_id: int = 0):
         self.coordinator = coordinator
         self.agent_type = agent_type
         self.db_path = db_path
-        self.gpu_id = gpu_id  # Preferred GPU for API calls
+        self.gpu_id = gpu_id  # Keep for compatibility but not used for GPU selection
         self.logger = logging.getLogger(f"{__name__}.{agent_type}")
         
         # API-specific tracking
@@ -30,7 +31,7 @@ class BaseOpulenceAgent:
         # Agent state
         self._is_active = True
         
-        # FIXED: API parameters matching model server expectations
+        # API parameters
         self.api_params = {
             "max_tokens": 1000,
             "temperature": 0.2,
@@ -46,6 +47,8 @@ class BaseOpulenceAgent:
         # Register for automatic cleanup
         if coordinator:
             weakref.finalize(self, self._cleanup_callback, agent_type)
+        
+        self.logger.info(f"Initialized {agent_type} agent (API-based)")
     
     @staticmethod
     def _cleanup_callback(agent_type: str):
@@ -79,8 +82,7 @@ class BaseOpulenceAgent:
             if params:
                 final_params.update(params)
             
-            # FIXED: Ensure parameters match model server validation
-            # Remove None values and validate ranges
+            # Clean parameters
             cleaned_params = {}
             for key, value in final_params.items():
                 if value is not None:
@@ -97,16 +99,15 @@ class BaseOpulenceAgent:
                     else:
                         cleaned_params[key] = value
             
-            # Make API call through coordinator
+            # Make API call through coordinator - GPU ID is ignored in coordinator
             result = await self.coordinator.call_model_api(
                 prompt=prompt,
                 params=cleaned_params,
-                preferred_gpu_id=self.gpu_id
+                preferred_gpu_id=self.gpu_id  # This will be ignored by coordinator
             )
             
-            # FIXED: Better response text extraction handling various response formats
+            # Extract response text from various response formats
             if isinstance(result, dict):
-                # Try different possible response keys
                 response_text = (
                     result.get('text') or 
                     result.get('response') or 
@@ -130,7 +131,7 @@ class BaseOpulenceAgent:
             
         except Exception as e:
             self.logger.error(f"API call failed for {self.agent_type}: {str(e)}")
-            # FIXED: More specific error handling
+            # More specific error handling
             if "422" in str(e):
                 raise RuntimeError(f"API validation error - check parameters: {str(e)}")
             elif "503" in str(e):
@@ -151,7 +152,7 @@ class BaseOpulenceAgent:
         """Add processing information to results"""
         if isinstance(result, dict):
             result.update({
-                'gpu_used': self.gpu_id,
+                'gpu_used': self.gpu_id,  # Keep for compatibility
                 'agent_type': self.agent_type,
                 'api_based': True,
                 'api_calls_made': self._api_calls_made,
@@ -219,15 +220,14 @@ class APIEngineContext:
     
     def __init__(self, coordinator, preferred_gpu_id: int = None):
         self.coordinator = coordinator
-        self.preferred_gpu_id = preferred_gpu_id
+        self.preferred_gpu_id = preferred_gpu_id  # Keep for compatibility but will be ignored
         self.logger = logging.getLogger(f"{__name__}.APIEngineContext")
     
     async def generate(self, prompt: str, sampling_params, request_id: str = None):
         """Generate text via API (compatible with original engine interface)"""
-        # FIXED: Better parameter conversion with validation
+        # Convert sampling_params to dict
         params = {}
         
-        # Handle sampling_params object or dict
         if hasattr(sampling_params, '__dict__'):
             # Object with attributes
             for attr in ['max_tokens', 'temperature', 'top_p', 'top_k', 
@@ -247,7 +247,7 @@ class APIEngineContext:
                 "top_p": 0.9
             }
         
-        # FIXED: Validate parameter ranges to match model server
+        # Validate parameter ranges
         validated_params = {}
         for key, value in params.items():
             if value is not None:
@@ -264,14 +264,14 @@ class APIEngineContext:
                 else:
                     validated_params[key] = value
         
-        # Call API
+        # Call API - preferred_gpu_id will be ignored by coordinator
         result = await self.coordinator.call_model_api(
             prompt=prompt, 
             params=validated_params, 
             preferred_gpu_id=self.preferred_gpu_id
         )
         
-        # FIXED: Better response format conversion
+        # Convert response format for compatibility
         class MockOutput:
             def __init__(self, text: str, finish_reason: str):
                 self.text = text
@@ -310,7 +310,7 @@ class MockEngine:
     
     async def generate(self, prompt: str, sampling_params=None, request_id: str = None):
         """Mock generate method that uses API calls"""
-        # FIXED: Better parameter conversion
+        # Convert parameters
         params = {}
         if sampling_params:
             if hasattr(sampling_params, '__dict__'):
@@ -342,7 +342,7 @@ class MockEngine:
         yield MockRequestOutput(response_text)
 
 
-# ==================== Utility Functions ====================
+# ==================== Utility Functions (Keep Same Names) ====================
 
 def create_api_agent(coordinator, agent_class, agent_type: str, **kwargs):
     """Factory function to create API-based agents"""
@@ -356,7 +356,7 @@ async def test_api_agent_functionality(coordinator):
     """Test function to verify API agent functionality"""
     
     # Create a test agent
-    test_agent = BaseOpulenceAgent(coordinator, "test_agent", gpu_id=1)
+    test_agent = BaseOpulenceAgent(coordinator, "test_agent", gpu_id=2)
     
     try:
         # Test API call with various parameter formats
@@ -416,24 +416,31 @@ async def validate_agent_server_integration(coordinator, server_endpoints):
         "error_handling": {}
     }
     
-    # Test each server endpoint
-    for gpu_id, endpoint in server_endpoints.items():
-        print(f"\n📡 Testing server at {endpoint} (GPU {gpu_id})...")
+    # Test with coordinator's available servers
+    available_servers = coordinator.load_balancer.get_available_servers()
+    
+    if not available_servers:
+        print("❌ No available servers found!")
+        return validation_results
+    
+    for server in available_servers:
+        server_name = server.config.name
+        print(f"\n📡 Testing server {server_name} at {server.config.endpoint}...")
         
         try:
-            # Create test agent for this GPU
-            test_agent = BaseOpulenceAgent(coordinator, f"test_agent_gpu_{gpu_id}", gpu_id=gpu_id)
+            # Create test agent
+            test_agent = BaseOpulenceAgent(coordinator, f"test_agent_{server_name}")
             
             # Test 1: Basic connectivity
             try:
                 response = await test_agent.call_api("Hello", {"max_tokens": 10})
-                validation_results["server_connectivity"][gpu_id] = {
+                validation_results["server_connectivity"][server_name] = {
                     "status": "✅ Connected",
                     "response_length": len(response)
                 }
                 print(f"  ✅ Basic connectivity: OK")
             except Exception as e:
-                validation_results["server_connectivity"][gpu_id] = {
+                validation_results["server_connectivity"][server_name] = {
                     "status": "❌ Failed",
                     "error": str(e)
                 }
@@ -442,44 +449,43 @@ async def validate_agent_server_integration(coordinator, server_endpoints):
             
             # Test 2: Parameter validation
             try:
-                # Test edge case parameters
                 await test_agent.call_api("Test", {
                     "max_tokens": 1,        # Minimum
                     "temperature": 0.0,     # Minimum
                     "top_p": 1.0,          # Maximum
                     "top_k": 1             # Minimum
                 })
-                validation_results["parameter_validation"][gpu_id] = "✅ Parameters validated"
+                validation_results["parameter_validation"][server_name] = "✅ Parameters validated"
                 print(f"  ✅ Parameter validation: OK")
             except Exception as e:
-                validation_results["parameter_validation"][gpu_id] = f"❌ {str(e)}"
+                validation_results["parameter_validation"][server_name] = f"❌ {str(e)}"
                 print(f"  ❌ Parameter validation: {str(e)}")
             
             # Test 3: Response format
             try:
                 response = await test_agent.call_api("Generate a number", {"max_tokens": 20})
                 if isinstance(response, str) and len(response) > 0:
-                    validation_results["response_format"][gpu_id] = "✅ Valid response format"
+                    validation_results["response_format"][server_name] = "✅ Valid response format"
                     print(f"  ✅ Response format: OK")
                 else:
-                    validation_results["response_format"][gpu_id] = f"❌ Invalid format: {type(response)}"
+                    validation_results["response_format"][server_name] = f"❌ Invalid format: {type(response)}"
                     print(f"  ❌ Response format: Invalid")
             except Exception as e:
-                validation_results["response_format"][gpu_id] = f"❌ {str(e)}"
+                validation_results["response_format"][server_name] = f"❌ {str(e)}"
                 print(f"  ❌ Response format test: {str(e)}")
             
             # Test 4: Error handling
             try:
-                # Test invalid parameters
+                # Test parameter clamping
                 await test_agent.call_api("Test", {"max_tokens": 99999})  # Should be clamped
-                validation_results["error_handling"][gpu_id] = "✅ Error handling works"
+                validation_results["error_handling"][server_name] = "✅ Error handling works"
                 print(f"  ✅ Error handling: OK")
             except Exception as e:
                 if "validation" in str(e).lower():
-                    validation_results["error_handling"][gpu_id] = "✅ Proper validation errors"
+                    validation_results["error_handling"][server_name] = "✅ Proper validation errors"
                     print(f"  ✅ Error handling: Proper validation")
                 else:
-                    validation_results["error_handling"][gpu_id] = f"❌ Unexpected error: {str(e)}"
+                    validation_results["error_handling"][server_name] = f"❌ Unexpected error: {str(e)}"
                     print(f"  ❌ Error handling: Unexpected error")
             
             # Cleanup
@@ -492,8 +498,8 @@ async def validate_agent_server_integration(coordinator, server_endpoints):
     print("\n📋 Validation Summary:")
     for test_category, results in validation_results.items():
         print(f"\n{test_category.replace('_', ' ').title()}:")
-        for gpu_id, result in results.items():
-            print(f"  GPU {gpu_id}: {result}")
+        for server_name, result in results.items():
+            print(f"  {server_name}: {result}")
     
     return validation_results
 
@@ -503,11 +509,11 @@ async def example_api_agent_usage():
     """Example of using the API-compatible base agent with proper configuration"""
     
     # Assuming you have an API coordinator
-    from api_coordinator import create_api_coordinator_from_endpoints
+    from .api_coordinator import create_api_coordinator_from_endpoints
     
     gpu_endpoints = {
-        1: "http://localhost:8100",
-        2: "http://localhost:8101"
+        2: "http://localhost:8100",  # Your CodeLlama server
+        3: "http://localhost:8101"   # Another server if available
     }
     
     coordinator = create_api_coordinator_from_endpoints(gpu_endpoints)
@@ -518,7 +524,7 @@ async def example_api_agent_usage():
         validation_results = await validate_agent_server_integration(coordinator, gpu_endpoints)
         
         # Create API-based agent with proper configuration
-        agent = BaseOpulenceAgent(coordinator, "example_agent", gpu_id=1)
+        agent = BaseOpulenceAgent(coordinator, "example_agent", gpu_id=2)  # GPU ID kept for compatibility
         
         # Update API parameters for this specific use case
         agent.update_api_params(
