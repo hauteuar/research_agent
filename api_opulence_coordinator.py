@@ -362,26 +362,28 @@ class ModelServerClient:
         finally:
             server.active_requests -= 1
     
-    async def health_check(self, server: ModelServer) -> bool:
-        """Check server health"""
+    async def _health_check_loop(self):
+        """Background health checking loop"""
         try:
-            health_url = urljoin(server.config.endpoint, "/health")
-            
-            async with self.session.get(
-                health_url,
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as response:
-                if response.status == 200:
-                    server.status = ModelServerStatus.HEALTHY
-                    return True
-                else:
-                    server.status = ModelServerStatus.UNHEALTHY
-                    return False
+            while True:
+                await asyncio.sleep(self.config.health_check_interval)
+                
+                # Check if event loop is still running
+                if asyncio.get_event_loop().is_closed():
+                    self.logger.info("Event loop closed, stopping health check")
+                    break
                     
-        except Exception:
-            server.status = ModelServerStatus.UNHEALTHY
-            return False
-
+                for server in self.load_balancer.servers:
+                    try:
+                        await self.client.health_check(server)
+                    except Exception as e:
+                        self.logger.warning(f"Health check failed for {server.config.name}: {e}")
+            
+        except asyncio.CancelledError:
+            self.logger.info("Health check loop cancelled")
+            return  # Don't re-raise, just return
+        except Exception as e:
+            self.logger.error(f"Health check loop error: {e}")
 # ==================== API-Compatible Engine Context ====================
 
 class APIEngineContext:
@@ -579,14 +581,18 @@ class APIOpulenceCoordinator:
     async def shutdown(self):
         """Shutdown the coordinator"""
         try:
+            # Cancel health check task more safely
             if self.health_check_task and not self.health_check_task.done():
                 self.health_check_task.cancel()
                 try:
-                    await self.health_check_task
-                except asyncio.CancelledError:
+                    await asyncio.wait_for(self.health_check_task, timeout=2.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
             
-            await self.client.close()
+            # Close client safely
+            if self.client:
+                await self.client.close()
+            
             self.logger.info("API Coordinator shut down successfully")
         
         except Exception as e:

@@ -37,6 +37,21 @@ except ImportError as e:
     COORDINATOR_AVAILABLE = False
     import_error = str(e)
 
+
+def cleanup_on_session_end():
+    """Cleanup function to call when session ends"""
+    try:
+        if st.session_state.get('coordinator'):
+            # Use sync cleanup for session end
+            if hasattr(st.session_state.coordinator, 'cleanup'):
+                st.session_state.coordinator.cleanup()
+    except Exception as e:
+        print(f"Cleanup error: {e}")  # Use print since st may not be available
+
+# Register cleanup
+import atexit
+atexit.register(cleanup_on_session_end)
+
 # Comprehensive mainframe file types and extensions
 MAINFRAME_FILE_TYPES = {
     'cobol': {
@@ -88,22 +103,28 @@ def safe_run_async(coroutine, timeout=30):
         try:
             return loop.run_until_complete(asyncio.wait_for(coroutine, timeout=timeout))
         finally:
-            # Cancel all pending tasks
-            pending = asyncio.all_tasks(loop)
-            for task in pending:
-                task.cancel()
-            
-            # Wait for tasks to complete cancellation
-            if pending:
-                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-            
-            loop.close()
-    except asyncio.TimeoutError:
-        st.error(f"Async operation timed out after {timeout} seconds")
-        return {"error": "Operation timed out"}
-    except Exception as e:
-        st.error(f"Async execution failed: {str(e)}")
-        return {"error": str(e)}
+            # Cancel all pending tasks safely
+            try:
+                pending = asyncio.all_tasks(loop)
+                if pending:
+                    for task in pending:
+                        task.cancel()
+                    
+                    # Wait for cancellation with timeout
+                    loop.run_until_complete(
+                        asyncio.wait_for(
+                            asyncio.gather(*pending, return_exceptions=True),
+                            timeout=5.0
+                        )
+                    )
+            except (asyncio.TimeoutError, RuntimeError):
+                pass  # Ignore if we can't clean up properly
+    finally:
+                try:
+                    if not loop.is_closed():
+                        loop.close()
+                except RuntimeError:
+                    pass  # Loop already closed
 
 def with_error_handling(func):
     """Decorator to add error handling to functions"""
