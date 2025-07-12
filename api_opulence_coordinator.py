@@ -1428,8 +1428,8 @@ def create_dual_gpu_coordinator_api(
     if model_servers is None:
         # Default to localhost model servers
         model_servers = [
-            {"endpoint": "http://localhost:8100", "gpu_id": 2, "name": "gpu_2"},
-            {"endpoint": "http://localhost:8101", "gpu_id": 3, "name": "gpu_3"}
+            {"endpoint": ""http://171.201.3.165:8100", "gpu_id": 2, "name": "gpu_2"},
+            {"endpoint": ""http://171.201.3.165:8101", "gpu_id": 3, "name": "gpu_3"}
         ]
     
     return create_api_coordinator_from_config(model_servers, load_balancing_strategy)
@@ -1485,8 +1485,8 @@ async def example_usage():
     
     # Define your model server endpoints
     model_servers = [
-        {"endpoint": "http://localhost:8100", "gpu_id": 2, "name": "gpu_2"},
-        {"endpoint": "http://localhost:8101", "gpu_id": 3, "name": "gpu_3"}
+        {"endpoint": ""http://171.201.3.165:8100", "gpu_id": 2, "name": "gpu_2"},
+        {"endpoint": ""http://171.201.3.165:8101", "gpu_id": 3, "name": "gpu_3"}
     ]
     
     # Create coordinator
