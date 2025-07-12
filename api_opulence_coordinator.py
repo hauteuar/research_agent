@@ -258,7 +258,7 @@ class ModelServerClient:
         self.logger = logging.getLogger(f"{__name__}.ModelServerClient")
         
     async def initialize(self):
-        """Initialize HTTP session"""
+        """Initialize HTTP session with simpler timeout"""
         connector = aiohttp.TCPConnector(
             limit=self.config.connection_pool_size,
             limit_per_host=10,
@@ -267,21 +267,19 @@ class ModelServerClient:
             enable_cleanup_closed=True
         )
         
-        timeout = aiohttp.ClientTimeout(
-            total=self.config.request_timeout,
-            connect=self.config.connection_timeout
-        )
+        # Use a simple timeout without complex nested timeouts
+        timeout = aiohttp.ClientTimeout(total=60)  # Simple 60s timeout
         
         self.session = aiohttp.ClientSession(
             connector=connector,
-            timeout=timeout,
+            timeout=timeout,  # This is the ONLY timeout we use
             headers={
                 'Content-Type': 'application/json',
                 'User-Agent': 'OpulenceCoordinator/1.0.0'
             }
         )
         
-        self.logger.info("Model server client initialized")
+        self.logger.info("Model server client initialized with simplified timeout")
     
     async def close(self):
         """Close HTTP session"""
@@ -290,70 +288,54 @@ class ModelServerClient:
             self.session = None
     
     async def call_generate(self, server: ModelServer, prompt: str, 
-                      params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Call model server generate endpoint"""
+                  params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """FIXED: Call model server without nested timeout managers"""
+        
         if not self.session:
             raise RuntimeError("Client not initialized")
         
         params = params or {}
         
-        # Prepare request data with proper validation
+        # Prepare request data
         request_data = {
             "prompt": prompt,
-            "max_tokens": min(params.get("max_tokens", 512), 2048),
+            "max_tokens": min(params.get("max_tokens", 512), 1024),
             "temperature": max(0.0, min(params.get("temperature", 0.1), 1.0)),
             "top_p": max(0.1, min(params.get("top_p", 0.9), 1.0)),
-            "stream": False  # Always disable streaming
+            "stream": False
         }
-        
-        # Remove None values
-        request_data = {k: v for k, v in request_data.items() if v is not None}
         
         server.active_requests += 1
         server.total_requests += 1
         start_time = time.time()
         
         try:
-            for attempt in range(self.config.max_retries + 1):
-                try:
-                    generate_url = urljoin(server.config.endpoint, "/generate")
+            # Remove nested timeout - use session timeout only
+            generate_url = urljoin(server.config.endpoint, "/generate")
+            
+            # Simple request without additional timeout wrapper
+            async with self.session.post(generate_url, json=request_data) as response:
+                if response.status == 200:
+                    result = await response.json()
                     
-                    async with self.session.post(
-                        generate_url,
-                        json=request_data,
-                        timeout=aiohttp.ClientTimeout(total=server.config.timeout)
-                    ) as response:
-                        
-                        if response.status == 200:
-                            result = await response.json()
-                            
-                            # Record success
-                            latency = time.time() - start_time
-                            server.record_success(latency)
-                            
-                            # Add metadata
-                            result["server_used"] = server.config.name
-                            result["gpu_id"] = server.config.gpu_id  # For compatibility
-                            result["latency"] = latency
-                            
-                            return result
-                        
-                        else:
-                            error_text = await response.text()
-                            raise aiohttp.ClientError(f"HTTP {response.status}: {error_text}")
-                
-                except (asyncio.TimeoutError, aiohttp.ClientError) as e:
-                    if attempt < self.config.max_retries:
-                        delay = self.config.retry_delay * (2 ** attempt if self.config.exponential_backoff else 1)
-                        self.logger.warning(f"Request failed, retrying in {delay:.1f}s: {e}")
-                        await asyncio.sleep(delay)
-                        continue
-                    raise
+                    # Record success
+                    latency = time.time() - start_time
+                    server.record_success(latency)
+                    
+                    # Add metadata
+                    result["server_used"] = server.config.name
+                    result["gpu_id"] = server.config.gpu_id
+                    result["latency"] = latency
+                    
+                    return result
+                else:
+                    error_text = await response.text()
+                    raise aiohttp.ClientError(f"HTTP {response.status}: {error_text}")
         
         except Exception as e:
             server.record_failure()
             
-            # Check if circuit breaker should open
+            # Check circuit breaker
             if server.should_open_circuit(self.config.circuit_breaker_threshold):
                 server.open_circuit()
             
@@ -361,6 +343,8 @@ class ModelServerClient:
         
         finally:
             server.active_requests -= 1
+
+
     
     async def _health_check_loop(self):
         """Background health checking loop"""
@@ -742,44 +726,33 @@ class APIOpulenceCoordinator:
             self.logger.error(f"Health check loop error: {e}")
     
     async def call_model_api(self, prompt: str, params: Dict[str, Any] = None, 
-                   preferred_gpu_id: int = None) -> Dict[str, Any]:
-        """Call model API with event loop safety checks"""
+                    preferred_gpu_id: int = None) -> Dict[str, Any]:
+        """FIXED: Remove nested timeout handling"""
         
-        # EVENT LOOP CHECK - Add this at the very beginning
-        try:
-            current_loop = asyncio.get_running_loop()
-            if current_loop.is_closed():
-                raise RuntimeError("Event loop is closed - cannot make API calls")
-        except RuntimeError as e:
-            if "no running event loop" in str(e):
-                raise RuntimeError("No event loop available - cannot make API calls")
-            else:
-                # Loop exists but might be closed
-                raise RuntimeError(f"Event loop issue: {str(e)}")
         server = self.load_balancer.select_server()        
         if not server:
             raise RuntimeError("No available servers found")
         
         try:
-            self.logger.debug(f"Routing request to {server.config.name} at {server.config.endpoint}")
+            self.logger.debug(f"Routing request to {server.config.name}")
+            
+            # Direct call without additional timeout wrapping
             result = await self.client.call_generate(server, prompt, params)
             self.stats["total_api_calls"] += 1
-            
             return result
             
         except Exception as e:
             self.logger.warning(f"Request failed on {server.config.name}: {e}")
             
-            # Try one more server if available
+            # Simple retry without timeout complexity
             retry_server = self.load_balancer.select_server()
             if retry_server and retry_server != server:
                 try:
-                    self.logger.info(f"Retrying with {retry_server.config.name}")
                     result = await self.client.call_generate(retry_server, prompt, params)
                     self.stats["total_api_calls"] += 1
                     return result
                 except Exception as retry_e:
-                    self.logger.error(f"Retry failed on {retry_server.config.name}: {retry_e}")
+                    self.logger.error(f"Retry failed: {retry_e}")
             
             raise RuntimeError(f"All servers failed: {str(e)}")
     

@@ -97,28 +97,22 @@ AGENT_TYPES = [
 # UTILITY FUNCTIONS
 # ============================================================================
 def safe_run_async(coroutine, timeout=30):
-    """AGGRESSIVE FIX: Use nest_asyncio for Streamlit compatibility"""
+    """FIXED: Simple version without timeout context manager"""
     import nest_asyncio
-    nest_asyncio.apply()  # Apply every time to be safe
+    nest_asyncio.apply()
     
     try:
-        # Try to get existing loop first
+        # Just run the coroutine without wait_for timeout
         try:
             loop = asyncio.get_running_loop()
-            # If we have a running loop, use create_task
-            task = asyncio.create_task(asyncio.wait_for(coroutine, timeout=timeout))
+            task = loop.create_task(coroutine)
             return loop.run_until_complete(task)
         except RuntimeError:
-            # No running loop, create new one
-            return asyncio.run(asyncio.wait_for(coroutine, timeout=timeout))
+            return asyncio.run(coroutine)
             
-    except asyncio.TimeoutError:
-        st.error(f"Operation timed out after {timeout} seconds")
-        return {"error": "Operation timed out"}
     except Exception as e:
         st.error(f"Async operation failed: {str(e)}")
-        return {"error": str(e)}
-    
+        return {"error": str(e)}    
 def with_error_handling(func):
     """Decorator to add error handling to functions"""
     def wrapper(*args, **kwargs):
