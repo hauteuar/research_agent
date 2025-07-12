@@ -414,8 +414,13 @@ async def init_api_coordinator_single_gpu():
     if not COORDINATOR_AVAILABLE:
         return {"error": "API Coordinator module not available"}
     
+    # Ensure session state is initialized
+    if 'coordinator' not in st.session_state:
+        st.session_state.coordinator = None
+    
     # Clean up existing coordinator first
-    if st.session_state.coordinator is not None:
+    if st.session_state.coordinator is not None:    
+    
         try:
             await st.session_state.coordinator.shutdown()
         except Exception as e:
