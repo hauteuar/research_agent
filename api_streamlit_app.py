@@ -80,16 +80,27 @@ AGENT_TYPES = [
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
-
-def safe_run_async(coroutine):
-    """Safe async function runner for Streamlit"""
+def safe_run_async(coroutine, timeout=30):
+    """Safe async function runner for Streamlit with timeout"""
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            return loop.run_until_complete(coroutine)
+            return loop.run_until_complete(asyncio.wait_for(coroutine, timeout=timeout))
         finally:
+            # Cancel all pending tasks
+            pending = asyncio.all_tasks(loop)
+            for task in pending:
+                task.cancel()
+            
+            # Wait for tasks to complete cancellation
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            
             loop.close()
+    except asyncio.TimeoutError:
+        st.error(f"Async operation timed out after {timeout} seconds")
+        return {"error": "Operation timed out"}
     except Exception as e:
         st.error(f"Async execution failed: {str(e)}")
         return {"error": str(e)}
@@ -138,26 +149,50 @@ def initialize_session_state():
 
 def detect_single_gpu_servers():
     """Auto-detect single GPU server configurations"""
-    potential_ports = [8000, 8001, 8002, 8003]
+    potential_ports = [8100, 8101, 8102, 8103]
     detected_servers = []
+    
+    st.info("🔍 Scanning for GPU servers...")
     
     for i, port in enumerate(potential_ports):
         endpoint = f"http://localhost:{port}"
         try:
-            response = requests.get(f"{endpoint}/health", timeout=2)
-            if response.status_code == 200:
-                detected_servers.append({
-                    "name": f"local_gpu_{i}",
-                    "endpoint": endpoint,
-                    "gpu_id": i,
-                    "max_concurrent_requests": 5,  # Conservative for single GPU
-                    "timeout": 300
-                })
-                st.success(f"✅ Detected server at {endpoint}")
-        except:
-            continue
+            with st.spinner(f"Checking {endpoint}..."):
+                response = requests.get(f"{endpoint}/health", timeout=2)
+                if response.status_code == 200:
+                    detected_servers.append({
+                        "name": f"local_gpu_{i}",
+                        "endpoint": endpoint,
+                        "gpu_id": i,
+                        "max_concurrent_requests": 5,  # Conservative for single GPU
+                        "timeout": 300
+                    })
+                    st.success(f"✅ Detected server at {endpoint}")
+                else:
+                    st.warning(f"⚠️ Server at {endpoint} returned status {response.status_code}")
+        except requests.exceptions.ConnectionError:
+            st.info(f"ℹ️ No server found at {endpoint}")
+        except Exception as e:
+            st.warning(f"⚠️ Error checking {endpoint}: {str(e)}")
+    
+    if not detected_servers:
+        st.warning("⚠️ No GPU servers detected on standard ports")
     
     return detected_servers
+
+def debug_initialization_state():
+    """Debug helper to show initialization state"""
+    if st.session_state.get('debug_mode', False):
+        with st.expander("🐛 Debug Information", expanded=False):
+            st.json({
+                "coordinator_available": COORDINATOR_AVAILABLE,
+                "import_error": st.session_state.get('import_error'),
+                "initialization_status": st.session_state.get('initialization_status'),
+                "coordinator_exists": st.session_state.get('coordinator') is not None,
+                "model_servers": st.session_state.get('model_servers', []),
+                "agent_status": {k: v['status'] for k, v in st.session_state.get('agent_status', {}).items()}
+            })
+
 
 def validate_server_endpoint(endpoint: str, timeout: int = 5) -> Dict[str, Any]:
     """Validate a server endpoint and return detailed status"""
@@ -330,70 +365,74 @@ async def init_api_coordinator_single_gpu():
         finally:
             st.session_state.coordinator = None
     
-        try:
-            with st.spinner("🔍 Detecting available GPU servers..."):
-                # Auto-detect servers if none configured
-                if not st.session_state.model_servers:
-                    detected_servers = detect_single_gpu_servers()
-                    
-                    if detected_servers:
-                        st.session_state.model_servers = detected_servers
-                        st.info(f"🎯 Auto-detected {len(detected_servers)} GPU server(s)")
-                    else:
-                        # Fallback to default localhost configuration
-                        st.session_state.model_servers = [{
-                            "name": "local_gpu_0",
-                            "endpoint": "http://localhost:8000",
-                            "gpu_id": 0,
-                            "max_concurrent_requests": 3,  # Conservative for single GPU
-                            "timeout": 300
-                        }]
-                        st.warning("⚠️ No servers detected, using default localhost:8000")
+    try:  # This try block was incorrectly indented
+        with st.spinner("🔍 Detecting available GPU servers..."):
+            # Auto-detect servers if none configured
+            if not st.session_state.model_servers:
+                detected_servers = detect_single_gpu_servers()
                 
-                # Create coordinator with single GPU optimizations
-                coordinator = create_api_coordinator_from_config(
-                    model_servers=st.session_state.model_servers,
-                    load_balancing_strategy="round_robin",  # Simple strategy for single GPU
-                    max_retries=2,  # Fewer retries for faster response
-                    connection_pool_size=10,  # Smaller pool for single GPU
-                    request_timeout=120  # Shorter timeout for responsiveness
-                )
-                
-                # Initialize with validation
-                await coordinator.initialize()
-                
-                # Quick validation for single GPU setup
-                validation_results = await validate_single_gpu_setup(coordinator)
-                
-                if validation_results['success']:
-                    st.session_state.coordinator = coordinator
-                    st.session_state.initialization_status = "completed"
-                    
-                    # Initialize agent status
-                    for agent_type in AGENT_TYPES:
-                        try:
-                            agent = coordinator.get_agent(agent_type)
-                            if agent:
-                                st.session_state.agent_status[agent_type]['status'] = 'available'
-                            else:
-                                st.session_state.agent_status[agent_type]['status'] = 'unavailable'
-                        except Exception as e:
-                            st.session_state.agent_status[agent_type]['status'] = 'error'
-                            st.session_state.agent_status[agent_type]['error_message'] = str(e)
-                    
-                    return {"success": True, "validation": validation_results}
+                if detected_servers:
+                    st.session_state.model_servers = detected_servers
+                    st.info(f"🎯 Auto-detected {len(detected_servers)} GPU server(s)")
                 else:
-                    st.session_state.initialization_status = f"validation_failed: {validation_results['message']}"
-                    return {"error": f"Validation failed: {validation_results['message']}"}
+                    # Fallback to default localhost configuration
+                    st.session_state.model_servers = [{
+                        "name": "local_gpu_0",
+                        "endpoint": "http://localhost:8000",
+                        "gpu_id": 0,
+                        "max_concurrent_requests": 3,  # Conservative for single GPU
+                        "timeout": 300
+                    }]
+                    st.warning("⚠️ No servers detected, using default localhost:8000")
+            
+            # Create coordinator with single GPU optimizations
+            coordinator = create_api_coordinator_from_config(
+                model_servers=st.session_state.model_servers,
+                load_balancing_strategy="round_robin",  # Simple strategy for single GPU
+                max_retries=2,  # Fewer retries for faster response
+                connection_pool_size=10,  # Smaller pool for single GPU
+                request_timeout=120  # Shorter timeout for responsiveness
+            )
+            
+            # Initialize with validation
+            await coordinator.initialize()
+            
+            # Quick validation for single GPU setup
+            validation_results = await validate_single_gpu_setup(coordinator)
+            
+            if validation_results['success']:
+                st.session_state.coordinator = coordinator
+                st.session_state.initialization_status = "completed"
+                
+                # Initialize agent status
+                for agent_type in AGENT_TYPES:
+                    try:
+                        agent = coordinator.get_agent(agent_type)
+                        if agent:
+                            st.session_state.agent_status[agent_type]['status'] = 'available'
+                        else:
+                            st.session_state.agent_status[agent_type]['status'] = 'unavailable'
+                    except Exception as e:
+                        st.session_state.agent_status[agent_type]['status'] = 'error'
+                        st.session_state.agent_status[agent_type]['error_message'] = str(e)
+                
+                return {"success": True, "validation": validation_results}
+            else:
+                # Clean up on validation failure
+                await coordinator.shutdown()
+                st.session_state.initialization_status = f"validation_failed: {validation_results['message']}"
+                return {"error": f"Validation failed: {validation_results['message']}"}
+    
+    except Exception as e:
+        # Clean up on any error
+        if 'coordinator' in locals():
+            try:
+                await coordinator.shutdown()
+            except:
+                pass
         
-        except Exception as e:
-            if 'coordinator' in locals():
-                try:
-                    await coordinator.shutdown()
-                except:
-                    pass
-            st.session_state.initialization_status = f"error: {str(e)}"
-            return {"error": str(e)}
+        st.session_state.initialization_status = f"error: {str(e)}"
+        return {"error": str(e)}
     
     return {"success": True, "message": "Coordinator already initialized"}
 
@@ -460,7 +499,7 @@ def show_initialization_interface():
         st.error("🔴 API Coordinator module not available")
         st.code(st.session_state.get('import_error', 'Unknown import error'))
         return
-    
+    debug_initialization_state()
     # Initialization status
     status = st.session_state.initialization_status
     
@@ -3116,8 +3155,6 @@ def show_sidebar_system_control():
     
     else:
         st.error(f"🔴 Status: {status}")
-    else:
-        st.error(f"🔴 Status: {status}")
         if st.button("🔄 Retry", use_container_width=True):
             retry_initialization()
 
@@ -3529,15 +3566,28 @@ def show_processing_history():
 
 def initialize_system():
     """Initialize the system"""
-    with st.spinner("🚀 Initializing system..."):
-        result = safe_run_async(init_api_coordinator_single_gpu())
+    try:
+        with st.spinner("🚀 Initializing system..."):
+            result = safe_run_async(init_api_coordinator_single_gpu())
+            
+            if result and result.get('success'):
+                st.success("✅ System initialized successfully!")
+                time.sleep(1)  # Brief pause to show the message
+                st.rerun()
+            else:
+                error_msg = result.get('error') if result else "Unknown error"
+                st.error(f"❌ Initialization failed: {error_msg}")
+                st.session_state.initialization_status = f"error: {error_msg}"
+                
+                # Show detailed error in debug mode
+                if st.session_state.get('debug_mode', False):
+                    st.json(result)
+    except Exception as e:
+        st.error(f"❌ System initialization exception: {str(e)}")
+        st.session_state.initialization_status = f"exception: {str(e)}"
         
-        if result and result.get('success'):
-            st.success("✅ System initialized successfully!")
-            st.rerun()
-        else:
-            error_msg = result.get('error') if result else "Unknown error"
-            st.error(f"❌ Initialization failed: {error_msg}")
+        if st.session_state.get('debug_mode', False):
+            st.exception(e)
 
 def restart_system():
     """Restart the system"""
