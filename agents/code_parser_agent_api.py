@@ -479,11 +479,7 @@ class BMSBusinessValidator:
             ))
         
         return violations
-    """
-Enhanced Code Parser Agent - Part 2: Main Class and Configuration
-Inherits from BaseOpulenceAgent with comprehensive pattern recognition
-"""
-
+    
 class EnhancedCodeParserAgent(BaseOpulenceAgent):
     """
     Enhanced Code Parser Agent that inherits from BaseOpulenceAgent
@@ -558,16 +554,680 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             'report_section': re.compile(r'^\s*REPORT\s+SECTION\s*\.', re.IGNORECASE | re.MULTILINE),
             'screen_section': re.compile(r'^\s*SCREEN\s+SECTION\s*\.', re.IGNORECASE | re.MULTILINE),
             'communication_section': re.compile(r'^\s*COMMUNICATION\s+SECTION\s*\.', re.IGNORECASE | re.MULTILINE),
-            'section': re.compile(r'^\s*([A-Z0-9][A-Z0-9-]*)\s+SECTION\s*\.\s*$', re.MULTILINE | re.IGNORECASE),
+            'section': re.compile(r'\bPERFORM\s+(?:([A-Z0-9][A-Z0-9-]*)\s+)?VARYING\s+(.*?)(?=\s+END-PERFORM|\.|$)', re.IGNORECASE | re.DOTALL),
+            'perform_thru': re.compile(r'\bPERFORM\s+([A-Z0-9][A-Z0-9-]*)\s+(?:THROUGH|THRU)\s+([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
+            'perform_times': re.compile(r'\bPERFORM\s+(?:([A-Z0-9][A-Z0-9-]*)\s+)?(\d+)\s+TIMES', re.IGNORECASE),
+            'perform_inline': re.compile(r'\bPERFORM\s*(.*?)\s*END-PERFORM', re.IGNORECASE | re.DOTALL),
+            'perform_test': re.compile(r'\bPERFORM\s+.*?\s+WITH\s+TEST\s+(BEFORE|AFTER)', re.IGNORECASE),
+            'perform_with_debug': re.compile(r'\bPERFORM\s+.*?\s+WITH\s+DEBUGGING\s+MODE', re.IGNORECASE),
+            
+            # Enhanced control flow with proper nesting
+            'if_statement': re.compile(r'\bIF\s+(.*?)(?=\s+THEN|\s+(?:NEXT|END)|$)', re.IGNORECASE),
+            'if_then': re.compile(r'\bIF\s+.*?\s+THEN\b', re.IGNORECASE),
+            'if_then_else': re.compile(r'\bIF\s+(.*?)\s+THEN\s+(.*?)(?:\s+ELSE\s+(.*?))?\s+END-IF', re.IGNORECASE | re.DOTALL),
+            'else_clause': re.compile(r'\bELSE\b', re.IGNORECASE),
+            'end_if': re.compile(r'\bEND-IF\b', re.IGNORECASE),
+            'evaluate': re.compile(r'\bEVALUATE\s+(.*?)(?=\s|$)', re.IGNORECASE),
+            'evaluate_block': re.compile(r'\bEVALUATE\s+(.*?)\s+END-EVALUATE', re.IGNORECASE | re.DOTALL),
+            'when_clause': re.compile(r'^\s*WHEN\s+([^\.]+)', re.IGNORECASE | re.MULTILINE),
+            'when_other': re.compile(r'^\s*WHEN\s+OTHER', re.IGNORECASE | re.MULTILINE),
+            'end_evaluate': re.compile(r'\bEND-EVALUATE\b', re.IGNORECASE),
+            
+            # Enhanced data definitions with comprehensive level validation
+            'data_item': re.compile(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*|FILLER)(?:\s+(.*?))?\.?\s*$', re.MULTILINE | re.IGNORECASE),
+            'data_item_with_level': re.compile(r'^\s*(01|02|03|04|05|06|07|08|09|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24|25|26|27|28|29|30|31|32|33|34|35|36|37|38|39|40|41|42|43|44|45|46|47|48|49|66|77|88)\s+([A-Z][A-Z0-9-]*|FILLER)', re.MULTILINE | re.IGNORECASE),
+            'filler_item': re.compile(r'^\s*(\d+)\s+FILLER(?:\s+(.*?))?\.?\s*$', re.MULTILINE | re.IGNORECASE),
+            'group_item': re.compile(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*)\s*\.?\s*$', re.MULTILINE | re.IGNORECASE),
+            
+            # Enhanced PIC and data type patterns
+            'pic_clause': re.compile(r'PIC(?:TURE)?\s+(?:IS\s+)?([X9AVSN\(\)\+\-\.,/ZB*$]+)', re.IGNORECASE),
+            'pic_with_edit': re.compile(r'PIC(?:TURE)?\s+(?:IS\s+)?([X9AVSN\(\)\+\-\.,/ZB*$]+(?:\s*EDIT\s+[^\.]*)?)', re.IGNORECASE),
+            'usage_clause': re.compile(r'USAGE\s+(?:IS\s+)?(COMP(?:-[0-9])?|BINARY|DISPLAY|PACKED-DECIMAL|INDEX|POINTER|OBJECT\s+REFERENCE|FUNCTION-POINTER|PROCEDURE-POINTER)', re.IGNORECASE),
+            'comp_usage': re.compile(r'\b(?:COMP|COMP-1|COMP-2|COMP-3|COMP-4|COMP-5|COMPUTATIONAL|COMPUTATIONAL-1|COMPUTATIONAL-2|COMPUTATIONAL-3|COMPUTATIONAL-4|COMPUTATIONAL-5|BINARY|PACKED-DECIMAL)\b', re.IGNORECASE),
+            'value_clause': re.compile(r'VALUE\s+(?:IS\s+)?([\'"][^\']*[\'"]|\S+)', re.IGNORECASE),
+            'value_all': re.compile(r'VALUE\s+(?:IS\s+)?ALL\s+([\'"][^\']*[\'"]|\S+)', re.IGNORECASE),
+            'value_space': re.compile(r'VALUE\s+(?:IS\s+)?(?:SPACE|SPACES)', re.IGNORECASE),
+            'value_zero': re.compile(r'VALUE\s+(?:IS\s+)?(?:ZERO|ZEROS|ZEROES)', re.IGNORECASE),
+            'value_quote': re.compile(r'VALUE\s+(?:IS\s+)?(?:QUOTE|QUOTES)', re.IGNORECASE),
+            'value_high_low': re.compile(r'VALUE\s+(?:IS\s+)?(?:HIGH-VALUE|HIGH-VALUES|LOW-VALUE|LOW-VALUES)', re.IGNORECASE),
+            
+            # Enhanced OCCURS patterns with comprehensive business rules
+            'occurs_clause': re.compile(r'OCCURS\s+(\d+)(?:\s+TO\s+(\d+))?\s+TIMES(?:\s+DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*))?(?:\s+INDEXED\s+BY\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*))?\s*(?:ASCENDING|DESCENDING)?(?:\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*))?\s*', re.IGNORECASE),
+            'occurs_depending': re.compile(r'OCCURS\s+\d+\s+TO\s+\d+\s+TIMES\s+DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'occurs_indexed': re.compile(r'INDEXED\s+BY\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'occurs_key': re.compile(r'(?:ASCENDING|DESCENDING)\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            
+            # Enhanced REDEFINES patterns with complex structures
+            'redefines': re.compile(r'REDEFINES\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'renames': re.compile(r'^\s*66\s+([A-Z][A-Z0-9-]*)\s+RENAMES\s+([A-Z][A-Z0-9-]*)\s+(?:THROUGH|THRU)\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'renames_simple': re.compile(r'^\s*66\s+([A-Z][A-Z0-9-]*)\s+RENAMES\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            
+            # Comprehensive file operations with enhanced context
+            'select_statement': re.compile(r'^\s*SELECT\s+([A-Z][A-Z0-9-]*)\s+ASSIGN\s+TO\s+([^\s\.]+)(?:\s+ORGANIZATION\s+(?:IS\s+)?([A-Z]+))?(?:\s+ACCESS\s+(?:MODE\s+)?(?:IS\s+)?([A-Z]+))?(?:\s+FILE\s+STATUS\s+(?:IS\s+)?([A-Z][A-Z0-9-]*))?', re.IGNORECASE | re.MULTILINE),
+            'fd_statement': re.compile(r'^\s*FD\s+([A-Z][A-Z0-9-]*)(?:\s+(.*?))?(?=\n\s*\d|\nFD|\nSD|\nRD|$)', re.IGNORECASE | re.MULTILINE | re.DOTALL),
+            'sd_statement': re.compile(r'^\s*SD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'rd_statement': re.compile(r'^\s*RD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'cd_statement': re.compile(r'^\s*CD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            
+            # Enhanced file operation statements
+            'open_statement': re.compile(r'\bOPEN\s+(INPUT|OUTPUT|I-O|EXTEND)\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'close_statement': re.compile(r'\bCLOSE\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'read_statement': re.compile(r'\bREAD\s+([A-Z][A-Z0-9-]*)(?:\s+(?:INTO\s+([A-Z][A-Z0-9-]*)|NEXT\s+RECORD|KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*)))?', re.IGNORECASE),
+            'write_statement': re.compile(r'\bWRITE\s+([A-Z][A-Z0-9-]*)(?:\s+FROM\s+([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            'rewrite_statement': re.compile(r'\bREWRITE\s+([A-Z][A-Z0-9-]*)(?:\s+FROM\s+([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            'delete_statement': re.compile(r'\bDELETE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'start_statement': re.compile(r'\bSTART\s+([A-Z][A-Z0-9-]*)(?:\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            
+            # Enhanced SQL blocks with comprehensive host variable detection
+            'sql_block': re.compile(r'EXEC\s+SQL(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
+            'sql_host_var': re.compile(r':([A-Z][A-Z0-9-]*(?:-[A-Z0-9]+)*)', re.IGNORECASE),
+            'sql_indicator_var': re.compile(r':([A-Z][A-Z0-9-]*)\s+INDICATOR\s+:([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_include': re.compile(r'EXEC\s+SQL\s+INCLUDE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_declare_cursor': re.compile(r'EXEC\s+SQL\s+DECLARE\s+([A-Z][A-Z0-9-]*)\s+CURSOR(?:\s+WITH\s+(?:HOLD|RETURN))?(?:\s+FOR\s+(.*?))?(?=\s+END-EXEC)', re.IGNORECASE | re.DOTALL),
+            'sql_whenever': re.compile(r'EXEC\s+SQL\s+WHENEVER\s+(SQLWARNING|SQLERROR|NOT\s+FOUND)\s+(CONTINUE|GOTO\s+[A-Z][A-Z0-9-]*|GO\s+TO\s+[A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_connect': re.compile(r'EXEC\s+SQL\s+CONNECT\s+(?:TO\s+)?([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_commit': re.compile(r'EXEC\s+SQL\s+COMMIT(?:\s+WORK)?', re.IGNORECASE),
+            'sql_rollback': re.compile(r'EXEC\s+SQL\s+ROLLBACK(?:\s+WORK)?', re.IGNORECASE),
+            
+            # Enhanced COPY statements with comprehensive replacement patterns
+            'copy_statement': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)(?:\s+(?:OF|IN)\s+([A-Z][A-Z0-9-]*))?(?:\s+REPLACING\s+(.*?))?\.', re.IGNORECASE | re.DOTALL),
+            'copy_replacing': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+REPLACING\s+(.*?)\.', re.IGNORECASE | re.DOTALL),
+            'copy_in': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+(?:IN|OF)\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'copy_suppress': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+SUPPRESS', re.IGNORECASE),
+            'replacing_clause': re.compile(r'==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            'replacing_leading': re.compile(r'LEADING\s+==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            'replacing_trailing': re.compile(r'TRAILING\s+==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            
+            # Enhanced error handling patterns
+            'on_size_error': re.compile(r'\bON\s+SIZE\s+ERROR\b', re.IGNORECASE),
+            'not_on_size_error': re.compile(r'\bNOT\s+ON\s+SIZE\s+ERROR\b', re.IGNORECASE),
+            'at_end': re.compile(r'\bAT\s+END\b', re.IGNORECASE),
+            'not_at_end': re.compile(r'\bNOT\s+AT\s+END\b', re.IGNORECASE),
+            'invalid_key': re.compile(r'\bINVALID\s+KEY\b', re.IGNORECASE),
+            'not_invalid_key': re.compile(r'\bNOT\s+INVALID\s+KEY\b', re.IGNORECASE),
+            'on_overflow': re.compile(r'\bON\s+OVERFLOW\b', re.IGNORECASE),
+            'not_on_overflow': re.compile(r'\bNOT\s+ON\s+OVERFLOW\b', re.IGNORECASE),
+            'on_exception': re.compile(r'\bON\s+EXCEPTION\b', re.IGNORECASE),
+            'not_on_exception': re.compile(r'\bNOT\s+ON\s+EXCEPTION\b', re.IGNORECASE),
+     
             
             # Enhanced paragraph detection
-            'paragraph': re.compile(r'^\s*([A-Z0-9][A-Z0-9-]*)\s*\.\s*$', re.MULTILINE | re.IGNORECASE),
-            'paragraph_with_section': re.compile(r'^\s*([A-Z0-9][A-Z0-9-]*)\s+SECTION\s*\.\s*$|^\s*([A-Z0-9][A-Z0-9-]*)\s*\.\s*$', re.MULTILINE | re.IGNORECASE),
+            'paragraph': re.compile(r'\bPERFORM\s+(?:([A-Z0-9][A-Z0-9-]*)\s+)?VARYING\s+(.*?)(?=\s+END-PERFORM|\.|$)', re.IGNORECASE | re.DOTALL),
+            'perform_thru': re.compile(r'\bPERFORM\s+([A-Z0-9][A-Z0-9-]*)\s+(?:THROUGH|THRU)\s+([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
+            'perform_times': re.compile(r'\bPERFORM\s+(?:([A-Z0-9][A-Z0-9-]*)\s+)?(\d+)\s+TIMES', re.IGNORECASE),
+            'perform_inline': re.compile(r'\bPERFORM\s*(.*?)\s*END-PERFORM', re.IGNORECASE | re.DOTALL),
+            'perform_test': re.compile(r'\bPERFORM\s+.*?\s+WITH\s+TEST\s+(BEFORE|AFTER)', re.IGNORECASE),
+            'perform_with_debug': re.compile(r'\bPERFORM\s+.*?\s+WITH\s+DEBUGGING\s+MODE', re.IGNORECASE),
             
+            # Enhanced control flow with proper nesting
+            'if_statement': re.compile(r'\bIF\s+(.*?)(?=\s+THEN|\s+(?:NEXT|END)|$)', re.IGNORECASE),
+            'if_then': re.compile(r'\bIF\s+.*?\s+THEN\b', re.IGNORECASE),
+            'if_then_else': re.compile(r'\bIF\s+(.*?)\s+THEN\s+(.*?)(?:\s+ELSE\s+(.*?))?\s+END-IF', re.IGNORECASE | re.DOTALL),
+            'else_clause': re.compile(r'\bELSE\b', re.IGNORECASE),
+            'end_if': re.compile(r'\bEND-IF\b', re.IGNORECASE),
+            'evaluate': re.compile(r'\bEVALUATE\s+(.*?)(?=\s|$)', re.IGNORECASE),
+            'evaluate_block': re.compile(r'\bEVALUATE\s+(.*?)\s+END-EVALUATE', re.IGNORECASE | re.DOTALL),
+            'when_clause': re.compile(r'^\s*WHEN\s+([^\.]+)', re.IGNORECASE | re.MULTILINE),
+            'when_other': re.compile(r'^\s*WHEN\s+OTHER', re.IGNORECASE | re.MULTILINE),
+            'end_evaluate': re.compile(r'\bEND-EVALUATE\b', re.IGNORECASE),
+            
+            # Enhanced data definitions with comprehensive level validation
+            'data_item': re.compile(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*|FILLER)(?:\s+(.*?))?\.?\s*$', re.MULTILINE | re.IGNORECASE),
+            'data_item_with_level': re.compile(r'^\s*(01|02|03|04|05|06|07|08|09|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24|25|26|27|28|29|30|31|32|33|34|35|36|37|38|39|40|41|42|43|44|45|46|47|48|49|66|77|88)\s+([A-Z][A-Z0-9-]*|FILLER)', re.MULTILINE | re.IGNORECASE),
+            'filler_item': re.compile(r'^\s*(\d+)\s+FILLER(?:\s+(.*?))?\.?\s*$', re.MULTILINE | re.IGNORECASE),
+            'group_item': re.compile(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*)\s*\.?\s*$', re.MULTILINE | re.IGNORECASE),
+            
+            # Enhanced PIC and data type patterns
+            'pic_clause': re.compile(r'PIC(?:TURE)?\s+(?:IS\s+)?([X9AVSN\(\)\+\-\.,/ZB*$]+)', re.IGNORECASE),
+            'pic_with_edit': re.compile(r'PIC(?:TURE)?\s+(?:IS\s+)?([X9AVSN\(\)\+\-\.,/ZB*$]+(?:\s*EDIT\s+[^\.]*)?)', re.IGNORECASE),
+            'usage_clause': re.compile(r'USAGE\s+(?:IS\s+)?(COMP(?:-[0-9])?|BINARY|DISPLAY|PACKED-DECIMAL|INDEX|POINTER|OBJECT\s+REFERENCE|FUNCTION-POINTER|PROCEDURE-POINTER)', re.IGNORECASE),
+            'comp_usage': re.compile(r'\b(?:COMP|COMP-1|COMP-2|COMP-3|COMP-4|COMP-5|COMPUTATIONAL|COMPUTATIONAL-1|COMPUTATIONAL-2|COMPUTATIONAL-3|COMPUTATIONAL-4|COMPUTATIONAL-5|BINARY|PACKED-DECIMAL)\b', re.IGNORECASE),
+            'value_clause': re.compile(r'VALUE\s+(?:IS\s+)?([\'"][^\']*[\'"]|\S+)', re.IGNORECASE),
+            'value_all': re.compile(r'VALUE\s+(?:IS\s+)?ALL\s+([\'"][^\']*[\'"]|\S+)', re.IGNORECASE),
+            'value_space': re.compile(r'VALUE\s+(?:IS\s+)?(?:SPACE|SPACES)', re.IGNORECASE),
+            'value_zero': re.compile(r'VALUE\s+(?:IS\s+)?(?:ZERO|ZEROS|ZEROES)', re.IGNORECASE),
+            'value_quote': re.compile(r'VALUE\s+(?:IS\s+)?(?:QUOTE|QUOTES)', re.IGNORECASE),
+            'value_high_low': re.compile(r'VALUE\s+(?:IS\s+)?(?:HIGH-VALUE|HIGH-VALUES|LOW-VALUE|LOW-VALUES)', re.IGNORECASE),
+            
+            # Enhanced OCCURS patterns with comprehensive business rules
+            'occurs_clause': re.compile(r'OCCURS\s+(\d+)(?:\s+TO\s+(\d+))?\s+TIMES(?:\s+DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*))?(?:\s+INDEXED\s+BY\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*))?\s*(?:ASCENDING|DESCENDING)?(?:\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*))?\s*', re.IGNORECASE),
+            'occurs_depending': re.compile(r'OCCURS\s+\d+\s+TO\s+\d+\s+TIMES\s+DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'occurs_indexed': re.compile(r'INDEXED\s+BY\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'occurs_key': re.compile(r'(?:ASCENDING|DESCENDING)\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            
+            # Enhanced REDEFINES patterns with complex structures
+            'redefines': re.compile(r'REDEFINES\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'renames': re.compile(r'^\s*66\s+([A-Z][A-Z0-9-]*)\s+RENAMES\s+([A-Z][A-Z0-9-]*)\s+(?:THROUGH|THRU)\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'renames_simple': re.compile(r'^\s*66\s+([A-Z][A-Z0-9-]*)\s+RENAMES\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            
+            # Comprehensive file operations with enhanced context
+            'select_statement': re.compile(r'^\s*SELECT\s+([A-Z][A-Z0-9-]*)\s+ASSIGN\s+TO\s+([^\s\.]+)(?:\s+ORGANIZATION\s+(?:IS\s+)?([A-Z]+))?(?:\s+ACCESS\s+(?:MODE\s+)?(?:IS\s+)?([A-Z]+))?(?:\s+FILE\s+STATUS\s+(?:IS\s+)?([A-Z][A-Z0-9-]*))?', re.IGNORECASE | re.MULTILINE),
+            'fd_statement': re.compile(r'^\s*FD\s+([A-Z][A-Z0-9-]*)(?:\s+(.*?))?(?=\n\s*\d|\nFD|\nSD|\nRD|$)', re.IGNORECASE | re.MULTILINE | re.DOTALL),
+            'sd_statement': re.compile(r'^\s*SD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'rd_statement': re.compile(r'^\s*RD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'cd_statement': re.compile(r'^\s*CD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            
+            # Enhanced file operation statements
+            'open_statement': re.compile(r'\bOPEN\s+(INPUT|OUTPUT|I-O|EXTEND)\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'close_statement': re.compile(r'\bCLOSE\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'read_statement': re.compile(r'\bREAD\s+([A-Z][A-Z0-9-]*)(?:\s+(?:INTO\s+([A-Z][A-Z0-9-]*)|NEXT\s+RECORD|KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*)))?', re.IGNORECASE),
+            'write_statement': re.compile(r'\bWRITE\s+([A-Z][A-Z0-9-]*)(?:\s+FROM\s+([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            'rewrite_statement': re.compile(r'\bREWRITE\s+([A-Z][A-Z0-9-]*)(?:\s+FROM\s+([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            'delete_statement': re.compile(r'\bDELETE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'start_statement': re.compile(r'\bSTART\s+([A-Z][A-Z0-9-]*)(?:\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            
+            # Enhanced SQL blocks with comprehensive host variable detection
+            'sql_block': re.compile(r'EXEC\s+SQL(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
+            'sql_host_var': re.compile(r':([A-Z][A-Z0-9-]*(?:-[A-Z0-9]+)*)', re.IGNORECASE),
+            'sql_indicator_var': re.compile(r':([A-Z][A-Z0-9-]*)\s+INDICATOR\s+:([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_include': re.compile(r'EXEC\s+SQL\s+INCLUDE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_declare_cursor': re.compile(r'EXEC\s+SQL\s+DECLARE\s+([A-Z][A-Z0-9-]*)\s+CURSOR(?:\s+WITH\s+(?:HOLD|RETURN))?(?:\s+FOR\s+(.*?))?(?=\s+END-EXEC)', re.IGNORECASE | re.DOTALL),
+            'sql_whenever': re.compile(r'EXEC\s+SQL\s+WHENEVER\s+(SQLWARNING|SQLERROR|NOT\s+FOUND)\s+(CONTINUE|GOTO\s+[A-Z][A-Z0-9-]*|GO\s+TO\s+[A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_connect': re.compile(r'EXEC\s+SQL\s+CONNECT\s+(?:TO\s+)?([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_commit': re.compile(r'EXEC\s+SQL\s+COMMIT(?:\s+WORK)?', re.IGNORECASE),
+            'sql_rollback': re.compile(r'EXEC\s+SQL\s+ROLLBACK(?:\s+WORK)?', re.IGNORECASE),
+            
+            # Enhanced COPY statements with comprehensive replacement patterns
+            'copy_statement': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)(?:\s+(?:OF|IN)\s+([A-Z][A-Z0-9-]*))?(?:\s+REPLACING\s+(.*?))?\.', re.IGNORECASE | re.DOTALL),
+            'copy_replacing': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+REPLACING\s+(.*?)\.', re.IGNORECASE | re.DOTALL),
+            'copy_in': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+(?:IN|OF)\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'copy_suppress': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+SUPPRESS', re.IGNORECASE),
+            'replacing_clause': re.compile(r'==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            'replacing_leading': re.compile(r'LEADING\s+==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            'replacing_trailing': re.compile(r'TRAILING\s+==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            
+            # Enhanced error handling patterns
+            'on_size_error': re.compile(r'\bON\s+SIZE\s+ERROR\b', re.IGNORECASE),
+            'not_on_size_error': re.compile(r'\bNOT\s+ON\s+SIZE\s+ERROR\b', re.IGNORECASE),
+            'at_end': re.compile(r'\bAT\s+END\b', re.IGNORECASE),
+            'not_at_end': re.compile(r'\bNOT\s+AT\s+END\b', re.IGNORECASE),
+            'invalid_key': re.compile(r'\bINVALID\s+KEY\b', re.IGNORECASE),
+            'not_invalid_key': re.compile(r'\bNOT\s+INVALID\s+KEY\b', re.IGNORECASE),
+            'on_overflow': re.compile(r'\bON\s+OVERFLOW\b', re.IGNORECASE),
+            'not_on_overflow': re.compile(r'\bNOT\s+ON\s+OVERFLOW\b', re.IGNORECASE),
+            'on_exception': re.compile(r'\bON\s+EXCEPTION\b', re.IGNORECASE),
+            'not_on_exception': re.compile(r'\bNOT\s+ON\s+EXCEPTION\b', re.IGNORECASE),
+       
+            'paragraph_with_section': re.compile(r'\bPERFORM\s+(?:([A-Z0-9][A-Z0-9-]*)\s+)?VARYING\s+(.*?)(?=\s+END-PERFORM|\.|$)', re.IGNORECASE | re.DOTALL),
+            'perform_thru': re.compile(r'\bPERFORM\s+([A-Z0-9][A-Z0-9-]*)\s+(?:THROUGH|THRU)\s+([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
+            'perform_times': re.compile(r'\bPERFORM\s+(?:([A-Z0-9][A-Z0-9-]*)\s+)?(\d+)\s+TIMES', re.IGNORECASE),
+            'perform_inline': re.compile(r'\bPERFORM\s*(.*?)\s*END-PERFORM', re.IGNORECASE | re.DOTALL),
+            'perform_test': re.compile(r'\bPERFORM\s+.*?\s+WITH\s+TEST\s+(BEFORE|AFTER)', re.IGNORECASE),
+            'perform_with_debug': re.compile(r'\bPERFORM\s+.*?\s+WITH\s+DEBUGGING\s+MODE', re.IGNORECASE),
+            
+            # Enhanced control flow with proper nesting
+            'if_statement': re.compile(r'\bIF\s+(.*?)(?=\s+THEN|\s+(?:NEXT|END)|$)', re.IGNORECASE),
+            'if_then': re.compile(r'\bIF\s+.*?\s+THEN\b', re.IGNORECASE),
+            'if_then_else': re.compile(r'\bIF\s+(.*?)\s+THEN\s+(.*?)(?:\s+ELSE\s+(.*?))?\s+END-IF', re.IGNORECASE | re.DOTALL),
+            'else_clause': re.compile(r'\bELSE\b', re.IGNORECASE),
+            'end_if': re.compile(r'\bEND-IF\b', re.IGNORECASE),
+            'evaluate': re.compile(r'\bEVALUATE\s+(.*?)(?=\s|$)', re.IGNORECASE),
+            'evaluate_block': re.compile(r'\bEVALUATE\s+(.*?)\s+END-EVALUATE', re.IGNORECASE | re.DOTALL),
+            'when_clause': re.compile(r'^\s*WHEN\s+([^\.]+)', re.IGNORECASE | re.MULTILINE),
+            'when_other': re.compile(r'^\s*WHEN\s+OTHER', re.IGNORECASE | re.MULTILINE),
+            'end_evaluate': re.compile(r'\bEND-EVALUATE\b', re.IGNORECASE),
+            
+            # Enhanced data definitions with comprehensive level validation
+            'data_item': re.compile(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*|FILLER)(?:\s+(.*?))?\.?\s*$', re.MULTILINE | re.IGNORECASE),
+            'data_item_with_level': re.compile(r'^\s*(01|02|03|04|05|06|07|08|09|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24|25|26|27|28|29|30|31|32|33|34|35|36|37|38|39|40|41|42|43|44|45|46|47|48|49|66|77|88)\s+([A-Z][A-Z0-9-]*|FILLER)', re.MULTILINE | re.IGNORECASE),
+            'filler_item': re.compile(r'^\s*(\d+)\s+FILLER(?:\s+(.*?))?\.?\s*$', re.MULTILINE | re.IGNORECASE),
+            'group_item': re.compile(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*)\s*\.?\s*$', re.MULTILINE | re.IGNORECASE),
+            
+            # Enhanced PIC and data type patterns
+            'pic_clause': re.compile(r'PIC(?:TURE)?\s+(?:IS\s+)?([X9AVSN\(\)\+\-\.,/ZB*$]+)', re.IGNORECASE),
+            'pic_with_edit': re.compile(r'PIC(?:TURE)?\s+(?:IS\s+)?([X9AVSN\(\)\+\-\.,/ZB*$]+(?:\s*EDIT\s+[^\.]*)?)', re.IGNORECASE),
+            'usage_clause': re.compile(r'USAGE\s+(?:IS\s+)?(COMP(?:-[0-9])?|BINARY|DISPLAY|PACKED-DECIMAL|INDEX|POINTER|OBJECT\s+REFERENCE|FUNCTION-POINTER|PROCEDURE-POINTER)', re.IGNORECASE),
+            'comp_usage': re.compile(r'\b(?:COMP|COMP-1|COMP-2|COMP-3|COMP-4|COMP-5|COMPUTATIONAL|COMPUTATIONAL-1|COMPUTATIONAL-2|COMPUTATIONAL-3|COMPUTATIONAL-4|COMPUTATIONAL-5|BINARY|PACKED-DECIMAL)\b', re.IGNORECASE),
+            'value_clause': re.compile(r'VALUE\s+(?:IS\s+)?([\'"][^\']*[\'"]|\S+)', re.IGNORECASE),
+            'value_all': re.compile(r'VALUE\s+(?:IS\s+)?ALL\s+([\'"][^\']*[\'"]|\S+)', re.IGNORECASE),
+            'value_space': re.compile(r'VALUE\s+(?:IS\s+)?(?:SPACE|SPACES)', re.IGNORECASE),
+            'value_zero': re.compile(r'VALUE\s+(?:IS\s+)?(?:ZERO|ZEROS|ZEROES)', re.IGNORECASE),
+            'value_quote': re.compile(r'VALUE\s+(?:IS\s+)?(?:QUOTE|QUOTES)', re.IGNORECASE),
+            'value_high_low': re.compile(r'VALUE\s+(?:IS\s+)?(?:HIGH-VALUE|HIGH-VALUES|LOW-VALUE|LOW-VALUES)', re.IGNORECASE),
+            
+            # Enhanced OCCURS patterns with comprehensive business rules
+            'occurs_clause': re.compile(r'OCCURS\s+(\d+)(?:\s+TO\s+(\d+))?\s+TIMES(?:\s+DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*))?(?:\s+INDEXED\s+BY\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*))?\s*(?:ASCENDING|DESCENDING)?(?:\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*))?\s*', re.IGNORECASE),
+            'occurs_depending': re.compile(r'OCCURS\s+\d+\s+TO\s+\d+\s+TIMES\s+DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'occurs_indexed': re.compile(r'INDEXED\s+BY\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'occurs_key': re.compile(r'(?:ASCENDING|DESCENDING)\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            
+            # Enhanced REDEFINES patterns with complex structures
+            'redefines': re.compile(r'REDEFINES\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'renames': re.compile(r'^\s*66\s+([A-Z][A-Z0-9-]*)\s+RENAMES\s+([A-Z][A-Z0-9-]*)\s+(?:THROUGH|THRU)\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'renames_simple': re.compile(r'^\s*66\s+([A-Z][A-Z0-9-]*)\s+RENAMES\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            
+            # Comprehensive file operations with enhanced context
+            'select_statement': re.compile(r'^\s*SELECT\s+([A-Z][A-Z0-9-]*)\s+ASSIGN\s+TO\s+([^\s\.]+)(?:\s+ORGANIZATION\s+(?:IS\s+)?([A-Z]+))?(?:\s+ACCESS\s+(?:MODE\s+)?(?:IS\s+)?([A-Z]+))?(?:\s+FILE\s+STATUS\s+(?:IS\s+)?([A-Z][A-Z0-9-]*))?', re.IGNORECASE | re.MULTILINE),
+            'fd_statement': re.compile(r'^\s*FD\s+([A-Z][A-Z0-9-]*)(?:\s+(.*?))?(?=\n\s*\d|\nFD|\nSD|\nRD|$)', re.IGNORECASE | re.MULTILINE | re.DOTALL),
+            'sd_statement': re.compile(r'^\s*SD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'rd_statement': re.compile(r'^\s*RD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'cd_statement': re.compile(r'^\s*CD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            
+            # Enhanced file operation statements
+            'open_statement': re.compile(r'\bOPEN\s+(INPUT|OUTPUT|I-O|EXTEND)\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'close_statement': re.compile(r'\bCLOSE\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'read_statement': re.compile(r'\bREAD\s+([A-Z][A-Z0-9-]*)(?:\s+(?:INTO\s+([A-Z][A-Z0-9-]*)|NEXT\s+RECORD|KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*)))?', re.IGNORECASE),
+            'write_statement': re.compile(r'\bWRITE\s+([A-Z][A-Z0-9-]*)(?:\s+FROM\s+([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            'rewrite_statement': re.compile(r'\bREWRITE\s+([A-Z][A-Z0-9-]*)(?:\s+FROM\s+([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            'delete_statement': re.compile(r'\bDELETE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'start_statement': re.compile(r'\bSTART\s+([A-Z][A-Z0-9-]*)(?:\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            
+            # Enhanced SQL blocks with comprehensive host variable detection
+            'sql_block': re.compile(r'EXEC\s+SQL(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
+            'sql_host_var': re.compile(r':([A-Z][A-Z0-9-]*(?:-[A-Z0-9]+)*)', re.IGNORECASE),
+            'sql_indicator_var': re.compile(r':([A-Z][A-Z0-9-]*)\s+INDICATOR\s+:([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_include': re.compile(r'EXEC\s+SQL\s+INCLUDE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_declare_cursor': re.compile(r'EXEC\s+SQL\s+DECLARE\s+([A-Z][A-Z0-9-]*)\s+CURSOR(?:\s+WITH\s+(?:HOLD|RETURN))?(?:\s+FOR\s+(.*?))?(?=\s+END-EXEC)', re.IGNORECASE | re.DOTALL),
+            'sql_whenever': re.compile(r'EXEC\s+SQL\s+WHENEVER\s+(SQLWARNING|SQLERROR|NOT\s+FOUND)\s+(CONTINUE|GOTO\s+[A-Z][A-Z0-9-]*|GO\s+TO\s+[A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_connect': re.compile(r'EXEC\s+SQL\s+CONNECT\s+(?:TO\s+)?([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_commit': re.compile(r'EXEC\s+SQL\s+COMMIT(?:\s+WORK)?', re.IGNORECASE),
+            'sql_rollback': re.compile(r'EXEC\s+SQL\s+ROLLBACK(?:\s+WORK)?', re.IGNORECASE),
+            
+            # Enhanced COPY statements with comprehensive replacement patterns
+            'copy_statement': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)(?:\s+(?:OF|IN)\s+([A-Z][A-Z0-9-]*))?(?:\s+REPLACING\s+(.*?))?\.', re.IGNORECASE | re.DOTALL),
+            'copy_replacing': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+REPLACING\s+(.*?)\.', re.IGNORECASE | re.DOTALL),
+            'copy_in': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+(?:IN|OF)\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'copy_suppress': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+SUPPRESS', re.IGNORECASE),
+            'replacing_clause': re.compile(r'==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            'replacing_leading': re.compile(r'LEADING\s+==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            'replacing_trailing': re.compile(r'TRAILING\s+==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            
+            # Enhanced error handling patterns
+            'on_size_error': re.compile(r'\bON\s+SIZE\s+ERROR\b', re.IGNORECASE),
+            'not_on_size_error': re.compile(r'\bNOT\s+ON\s+SIZE\s+ERROR\b', re.IGNORECASE),
+            'at_end': re.compile(r'\bAT\s+END\b', re.IGNORECASE),
+            'not_at_end': re.compile(r'\bNOT\s+AT\s+END\b', re.IGNORECASE),
+            'invalid_key': re.compile(r'\bINVALID\s+KEY\b', re.IGNORECASE),
+            'not_invalid_key': re.compile(r'\bNOT\s+INVALID\s+KEY\b', re.IGNORECASE),
+            'on_overflow': re.compile(r'\bON\s+OVERFLOW\b', re.IGNORECASE),
+            'not_on_overflow': re.compile(r'\bNOT\s+ON\s+OVERFLOW\b', re.IGNORECASE),
+            'on_exception': re.compile(r'\bON\s+EXCEPTION\b', re.IGNORECASE),
+            'not_on_exception': re.compile(r'\bNOT\s+ON\s+EXCEPTION\b', re.IGNORECASE),
+        
             # Comprehensive PERFORM patterns with enhanced business logic
             'perform_simple': re.compile(r'\bPERFORM\s+([A-Z0-9][A-Z0-9-]*)\s*(?:\.|$)', re.IGNORECASE),
             'perform_until': re.compile(r'\bPERFORM\s+(?:([A-Z0-9][A-Z0-9-]*)\s+)?UNTIL\s+(.*?)(?=\s+END-PERFORM|\.|$)', re.IGNORECASE | re.DOTALL),
             'perform_varying': re.compile(r'\bPERFORM\s+(?:([A-Z0-9][A-Z0-9-]*)\s+)?VARYING\s+(.*?)(?=\s+END-PERFORM|\.|$)', re.IGNORECASE | re.DOTALL),
+            'perform_thru': re.compile(r'\bPERFORM\s+([A-Z0-9][A-Z0-9-]*)\s+(?:THROUGH|THRU)\s+([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
+            'perform_times': re.compile(r'\bPERFORM\s+(?:([A-Z0-9][A-Z0-9-]*)\s+)?(\d+)\s+TIMES', re.IGNORECASE),
+            'perform_inline': re.compile(r'\bPERFORM\s*(.*?)\s*END-PERFORM', re.IGNORECASE | re.DOTALL),
+            'perform_test': re.compile(r'\bPERFORM\s+.*?\s+WITH\s+TEST\s+(BEFORE|AFTER)', re.IGNORECASE),
+            'perform_with_debug': re.compile(r'\bPERFORM\s+.*?\s+WITH\s+DEBUGGING\s+MODE', re.IGNORECASE),
+            
+            # Enhanced control flow with proper nesting
+            'if_statement': re.compile(r'\bIF\s+(.*?)(?=\s+THEN|\s+(?:NEXT|END)|$)', re.IGNORECASE),
+            'if_then': re.compile(r'\bIF\s+.*?\s+THEN\b', re.IGNORECASE),
+            'if_then_else': re.compile(r'\bIF\s+(.*?)\s+THEN\s+(.*?)(?:\s+ELSE\s+(.*?))?\s+END-IF', re.IGNORECASE | re.DOTALL),
+            'else_clause': re.compile(r'\bELSE\b', re.IGNORECASE),
+            'end_if': re.compile(r'\bEND-IF\b', re.IGNORECASE),
+            'evaluate': re.compile(r'\bEVALUATE\s+(.*?)(?=\s|$)', re.IGNORECASE),
+            'evaluate_block': re.compile(r'\bEVALUATE\s+(.*?)\s+END-EVALUATE', re.IGNORECASE | re.DOTALL),
+            'when_clause': re.compile(r'^\s*WHEN\s+([^\.]+)', re.IGNORECASE | re.MULTILINE),
+            'when_other': re.compile(r'^\s*WHEN\s+OTHER', re.IGNORECASE | re.MULTILINE),
+            'end_evaluate': re.compile(r'\bEND-EVALUATE\b', re.IGNORECASE),
+            
+            # Enhanced data definitions with comprehensive level validation
+            'data_item': re.compile(r'\bPERFORM\s+(?:([A-Z0-9][A-Z0-9-]*)\s+)?VARYING\s+(.*?)(?=\s+END-PERFORM|\.|$)', re.IGNORECASE | re.DOTALL),
+            'perform_thru': re.compile(r'\bPERFORM\s+([A-Z0-9][A-Z0-9-]*)\s+(?:THROUGH|THRU)\s+([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
+            'perform_times': re.compile(r'\bPERFORM\s+(?:([A-Z0-9][A-Z0-9-]*)\s+)?(\d+)\s+TIMES', re.IGNORECASE),
+            'perform_inline': re.compile(r'\bPERFORM\s*(.*?)\s*END-PERFORM', re.IGNORECASE | re.DOTALL),
+            'perform_test': re.compile(r'\bPERFORM\s+.*?\s+WITH\s+TEST\s+(BEFORE|AFTER)', re.IGNORECASE),
+            'perform_with_debug': re.compile(r'\bPERFORM\s+.*?\s+WITH\s+DEBUGGING\s+MODE', re.IGNORECASE),
+            
+            # Enhanced control flow with proper nesting
+            'if_statement': re.compile(r'\bIF\s+(.*?)(?=\s+THEN|\s+(?:NEXT|END)|$)', re.IGNORECASE),
+            'if_then': re.compile(r'\bIF\s+.*?\s+THEN\b', re.IGNORECASE),
+            'if_then_else': re.compile(r'\bIF\s+(.*?)\s+THEN\s+(.*?)(?:\s+ELSE\s+(.*?))?\s+END-IF', re.IGNORECASE | re.DOTALL),
+            'else_clause': re.compile(r'\bELSE\b', re.IGNORECASE),
+            'end_if': re.compile(r'\bEND-IF\b', re.IGNORECASE),
+            'evaluate': re.compile(r'\bEVALUATE\s+(.*?)(?=\s|$)', re.IGNORECASE),
+            'evaluate_block': re.compile(r'\bEVALUATE\s+(.*?)\s+END-EVALUATE', re.IGNORECASE | re.DOTALL),
+            'when_clause': re.compile(r'^\s*WHEN\s+([^\.]+)', re.IGNORECASE | re.MULTILINE),
+            'when_other': re.compile(r'^\s*WHEN\s+OTHER', re.IGNORECASE | re.MULTILINE),
+            'end_evaluate': re.compile(r'\bEND-EVALUATE\b', re.IGNORECASE),
+            
+            # Enhanced data definitions with comprehensive level validation
+            'data_item': re.compile(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*|FILLER)(?:\s+(.*?))?\.?\s*$', re.MULTILINE | re.IGNORECASE),
+            'data_item_with_level': re.compile(r'^\s*(01|02|03|04|05|06|07|08|09|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24|25|26|27|28|29|30|31|32|33|34|35|36|37|38|39|40|41|42|43|44|45|46|47|48|49|66|77|88)\s+([A-Z][A-Z0-9-]*|FILLER)', re.MULTILINE | re.IGNORECASE),
+            'filler_item': re.compile(r'^\s*(\d+)\s+FILLER(?:\s+(.*?))?\.?\s*$', re.MULTILINE | re.IGNORECASE),
+            'group_item': re.compile(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*)\s*\.?\s*$', re.MULTILINE | re.IGNORECASE),
+            
+            # Enhanced PIC and data type patterns
+            'pic_clause': re.compile(r'PIC(?:TURE)?\s+(?:IS\s+)?([X9AVSN\(\)\+\-\.,/ZB*$]+)', re.IGNORECASE),
+            'pic_with_edit': re.compile(r'PIC(?:TURE)?\s+(?:IS\s+)?([X9AVSN\(\)\+\-\.,/ZB*$]+(?:\s*EDIT\s+[^\.]*)?)', re.IGNORECASE),
+            'usage_clause': re.compile(r'USAGE\s+(?:IS\s+)?(COMP(?:-[0-9])?|BINARY|DISPLAY|PACKED-DECIMAL|INDEX|POINTER|OBJECT\s+REFERENCE|FUNCTION-POINTER|PROCEDURE-POINTER)', re.IGNORECASE),
+            'comp_usage': re.compile(r'\b(?:COMP|COMP-1|COMP-2|COMP-3|COMP-4|COMP-5|COMPUTATIONAL|COMPUTATIONAL-1|COMPUTATIONAL-2|COMPUTATIONAL-3|COMPUTATIONAL-4|COMPUTATIONAL-5|BINARY|PACKED-DECIMAL)\b', re.IGNORECASE),
+            'value_clause': re.compile(r'VALUE\s+(?:IS\s+)?([\'"][^\']*[\'"]|\S+)', re.IGNORECASE),
+            'value_all': re.compile(r'VALUE\s+(?:IS\s+)?ALL\s+([\'"][^\']*[\'"]|\S+)', re.IGNORECASE),
+            'value_space': re.compile(r'VALUE\s+(?:IS\s+)?(?:SPACE|SPACES)', re.IGNORECASE),
+            'value_zero': re.compile(r'VALUE\s+(?:IS\s+)?(?:ZERO|ZEROS|ZEROES)', re.IGNORECASE),
+            'value_quote': re.compile(r'VALUE\s+(?:IS\s+)?(?:QUOTE|QUOTES)', re.IGNORECASE),
+            'value_high_low': re.compile(r'VALUE\s+(?:IS\s+)?(?:HIGH-VALUE|HIGH-VALUES|LOW-VALUE|LOW-VALUES)', re.IGNORECASE),
+            
+            # Enhanced OCCURS patterns with comprehensive business rules
+            'occurs_clause': re.compile(r'OCCURS\s+(\d+)(?:\s+TO\s+(\d+))?\s+TIMES(?:\s+DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*))?(?:\s+INDEXED\s+BY\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*))?\s*(?:ASCENDING|DESCENDING)?(?:\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*))?\s*', re.IGNORECASE),
+            'occurs_depending': re.compile(r'OCCURS\s+\d+\s+TO\s+\d+\s+TIMES\s+DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'occurs_indexed': re.compile(r'INDEXED\s+BY\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'occurs_key': re.compile(r'(?:ASCENDING|DESCENDING)\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            
+            # Enhanced REDEFINES patterns with complex structures
+            'redefines': re.compile(r'REDEFINES\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'renames': re.compile(r'^\s*66\s+([A-Z][A-Z0-9-]*)\s+RENAMES\s+([A-Z][A-Z0-9-]*)\s+(?:THROUGH|THRU)\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'renames_simple': re.compile(r'^\s*66\s+([A-Z][A-Z0-9-]*)\s+RENAMES\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            
+            # Comprehensive file operations with enhanced context
+            'select_statement': re.compile(r'^\s*SELECT\s+([A-Z][A-Z0-9-]*)\s+ASSIGN\s+TO\s+([^\s\.]+)(?:\s+ORGANIZATION\s+(?:IS\s+)?([A-Z]+))?(?:\s+ACCESS\s+(?:MODE\s+)?(?:IS\s+)?([A-Z]+))?(?:\s+FILE\s+STATUS\s+(?:IS\s+)?([A-Z][A-Z0-9-]*))?', re.IGNORECASE | re.MULTILINE),
+            'fd_statement': re.compile(r'^\s*FD\s+([A-Z][A-Z0-9-]*)(?:\s+(.*?))?(?=\n\s*\d|\nFD|\nSD|\nRD|$)', re.IGNORECASE | re.MULTILINE | re.DOTALL),
+            'sd_statement': re.compile(r'^\s*SD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'rd_statement': re.compile(r'^\s*RD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'cd_statement': re.compile(r'^\s*CD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            
+            # Enhanced file operation statements
+            'open_statement': re.compile(r'\bOPEN\s+(INPUT|OUTPUT|I-O|EXTEND)\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'close_statement': re.compile(r'\bCLOSE\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'read_statement': re.compile(r'\bREAD\s+([A-Z][A-Z0-9-]*)(?:\s+(?:INTO\s+([A-Z][A-Z0-9-]*)|NEXT\s+RECORD|KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*)))?', re.IGNORECASE),
+            'write_statement': re.compile(r'\bWRITE\s+([A-Z][A-Z0-9-]*)(?:\s+FROM\s+([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            'rewrite_statement': re.compile(r'\bREWRITE\s+([A-Z][A-Z0-9-]*)(?:\s+FROM\s+([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            'delete_statement': re.compile(r'\bDELETE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'start_statement': re.compile(r'\bSTART\s+([A-Z][A-Z0-9-]*)(?:\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            
+            # Enhanced SQL blocks with comprehensive host variable detection
+            'sql_block': re.compile(r'EXEC\s+SQL(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
+            'sql_host_var': re.compile(r':([A-Z][A-Z0-9-]*(?:-[A-Z0-9]+)*)', re.IGNORECASE),
+            'sql_indicator_var': re.compile(r':([A-Z][A-Z0-9-]*)\s+INDICATOR\s+:([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_include': re.compile(r'EXEC\s+SQL\s+INCLUDE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_declare_cursor': re.compile(r'EXEC\s+SQL\s+DECLARE\s+([A-Z][A-Z0-9-]*)\s+CURSOR(?:\s+WITH\s+(?:HOLD|RETURN))?(?:\s+FOR\s+(.*?))?(?=\s+END-EXEC)', re.IGNORECASE | re.DOTALL),
+            'sql_whenever': re.compile(r'EXEC\s+SQL\s+WHENEVER\s+(SQLWARNING|SQLERROR|NOT\s+FOUND)\s+(CONTINUE|GOTO\s+[A-Z][A-Z0-9-]*|GO\s+TO\s+[A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_connect': re.compile(r'EXEC\s+SQL\s+CONNECT\s+(?:TO\s+)?([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_commit': re.compile(r'EXEC\s+SQL\s+COMMIT(?:\s+WORK)?', re.IGNORECASE),
+            'sql_rollback': re.compile(r'EXEC\s+SQL\s+ROLLBACK(?:\s+WORK)?', re.IGNORECASE),
+            
+            # Enhanced COPY statements with comprehensive replacement patterns
+            'copy_statement': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)(?:\s+(?:OF|IN)\s+([A-Z][A-Z0-9-]*))?(?:\s+REPLACING\s+(.*?))?\.', re.IGNORECASE | re.DOTALL),
+            'copy_replacing': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+REPLACING\s+(.*?)\.', re.IGNORECASE | re.DOTALL),
+            'copy_in': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+(?:IN|OF)\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'copy_suppress': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+SUPPRESS', re.IGNORECASE),
+            'replacing_clause': re.compile(r'==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            'replacing_leading': re.compile(r'LEADING\s+==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            'replacing_trailing': re.compile(r'TRAILING\s+==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            
+            # Enhanced error handling patterns
+            'on_size_error': re.compile(r'\bON\s+SIZE\s+ERROR\b', re.IGNORECASE),
+            'not_on_size_error': re.compile(r'\bNOT\s+ON\s+SIZE\s+ERROR\b', re.IGNORECASE),
+            'at_end': re.compile(r'\bAT\s+END\b', re.IGNORECASE),
+            'not_at_end': re.compile(r'\bNOT\s+AT\s+END\b', re.IGNORECASE),
+            'invalid_key': re.compile(r'\bINVALID\s+KEY\b', re.IGNORECASE),
+            'not_invalid_key': re.compile(r'\bNOT\s+INVALID\s+KEY\b', re.IGNORECASE),
+            'on_overflow': re.compile(r'\bON\s+OVERFLOW\b', re.IGNORECASE),
+            'not_on_overflow': re.compile(r'\bNOT\s+ON\s+OVERFLOW\b', re.IGNORECASE),
+            'on_exception': re.compile(r'\bON\s+EXCEPTION\b', re.IGNORECASE),
+            'not_on_exception': re.compile(r'\bNOT\s+ON\s+EXCEPTION\b', re.IGNORECASE),
+
+            'data_item_with_level': re.compile(r'^\s*(01|02|03|04|05|06|07|08|09|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24|25|26|27|28|29|30|31|32|33|34|35|36|37|38|39|40|41|42|43|44|45|46|47|48|49|66|77|88)\s+([A-Z][A-Z0-9-]*|FILLER)', re.MULTILINE | re.IGNORECASE),
+            'filler_item': re.compile(r'\bPERFORM\s+(?:([A-Z0-9][A-Z0-9-]*)\s+)?VARYING\s+(.*?)(?=\s+END-PERFORM|\.|$)', re.IGNORECASE | re.DOTALL),
+            'perform_thru': re.compile(r'\bPERFORM\s+([A-Z0-9][A-Z0-9-]*)\s+(?:THROUGH|THRU)\s+([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
+            'perform_times': re.compile(r'\bPERFORM\s+(?:([A-Z0-9][A-Z0-9-]*)\s+)?(\d+)\s+TIMES', re.IGNORECASE),
+            'perform_inline': re.compile(r'\bPERFORM\s*(.*?)\s*END-PERFORM', re.IGNORECASE | re.DOTALL),
+            'perform_test': re.compile(r'\bPERFORM\s+.*?\s+WITH\s+TEST\s+(BEFORE|AFTER)', re.IGNORECASE),
+            'perform_with_debug': re.compile(r'\bPERFORM\s+.*?\s+WITH\s+DEBUGGING\s+MODE', re.IGNORECASE),
+            
+            # Enhanced control flow with proper nesting
+            'if_statement': re.compile(r'\bIF\s+(.*?)(?=\s+THEN|\s+(?:NEXT|END)|$)', re.IGNORECASE),
+            'if_then': re.compile(r'\bIF\s+.*?\s+THEN\b', re.IGNORECASE),
+            'if_then_else': re.compile(r'\bIF\s+(.*?)\s+THEN\s+(.*?)(?:\s+ELSE\s+(.*?))?\s+END-IF', re.IGNORECASE | re.DOTALL),
+            'else_clause': re.compile(r'\bELSE\b', re.IGNORECASE),
+            'end_if': re.compile(r'\bEND-IF\b', re.IGNORECASE),
+            'evaluate': re.compile(r'\bEVALUATE\s+(.*?)(?=\s|$)', re.IGNORECASE),
+            'evaluate_block': re.compile(r'\bEVALUATE\s+(.*?)\s+END-EVALUATE', re.IGNORECASE | re.DOTALL),
+            'when_clause': re.compile(r'^\s*WHEN\s+([^\.]+)', re.IGNORECASE | re.MULTILINE),
+            'when_other': re.compile(r'^\s*WHEN\s+OTHER', re.IGNORECASE | re.MULTILINE),
+            'end_evaluate': re.compile(r'\bEND-EVALUATE\b', re.IGNORECASE),
+            
+            # Enhanced data definitions with comprehensive level validation
+            'data_item': re.compile(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*|FILLER)(?:\s+(.*?))?\.?\s*$', re.MULTILINE | re.IGNORECASE),
+            'data_item_with_level': re.compile(r'^\s*(01|02|03|04|05|06|07|08|09|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24|25|26|27|28|29|30|31|32|33|34|35|36|37|38|39|40|41|42|43|44|45|46|47|48|49|66|77|88)\s+([A-Z][A-Z0-9-]*|FILLER)', re.MULTILINE | re.IGNORECASE),
+            'filler_item': re.compile(r'^\s*(\d+)\s+FILLER(?:\s+(.*?))?\.?\s*$', re.MULTILINE | re.IGNORECASE),
+            'group_item': re.compile(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*)\s*\.?\s*$', re.MULTILINE | re.IGNORECASE),
+            
+            # Enhanced PIC and data type patterns
+            'pic_clause': re.compile(r'PIC(?:TURE)?\s+(?:IS\s+)?([X9AVSN\(\)\+\-\.,/ZB*$]+)', re.IGNORECASE),
+            'pic_with_edit': re.compile(r'PIC(?:TURE)?\s+(?:IS\s+)?([X9AVSN\(\)\+\-\.,/ZB*$]+(?:\s*EDIT\s+[^\.]*)?)', re.IGNORECASE),
+            'usage_clause': re.compile(r'USAGE\s+(?:IS\s+)?(COMP(?:-[0-9])?|BINARY|DISPLAY|PACKED-DECIMAL|INDEX|POINTER|OBJECT\s+REFERENCE|FUNCTION-POINTER|PROCEDURE-POINTER)', re.IGNORECASE),
+            'comp_usage': re.compile(r'\b(?:COMP|COMP-1|COMP-2|COMP-3|COMP-4|COMP-5|COMPUTATIONAL|COMPUTATIONAL-1|COMPUTATIONAL-2|COMPUTATIONAL-3|COMPUTATIONAL-4|COMPUTATIONAL-5|BINARY|PACKED-DECIMAL)\b', re.IGNORECASE),
+            'value_clause': re.compile(r'VALUE\s+(?:IS\s+)?([\'"][^\']*[\'"]|\S+)', re.IGNORECASE),
+            'value_all': re.compile(r'VALUE\s+(?:IS\s+)?ALL\s+([\'"][^\']*[\'"]|\S+)', re.IGNORECASE),
+            'value_space': re.compile(r'VALUE\s+(?:IS\s+)?(?:SPACE|SPACES)', re.IGNORECASE),
+            'value_zero': re.compile(r'VALUE\s+(?:IS\s+)?(?:ZERO|ZEROS|ZEROES)', re.IGNORECASE),
+            'value_quote': re.compile(r'VALUE\s+(?:IS\s+)?(?:QUOTE|QUOTES)', re.IGNORECASE),
+            'value_high_low': re.compile(r'VALUE\s+(?:IS\s+)?(?:HIGH-VALUE|HIGH-VALUES|LOW-VALUE|LOW-VALUES)', re.IGNORECASE),
+            
+            # Enhanced OCCURS patterns with comprehensive business rules
+            'occurs_clause': re.compile(r'OCCURS\s+(\d+)(?:\s+TO\s+(\d+))?\s+TIMES(?:\s+DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*))?(?:\s+INDEXED\s+BY\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*))?\s*(?:ASCENDING|DESCENDING)?(?:\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*))?\s*', re.IGNORECASE),
+            'occurs_depending': re.compile(r'OCCURS\s+\d+\s+TO\s+\d+\s+TIMES\s+DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'occurs_indexed': re.compile(r'INDEXED\s+BY\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'occurs_key': re.compile(r'(?:ASCENDING|DESCENDING)\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            
+            # Enhanced REDEFINES patterns with complex structures
+            'redefines': re.compile(r'REDEFINES\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'renames': re.compile(r'^\s*66\s+([A-Z][A-Z0-9-]*)\s+RENAMES\s+([A-Z][A-Z0-9-]*)\s+(?:THROUGH|THRU)\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'renames_simple': re.compile(r'^\s*66\s+([A-Z][A-Z0-9-]*)\s+RENAMES\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            
+            # Comprehensive file operations with enhanced context
+            'select_statement': re.compile(r'^\s*SELECT\s+([A-Z][A-Z0-9-]*)\s+ASSIGN\s+TO\s+([^\s\.]+)(?:\s+ORGANIZATION\s+(?:IS\s+)?([A-Z]+))?(?:\s+ACCESS\s+(?:MODE\s+)?(?:IS\s+)?([A-Z]+))?(?:\s+FILE\s+STATUS\s+(?:IS\s+)?([A-Z][A-Z0-9-]*))?', re.IGNORECASE | re.MULTILINE),
+            'fd_statement': re.compile(r'^\s*FD\s+([A-Z][A-Z0-9-]*)(?:\s+(.*?))?(?=\n\s*\d|\nFD|\nSD|\nRD|$)', re.IGNORECASE | re.MULTILINE | re.DOTALL),
+            'sd_statement': re.compile(r'^\s*SD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'rd_statement': re.compile(r'^\s*RD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'cd_statement': re.compile(r'^\s*CD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            
+            # Enhanced file operation statements
+            'open_statement': re.compile(r'\bOPEN\s+(INPUT|OUTPUT|I-O|EXTEND)\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'close_statement': re.compile(r'\bCLOSE\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'read_statement': re.compile(r'\bREAD\s+([A-Z][A-Z0-9-]*)(?:\s+(?:INTO\s+([A-Z][A-Z0-9-]*)|NEXT\s+RECORD|KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*)))?', re.IGNORECASE),
+            'write_statement': re.compile(r'\bWRITE\s+([A-Z][A-Z0-9-]*)(?:\s+FROM\s+([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            'rewrite_statement': re.compile(r'\bREWRITE\s+([A-Z][A-Z0-9-]*)(?:\s+FROM\s+([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            'delete_statement': re.compile(r'\bDELETE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'start_statement': re.compile(r'\bSTART\s+([A-Z][A-Z0-9-]*)(?:\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            
+            # Enhanced SQL blocks with comprehensive host variable detection
+            'sql_block': re.compile(r'EXEC\s+SQL(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
+            'sql_host_var': re.compile(r':([A-Z][A-Z0-9-]*(?:-[A-Z0-9]+)*)', re.IGNORECASE),
+            'sql_indicator_var': re.compile(r':([A-Z][A-Z0-9-]*)\s+INDICATOR\s+:([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_include': re.compile(r'EXEC\s+SQL\s+INCLUDE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_declare_cursor': re.compile(r'EXEC\s+SQL\s+DECLARE\s+([A-Z][A-Z0-9-]*)\s+CURSOR(?:\s+WITH\s+(?:HOLD|RETURN))?(?:\s+FOR\s+(.*?))?(?=\s+END-EXEC)', re.IGNORECASE | re.DOTALL),
+            'sql_whenever': re.compile(r'EXEC\s+SQL\s+WHENEVER\s+(SQLWARNING|SQLERROR|NOT\s+FOUND)\s+(CONTINUE|GOTO\s+[A-Z][A-Z0-9-]*|GO\s+TO\s+[A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_connect': re.compile(r'EXEC\s+SQL\s+CONNECT\s+(?:TO\s+)?([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_commit': re.compile(r'EXEC\s+SQL\s+COMMIT(?:\s+WORK)?', re.IGNORECASE),
+            'sql_rollback': re.compile(r'EXEC\s+SQL\s+ROLLBACK(?:\s+WORK)?', re.IGNORECASE),
+            
+            # Enhanced COPY statements with comprehensive replacement patterns
+            'copy_statement': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)(?:\s+(?:OF|IN)\s+([A-Z][A-Z0-9-]*))?(?:\s+REPLACING\s+(.*?))?\.', re.IGNORECASE | re.DOTALL),
+            'copy_replacing': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+REPLACING\s+(.*?)\.', re.IGNORECASE | re.DOTALL),
+            'copy_in': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+(?:IN|OF)\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'copy_suppress': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+SUPPRESS', re.IGNORECASE),
+            'replacing_clause': re.compile(r'==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            'replacing_leading': re.compile(r'LEADING\s+==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            'replacing_trailing': re.compile(r'TRAILING\s+==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            
+            # Enhanced error handling patterns
+            'on_size_error': re.compile(r'\bON\s+SIZE\s+ERROR\b', re.IGNORECASE),
+            'not_on_size_error': re.compile(r'\bNOT\s+ON\s+SIZE\s+ERROR\b', re.IGNORECASE),
+            'at_end': re.compile(r'\bAT\s+END\b', re.IGNORECASE),
+            'not_at_end': re.compile(r'\bNOT\s+AT\s+END\b', re.IGNORECASE),
+            'invalid_key': re.compile(r'\bINVALID\s+KEY\b', re.IGNORECASE),
+            'not_invalid_key': re.compile(r'\bNOT\s+INVALID\s+KEY\b', re.IGNORECASE),
+            'on_overflow': re.compile(r'\bON\s+OVERFLOW\b', re.IGNORECASE),
+            'not_on_overflow': re.compile(r'\bNOT\s+ON\s+OVERFLOW\b', re.IGNORECASE),
+            'on_exception': re.compile(r'\bON\s+EXCEPTION\b', re.IGNORECASE),
+            'not_on_exception': re.compile(r'\bNOT\s+ON\s+EXCEPTION\b', re.IGNORECASE),
+  
+            'group_item': re.compile(r'\bPERFORM\s+(?:([A-Z0-9][A-Z0-9-]*)\s+)?VARYING\s+(.*?)(?=\s+END-PERFORM|\.|$)', re.IGNORECASE | re.DOTALL),
+            'perform_thru': re.compile(r'\bPERFORM\s+([A-Z0-9][A-Z0-9-]*)\s+(?:THROUGH|THRU)\s+([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
+            'perform_times': re.compile(r'\bPERFORM\s+(?:([A-Z0-9][A-Z0-9-]*)\s+)?(\d+)\s+TIMES', re.IGNORECASE),
+            'perform_inline': re.compile(r'\bPERFORM\s*(.*?)\s*END-PERFORM', re.IGNORECASE | re.DOTALL),
+            'perform_test': re.compile(r'\bPERFORM\s+.*?\s+WITH\s+TEST\s+(BEFORE|AFTER)', re.IGNORECASE),
+            'perform_with_debug': re.compile(r'\bPERFORM\s+.*?\s+WITH\s+DEBUGGING\s+MODE', re.IGNORECASE),
+            
+            # Enhanced control flow with proper nesting
+            'if_statement': re.compile(r'\bIF\s+(.*?)(?=\s+THEN|\s+(?:NEXT|END)|$)', re.IGNORECASE),
+            'if_then': re.compile(r'\bIF\s+.*?\s+THEN\b', re.IGNORECASE),
+            'if_then_else': re.compile(r'\bIF\s+(.*?)\s+THEN\s+(.*?)(?:\s+ELSE\s+(.*?))?\s+END-IF', re.IGNORECASE | re.DOTALL),
+            'else_clause': re.compile(r'\bELSE\b', re.IGNORECASE),
+            'end_if': re.compile(r'\bEND-IF\b', re.IGNORECASE),
+            'evaluate': re.compile(r'\bEVALUATE\s+(.*?)(?=\s|$)', re.IGNORECASE),
+            'evaluate_block': re.compile(r'\bEVALUATE\s+(.*?)\s+END-EVALUATE', re.IGNORECASE | re.DOTALL),
+            'when_clause': re.compile(r'^\s*WHEN\s+([^\.]+)', re.IGNORECASE | re.MULTILINE),
+            'when_other': re.compile(r'^\s*WHEN\s+OTHER', re.IGNORECASE | re.MULTILINE),
+            'end_evaluate': re.compile(r'\bEND-EVALUATE\b', re.IGNORECASE),
+            
+            # Enhanced data definitions with comprehensive level validation
+            'data_item': re.compile(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*|FILLER)(?:\s+(.*?))?\.?\s*$', re.MULTILINE | re.IGNORECASE),
+            'data_item_with_level': re.compile(r'^\s*(01|02|03|04|05|06|07|08|09|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24|25|26|27|28|29|30|31|32|33|34|35|36|37|38|39|40|41|42|43|44|45|46|47|48|49|66|77|88)\s+([A-Z][A-Z0-9-]*|FILLER)', re.MULTILINE | re.IGNORECASE),
+            'filler_item': re.compile(r'^\s*(\d+)\s+FILLER(?:\s+(.*?))?\.?\s*$', re.MULTILINE | re.IGNORECASE),
+            'group_item': re.compile(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*)\s*\.?\s*$', re.MULTILINE | re.IGNORECASE),
+            
+            # Enhanced PIC and data type patterns
+            'pic_clause': re.compile(r'PIC(?:TURE)?\s+(?:IS\s+)?([X9AVSN\(\)\+\-\.,/ZB*$]+)', re.IGNORECASE),
+            'pic_with_edit': re.compile(r'PIC(?:TURE)?\s+(?:IS\s+)?([X9AVSN\(\)\+\-\.,/ZB*$]+(?:\s*EDIT\s+[^\.]*)?)', re.IGNORECASE),
+            'usage_clause': re.compile(r'USAGE\s+(?:IS\s+)?(COMP(?:-[0-9])?|BINARY|DISPLAY|PACKED-DECIMAL|INDEX|POINTER|OBJECT\s+REFERENCE|FUNCTION-POINTER|PROCEDURE-POINTER)', re.IGNORECASE),
+            'comp_usage': re.compile(r'\b(?:COMP|COMP-1|COMP-2|COMP-3|COMP-4|COMP-5|COMPUTATIONAL|COMPUTATIONAL-1|COMPUTATIONAL-2|COMPUTATIONAL-3|COMPUTATIONAL-4|COMPUTATIONAL-5|BINARY|PACKED-DECIMAL)\b', re.IGNORECASE),
+            'value_clause': re.compile(r'VALUE\s+(?:IS\s+)?([\'"][^\']*[\'"]|\S+)', re.IGNORECASE),
+            'value_all': re.compile(r'VALUE\s+(?:IS\s+)?ALL\s+([\'"][^\']*[\'"]|\S+)', re.IGNORECASE),
+            'value_space': re.compile(r'VALUE\s+(?:IS\s+)?(?:SPACE|SPACES)', re.IGNORECASE),
+            'value_zero': re.compile(r'VALUE\s+(?:IS\s+)?(?:ZERO|ZEROS|ZEROES)', re.IGNORECASE),
+            'value_quote': re.compile(r'VALUE\s+(?:IS\s+)?(?:QUOTE|QUOTES)', re.IGNORECASE),
+            'value_high_low': re.compile(r'VALUE\s+(?:IS\s+)?(?:HIGH-VALUE|HIGH-VALUES|LOW-VALUE|LOW-VALUES)', re.IGNORECASE),
+            
+            # Enhanced OCCURS patterns with comprehensive business rules
+            'occurs_clause': re.compile(r'OCCURS\s+(\d+)(?:\s+TO\s+(\d+))?\s+TIMES(?:\s+DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*))?(?:\s+INDEXED\s+BY\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*))?\s*(?:ASCENDING|DESCENDING)?(?:\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*))?\s*', re.IGNORECASE),
+            'occurs_depending': re.compile(r'OCCURS\s+\d+\s+TO\s+\d+\s+TIMES\s+DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'occurs_indexed': re.compile(r'INDEXED\s+BY\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'occurs_key': re.compile(r'(?:ASCENDING|DESCENDING)\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            
+            # Enhanced REDEFINES patterns with complex structures
+            'redefines': re.compile(r'REDEFINES\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'renames': re.compile(r'^\s*66\s+([A-Z][A-Z0-9-]*)\s+RENAMES\s+([A-Z][A-Z0-9-]*)\s+(?:THROUGH|THRU)\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'renames_simple': re.compile(r'^\s*66\s+([A-Z][A-Z0-9-]*)\s+RENAMES\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            
+            # Comprehensive file operations with enhanced context
+            'select_statement': re.compile(r'^\s*SELECT\s+([A-Z][A-Z0-9-]*)\s+ASSIGN\s+TO\s+([^\s\.]+)(?:\s+ORGANIZATION\s+(?:IS\s+)?([A-Z]+))?(?:\s+ACCESS\s+(?:MODE\s+)?(?:IS\s+)?([A-Z]+))?(?:\s+FILE\s+STATUS\s+(?:IS\s+)?([A-Z][A-Z0-9-]*))?', re.IGNORECASE | re.MULTILINE),
+            'fd_statement': re.compile(r'^\s*FD\s+([A-Z][A-Z0-9-]*)(?:\s+(.*?))?(?=\n\s*\d|\nFD|\nSD|\nRD|$)', re.IGNORECASE | re.MULTILINE | re.DOTALL),
+            'sd_statement': re.compile(r'^\s*SD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'rd_statement': re.compile(r'^\s*RD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'cd_statement': re.compile(r'^\s*CD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            
+            # Enhanced file operation statements
+            'open_statement': re.compile(r'\bOPEN\s+(INPUT|OUTPUT|I-O|EXTEND)\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'close_statement': re.compile(r'\bCLOSE\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'read_statement': re.compile(r'\bREAD\s+([A-Z][A-Z0-9-]*)(?:\s+(?:INTO\s+([A-Z][A-Z0-9-]*)|NEXT\s+RECORD|KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*)))?', re.IGNORECASE),
+            'write_statement': re.compile(r'\bWRITE\s+([A-Z][A-Z0-9-]*)(?:\s+FROM\s+([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            'rewrite_statement': re.compile(r'\bREWRITE\s+([A-Z][A-Z0-9-]*)(?:\s+FROM\s+([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            'delete_statement': re.compile(r'\bDELETE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'start_statement': re.compile(r'\bSTART\s+([A-Z][A-Z0-9-]*)(?:\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            
+            # Enhanced SQL blocks with comprehensive host variable detection
+            'sql_block': re.compile(r'EXEC\s+SQL(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
+            'sql_host_var': re.compile(r':([A-Z][A-Z0-9-]*(?:-[A-Z0-9]+)*)', re.IGNORECASE),
+            'sql_indicator_var': re.compile(r':([A-Z][A-Z0-9-]*)\s+INDICATOR\s+:([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_include': re.compile(r'EXEC\s+SQL\s+INCLUDE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_declare_cursor': re.compile(r'EXEC\s+SQL\s+DECLARE\s+([A-Z][A-Z0-9-]*)\s+CURSOR(?:\s+WITH\s+(?:HOLD|RETURN))?(?:\s+FOR\s+(.*?))?(?=\s+END-EXEC)', re.IGNORECASE | re.DOTALL),
+            'sql_whenever': re.compile(r'EXEC\s+SQL\s+WHENEVER\s+(SQLWARNING|SQLERROR|NOT\s+FOUND)\s+(CONTINUE|GOTO\s+[A-Z][A-Z0-9-]*|GO\s+TO\s+[A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_connect': re.compile(r'EXEC\s+SQL\s+CONNECT\s+(?:TO\s+)?([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_commit': re.compile(r'EXEC\s+SQL\s+COMMIT(?:\s+WORK)?', re.IGNORECASE),
+            'sql_rollback': re.compile(r'EXEC\s+SQL\s+ROLLBACK(?:\s+WORK)?', re.IGNORECASE),
+            
+            # Enhanced COPY statements with comprehensive replacement patterns
+            'copy_statement': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)(?:\s+(?:OF|IN)\s+([A-Z][A-Z0-9-]*))?(?:\s+REPLACING\s+(.*?))?\.', re.IGNORECASE | re.DOTALL),
+            'copy_replacing': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+REPLACING\s+(.*?)\.', re.IGNORECASE | re.DOTALL),
+            'copy_in': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+(?:IN|OF)\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'copy_suppress': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+SUPPRESS', re.IGNORECASE),
+            'replacing_clause': re.compile(r'==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            'replacing_leading': re.compile(r'LEADING\s+==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            'replacing_trailing': re.compile(r'TRAILING\s+==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            
+            # Enhanced error handling patterns
+            'on_size_error': re.compile(r'\bON\s+SIZE\s+ERROR\b', re.IGNORECASE),
+            'not_on_size_error': re.compile(r'\bNOT\s+ON\s+SIZE\s+ERROR\b', re.IGNORECASE),
+            'at_end': re.compile(r'\bAT\s+END\b', re.IGNORECASE),
+            'not_at_end': re.compile(r'\bNOT\s+AT\s+END\b', re.IGNORECASE),
+            'invalid_key': re.compile(r'\bINVALID\s+KEY\b', re.IGNORECASE),
+            'not_invalid_key': re.compile(r'\bNOT\s+INVALID\s+KEY\b', re.IGNORECASE),
+            'on_overflow': re.compile(r'\bON\s+OVERFLOW\b', re.IGNORECASE),
+            'not_on_overflow': re.compile(r'\bNOT\s+ON\s+OVERFLOW\b', re.IGNORECASE),
+            'on_exception': re.compile(r'\bON\s+EXCEPTION\b', re.IGNORECASE),
+            'not_on_exception': re.compile(r'\bNOT\s+ON\s+EXCEPTION\b', re.IGNORECASE),
+        
+            
+            # Enhanced PIC and data type patterns
+            'pic_clause': re.compile(r'PIC(?:TURE)?\s+(?:IS\s+)?([X9AVSN\(\)\+\-\.,/ZB*$]+)', re.IGNORECASE),
+            'pic_with_edit': re.compile(r'PIC(?:TURE)?\s+(?:IS\s+)?([X9AVSN\(\)\+\-\.,/ZB*$]+(?:\s*EDIT\s+[^\.]*)?)', re.IGNORECASE),
+            'usage_clause': re.compile(r'USAGE\s+(?:IS\s+)?(COMP(?:-[0-9])?|BINARY|DISPLAY|PACKED-DECIMAL|INDEX|POINTER|OBJECT\s+REFERENCE|FUNCTION-POINTER|PROCEDURE-POINTER)', re.IGNORECASE),
+            'comp_usage': re.compile(r'\b(?:COMP|COMP-1|COMP-2|COMP-3|COMP-4|COMP-5|COMPUTATIONAL|COMPUTATIONAL-1|COMPUTATIONAL-2|COMPUTATIONAL-3|COMPUTATIONAL-4|COMPUTATIONAL-5|BINARY|PACKED-DECIMAL)\b', re.IGNORECASE),
+            'value_clause': re.compile(r'VALUE\s+(?:IS\s+)?([\'"][^\']*[\'"]|\S+)', re.IGNORECASE),
+            'value_all': re.compile(r'VALUE\s+(?:IS\s+)?ALL\s+([\'"][^\']*[\'"]|\S+)', re.IGNORECASE),
+            'value_space': re.compile(r'VALUE\s+(?:IS\s+)?(?:SPACE|SPACES)', re.IGNORECASE),
+            'value_zero': re.compile(r'VALUE\s+(?:IS\s+)?(?:ZERO|ZEROS|ZEROES)', re.IGNORECASE),
+            'value_quote': re.compile(r'VALUE\s+(?:IS\s+)?(?:QUOTE|QUOTES)', re.IGNORECASE),
+            'value_high_low': re.compile(r'VALUE\s+(?:IS\s+)?(?:HIGH-VALUE|HIGH-VALUES|LOW-VALUE|LOW-VALUES)', re.IGNORECASE),
+            
+            # Enhanced OCCURS patterns with comprehensive business rules
+            'occurs_clause': re.compile(r'OCCURS\s+(\d+)(?:\s+TO\s+(\d+))?\s+TIMES(?:\s+DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*))?(?:\s+INDEXED\s+BY\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*))?\s*(?:ASCENDING|DESCENDING)?(?:\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*))?\s*', re.IGNORECASE),
+            'occurs_depending': re.compile(r'OCCURS\s+\d+\s+TO\s+\d+\s+TIMES\s+DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'occurs_indexed': re.compile(r'INDEXED\s+BY\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'occurs_key': re.compile(r'(?:ASCENDING|DESCENDING)\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            
+            # Enhanced REDEFINES patterns with complex structures
+            'redefines': re.compile(r'REDEFINES\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'renames': re.compile(r'^\s*66\s+([A-Z][A-Z0-9-]*)\s+RENAMES\s+([A-Z][A-Z0-9-]*)\s+(?:THROUGH|THRU)\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'renames_simple': re.compile(r'^\s*66\s+([A-Z][A-Z0-9-]*)\s+RENAMES\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            
+            # Comprehensive file operations with enhanced context
+            'select_statement': re.compile(r'^\s*SELECT\s+([A-Z][A-Z0-9-]*)\s+ASSIGN\s+TO\s+([^\s\.]+)(?:\s+ORGANIZATION\s+(?:IS\s+)?([A-Z]+))?(?:\s+ACCESS\s+(?:MODE\s+)?(?:IS\s+)?([A-Z]+))?(?:\s+FILE\s+STATUS\s+(?:IS\s+)?([A-Z][A-Z0-9-]*))?', re.IGNORECASE | re.MULTILINE),
+            'fd_statement': re.compile(r'^\s*FD\s+([A-Z][A-Z0-9-]*)(?:\s+(.*?))?(?=\n\s*\d|\nFD|\nSD|\nRD|$)', re.IGNORECASE | re.MULTILINE | re.DOTALL),
+            'sd_statement': re.compile(r'^\s*SD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'rd_statement': re.compile(r'^\s*RD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            'cd_statement': re.compile(r'^\s*CD\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE | re.MULTILINE),
+            
+            # Enhanced file operation statements
+            'open_statement': re.compile(r'\bOPEN\s+(INPUT|OUTPUT|I-O|EXTEND)\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'close_statement': re.compile(r'\bCLOSE\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', re.IGNORECASE),
+            'read_statement': re.compile(r'\bREAD\s+([A-Z][A-Z0-9-]*)(?:\s+(?:INTO\s+([A-Z][A-Z0-9-]*)|NEXT\s+RECORD|KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*)))?', re.IGNORECASE),
+            'write_statement': re.compile(r'\bWRITE\s+([A-Z][A-Z0-9-]*)(?:\s+FROM\s+([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            'rewrite_statement': re.compile(r'\bREWRITE\s+([A-Z][A-Z0-9-]*)(?:\s+FROM\s+([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            'delete_statement': re.compile(r'\bDELETE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'start_statement': re.compile(r'\bSTART\s+([A-Z][A-Z0-9-]*)(?:\s+KEY\s+(?:IS\s+)?([A-Z][A-Z0-9-]*))?', re.IGNORECASE),
+            
+            # Enhanced SQL blocks with comprehensive host variable detection
+            'sql_block': re.compile(r'EXEC\s+SQL(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
+            'sql_host_var': re.compile(r':([A-Z][A-Z0-9-]*(?:-[A-Z0-9]+)*)', re.IGNORECASE),
+            'sql_indicator_var': re.compile(r':([A-Z][A-Z0-9-]*)\s+INDICATOR\s+:([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_include': re.compile(r'EXEC\s+SQL\s+INCLUDE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_declare_cursor': re.compile(r'EXEC\s+SQL\s+DECLARE\s+([A-Z][A-Z0-9-]*)\s+CURSOR(?:\s+WITH\s+(?:HOLD|RETURN))?(?:\s+FOR\s+(.*?))?(?=\s+END-EXEC)', re.IGNORECASE | re.DOTALL),
+            'sql_whenever': re.compile(r'EXEC\s+SQL\s+WHENEVER\s+(SQLWARNING|SQLERROR|NOT\s+FOUND)\s+(CONTINUE|GOTO\s+[A-Z][A-Z0-9-]*|GO\s+TO\s+[A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_connect': re.compile(r'EXEC\s+SQL\s+CONNECT\s+(?:TO\s+)?([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'sql_commit': re.compile(r'EXEC\s+SQL\s+COMMIT(?:\s+WORK)?', re.IGNORECASE),
+            'sql_rollback': re.compile(r'EXEC\s+SQL\s+ROLLBACK(?:\s+WORK)?', re.IGNORECASE),
+            
+            # Enhanced COPY statements with comprehensive replacement patterns
+            'copy_statement': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)(?:\s+(?:OF|IN)\s+([A-Z][A-Z0-9-]*))?(?:\s+REPLACING\s+(.*?))?\.', re.IGNORECASE | re.DOTALL),
+            'copy_replacing': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+REPLACING\s+(.*?)\.', re.IGNORECASE | re.DOTALL),
+            'copy_in': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+(?:IN|OF)\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+            'copy_suppress': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)\s+SUPPRESS', re.IGNORECASE),
+            'replacing_clause': re.compile(r'==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            'replacing_leading': re.compile(r'LEADING\s+==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            'replacing_trailing': re.compile(r'TRAILING\s+==([^=]*)==\s+BY\s+==([^=]*)==', re.IGNORECASE),
+            
+            # Enhanced error handling patterns
+            'on_size_error': re.compile(r'\bON\s+SIZE\s+ERROR\b', re.IGNORECASE),
+            'not_on_size_error': re.compile(r'\bNOT\s+ON\s+SIZE\s+ERROR\b', re.IGNORECASE),
+            'at_end': re.compile(r'\bAT\s+END\b', re.IGNORECASE),
+            'not_at_end': re.compile(r'\bNOT\s+AT\s+END\b', re.IGNORECASE),
+            'invalid_key': re.compile(r'\bINVALID\s+KEY\b', re.IGNORECASE),
+            'not_invalid_key': re.compile(r'\bNOT\s+INVALID\s+KEY\b', re.IGNORECASE),
+            'on_overflow': re.compile(r'\bON\s+OVERFLOW\b', re.IGNORECASE),
+            'not_on_overflow': re.compile(r'\bNOT\s+ON\s+OVERFLOW\b', re.IGNORECASE),
+            'on_exception': re.compile(r'\bON\s+EXCEPTION\b', re.IGNORECASE),
+            'not_on_exception': re.compile(r'\bNOT\s+ON\s+EXCEPTION\b', re.IGNORECASE),
+     
             'perform_thru': re.compile(r'\bPERFORM\s+([A-Z0-9][A-Z0-9-]*)\s+(?:THROUGH|THRU)\s+([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
             'perform_times': re.compile(r'\bPERFORM\s+(?:([A-Z0-9][A-Z0-9-]*)\s+)?(\d+)\s+TIMES', re.IGNORECASE),
             'perform_inline': re.compile(r'\bPERFORM\s*(.*?)\s*END-PERFORM', re.IGNORECASE | re.DOTALL),
@@ -702,6 +1362,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             'date_field': re.compile(r'^\s*\d+\s+([A-Z][A-Z0-9-]*(?:DATE|DT)[A-Z0-9-]*)\s+PIC', re.IGNORECASE | re.MULTILINE),
             'amount_field': re.compile(r'^\s*\d+\s+([A-Z][A-Z0-9-]*(?:AMOUNT|AMT|TOTAL|SUM)[A-Z0-9-]*)\s+PIC', re.IGNORECASE | re.MULTILINE),
         }
+
     def _init_mq_patterns(self):
         """Initialize comprehensive IBM MQ/WebSphere MQ patterns"""
         self.mq_patterns = {
@@ -767,7 +1428,6 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             'mq_message_id': re.compile(r'(?:MESSAGE-ID|MSG-ID)', re.IGNORECASE),
             'mq_correlation_id': re.compile(r'(?:CORRELATION-ID|CORREL-ID)', re.IGNORECASE),
         }
-
     def _init_db2_patterns(self):
         """Initialize comprehensive DB2 stored procedure patterns"""
         self.db2_patterns = {
@@ -1044,6 +1704,1503 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             'bms_ic': re.compile(r'\bIC\b', re.IGNORECASE),
             'bms_fset': re.compile(r'\bFSET\b', re.IGNORECASE),
         }
+# ==================== MISSING ENHANCED PARSING METHODS ====================
+
+    async def _parse_cobol_divisions_enhanced(self, content: str, program_name: str, 
+                                            program_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse COBOL divisions with enhanced LLM analysis"""
+        chunks = []
+        
+        # Find all divisions
+        divisions = [
+            ('IDENTIFICATION', self.cobol_patterns['identification_division']),
+            ('ENVIRONMENT', self.cobol_patterns['environment_division']),
+            ('DATA', self.cobol_patterns['data_division']),
+            ('PROCEDURE', self.cobol_patterns['procedure_division'])
+        ]
+        
+        for div_name, pattern in divisions:
+            match = pattern.search(content)
+            if match:
+                # Extract division content
+                start_pos = match.start()
+                
+                # Find next division or end of file
+                next_div_pos = len(content)
+                for next_div_name, next_pattern in divisions:
+                    if next_div_name != div_name:
+                        next_match = next_pattern.search(content, start_pos + 1)
+                        if next_match and next_match.start() < next_div_pos:
+                            next_div_pos = next_match.start()
+                
+                division_content = content[start_pos:next_div_pos].strip()
+                
+                # Analyze division with LLM
+                division_analysis = await self._analyze_with_llm_cached(
+                    division_content, f'cobol_{div_name.lower()}_division',
+                    """
+                    Analyze this COBOL {division_name} division:
+                    
+                    {content}
+                    
+                    Identify:
+                    1. Key elements and their business purpose
+                    2. Compliance with COBOL standards
+                    3. Complexity indicators
+                    4. Potential issues or improvements
+                    
+                    Return as JSON:
+                    {{
+                        "key_elements": ["element1", "element2"],
+                        "business_purpose": "program identification and setup",
+                        "compliance_level": "high",
+                        "complexity_score": 3,
+                        "issues": ["issue1"],
+                        "suggestions": ["suggestion1"]
+                    }}
+                    """,
+                    division_name=div_name
+                )
+                
+                business_context = {
+                    'division_type': div_name.lower(),
+                    'business_purpose': division_analysis.get('analysis', {}).get('business_purpose', ''),
+                    'complexity_score': division_analysis.get('analysis', {}).get('complexity_score', 0),
+                    'compliance_level': division_analysis.get('analysis', {}).get('compliance_level', 'unknown')
+                }
+                
+                chunk = CodeChunk(
+                    program_name=program_name,
+                    chunk_id=f"{program_name}_{div_name}_DIVISION",
+                    chunk_type=f"cobol_{div_name.lower()}_division",
+                    content=division_content,
+                    metadata={
+                        'division_name': div_name,
+                        'llm_analysis': division_analysis.get('analysis', {}),
+                        'division_size': len(division_content.split('\n'))
+                    },
+                    business_context=business_context,
+                    confidence_score=division_analysis.get('confidence_score', 0.8),
+                    line_start=content[:start_pos].count('\n'),
+                    line_end=content[:next_div_pos].count('\n')
+                )
+                chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_cobol_sections_enhanced(self, content: str, program_name: str,
+                                           program_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse COBOL sections with enhanced business context"""
+        chunks = []
+        
+        # Find all sections
+        section_matches = list(self.cobol_patterns['section'].finditer(content))
+        
+        for i, match in enumerate(section_matches):
+            section_name = match.group(1)
+            start_pos = match.start()
+            
+            # Find end of section (next section or division)
+            if i + 1 < len(section_matches):
+                end_pos = section_matches[i + 1].start()
+            else:
+                # Look for next division
+                end_pos = len(content)
+                for div_pattern in [self.cobol_patterns['procedure_division']]:
+                    next_div = div_pattern.search(content, start_pos + 1)
+                    if next_div and next_div.start() < end_pos:
+                        end_pos = next_div.start()
+            
+            section_content = content[start_pos:end_pos].strip()
+            
+            # Analyze section purpose
+            section_analysis = await self._analyze_with_llm_cached(
+                section_content, 'cobol_section',
+                """
+                Analyze this COBOL section:
+                
+                {content}
+                
+                Identify:
+                1. Section purpose and functionality
+                2. Data definitions or procedures within
+                3. Business logic complexity
+                4. Integration points
+                
+                Return as JSON:
+                {{
+                    "purpose": "file control definitions",
+                    "functionality": "defines file access methods",
+                    "complexity": "medium",
+                    "business_impact": "high",
+                    "integration_points": ["database", "files"]
+                }}
+                """
+            )
+            
+            business_context = {
+                'section_name': section_name,
+                'purpose': section_analysis.get('analysis', {}).get('purpose', ''),
+                'functionality': section_analysis.get('analysis', {}).get('functionality', ''),
+                'business_impact': section_analysis.get('analysis', {}).get('business_impact', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_SECTION_{section_name}",
+                chunk_type="cobol_section",
+                content=section_content,
+                metadata={
+                    'section_name': section_name,
+                    'llm_analysis': section_analysis.get('analysis', {}),
+                    'section_lines': len(section_content.split('\n'))
+                },
+                business_context=business_context,
+                confidence_score=section_analysis.get('confidence_score', 0.8),
+                line_start=content[:start_pos].count('\n'),
+                line_end=content[:end_pos].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_data_items_enhanced(self, content: str, program_name: str,
+                                       program_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse COBOL data items with enhanced business analysis"""
+        chunks = []
+        
+        # Find all data items
+        data_matches = list(self.cobol_patterns['data_item'].finditer(content))
+        
+        # Group data items by level hierarchy
+        data_groups = self._group_data_items_by_hierarchy(data_matches)
+        
+        for group in data_groups:
+            if len(group['items']) > 1:  # Only process groups with multiple items
+                group_content = '\n'.join([item['match'].group(0) for item in group['items']])
+                
+                # Analyze data group with LLM
+                data_analysis = await self._analyze_with_llm_cached(
+                    group_content, 'cobol_data_group',
+                    """
+                    Analyze this COBOL data group:
+                    
+                    {content}
+                    
+                    Identify:
+                    1. Business entity represented
+                    2. Data usage patterns
+                    3. Field relationships and dependencies
+                    4. Data validation requirements
+                    5. Performance considerations
+                    
+                    Return as JSON:
+                    {{
+                        "business_entity": "customer_record",
+                        "usage_patterns": ["input", "processing", "output"],
+                        "field_relationships": [
+                            {{"parent": "field1", "children": ["field1a", "field1b"]}}
+                        ],
+                        "validation_requirements": ["required_fields", "format_checks"],
+                        "performance_impact": "medium"
+                    }}
+                    """
+                )
+                
+                business_context = {
+                    'data_group_type': 'hierarchical_structure',
+                    'business_entity': data_analysis.get('analysis', {}).get('business_entity', ''),
+                    'usage_patterns': data_analysis.get('analysis', {}).get('usage_patterns', []),
+                    'field_count': len(group['items']),
+                    'hierarchy_depth': group['max_level'] - group['min_level'] + 1
+                }
+                
+                chunk = CodeChunk(
+                    program_name=program_name,
+                    chunk_id=f"{program_name}_DATA_GROUP_{group['group_id']}",
+                    chunk_type="cobol_data_group",
+                    content=group_content,
+                    metadata={
+                        'field_count': len(group['items']),
+                        'level_range': f"{group['min_level']}-{group['max_level']}",
+                        'llm_analysis': data_analysis.get('analysis', {}),
+                        'group_fields': [item['field_name'] for item in group['items']]
+                    },
+                    business_context=business_context,
+                    confidence_score=data_analysis.get('confidence_score', 0.7),
+                    line_start=content[:group['start_pos']].count('\n'),
+                    line_end=content[:group['end_pos']].count('\n')
+                )
+                chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_procedure_division_enhanced(self, content: str, program_name: str,
+                                               program_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse COBOL procedure division with comprehensive flow analysis"""
+        chunks = []
+        
+        # Find procedure division
+        proc_div_match = self.cobol_patterns['procedure_division'].search(content)
+        if not proc_div_match:
+            return chunks
+        
+        proc_start = proc_div_match.start()
+        proc_content = content[proc_start:]
+        
+        # Parse paragraphs
+        paragraph_chunks = await self._parse_paragraphs_enhanced(proc_content, program_name)
+        chunks.extend(paragraph_chunks)
+        
+        # Parse PERFORM statements
+        perform_chunks = await self._parse_perform_statements_enhanced(proc_content, program_name)
+        chunks.extend(perform_chunks)
+        
+        # Parse control flow statements
+        control_chunks = await self._parse_control_flow_enhanced(proc_content, program_name)
+        chunks.extend(control_chunks)
+        
+        # Parse file operations
+        file_chunks = await self._parse_file_operations_enhanced(proc_content, program_name)
+        chunks.extend(file_chunks)
+        
+        return chunks
+
+    async def _parse_paragraphs_enhanced(self, content: str, program_name: str) -> List[CodeChunk]:
+        """Parse COBOL paragraphs with business logic analysis"""
+        chunks = []
+        
+        paragraph_matches = list(self.cobol_patterns['paragraph'].finditer(content))
+        
+        for i, match in enumerate(paragraph_matches):
+            para_name = match.group(1)
+            start_pos = match.start()
+            
+            # Find paragraph end
+            if i + 1 < len(paragraph_matches):
+                end_pos = paragraph_matches[i + 1].start()
+            else:
+                end_pos = len(content)
+            
+            para_content = content[start_pos:end_pos].strip()
+            
+            # Analyze paragraph with LLM
+            para_analysis = await self._analyze_with_llm_cached(
+                para_content, 'cobol_paragraph',
+                """
+                Analyze this COBOL paragraph:
+                
+                {content}
+                
+                Identify:
+                1. Primary business function
+                2. Operations performed
+                3. Error handling present
+                4. Complexity level
+                5. Performance characteristics
+                
+                Return as JSON:
+                {{
+                    "business_function": "customer_validation",
+                    "operations": ["read_file", "validate_data", "update_record"],
+                    "error_handling": true,
+                    "complexity_level": "medium",
+                    "performance_characteristics": "io_intensive"
+                }}
+                """
+            )
+            
+            business_context = {
+                'paragraph_name': para_name,
+                'business_function': para_analysis.get('analysis', {}).get('business_function', ''),
+                'operations': para_analysis.get('analysis', {}).get('operations', []),
+                'has_error_handling': para_analysis.get('analysis', {}).get('error_handling', False),
+                'complexity_level': para_analysis.get('analysis', {}).get('complexity_level', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_PARA_{para_name}",
+                chunk_type="cobol_paragraph",
+                content=para_content,
+                metadata={
+                    'paragraph_name': para_name,
+                    'llm_analysis': para_analysis.get('analysis', {}),
+                    'statement_count': len([line for line in para_content.split('\n') if line.strip() and not line.strip().startswith('*')])
+                },
+                business_context=business_context,
+                confidence_score=para_analysis.get('confidence_score', 0.8),
+                line_start=content[:start_pos].count('\n'),
+                line_end=content[:end_pos].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_perform_statements_enhanced(self, content: str, program_name: str) -> List[CodeChunk]:
+        """Parse PERFORM statements with flow analysis"""
+        chunks = []
+        
+        # Different PERFORM patterns
+        perform_patterns = {
+            'simple': self.cobol_patterns['perform_simple'],
+            'until': self.cobol_patterns['perform_until'],
+            'varying': self.cobol_patterns['perform_varying'],
+            'thru': self.cobol_patterns['perform_thru'],
+            'times': self.cobol_patterns['perform_times'],
+            'inline': self.cobol_patterns['perform_inline']
+        }
+        
+        for perform_type, pattern in perform_patterns.items():
+            matches = list(pattern.finditer(content))
+            
+            for match in matches:
+                perform_analysis = await self._analyze_with_llm_cached(
+                    match.group(0), f'cobol_perform_{perform_type}',
+                    """
+                    Analyze this COBOL PERFORM statement:
+                    
+                    {content}
+                    
+                    Identify:
+                    1. Control flow type and purpose
+                    2. Loop characteristics (if applicable)
+                    3. Called paragraphs or inline logic
+                    4. Performance implications
+                    5. Business logic pattern
+                    
+                    Return as JSON:
+                    {{
+                        "control_flow_type": "conditional_loop",
+                        "loop_characteristics": "until_condition_met",
+                        "called_targets": ["para1", "para2"],
+                        "performance_impact": "medium",
+                        "business_pattern": "data_processing_loop"
+                    }}
+                    """
+                )
+                
+                business_context = {
+                    'perform_type': perform_type,
+                    'control_flow_type': perform_analysis.get('analysis', {}).get('control_flow_type', ''),
+                    'business_pattern': perform_analysis.get('analysis', {}).get('business_pattern', ''),
+                    'performance_impact': perform_analysis.get('analysis', {}).get('performance_impact', 'unknown')
+                }
+                
+                chunk = CodeChunk(
+                    program_name=program_name,
+                    chunk_id=f"{program_name}_PERFORM_{hash(match.group(0))%10000}",
+                    chunk_type=f"cobol_perform_{perform_type}",
+                    content=match.group(0),
+                    metadata={
+                        'perform_type': perform_type,
+                        'llm_analysis': perform_analysis.get('analysis', {}),
+                        'targets': perform_analysis.get('analysis', {}).get('called_targets', [])
+                    },
+                    business_context=business_context,
+                    confidence_score=perform_analysis.get('confidence_score', 0.8),
+                    line_start=content[:match.start()].count('\n'),
+                    line_end=content[:match.end()].count('\n')
+                )
+                chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_control_flow_enhanced(self, content: str, program_name: str) -> List[CodeChunk]:
+        """Parse control flow statements with decision analysis"""
+        chunks = []
+        
+        # IF statements
+        if_matches = list(self.cobol_patterns['if_then_else'].finditer(content))
+        for match in matches:
+            if_analysis = await self._analyze_with_llm_cached(
+                match.group(0), 'cobol_if_statement',
+                """
+                Analyze this COBOL IF statement:
+                
+                {content}
+                
+                Identify:
+                1. Decision logic and conditions
+                2. Business rules implemented
+                3. Complexity of conditional logic
+                4. Error handling within branches
+                5. Data validation patterns
+                
+                Return as JSON:
+                {{
+                    "decision_logic": "customer_status_check",
+                    "business_rules": ["active_customer_validation"],
+                    "complexity": "medium",
+                    "has_error_handling": true,
+                    "validation_patterns": ["status_code_check"]
+                }}
+                """
+            )
+            
+            business_context = {
+                'statement_type': 'conditional',
+                'decision_logic': if_analysis.get('analysis', {}).get('decision_logic', ''),
+                'business_rules': if_analysis.get('analysis', {}).get('business_rules', []),
+                'complexity': if_analysis.get('analysis', {}).get('complexity', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_IF_{hash(match.group(0))%10000}",
+                chunk_type="cobol_if_statement",
+                content=match.group(0),
+                metadata={
+                    'statement_type': 'if_then_else',
+                    'llm_analysis': if_analysis.get('analysis', {}),
+                    'has_else': 'ELSE' in match.group(0).upper()
+                },
+                business_context=business_context,
+                confidence_score=if_analysis.get('confidence_score', 0.8),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        # EVALUATE statements
+        evaluate_matches = list(self.cobol_patterns['evaluate_block'].finditer(content))
+        for match in evaluate_matches:
+            evaluate_analysis = await self._analyze_with_llm_cached(
+                match.group(0), 'cobol_evaluate_statement',
+                """
+                Analyze this COBOL EVALUATE statement:
+                
+                {content}
+                
+                Identify:
+                1. Selection criteria and cases
+                2. Business logic patterns
+                3. Decision tree complexity
+                4. Case coverage completeness
+                5. Default handling (WHEN OTHER)
+                
+                Return as JSON:
+                {{
+                    "selection_criteria": "transaction_type",
+                    "business_patterns": ["transaction_routing"],
+                    "complexity": "high",
+                    "case_count": 5,
+                    "has_default": true
+                }}
+                """
+            )
+            
+            business_context = {
+                'statement_type': 'multi_way_selection',
+                'selection_criteria': evaluate_analysis.get('analysis', {}).get('selection_criteria', ''),
+                'business_patterns': evaluate_analysis.get('analysis', {}).get('business_patterns', []),
+                'case_count': evaluate_analysis.get('analysis', {}).get('case_count', 0)
+            }
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_EVALUATE_{hash(match.group(0))%10000}",
+                chunk_type="cobol_evaluate_statement",
+                content=match.group(0),
+                metadata={
+                    'statement_type': 'evaluate',
+                    'llm_analysis': evaluate_analysis.get('analysis', {}),
+                    'when_count': content.upper().count('WHEN ')
+                },
+                business_context=business_context,
+                confidence_score=evaluate_analysis.get('confidence_score', 0.8),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_file_operations_enhanced(self, content: str, program_name: str) -> List[CodeChunk]:
+        """Parse file operations with I/O analysis"""
+        chunks = []
+        
+        file_operations = {
+            'open': self.cobol_patterns['open_statement'],
+            'close': self.cobol_patterns['close_statement'],
+            'read': self.cobol_patterns['read_statement'],
+            'write': self.cobol_patterns['write_statement'],
+            'rewrite': self.cobol_patterns['rewrite_statement'],
+            'delete': self.cobol_patterns['delete_statement']
+        }
+        
+        for op_type, pattern in file_operations.items():
+            matches = list(pattern.finditer(content))
+            
+            for match in matches:
+                file_analysis = await self._analyze_with_llm_cached(
+                    match.group(0), f'cobol_file_{op_type}',
+                    """
+                    Analyze this COBOL file operation:
+                    
+                    {content}
+                    
+                    Identify:
+                    1. File access pattern and purpose
+                    2. Data processing workflow
+                    3. Error handling strategy
+                    4. Performance implications
+                    5. Business transaction context
+                    
+                    Return as JSON:
+                    {{
+                        "access_pattern": "sequential_read",
+                        "processing_purpose": "customer_data_retrieval",
+                        "error_handling": "exception_based",
+                        "performance_impact": "high",
+                        "transaction_context": "batch_processing"
+                    }}
+                    """
+                )
+                
+                business_context = {
+                    'operation_type': op_type,
+                    'access_pattern': file_analysis.get('analysis', {}).get('access_pattern', ''),
+                    'processing_purpose': file_analysis.get('analysis', {}).get('processing_purpose', ''),
+                    'transaction_context': file_analysis.get('analysis', {}).get('transaction_context', 'unknown')
+                }
+                
+                chunk = CodeChunk(
+                    program_name=program_name,
+                    chunk_id=f"{program_name}_FILE_{op_type.upper()}_{hash(match.group(0))%10000}",
+                    chunk_type=f"cobol_file_{op_type}",
+                    content=match.group(0),
+                    metadata={
+                        'operation_type': op_type,
+                        'llm_analysis': file_analysis.get('analysis', {}),
+                        'file_name': match.group(1) if match.groups() else ''
+                    },
+                    business_context=business_context,
+                    confidence_score=file_analysis.get('confidence_score', 0.8),
+                    line_start=content[:match.start()].count('\n'),
+                    line_end=content[:match.end()].count('\n')
+                )
+                chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_sql_blocks_enhanced(self, content: str, program_name: str) -> List[CodeChunk]:
+        """Parse SQL blocks with host variable analysis"""
+        chunks = []
+        
+        sql_matches = list(self.cobol_patterns['sql_block'].finditer(content))
+        
+        for match in sql_matches:
+            sql_content = match.group(1).strip()
+            
+            # Analyze SQL with LLM
+            sql_analysis = await self._analyze_with_llm_cached(
+                sql_content, 'cobol_sql_block',
+                """
+                Analyze this embedded SQL block:
+                
+                {content}
+                
+                Identify:
+                1. SQL operation type and complexity
+                2. Host variables used
+                3. Database tables accessed
+                4. Performance characteristics
+                5. Business transaction purpose
+                
+                Return as JSON:
+                {{
+                    "operation_type": "select_with_join",
+                    "complexity": "medium",
+                    "host_variables": [":customer-id", ":customer-name"],
+                    "tables_accessed": ["CUSTOMER", "ACCOUNT"],
+                    "performance_impact": "medium",
+                    "business_purpose": "customer_account_lookup"
+                }}
+                """
+            )
+            
+            # Extract host variables
+            host_vars = self.cobol_patterns['sql_host_var'].findall(sql_content)
+            
+            business_context = {
+                'sql_type': 'embedded_sql',
+                'operation_type': sql_analysis.get('analysis', {}).get('operation_type', ''),
+                'business_purpose': sql_analysis.get('analysis', {}).get('business_purpose', ''),
+                'host_variable_count': len(host_vars),
+                'tables_accessed': sql_analysis.get('analysis', {}).get('tables_accessed', [])
+            }
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_SQL_{hash(sql_content)%10000}",
+                chunk_type="cobol_sql_block",
+                content=match.group(0),
+                metadata={
+                    'sql_content': sql_content,
+                    'host_variables': host_vars,
+                    'llm_analysis': sql_analysis.get('analysis', {}),
+                    'sql_length': len(sql_content)
+                },
+                business_context=business_context,
+                confidence_score=sql_analysis.get('confidence_score', 0.8),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_cics_commands_enhanced(self, content: str, program_name: str) -> List[CodeChunk]:
+        """Parse CICS commands with transaction context"""
+        chunks = []
+        
+        # Major CICS command patterns
+        cics_commands = {
+            'send_map': self.cics_patterns['cics_send_map'],
+            'receive_map': self.cics_patterns['cics_receive_map'],
+            'read': self.cics_patterns['cics_read'],
+            'write': self.cics_patterns['cics_write'],
+            'link': self.cics_patterns['cics_link'],
+            'xctl': self.cics_patterns['cics_xctl'],
+            'return': self.cics_patterns['cics_return']
+        }
+        
+        for cmd_type, pattern in cics_commands.items():
+            matches = list(pattern.finditer(content))
+            
+            for match in matches:
+                cics_analysis = await self._analyze_with_llm_cached(
+                    match.group(0), f'cics_{cmd_type}',
+                    """
+                    Analyze this CICS command:
+                    
+                    {content}
+                    
+                    Identify:
+                    1. Transaction flow purpose
+                    2. Resource management
+                    3. Error handling approach
+                    4. User interaction pattern
+                    5. Business function
+                    
+                    Return as JSON:
+                    {{
+                        "transaction_purpose": "customer_inquiry_response",
+                        "resource_management": "file_access",
+                        "error_handling": "condition_based",
+                        "interaction_pattern": "conversational",
+                        "business_function": "customer_service"
+                    }}
+                    """
+                )
+                
+                business_context = {
+                    'cics_command': cmd_type,
+                    'transaction_purpose': cics_analysis.get('analysis', {}).get('transaction_purpose', ''),
+                    'business_function': cics_analysis.get('analysis', {}).get('business_function', ''),
+                    'interaction_pattern': cics_analysis.get('analysis', {}).get('interaction_pattern', 'unknown')
+                }
+                
+                chunk = CodeChunk(
+                    program_name=program_name,
+                    chunk_id=f"{program_name}_CICS_{cmd_type.upper()}_{hash(match.group(0))%10000}",
+                    chunk_type=f"cics_{cmd_type}",
+                    content=match.group(0),
+                    metadata={
+                        'command_type': cmd_type,
+                        'llm_analysis': cics_analysis.get('analysis', {}),
+                        'command_length': len(match.group(0))
+                    },
+                    business_context=business_context,
+                    confidence_score=cics_analysis.get('confidence_score', 0.8),
+                    line_start=content[:match.start()].count('\n'),
+                    line_end=content[:match.end()].count('\n')
+                )
+                chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_copy_statements_enhanced(self, content: str, program_name: str) -> List[CodeChunk]:
+        """Parse COPY statements with replacement analysis"""
+        chunks = []
+        
+        copy_matches = list(self.cobol_patterns['copy_statement'].finditer(content))
+        
+        for match in copy_matches:
+            copybook_name = match.group(1)
+            library = match.group(2) if match.groups() and len(match.groups()) > 1 else None
+            replacing_clause = match.group(3) if match.groups() and len(match.groups()) > 2 else None
+            
+            copy_analysis = await self._analyze_with_llm_cached(
+                match.group(0), 'cobol_copy_statement',
+                """
+                Analyze this COPY statement:
+                
+                {content}
+                
+                Identify:
+                1. Copybook purpose and domain
+                2. Replacement strategy (if any)
+                3. Code reuse pattern
+                4. Integration complexity
+                5. Maintenance implications
+                
+                Return as JSON:
+                {{
+                    "copybook_purpose": "customer_data_structure",
+                    "domain": "customer_management",
+                    "replacement_strategy": "parameter_substitution",
+                    "reuse_pattern": "standard_record_layout",
+                    "maintenance_impact": "low"
+                }}
+                """
+            )
+            
+            business_context = {
+                'copybook_name': copybook_name,
+                'library': library,
+                'has_replacing': replacing_clause is not None,
+                'copybook_purpose': copy_analysis.get('analysis', {}).get('copybook_purpose', ''),
+                'domain': copy_analysis.get('analysis', {}).get('domain', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_COPY_{copybook_name}",
+                chunk_type="cobol_copy_statement",
+                content=match.group(0),
+                metadata={
+                    'copybook_name': copybook_name,
+                    'library': library,
+                    'replacing_clause': replacing_clause,
+                    'llm_analysis': copy_analysis.get('analysis', {})
+                },
+                business_context=business_context,
+                confidence_score=copy_analysis.get('confidence_score', 0.9),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_jcl_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
+        """Enhanced JCL parsing with job flow analysis"""
+        chunks = []
+        program_name = self._extract_program_name(content, Path(filename))
+        
+        # Get LLM analysis for overall JCL structure
+        jcl_analysis = await self._llm_analyze_complex_pattern(content, 'business_logic')
+        
+        # Parse JOB card
+        job_chunks = await self._parse_jcl_job_card(content, program_name, jcl_analysis)
+        chunks.extend(job_chunks)
+        
+        # Parse job steps
+        step_chunks = await self._parse_jcl_steps_enhanced(content, program_name, jcl_analysis)
+        chunks.extend(step_chunks)
+        
+        # Parse DD statements
+        dd_chunks = await self._parse_jcl_dd_statements_enhanced(content, program_name, jcl_analysis)
+        chunks.extend(dd_chunks)
+        
+        # Parse PROC definitions
+        proc_chunks = await self._parse_jcl_proc_definitions(content, program_name, jcl_analysis)
+        chunks.extend(proc_chunks)
+        
+        # Parse control statements
+        control_chunks = await self._parse_jcl_control_statements(content, program_name, jcl_analysis)
+        chunks.extend(control_chunks)
+        
+        return chunks
+
+    async def _parse_jcl_job_card(self, content: str, program_name: str, 
+                                jcl_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse JCL JOB card with resource analysis"""
+        chunks = []
+        
+        job_match = self.jcl_patterns['job_card'].search(content)
+        if job_match:
+            job_name = job_match.group(1)
+            job_params = job_match.group(2)
+            
+            job_analysis = await self._analyze_with_llm_cached(
+                job_match.group(0), 'jcl_job_card',
+                """
+                Analyze this JCL JOB card:
+                
+                {content}
+                
+                Identify:
+                1. Job purpose and business function
+                2. Resource requirements
+                3. Scheduling characteristics
+                4. Security and authorization
+                5. Performance expectations
+                
+                Return as JSON:
+                {{
+                    "business_function": "daily_customer_processing",
+                    "resource_requirements": "high_memory",
+                    "scheduling": "batch_daily",
+                    "security_level": "standard",
+                    "performance_class": "production"
+                }}
+                """
+            )
+            
+            business_context = {
+                'job_name': job_name,
+                'business_function': job_analysis.get('analysis', {}).get('business_function', ''),
+                'scheduling': job_analysis.get('analysis', {}).get('scheduling', ''),
+                'performance_class': job_analysis.get('analysis', {}).get('performance_class', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_JOB_CARD",
+                chunk_type="jcl_job_card",
+                content=job_match.group(0),
+                metadata={
+                    'job_name': job_name,
+                    'job_parameters': job_params,
+                    'llm_analysis': job_analysis.get('analysis', {})
+                },
+                business_context=business_context,
+                confidence_score=job_analysis.get('confidence_score', 0.8),
+                line_start=content[:job_match.start()].count('\n'),
+                line_end=content[:job_match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_jcl_steps_enhanced(self, content: str, program_name: str,
+                                      jcl_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse JCL job steps with execution flow analysis"""
+        chunks = []
+        
+        step_matches = list(self.jcl_patterns['job_step'].finditer(content))
+        
+        for i, match in enumerate(step_matches):
+            step_name = match.group(1)
+            step_params = match.group(2)
+            
+            step_analysis = await self._analyze_with_llm_cached(
+                match.group(0), 'jcl_job_step',
+                """
+                Analyze this JCL job step:
+                
+                {content}
+                
+                Identify:
+                1. Program function and purpose
+                2. Data processing workflow
+                3. Error handling strategy
+                4. Resource utilization
+                5. Business process integration
+                
+                Return as JSON:
+                {{
+                    "program_function": "customer_data_validation",
+                    "workflow_type": "data_transformation",
+                    "error_handling": "conditional_execution",
+                    "resource_usage": "cpu_intensive",
+                    "business_integration": "customer_onboarding_process"
+                }}
+                """
+            )
+            
+            business_context = {
+                'step_name': step_name,
+                'step_sequence': i + 1,
+                'program_function': step_analysis.get('analysis', {}).get('program_function', ''),
+                'workflow_type': step_analysis.get('analysis', {}).get('workflow_type', ''),
+                'business_integration': step_analysis.get('analysis', {}).get('business_integration', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_STEP_{step_name}",
+                chunk_type="jcl_job_step",
+                content=match.group(0),
+                metadata={
+                    'step_name': step_name,
+                    'step_parameters': step_params,
+                    'step_sequence': i + 1,
+                    'llm_analysis': step_analysis.get('analysis', {})
+                },
+                business_context=business_context,
+                confidence_score=step_analysis.get('confidence_score', 0.8),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_jcl_dd_statements_enhanced(self, content: str, program_name: str,
+                                              jcl_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse JCL DD statements with data flow analysis"""
+        chunks = []
+        
+        dd_matches = list(self.jcl_patterns['dd_statement'].finditer(content))
+        
+        for match in dd_matches:
+            dd_name = match.group(1)
+            dd_params = match.group(2)
+            
+            # Extract dataset name if present
+            dsn_match = self.jcl_patterns['dataset'].search(dd_params)
+            dataset_name = dsn_match.group(1) if dsn_match else None
+            
+            dd_analysis = await self._analyze_with_llm_cached(
+                match.group(0), 'jcl_dd_statement',
+                """
+                Analyze this JCL DD statement:
+                
+                {content}
+                
+                Identify:
+                1. Data flow direction and purpose
+                2. Dataset characteristics
+                3. Storage and access patterns
+                4. Business data category
+                5. Performance implications
+                
+                Return as JSON:
+                {{
+                    "data_flow": "input_processing",
+                    "dataset_purpose": "customer_master_file",
+                    "access_pattern": "sequential_read",
+                    "data_category": "customer_data",
+                    "performance_impact": "io_intensive"
+                }}
+                """
+            )
+            
+            business_context = {
+                'dd_name': dd_name,
+                'dataset_name': dataset_name,
+                'data_flow': dd_analysis.get('analysis', {}).get('data_flow', ''),
+                'dataset_purpose': dd_analysis.get('analysis', {}).get('dataset_purpose', ''),
+                'data_category': dd_analysis.get('analysis', {}).get('data_category', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_DD_{dd_name}",
+                chunk_type="jcl_dd_statement",
+                content=match.group(0),
+                metadata={
+                    'dd_name': dd_name,
+                    'dataset_name': dataset_name,
+                    'dd_parameters': dd_params,
+                    'llm_analysis': dd_analysis.get('analysis', {})
+                },
+                business_context=business_context,
+                confidence_score=dd_analysis.get('confidence_score', 0.8),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+    
+    # ==================== HELPER METHODS AND UTILITIES ====================
+
+    def _group_data_items_by_hierarchy(self, data_matches: List) -> List[Dict[str, Any]]:
+        """Group data items by their hierarchical relationships"""
+        groups = []
+        current_group = None
+        group_id = 1
+        
+        for match in data_matches:
+            try:
+                level = int(match.group(1))
+                field_name = match.group(2)
+                
+                # Start new group on level 01
+                if level == 1:
+                    if current_group:
+                        groups.append(current_group)
+                    
+                    current_group = {
+                        'group_id': group_id,
+                        'items': [],
+                        'min_level': level,
+                        'max_level': level,
+                        'start_pos': match.start(),
+                        'end_pos': match.end()
+                    }
+                    group_id += 1
+                
+                if current_group:
+                    current_group['items'].append({
+                        'level': level,
+                        'field_name': field_name,
+                        'match': match,
+                        'position': match.start()
+                    })
+                    current_group['max_level'] = max(current_group['max_level'], level)
+                    current_group['end_pos'] = match.end()
+                    
+            except (ValueError, IndexError):
+                continue
+        
+        if current_group:
+            groups.append(current_group)
+        
+        return groups
+
+    async def _parse_jcl_proc_definitions(self, content: str, program_name: str,
+                                        jcl_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse JCL PROC definitions"""
+        chunks = []
+        
+        proc_matches = list(self.jcl_patterns['proc_definition'].finditer(content))
+        
+        for match in proc_matches:
+            proc_name = match.group(1)
+            proc_params = match.group(2) if match.groups() and len(match.groups()) > 1 else ""
+            
+            # Find PEND statement
+            pend_match = self.jcl_patterns['pend_statement'].search(content, match.end())
+            if pend_match:
+                proc_content = content[match.start():pend_match.end()]
+            else:
+                proc_content = match.group(0)
+            
+            proc_analysis = await self._analyze_with_llm_cached(
+                proc_content, 'jcl_proc_definition',
+                """
+                Analyze this JCL PROC definition:
+                
+                {content}
+                
+                Identify:
+                1. Procedure purpose and reusability
+                2. Parameter substitution strategy
+                3. Step sequence and dependencies
+                4. Business process automation
+                5. Maintenance characteristics
+                
+                Return as JSON:
+                {{
+                    "procedure_purpose": "customer_data_backup",
+                    "reusability": "high",
+                    "parameter_strategy": "symbolic_substitution",
+                    "process_automation": "scheduled_maintenance",
+                    "maintenance_level": "low"
+                }}
+                """
+            )
+            
+            business_context = {
+                'proc_name': proc_name,
+                'procedure_purpose': proc_analysis.get('analysis', {}).get('procedure_purpose', ''),
+                'reusability': proc_analysis.get('analysis', {}).get('reusability', ''),
+                'process_automation': proc_analysis.get('analysis', {}).get('process_automation', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_PROC_{proc_name}",
+                chunk_type="jcl_proc_definition",
+                content=proc_content,
+                metadata={
+                    'proc_name': proc_name,
+                    'proc_parameters': proc_params,
+                    'llm_analysis': proc_analysis.get('analysis', {}),
+                    'proc_length': len(proc_content.split('\n'))
+                },
+                business_context=business_context,
+                confidence_score=proc_analysis.get('confidence_score', 0.8),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.start() + len(proc_content)].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_jcl_control_statements(self, content: str, program_name: str,
+                                          jcl_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse JCL control statements (IF/THEN/ELSE/ENDIF)"""
+        chunks = []
+        
+        # Find IF statements
+        if_matches = list(self.jcl_patterns['if_statement'].finditer(content))
+        
+        for match in if_matches:
+            if_condition = match.group(1)
+            
+            # Find corresponding ENDIF
+            endif_match = self.jcl_patterns['endif_statement'].search(content, match.end())
+            if endif_match:
+                control_block = content[match.start():endif_match.end()]
+            else:
+                control_block = match.group(0)
+            
+            control_analysis = await self._analyze_with_llm_cached(
+                control_block, 'jcl_control_flow',
+                """
+                Analyze this JCL control flow:
+                
+                {content}
+                
+                Identify:
+                1. Conditional logic purpose
+                2. Error handling strategy
+                3. Business rule implementation
+                4. Execution flow complexity
+                5. Recovery mechanisms
+                
+                Return as JSON:
+                {{
+                    "logic_purpose": "step_failure_handling",
+                    "error_strategy": "conditional_restart",
+                    "business_rules": ["data_validation_required"],
+                    "complexity": "medium",
+                    "recovery_mechanism": "automatic_retry"
+                }}
+                """
+            )
+            
+            business_context = {
+                'control_type': 'conditional_execution',
+                'logic_purpose': control_analysis.get('analysis', {}).get('logic_purpose', ''),
+                'error_strategy': control_analysis.get('analysis', {}).get('error_strategy', ''),
+                'complexity': control_analysis.get('analysis', {}).get('complexity', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_CONTROL_{hash(if_condition)%10000}",
+                chunk_type="jcl_control_flow",
+                content=control_block,
+                metadata={
+                    'condition': if_condition,
+                    'llm_analysis': control_analysis.get('analysis', {}),
+                    'control_length': len(control_block.split('\n'))
+                },
+                business_context=business_context,
+                confidence_score=control_analysis.get('confidence_score', 0.8),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.start() + len(control_block)].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_bms_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
+        """Enhanced BMS parsing with map layout analysis"""
+        chunks = []
+        program_name = self._extract_program_name(content, Path(filename))
+        
+        # Parse mapset definitions
+        mapset_chunks = await self._parse_bms_mapsets_enhanced(content, program_name)
+        chunks.extend(mapset_chunks)
+        
+        # Parse map definitions
+        map_chunks = await self._parse_bms_maps_enhanced(content, program_name)
+        chunks.extend(map_chunks)
+        
+        # Parse field definitions
+        field_chunks = await self._parse_bms_fields_enhanced(content, program_name)
+        chunks.extend(field_chunks)
+        
+        return chunks
+
+    async def _parse_bms_mapsets_enhanced(self, content: str, program_name: str) -> List[CodeChunk]:
+        """Parse BMS mapset definitions with UI analysis"""
+        chunks = []
+        
+        mapset_matches = list(self.bms_patterns['bms_mapset'].finditer(content))
+        
+        for match in mapset_matches:
+            mapset_name = match.group(1)
+            mapset_params = match.group(2)
+            
+            mapset_analysis = await self._analyze_with_llm_cached(
+                match.group(0), 'bms_mapset',
+                """
+                Analyze this BMS mapset definition:
+                
+                {content}
+                
+                Identify:
+                1. User interface purpose and design
+                2. Terminal characteristics and compatibility
+                3. Screen layout complexity
+                4. Business function served
+                5. User interaction patterns
+                
+                Return as JSON:
+                {{
+                    "ui_purpose": "customer_inquiry_screen",
+                    "terminal_type": "3270",
+                    "layout_complexity": "medium",
+                    "business_function": "customer_service",
+                    "interaction_pattern": "form_based"
+                }}
+                """
+            )
+            
+            business_context = {
+                'mapset_name': mapset_name,
+                'ui_purpose': mapset_analysis.get('analysis', {}).get('ui_purpose', ''),
+                'business_function': mapset_analysis.get('analysis', {}).get('business_function', ''),
+                'interaction_pattern': mapset_analysis.get('analysis', {}).get('interaction_pattern', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_MAPSET_{mapset_name}",
+                chunk_type="bms_mapset",
+                content=match.group(0),
+                metadata={
+                    'mapset_name': mapset_name,
+                    'mapset_parameters': mapset_params,
+                    'llm_analysis': mapset_analysis.get('analysis', {})
+                },
+                business_context=business_context,
+                confidence_score=mapset_analysis.get('confidence_score', 0.8),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_bms_maps_enhanced(self, content: str, program_name: str) -> List[CodeChunk]:
+        """Parse BMS map definitions with screen layout analysis"""
+        chunks = []
+        
+        map_matches = list(self.bms_patterns['bms_map'].finditer(content))
+        
+        for match in map_matches:
+            map_name = match.group(1)
+            map_params = match.group(2)
+            
+            # Extract size information
+            size_match = self.bms_patterns['bms_map_params'].search(map_params)
+            screen_size = (size_match.group(1), size_match.group(2)) if size_match and size_match.group(1) else None
+            
+            map_analysis = await self._analyze_with_llm_cached(
+                match.group(0), 'bms_map',
+                """
+                Analyze this BMS map definition:
+                
+                {content}
+                
+                Identify:
+                1. Screen layout structure and design
+                2. User workflow facilitated
+                3. Data entry patterns
+                4. Navigation and usability
+                5. Business process integration
+                
+                Return as JSON:
+                {{
+                    "layout_structure": "tabular_data_entry",
+                    "user_workflow": "customer_information_update",
+                    "data_entry_pattern": "sequential_fields",
+                    "navigation": "function_key_driven",
+                    "process_integration": "customer_maintenance"
+                }}
+                """
+            )
+            
+            business_context = {
+                'map_name': map_name,
+                'screen_size': screen_size,
+                'layout_structure': map_analysis.get('analysis', {}).get('layout_structure', ''),
+                'user_workflow': map_analysis.get('analysis', {}).get('user_workflow', ''),
+                'process_integration': map_analysis.get('analysis', {}).get('process_integration', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_MAP_{map_name}",
+                chunk_type="bms_map",
+                content=match.group(0),
+                metadata={
+                    'map_name': map_name,
+                    'screen_size': screen_size,
+                    'map_parameters': map_params,
+                    'llm_analysis': map_analysis.get('analysis', {})
+                },
+                business_context=business_context,
+                confidence_score=map_analysis.get('confidence_score', 0.8),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_bms_fields_enhanced(self, content: str, program_name: str) -> List[CodeChunk]:
+        """Parse BMS field definitions with UI element analysis"""
+        chunks = []
+        
+        field_matches = list(self.bms_patterns['bms_field'].finditer(content))
+        
+        # Group fields by their maps
+        field_groups = self._group_bms_fields_by_map(field_matches, content)
+        
+        for group in field_groups:
+            group_content = '\n'.join([field['match'].group(0) for field in group['fields']])
+            
+            field_analysis = await self._analyze_with_llm_cached(
+                group_content, 'bms_field_group',
+                """
+                Analyze this group of BMS fields:
+                
+                {content}
+                
+                Identify:
+                1. Field grouping purpose and organization
+                2. Data validation and input controls
+                3. User interaction design
+                4. Business data representation
+                5. Accessibility and usability features
+                
+                Return as JSON:
+                {{
+                    "grouping_purpose": "customer_contact_information",
+                    "validation_controls": ["required_fields", "format_validation"],
+                    "interaction_design": "tabbed_interface",
+                    "data_representation": "customer_profile",
+                    "usability_features": ["field_highlighting", "error_indication"]
+                }}
+                """
+            )
+            
+            business_context = {
+                'field_group_type': 'ui_section',
+                'grouping_purpose': field_analysis.get('analysis', {}).get('grouping_purpose', ''),
+                'data_representation': field_analysis.get('analysis', {}).get('data_representation', ''),
+                'field_count': len(group['fields'])
+            }
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name}_FIELDS_{group['group_id']}",
+                chunk_type="bms_field_group",
+                content=group_content,
+                metadata={
+                    'field_count': len(group['fields']),
+                    'field_names': [field['field_name'] for field in group['fields']],
+                    'llm_analysis': field_analysis.get('analysis', {})
+                },
+                business_context=business_context,
+                confidence_score=field_analysis.get('confidence_score', 0.8),
+                line_start=content[:group['start_pos']].count('\n'),
+                line_end=content[:group['end_pos']].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    def _group_bms_fields_by_map(self, field_matches: List, content: str) -> List[Dict[str, Any]]:
+        """Group BMS fields by their containing maps"""
+        groups = []
+        current_group = None
+        group_id = 1
+        
+        # Find map boundaries
+        map_matches = list(self.bms_patterns['bms_map'].finditer(content))
+        
+        for field_match in field_matches:
+            field_name = field_match.group(1)
+            field_pos = field_match.start()
+            
+            # Find which map this field belongs to
+            containing_map = None
+            for map_match in map_matches:
+                if map_match.start() < field_pos:
+                    # Check if there's another map between this one and the field
+                    next_map = None
+                    for next_map_match in map_matches:
+                        if next_map_match.start() > map_match.start() and next_map_match.start() < field_pos:
+                            next_map = next_map_match
+                            break
+                    
+                    if not next_map:
+                        containing_map = map_match
+            
+            # Group fields by map
+            if containing_map:
+                map_name = containing_map.group(1)
+                
+                # Check if we need to start a new group
+                if not current_group or current_group.get('map_name') != map_name:
+                    if current_group:
+                        groups.append(current_group)
+                    
+                    current_group = {
+                        'group_id': group_id,
+                        'map_name': map_name,
+                        'fields': [],
+                        'start_pos': field_pos,
+                        'end_pos': field_pos
+                    }
+                    group_id += 1
+                
+                current_group['fields'].append({
+                    'field_name': field_name,
+                    'match': field_match,
+                    'position': field_pos
+                })
+                current_group['end_pos'] = field_match.end()
+        
+        if current_group:
+            groups.append(current_group)
+        
+        return groups
+
+    async def _parse_cics_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
+        """Enhanced CICS parsing - wrapper around COBOL parsing with CICS focus"""
+        # CICS programs are essentially COBOL programs with CICS commands
+        # Parse as COBOL first, then add CICS-specific analysis
+        return await self._parse_cobol_with_enhanced_analysis(content, filename)
+
+    async def _parse_generic(self, content: str, filename: str) -> List[CodeChunk]:
+        """Generic parsing for unknown file types"""
+        chunks = []
+        program_name = self._extract_program_name(content, Path(filename))
+        
+        # Simple line-based chunking with basic analysis
+        lines = content.split('\n')
+        chunk_size = 50  # lines per chunk
+        
+        for i in range(0, len(lines), chunk_size):
+            chunk_lines = lines[i:i + chunk_size]
+            chunk_content = '\n'.join(chunk_lines)
+            
+            if chunk_content.strip():
+                chunk = CodeChunk(
+                    program_name=program_name,
+                    chunk_id=f"{program_name}_GENERIC_{i//chunk_size + 1}",
+                    chunk_type="generic_code_block",
+                    content=chunk_content,
+                    metadata={
+                        'chunk_number': i//chunk_size + 1,
+                        'line_count': len(chunk_lines),
+                        'start_line': i + 1,
+                        'end_line': min(i + chunk_size, len(lines))
+                    },
+                    business_context={'file_type': 'unknown'},
+                    confidence_score=0.5,
+                    line_start=i,
+                    line_end=min(i + chunk_size, len(lines))
+                )
+                chunks.append(chunk)
+        
+        return chunks
+    
+# ==================== DATABASE AND STORAGE METHODS ====================
 
     def _init_enhanced_database(self):
         """Initialize enhanced database schema with comprehensive tables"""
@@ -1217,6 +3374,477 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         except Exception as e:
             self.logger.error(f"Enhanced database initialization failed: {str(e)}")
             raise
+
+    async def _store_business_violations(self, violations: List[BusinessRuleViolation], program_name: str):
+        """Store business rule violations in database"""
+        if not violations:
+            return
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            for violation in violations:
+                cursor.execute("""
+                    INSERT INTO business_rule_violations 
+                    (program_name, rule_type, rule_name, severity, description, 
+                     line_number, context, confidence_score)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    program_name,
+                    'business_rule',
+                    violation.rule,
+                    violation.severity,
+                    violation.context,
+                    violation.line_number,
+                    violation.context,
+                    1.0  # Default confidence for rule-based violations
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"Stored {len(violations)} business violations for {program_name}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store business violations: {str(e)}")
+
+    async def _analyze_control_flow(self, chunks: List[CodeChunk]) -> List[ControlFlowPath]:
+        """Analyze control flow paths from parsed chunks"""
+        paths = []
+        
+        # Extract paragraphs and their relationships
+        paragraphs = {}
+        perform_calls = {}
+        
+        for chunk in chunks:
+            if chunk.chunk_type == "cobol_paragraph":
+                para_name = chunk.metadata.get('paragraph_name', '')
+                paragraphs[para_name] = {
+                    'chunk': chunk,
+                    'called_by': [],
+                    'calls': []
+                }
+            elif 'perform' in chunk.chunk_type:
+                targets = chunk.metadata.get('targets', [])
+                perform_calls[chunk.chunk_id] = targets
+        
+        # Build call relationships
+        for chunk_id, targets in perform_calls.items():
+            for target in targets:
+                if target in paragraphs:
+                    paragraphs[target]['called_by'].append(chunk_id)
+        
+        # Create control flow paths
+        path_id = 1
+        for para_name, para_info in paragraphs.items():
+            if para_info['called_by']:  # Only include called paragraphs
+                path = ControlFlowPath(
+                    path_id=f"PATH_{path_id}",
+                    entry_point=para_name,
+                    exit_points=[],  # Would need more analysis
+                    conditions=[],   # Would need condition analysis
+                    called_paragraphs=para_info['calls'],
+                    data_accessed=[]  # Would need data flow analysis
+                )
+                paths.append(path)
+                path_id += 1
+        
+        return paths
+
+    async def _store_control_flow_analysis(self, paths: List[ControlFlowPath], program_name: str):
+        """Store control flow analysis in database"""
+        if not paths:
+            return
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            for path in paths:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO control_flow_paths 
+                    (program_name, path_id, entry_point, exit_points, conditions,
+                     called_paragraphs, data_accessed, complexity_score, business_function)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    program_name,
+                    path.path_id,
+                    path.entry_point,
+                    json.dumps(path.exit_points),
+                    json.dumps(path.conditions),
+                    json.dumps(path.called_paragraphs),
+                    json.dumps(path.data_accessed),
+                    len(path.called_paragraphs),  # Simple complexity metric
+                    'unknown'  # Would need business analysis
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"Stored {len(paths)} control flow paths for {program_name}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store control flow analysis: {str(e)}")
+
+    async def _generate_field_lineage(self, program_name: str, chunks: List[CodeChunk]) -> List[Dict[str, Any]]:
+        """Generate field lineage records from parsed chunks"""
+        lineage_records = []
+        
+        for chunk in chunks:
+            if chunk.chunk_type in ["cobol_data_group", "copybook_record_layout"]:
+                fields = chunk.metadata.get('group_fields', [])
+                for field in fields:
+                    lineage_record = {
+                        'field_name': field,
+                        'program_name': program_name,
+                        'paragraph': chunk.chunk_id,
+                        'operation': 'definition',
+                        'data_type': 'unknown',  # Would need PIC analysis
+                        'business_domain': chunk.business_context.get('business_entity', 'unknown'),
+                        'sensitivity_level': 'standard'
+                    }
+                    lineage_records.append(lineage_record)
+        
+        return lineage_records
+
+    async def _store_field_lineage(self, lineage_records: List[Dict[str, Any]]):
+        """Store field lineage records in database"""
+        if not lineage_records:
+            return
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            for record in lineage_records:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO field_lineage 
+                    (field_name, program_name, paragraph, operation, data_type,
+                     business_domain, sensitivity_level)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    record['field_name'],
+                    record['program_name'],
+                    record['paragraph'],
+                    record['operation'],
+                    record['data_type'],
+                    record['business_domain'],
+                    record['sensitivity_level']
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"Stored {len(lineage_records)} field lineage records")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store field lineage: {str(e)}")
+
+    async def _llm_analyze_db2_patterns(self, content: str) -> Dict[str, Any]:
+        """Use LLM to analyze DB2 patterns and SQL complexity"""
+        return await self._analyze_with_llm_cached(
+            content, 'db2_analysis',
+            """
+            Analyze this DB2 stored procedure for SQL patterns and complexity:
+            
+            {content}
+            
+            Identify:
+            1. SQL operation complexity and performance characteristics
+            2. Data access patterns and table relationships
+            3. Transaction management and consistency
+            4. Error handling and exception management
+            5. Business logic implementation
+            
+            Return as JSON:
+            {{
+                "sql_complexity": "high",
+                "data_access_patterns": ["sequential_scan", "indexed_lookup"],
+                "transaction_management": "explicit_commit",
+                "error_handling": "comprehensive",
+                "business_logic": ["data_validation", "business_rules"],
+                "performance_characteristics": {{"throughput": "medium", "latency": "low"}}
+            }}
+            """
+        )
+
+    async def _llm_analyze_cobol_sp_patterns(self, content: str) -> Dict[str, Any]:
+        """Use LLM to analyze COBOL stored procedure patterns"""
+        return await self._analyze_with_llm_cached(
+            content, 'cobol_sp_analysis',
+            """
+            Analyze this COBOL stored procedure for SQL integration patterns:
+            
+            {content}
+            
+            Identify:
+            1. Host variable usage and data binding
+            2. SQL error handling strategies
+            3. Result set processing patterns
+            4. Transaction coordination
+            5. Business process integration
+            
+            Return as JSON:
+            {{
+                "host_variable_usage": "comprehensive",
+                "error_handling_strategy": "sqlcode_based",
+                "result_set_processing": "cursor_based",
+                "transaction_coordination": "cobol_managed",
+                "business_integration": "batch_processing"
+            }}
+            """
+        )
+
+    async def _parse_sql_communication_areas_enhanced(self, content: str, procedure_name: str,
+                                                    sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse SQL communication areas with enhanced analysis"""
+        chunks = []
+        
+        # Find SQLCA and SQLDA includes
+        sqlca_matches = list(self.sql_patterns['sql_include_sqlca'].finditer(content))
+        sqlda_matches = list(self.sql_patterns['sql_include_sqlda'].finditer(content))
+        
+        for match in sqlca_matches + sqlda_matches:
+            comm_type = 'SQLCA' if 'SQLCA' in match.group(0) else 'SQLDA'
+            
+            comm_analysis = await self._analyze_with_llm_cached(
+                match.group(0), f'sql_communication_{comm_type.lower()}',
+                """
+                Analyze this SQL communication area:
+                
+                {content}
+                
+                Identify:
+                1. Error handling integration
+                2. Status checking patterns
+                3. Performance monitoring capability
+                4. Transaction state management
+                
+                Return as JSON:
+                {{
+                    "error_integration": "comprehensive",
+                    "status_checking": "after_each_sql",
+                    "performance_monitoring": "enabled",
+                    "transaction_management": "automatic"
+                }}
+                """
+            )
+            
+            business_context = {
+                'communication_type': comm_type,
+                'error_integration': comm_analysis.get('analysis', {}).get('error_integration', ''),
+                'status_checking': comm_analysis.get('analysis', {}).get('status_checking', ''),
+                'purpose': 'sql_error_handling'
+            }
+            
+            chunk = CodeChunk(
+                program_name=procedure_name,
+                chunk_id=f"{procedure_name}_{comm_type}_INCLUDE",
+                chunk_type=f"sql_communication_{comm_type.lower()}",
+                content=match.group(0),
+                metadata={
+                    'communication_type': comm_type,
+                    'llm_analysis': comm_analysis.get('analysis', {})
+                },
+                business_context=business_context,
+                confidence_score=comm_analysis.get('confidence_score', 0.9),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_embedded_sql_enhanced(self, content: str, procedure_name: str,
+                                         sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse embedded SQL with enhanced host variable analysis"""
+        chunks = []
+        
+        # This is already handled in _parse_sql_blocks_enhanced
+        # but we can add COBOL-specific SQL analysis here
+        
+        # Find WHENEVER statements
+        whenever_matches = list(self.sql_patterns['sql_whenever_sqlerror'].finditer(content))
+        whenever_matches.extend(list(self.sql_patterns['sql_whenever_not_found'].finditer(content)))
+        whenever_matches.extend(list(self.sql_patterns['sql_whenever_sqlwarning'].finditer(content)))
+        
+        for match in whenever_matches:
+            whenever_analysis = await self._analyze_with_llm_cached(
+                match.group(0), 'sql_whenever_statement',
+                """
+                Analyze this SQL WHENEVER statement:
+                
+                {content}
+                
+                Identify:
+                1. Error handling strategy
+                2. Program flow impact
+                3. Recovery mechanisms
+                4. Business continuity approach
+                
+                Return as JSON:
+                {{
+                    "error_strategy": "goto_error_handler",
+                    "flow_impact": "structured_exception_handling",
+                    "recovery_mechanism": "rollback_and_retry",
+                    "business_continuity": "transaction_safe"
+                }}
+                """
+            )
+            
+            business_context = {
+                'statement_type': 'error_handling',
+                'error_strategy': whenever_analysis.get('analysis', {}).get('error_strategy', ''),
+                'flow_impact': whenever_analysis.get('analysis', {}).get('flow_impact', ''),
+                'business_continuity': whenever_analysis.get('analysis', {}).get('business_continuity', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=procedure_name,
+                chunk_id=f"{procedure_name}_WHENEVER_{hash(match.group(0))%10000}",
+                chunk_type="sql_whenever_statement",
+                content=match.group(0),
+                metadata={
+                    'whenever_type': match.group(1) if match.groups() else 'unknown',
+                    'llm_analysis': whenever_analysis.get('analysis', {})
+                },
+                business_context=business_context,
+                confidence_score=whenever_analysis.get('confidence_score', 0.8),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_result_set_handling(self, content: str, procedure_name: str,
+                                       sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse result set handling patterns"""
+        chunks = []
+        
+        # Find result set related SQL
+        result_set_matches = list(self.sql_patterns['cobol_result_set'].finditer(content))
+        allocate_matches = list(self.sql_patterns['cobol_allocate_cursor'].finditer(content))
+        
+        for match in result_set_matches + allocate_matches:
+            rs_analysis = await self._analyze_with_llm_cached(
+                match.group(0), 'sql_result_set',
+                """
+                Analyze this result set handling:
+                
+                {content}
+                
+                Identify:
+                1. Result set processing pattern
+                2. Memory management approach
+                3. Performance characteristics
+                4. Business data flow
+                
+                Return as JSON:
+                {{
+                    "processing_pattern": "cursor_based_iteration",
+                    "memory_management": "automatic_cleanup",
+                    "performance": "streaming_optimized",
+                    "data_flow": "batch_to_online"
+                }}
+                """
+            )
+            
+            business_context = {
+                'processing_type': 'result_set_handling',
+                'processing_pattern': rs_analysis.get('analysis', {}).get('processing_pattern', ''),
+                'performance': rs_analysis.get('analysis', {}).get('performance', ''),
+                'data_flow': rs_analysis.get('analysis', {}).get('data_flow', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=procedure_name,
+                chunk_id=f"{procedure_name}_RESULT_SET_{hash(match.group(0))%10000}",
+                chunk_type="sql_result_set_handling",
+                content=match.group(0),
+                metadata={
+                    'llm_analysis': rs_analysis.get('analysis', {})
+                },
+                business_context=business_context,
+                confidence_score=rs_analysis.get('confidence_score', 0.8),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    async def _parse_procedure_calls_enhanced(self, content: str, procedure_name: str,
+                                            sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
+        """Parse procedure calls with parameter analysis"""
+        chunks = []
+        
+        # Find CALL statements
+        call_matches = list(self.sql_patterns['cobol_procedure_call'].finditer(content))
+        
+        for match in call_matches:
+            called_proc = match.group(1) if match.groups() else 'unknown'
+            parameters = match.group(2) if match.groups() and len(match.groups()) > 1 else ''
+            
+            call_analysis = await self._analyze_with_llm_cached(
+                match.group(0), 'sql_procedure_call',
+                """
+                Analyze this procedure call:
+                
+                {content}
+                
+                Identify:
+                1. Parameter passing strategy
+                2. Transaction coordination
+                3. Error propagation
+                4. Business process integration
+                
+                Return as JSON:
+                {{
+                    "parameter_strategy": "reference_passing",
+                    "transaction_coordination": "nested_transaction",
+                    "error_propagation": "exception_bubbling",
+                    "business_integration": "service_orchestration"
+                }}
+                """
+            )
+            
+            business_context = {
+                'call_type': 'procedure_invocation',
+                'called_procedure': called_proc,
+                'parameter_strategy': call_analysis.get('analysis', {}).get('parameter_strategy', ''),
+                'business_integration': call_analysis.get('analysis', {}).get('business_integration', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=procedure_name,
+                chunk_id=f"{procedure_name}_CALL_{called_proc}",
+                chunk_type="sql_procedure_call",
+                content=match.group(0),
+                metadata={
+                    'called_procedure': called_proc,
+                    'parameters': parameters,
+                    'llm_analysis': call_analysis.get('analysis', {})
+                },
+                business_context=business_context,
+                confidence_score=call_analysis.get('confidence_score', 0.8),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
+        
+        return chunks
+
+    def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Add processing metadata to result"""
+        result["processor"] = "EnhancedCodeParserAgent"
+        result["processor_version"] = "3.0.0-LLM-Enhanced"
+        result["api_integration"] = True
+        result["llm_enhanced"] = True
+        return result
+
+
     # ==================== CORE PROCESSING METHODS ====================
 
     def _generate_file_hash(self, content: str, file_path: Path) -> str:
@@ -1428,140 +4056,6 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         self.logger.error(f"Failed to read file {file_path} with any encoding")
         return None
 
-    async def process_file(self, file_path: Path) -> Dict[str, Any]:
-        """Process a single code file with enhanced business rule validation and LLM analysis"""
-        try:
-            self.logger.info(f"Processing file: {file_path}")
-            
-            if not file_path.exists():
-                return self._add_processing_info({
-                    "status": "error",
-                    "file_name": str(file_path.name),
-                    "error": "File not found"
-                })
-            
-            # Enhanced file reading with multiple encoding attempts
-            content = await self._read_file_with_encoding(file_path)
-            if content is None:
-                return self._add_processing_info({
-                    "status": "error",
-                    "file_name": str(file_path.name),
-                    "error": "Unable to decode file"
-                })
-
-            if not content.strip():
-                return self._add_processing_info({
-                    "status": "error",
-                    "file_name": str(file_path.name),
-                    "error": "File is empty"
-                })
-
-            # Check for duplicates
-            if self._is_duplicate_file(file_path, content):
-                return self._add_processing_info({
-                    "status": "skipped",
-                    "file_name": str(file_path.name),
-                    "message": "File already processed (duplicate detected)"
-                })
-            
-            file_type = self._detect_file_type(content, file_path.suffix)
-            self.logger.info(f"Detected file type: {file_type}")
-            
-            # Business rule validation before parsing
-            business_violations = []
-            if file_type in self.business_validators:
-                violations = await self.business_validators[file_type].validate_structure(content)
-                business_violations.extend(violations)
-            
-            # Parse based on file type with enhanced business context and LLM analysis
-            if file_type == 'cobol':
-                chunks = await self._parse_cobol_with_enhanced_analysis(content, str(file_path.name))
-            elif file_type == 'jcl':
-                chunks = await self._parse_jcl_with_enhanced_analysis(content, str(file_path.name))
-            elif file_type == 'copybook':
-                chunks = await self._parse_copybook_with_enhanced_analysis(content, str(file_path.name))
-            elif file_type == 'bms':
-                chunks = await self._parse_bms_with_enhanced_analysis(content, str(file_path.name))
-            elif file_type == 'cics':
-                chunks = await self._parse_cics_with_enhanced_analysis(content, str(file_path.name))
-            elif file_type == 'db2_procedure':
-                chunks = await self._parse_db2_procedure_with_enhanced_analysis(content, str(file_path.name))
-            elif file_type == 'cobol_stored_procedure':
-                chunks = await self._parse_cobol_stored_procedure_with_enhanced_analysis(content, str(file_path.name))
-            elif file_type == 'mq_program':
-                chunks = await self._parse_mq_program_with_enhanced_analysis(content, str(file_path.name))
-            else:
-                chunks = await self._parse_generic(content, str(file_path.name))
-            
-            self.logger.info(f"Generated {len(chunks)} chunks")
-            
-            if not chunks:
-                return self._add_processing_info({
-                    "status": "warning",
-                    "file_name": str(file_path.name),
-                    "file_type": file_type,
-                    "chunks_created": 0,
-                    "message": "No chunks were created from this file"
-                })
-            
-            # Store business violations
-            if business_violations:
-                await self._store_business_violations(business_violations, self._extract_program_name(content, file_path))
-            
-            # Add file hash to all chunks
-            file_hash = self._generate_file_hash(content, file_path)
-            for chunk in chunks:
-                chunk.metadata['file_hash'] = file_hash
-            
-            # Store chunks with verification
-            await self._store_chunks_enhanced(chunks, file_hash)
-            
-            # Verify chunks were stored
-            stored_chunks = await self._verify_chunks_stored(self._extract_program_name(content, file_path))
-            
-            # Generate enhanced metadata with business context
-            metadata = await self._generate_metadata_enhanced(chunks, file_type, business_violations)
-
-            # Generate control flow analysis for applicable file types
-            if file_type in ['cobol', 'cics', 'cobol_stored_procedure']:
-                control_flow = await self._analyze_control_flow(chunks)
-                await self._store_control_flow_analysis(control_flow, self._extract_program_name(content, file_path))
-            
-            # Generate and store field lineage for data-intensive file types
-            if file_type in ['cobol', 'cics', 'copybook', 'cobol_stored_procedure']:
-                lineage_records = await self._generate_field_lineage(self._extract_program_name(content, file_path), chunks)
-                await self._store_field_lineage(lineage_records)
-            
-            # Store specialized analysis for specific file types
-            if file_type == 'copybook':
-                await self._store_copybook_analysis(chunks, self._extract_program_name(content, file_path))
-            elif file_type == 'mq_program':
-                await self._store_mq_analysis(chunks, content, self._extract_program_name(content, file_path))
-            elif file_type == 'db2_procedure':
-                await self._store_db2_procedure_analysis(chunks, self._extract_program_name(content, file_path))
-            
-            result = {
-                "status": "success",
-                "file_name": str(file_path.name),
-                "file_type": file_type,
-                "chunks_created": len(chunks),
-                "chunks_verified": stored_chunks,
-                "business_violations": len(business_violations),
-                "metadata": metadata,
-                "processing_timestamp": dt.now().isoformat(),
-                "file_hash": file_hash
-            }
-            
-            return self._add_processing_info(result)
-            
-        except Exception as e:
-            self.logger.error(f"Processing failed for {file_path}: {str(e)}")
-            return self._add_processing_info({
-                "status": "error",
-                "file_name": file_path.name,
-                "error": str(e)
-            })
-
     # ==================== LLM INTEGRATION METHODS ====================
 
     async def _analyze_with_llm_cached(self, content: str, analysis_type: str, 
@@ -1758,1490 +4252,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         return await self._analyze_with_llm_cached(
             content, pattern_type, prompts[pattern_type]
         )
-    # ==================== ENHANCED PARSING METHODS ====================
-
-    async def _parse_cobol_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
-        """Enhanced COBOL parsing with comprehensive LLM analysis"""
-        chunks = []
-        program_name = self._extract_program_name(content, Path(filename))
-        
-        # Get LLM analysis for overall program structure
-        program_analysis = await self._llm_analyze_complex_pattern(content, 'business_logic')
-        
-        # Parse divisions with enhanced validation and LLM insights
-        division_chunks = await self._parse_cobol_divisions_enhanced(content, program_name, program_analysis)
-        chunks.extend(division_chunks)
-        
-        # Parse sections with comprehensive context
-        section_chunks = await self._parse_cobol_sections_enhanced(content, program_name, program_analysis)
-        chunks.extend(section_chunks)
-        
-        # Parse data items with advanced business rule validation
-        data_chunks = await self._parse_data_items_enhanced(content, program_name, program_analysis)
-        chunks.extend(data_chunks)
-        
-        # Parse procedure division with comprehensive flow analysis
-        procedure_chunks = await self._parse_procedure_division_enhanced(content, program_name, program_analysis)
-        chunks.extend(procedure_chunks)
-        
-        # Parse SQL blocks with enhanced host variable validation
-        sql_chunks = await self._parse_sql_blocks_enhanced(content, program_name)
-        chunks.extend(sql_chunks)
-        
-        # Parse CICS commands with transaction context
-        cics_chunks = await self._parse_cics_commands_enhanced(content, program_name)
-        chunks.extend(cics_chunks)
-        
-        # Parse COPY statements with replacement analysis
-        copy_chunks = await self._parse_copy_statements_enhanced(content, program_name)
-        chunks.extend(copy_chunks)
-        
-        return chunks
-
-    async def _parse_copybook_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
-        """Enhanced copybook parsing with comprehensive layout analysis"""
-        chunks = []
-        copybook_name = self._extract_program_name(content, Path(filename))
-        
-        # Analyze copybook structure with LLM
-        structure_analysis = await self._llm_analyze_complex_pattern(content, 'data_relationships')
-        
-        # Detect layout type and complexity
-        layout_info = await self._analyze_copybook_layout(content, copybook_name)
-        
-        # Parse multi-layout copybooks
-        if layout_info['layout_type'] == CopybookLayoutType.MULTI_RECORD:
-            layout_chunks = await self._parse_multi_record_layouts(content, copybook_name, structure_analysis)
-            chunks.extend(layout_chunks)
-        
-        # Parse conditional layouts based on indicators
-        elif layout_info['layout_type'] == CopybookLayoutType.CONDITIONAL_LAYOUT:
-            conditional_chunks = await self._parse_conditional_layouts(content, copybook_name, structure_analysis)
-            chunks.extend(conditional_chunks)
-        
-        # Parse REDEFINES structures
-        elif layout_info['layout_type'] == CopybookLayoutType.REDEFINES_LAYOUT:
-            redefines_chunks = await self._parse_redefines_structures(content, copybook_name, structure_analysis)
-            chunks.extend(redefines_chunks)
-        
-        # Parse OCCURS structures
-        elif layout_info['layout_type'] == CopybookLayoutType.OCCURS_LAYOUT:
-            occurs_chunks = await self._parse_occurs_structures(content, copybook_name, structure_analysis)
-            chunks.extend(occurs_chunks)
-        
-        # Default single record layout
-        else:
-            single_chunks = await self._parse_single_record_layout(content, copybook_name, structure_analysis)
-            chunks.extend(single_chunks)
-        
-        # Parse REPLACING parameters
-        replacing_chunks = await self._parse_replacing_parameters(content, copybook_name)
-        chunks.extend(replacing_chunks)
-        
-        # Parse multi-filler patterns for alignment
-        filler_chunks = await self._parse_multi_filler_patterns(content, copybook_name)
-        chunks.extend(filler_chunks)
-        
-        return chunks
-
-    async def _parse_mq_program_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
-        """Enhanced IBM MQ program parsing with comprehensive message flow analysis"""
-        chunks = []
-        program_name = self._extract_program_name(content, Path(filename))
-        
-        # First parse as COBOL with MQ enhancements
-        base_cobol_chunks = await self._parse_cobol_with_enhanced_analysis(content, filename)
-        chunks.extend(base_cobol_chunks)
-        
-        # Analyze MQ-specific patterns with LLM
-        mq_analysis = await self._llm_analyze_mq_patterns(content)
-        
-        # Parse MQ API call sequences
-        api_chunks = await self._parse_mq_api_sequences(content, program_name, mq_analysis)
-        chunks.extend(api_chunks)
-        
-        # Parse MQ data structures with comprehensive field analysis
-        structure_chunks = await self._parse_mq_data_structures_enhanced(content, program_name, mq_analysis)
-        chunks.extend(structure_chunks)
-        
-        # Parse message flow patterns
-        flow_chunks = await self._parse_mq_message_flows(content, program_name, mq_analysis)
-        chunks.extend(flow_chunks)
-        
-        # Parse error handling patterns specific to MQ
-        error_chunks = await self._parse_mq_error_handling(content, program_name, mq_analysis)
-        chunks.extend(error_chunks)
-        
-        # Parse transaction scope and commit patterns
-        transaction_chunks = await self._parse_mq_transaction_patterns(content, program_name, mq_analysis)
-        chunks.extend(transaction_chunks)
-        
-        return chunks
-
-    async def _parse_db2_procedure_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
-        """Enhanced DB2 stored procedure parsing with comprehensive SQL analysis"""
-        chunks = []
-        procedure_name = self._extract_program_name(content, Path(filename))
-        
-        # Analyze DB2 procedure structure with LLM
-        db2_analysis = await self._llm_analyze_db2_patterns(content)
-        
-        # Parse procedure signature and parameters
-        signature_chunk = await self._parse_db2_procedure_signature(content, procedure_name, db2_analysis)
-        if signature_chunk:
-            chunks.append(signature_chunk)
-        
-        # Parse variable declarations with type analysis
-        declaration_chunks = await self._parse_db2_declarations_enhanced(content, procedure_name, db2_analysis)
-        chunks.extend(declaration_chunks)
-        
-        # Parse cursor definitions with SQL analysis
-        cursor_chunks = await self._parse_db2_cursors_enhanced(content, procedure_name, db2_analysis)
-        chunks.extend(cursor_chunks)
-        
-        # Parse exception handlers with comprehensive error analysis
-        handler_chunks = await self._parse_db2_exception_handlers_enhanced(content, procedure_name, db2_analysis)
-        chunks.extend(handler_chunks)
-        
-        # Parse SQL statements with performance analysis
-        sql_chunks = await self._parse_db2_sql_statements_enhanced(content, procedure_name, db2_analysis)
-        chunks.extend(sql_chunks)
-        
-        # Parse control flow structures
-        control_chunks = await self._parse_db2_control_flow_enhanced(content, procedure_name, db2_analysis)
-        chunks.extend(control_chunks)
-        
-        # Parse dynamic SQL patterns
-        dynamic_chunks = await self._parse_db2_dynamic_sql(content, procedure_name, db2_analysis)
-        chunks.extend(dynamic_chunks)
-        
-        return chunks
-
-    async def _parse_cobol_stored_procedure_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
-        """Enhanced COBOL stored procedure parsing combining COBOL and SQL analysis"""
-        chunks = []
-        procedure_name = self._extract_program_name(content, Path(filename))
-        
-        # Parse as enhanced COBOL first
-        cobol_chunks = await self._parse_cobol_with_enhanced_analysis(content, filename)
-        chunks.extend(cobol_chunks)
-        
-        # Analyze stored procedure specific patterns
-        sp_analysis = await self._llm_analyze_cobol_sp_patterns(content)
-        
-        # Parse SQL communication areas (SQLCA, SQLDA)
-        comm_chunks = await self._parse_sql_communication_areas_enhanced(content, procedure_name, sp_analysis)
-        chunks.extend(comm_chunks)
-        
-        # Parse embedded SQL with host variable validation
-        embedded_sql_chunks = await self._parse_embedded_sql_enhanced(content, procedure_name, sp_analysis)
-        chunks.extend(embedded_sql_chunks)
-        
-        # Parse result set handling
-        result_set_chunks = await self._parse_result_set_handling(content, procedure_name, sp_analysis)
-        chunks.extend(result_set_chunks)
-        
-        # Parse procedure calls and parameter passing
-        call_chunks = await self._parse_procedure_calls_enhanced(content, procedure_name, sp_analysis)
-        chunks.extend(call_chunks)
-        
-        return chunks
-
-    # ==================== COPYBOOK ENHANCED PARSING METHODS ====================
-
-    async def _analyze_copybook_layout(self, content: str, copybook_name: str) -> Dict[str, Any]:
-        """Analyze copybook layout type and complexity"""
-        
-        # Count different layout indicators
-        layout_indicators = len(self.copybook_patterns['layout_indicator'].findall(content))
-        record_types = len(self.copybook_patterns['record_type_field'].findall(content))
-        redefines_count = len(self.copybook_patterns['redefines_complex'].findall(content))
-        occurs_count = len(self.copybook_patterns['occurs_complex'].findall(content))
-        conditional_fields = len(self.copybook_patterns['conditional_field'].findall(content))
-        
-        # Determine layout type
-        if layout_indicators > 1 or record_types > 1:
-            layout_type = CopybookLayoutType.MULTI_RECORD
-        elif conditional_fields > 0:
-            layout_type = CopybookLayoutType.CONDITIONAL_LAYOUT
-        elif redefines_count > 2:
-            layout_type = CopybookLayoutType.REDEFINES_LAYOUT
-        elif occurs_count > 1:
-            layout_type = CopybookLayoutType.OCCURS_LAYOUT
-        else:
-            layout_type = CopybookLayoutType.SINGLE_RECORD
-        
-        # Calculate complexity score
-        complexity_score = (layout_indicators * 3 + record_types * 2 + 
-                          redefines_count * 2 + occurs_count * 1 + conditional_fields * 2)
-        
-        return {
-            'layout_type': layout_type,
-            'complexity_score': min(complexity_score, 20),
-            'layout_indicators': layout_indicators,
-            'record_types': record_types,
-            'redefines_count': redefines_count,
-            'occurs_count': occurs_count,
-            'conditional_fields': conditional_fields
-        }
-
-    async def _parse_multi_record_layouts(self, content: str, copybook_name: str, 
-                                        structure_analysis: Dict[str, Any]) -> List[CodeChunk]:
-        """Parse copybooks with multiple record layouts"""
-        chunks = []
-        
-        # Find record type indicators
-        layout_matches = list(self.copybook_patterns['layout_indicator'].finditer(content))
-        record_type_matches = list(self.copybook_patterns['record_type_field'].finditer(content))
-        
-        # Combine and sort by position
-        all_indicators = []
-        for match in layout_matches:
-            all_indicators.append({
-                'type': 'layout_indicator',
-                'name': match.group(1),
-                'position': match.start(),
-                'match': match
-            })
-        
-        for match in record_type_matches:
-            all_indicators.append({
-                'type': 'record_type',
-                'name': match.group(1),
-                'position': match.start(),
-                'match': match
-            })
-        
-        all_indicators.sort(key=lambda x: x['position'])
-        
-        # Parse each record layout
-        for i, indicator in enumerate(all_indicators):
-            start_pos = indicator['position']
-            
-            # Find end position
-            if i + 1 < len(all_indicators):
-                end_pos = all_indicators[i + 1]['position']
-            else:
-                end_pos = len(content)
-            
-            # Extract layout content
-            layout_content = content[start_pos:end_pos].strip()
-            
-            # Analyze with LLM for business context
-            layout_analysis = await self._analyze_with_llm_cached(
-                layout_content, 'copybook_layout',
-                """
-                Analyze this copybook record layout:
-                
-                {content}
-                
-                Identify:
-                1. Business purpose and domain
-                2. Key data elements and their roles
-                3. Data validation requirements
-                4. Usage patterns and frequency
-                
-                Return as JSON:
-                {{
-                    "business_purpose": "customer data record",
-                    "domain": "customer_management",
-                    "key_elements": [
-                        {{"field": "field1", "role": "identifier", "validation": "required"}}
-                    ],
-                    "usage_patterns": ["batch_processing", "online_inquiry"],
-                    "data_sensitivity": "medium"
-                }}
-                """
-            )
-            
-            business_context = {
-                'layout_type': 'multi_record',
-                'record_indicator': indicator['name'],
-                'business_analysis': layout_analysis.get('analysis', {}),
-                'confidence_score': layout_analysis.get('confidence_score', 0.7)
-            }
-            
-            chunk = CodeChunk(
-                program_name=copybook_name,
-                chunk_id=f"{copybook_name}_LAYOUT_{indicator['name']}",
-                chunk_type="copybook_record_layout",
-                content=layout_content,
-                metadata={
-                    'layout_indicator': indicator['name'],
-                    'layout_position': i + 1,
-                    'total_layouts': len(all_indicators),
-                    'llm_analysis': layout_analysis.get('analysis', {})
-                },
-                business_context=business_context,
-                confidence_score=layout_analysis.get('confidence_score', 0.7),
-                line_start=content[:start_pos].count('\n'),
-                line_end=content[:end_pos].count('\n')
-            )
-            chunks.append(chunk)
-        
-        return chunks
-
-    async def _parse_conditional_layouts(self, content: str, copybook_name: str,
-                                       structure_analysis: Dict[str, Any]) -> List[CodeChunk]:
-        """Parse copybooks with conditional field layouts"""
-        chunks = []
-        
-        # Find conditional fields (DEPENDING ON clauses)
-        conditional_matches = list(self.copybook_patterns['conditional_field'].finditer(content))
-        
-        for match in conditional_matches:
-            field_name = match.group(1)
-            depending_field = match.group(2)
-            
-            # Analyze conditional logic with LLM
-            conditional_analysis = await self._analyze_with_llm_cached(
-                context_content, 'conditional_field',
-                """
-                Analyze this conditional field definition:
-                
-                {content}
-                
-                Focus on field: {field_name} depending on {depending_field}
-                
-                Identify:
-                1. Business logic for the condition
-                2. Possible values and their meanings
-                3. Data integrity implications
-                4. Processing complexity
-                
-                Return as JSON:
-                {{
-                    "business_logic": "variable length based on transaction type",
-                    "condition_values": [
-                        {{"value": "01", "meaning": "customer record", "field_count": 15}}
-                    ],
-                    "integrity_rules": ["depending_field must be set before access"],
-                    "complexity_impact": "medium"
-                }}
-                """,
-                field_name=field_name,
-                depending_field=depending_field
-            )
-            
-            business_context = {
-                'field_type': 'conditional',
-                'depending_on': depending_field,
-                'business_logic': conditional_analysis.get('analysis', {}).get('business_logic', ''),
-                'complexity_impact': conditional_analysis.get('analysis', {}).get('complexity_impact', 'unknown')
-            }
-            
-            chunk = CodeChunk(
-                program_name=copybook_name,
-                chunk_id=f"{copybook_name}_CONDITIONAL_{field_name}",
-                chunk_type="copybook_conditional_field",
-                content=match.group(0),
-                metadata={
-                    'field_name': field_name,
-                    'depending_field': depending_field,
-                    'conditional_analysis': conditional_analysis.get('analysis', {}),
-                    'confidence_score': conditional_analysis.get('confidence_score', 0.7)
-                },
-                business_context=business_context,
-                confidence_score=conditional_analysis.get('confidence_score', 0.7),
-                line_start=content[:match.start()].count('\n'),
-                line_end=content[:match.end()].count('\n')
-            )
-            chunks.append(chunk)
-        
-        return chunks
-
-    async def _parse_redefines_structures(self, content: str, copybook_name: str,
-                                        structure_analysis: Dict[str, Any]) -> List[CodeChunk]:
-        """Parse copybooks with complex REDEFINES structures"""
-        chunks = []
-        
-        # Find all REDEFINES patterns
-        redefines_matches = list(self.copybook_patterns['redefines_complex'].finditer(content))
-        
-        # Group related redefines
-        redefines_groups = self._group_redefines_structures(redefines_matches, content)
-        
-        for group in redefines_groups:
-            # Extract the complete redefines structure
-            start_pos = group['start_pos']
-            end_pos = group['end_pos']
-            structure_content = content[start_pos:end_pos]
-            
-            # Analyze redefines business purpose with LLM
-            redefines_analysis = await self._analyze_with_llm_cached(
-                structure_content, 'redefines_structure',
-                """
-                Analyze this REDEFINES structure:
-                
-                {content}
-                
-                Identify:
-                1. Business purpose of the overlay
-                2. Different data interpretations
-                3. Usage scenarios for each view
-                4. Data integrity considerations
-                
-                Return as JSON:
-                {{
-                    "business_purpose": "dual interpretation of amount field",
-                    "data_views": [
-                        {{"view": "numeric", "purpose": "calculations", "format": "packed decimal"}},
-                        {{"view": "display", "purpose": "reporting", "format": "formatted text"}}
-                    ],
-                    "usage_scenarios": ["batch calculations", "report generation"],
-                    "integrity_considerations": ["both views must be synchronized"]
-                }}
-                """
-            )
-            
-            business_context = {
-                'structure_type': 'redefines',
-                'original_field': group['original_field'],
-                'redefining_fields': group['redefining_fields'],
-                'business_purpose': redefines_analysis.get('analysis', {}).get('business_purpose', ''),
-                'data_views': redefines_analysis.get('analysis', {}).get('data_views', [])
-            }
-            
-            chunk = CodeChunk(
-                program_name=copybook_name,
-                chunk_id=f"{copybook_name}_REDEFINES_{group['original_field']}",
-                chunk_type="copybook_redefines_structure",
-                content=structure_content,
-                metadata={
-                    'original_field': group['original_field'],
-                    'redefining_fields': group['redefining_fields'],
-                    'redefines_analysis': redefines_analysis.get('analysis', {}),
-                    'structure_complexity': len(group['redefining_fields'])
-                },
-                business_context=business_context,
-                confidence_score=redefines_analysis.get('confidence_score', 0.7),
-                line_start=content[:start_pos].count('\n'),
-                line_end=content[:end_pos].count('\n')
-            )
-            chunks.append(chunk)
-        
-        return chunks
-
-    async def _parse_occurs_structures(self, content: str, copybook_name: str,
-                                     structure_analysis: Dict[str, Any]) -> List[CodeChunk]:
-        """Parse copybooks with OCCURS structures (arrays and tables)"""
-        chunks = []
-        
-        # Find all OCCURS patterns
-        occurs_matches = list(self.copybook_patterns['occurs_complex'].finditer(content))
-        
-        for match in occurs_matches:
-            min_occurs = int(match.group(1)) if match.group(1) else 0
-            max_occurs = int(match.group(2)) if match.group(2) else min_occurs
-            depending_field = match.group(3) if match.group(3) else None
-            indexed_fields = match.group(4) if match.group(4) else None
-            key_fields = match.group(5) if match.group(5) else None
-            
-            # Extract the complete OCCURS structure context
-            start_pos = max(0, match.start() - 100)
-            end_pos = min(len(content), match.end() + 300)
-            occurs_content = content[start_pos:end_pos]
-            
-            # Analyze OCCURS business purpose with LLM
-            occurs_analysis = await self._analyze_with_llm_cached(
-                occurs_content, 'occurs_structure',
-                """
-                Analyze this OCCURS structure:
-                
-                {content}
-                
-                Min occurs: {min_occurs}, Max occurs: {max_occurs}
-                Depending on: {depending_field}
-                Indexed by: {indexed_fields}
-                Key fields: {key_fields}
-                
-                Identify:
-                1. Business purpose of the array/table
-                2. Data organization and access patterns
-                3. Performance implications
-                4. Business rules for sizing
-                
-                Return as JSON:
-                {{
-                    "business_purpose": "customer address history table",
-                    "data_organization": "chronological_array",
-                    "access_patterns": ["sequential_scan", "indexed_lookup"],
-                    "performance_implications": "memory_intensive_for_large_arrays",
-                    "sizing_rules": "max 12 addresses per customer"
-                }}
-                """,
-                min_occurs=min_occurs,
-                max_occurs=max_occurs,
-                depending_field=depending_field or "N/A",
-                indexed_fields=indexed_fields or "N/A",
-                key_fields=key_fields or "N/A"
-            )
-            
-            business_context = {
-                'structure_type': 'occurs',
-                'min_occurs': min_occurs,
-                'max_occurs': max_occurs,
-                'is_variable': max_occurs != min_occurs or depending_field is not None,
-                'depending_field': depending_field,
-                'indexed_fields': indexed_fields.split(',') if indexed_fields else [],
-                'key_fields': key_fields.split(',') if key_fields else [],
-                'business_purpose': occurs_analysis.get('analysis', {}).get('business_purpose', ''),
-                'access_patterns': occurs_analysis.get('analysis', {}).get('access_patterns', [])
-            }
-            
-            chunk = CodeChunk(
-                program_name=copybook_name,
-                chunk_id=f"{copybook_name}_OCCURS_{hash(match.group(0))%10000}",
-                chunk_type="copybook_occurs_structure",
-                content=match.group(0),
-                metadata={
-                    'occurs_details': {
-                        'min_occurs': min_occurs,
-                        'max_occurs': max_occurs,
-                        'depending_field': depending_field,
-                        'indexed_fields': indexed_fields,
-                        'key_fields': key_fields
-                    },
-                    'occurs_analysis': occurs_analysis.get('analysis', {}),
-                    'performance_impact': occurs_analysis.get('analysis', {}).get('performance_implications', 'unknown')
-                },
-                business_context=business_context,
-                confidence_score=occurs_analysis.get('confidence_score', 0.7),
-                line_start=content[:match.start()].count('\n'),
-                line_end=content[:match.end()].count('\n')
-            )
-            chunks.append(chunk)
-        
-        return chunks
-
-    async def _parse_replacing_parameters(self, content: str, copybook_name: str) -> List[CodeChunk]:
-        """Parse REPLACING parameters for copybook customization"""
-        chunks = []
-        
-        # Find all types of replacing patterns
-        replacing_patterns = {
-            'variable': self.copybook_patterns['replacing_variable'],
-            'literal': self.copybook_patterns['replacing_literal'],
-            'numeric': self.copybook_patterns['replacing_numeric'],
-            'pic': self.copybook_patterns['replacing_pic'],
-            'usage': self.copybook_patterns['replacing_usage']
-        }
-        
-        all_replacements = []
-        for pattern_type, pattern in replacing_patterns.items():
-            matches = list(pattern.finditer(content))
-            for match in matches:
-                all_replacements.append({
-                    'type': pattern_type,
-                    'value': match.group(1),
-                    'position': match.start(),
-                    'match': match
-                })
-        
-        if all_replacements:
-            # Group replacements by proximity
-            replacement_groups = self._group_replacing_parameters(all_replacements)
-            
-            for group in replacement_groups:
-                replacements_content = '\n'.join([r['match'].group(0) for r in group['replacements']])
-                
-                business_context = {
-                    'customization_type': 'replacing_parameters',
-                    'parameter_types': list(set([r['type'] for r in group['replacements']])),
-                    'customization_scope': 'copybook_instantiation',
-                    'flexibility_level': 'high' if len(group['replacements']) > 3 else 'medium'
-                }
-                
-                chunk = CodeChunk(
-                    program_name=copybook_name,
-                    chunk_id=f"{copybook_name}_REPLACING_{group['group_id']}",
-                    chunk_type="copybook_replacing_parameters",
-                    content=replacements_content,
-                    metadata={
-                        'replacement_count': len(group['replacements']),
-                        'parameter_types': [r['type'] for r in group['replacements']],
-                        'parameter_values': [r['value'] for r in group['replacements']]
-                    },
-                    business_context=business_context,
-                    confidence_score=0.9,  # High confidence for pattern matching
-                    line_start=content[:group['start_pos']].count('\n'),
-                    line_end=content[:group['end_pos']].count('\n')
-                )
-                chunks.append(chunk)
-        
-        return chunks
-
-    async def _parse_multi_filler_patterns(self, content: str, copybook_name: str) -> List[CodeChunk]:
-        """Parse multi-filler patterns for data alignment and padding analysis"""
-        chunks = []
-        
-        # Find all filler patterns
-        filler_matches = list(self.copybook_patterns['multi_filler'].finditer(content))
-        alignment_matches = list(self.copybook_patterns['filler_alignment'].finditer(content))
-        sync_matches = list(self.copybook_patterns['sync_alignment'].finditer(content))
-        
-        # Analyze filler patterns for alignment strategy
-        if filler_matches or alignment_matches or sync_matches:
-            filler_analysis = await self._analyze_filler_patterns(content, filler_matches, alignment_matches, sync_matches)
-            
-            business_context = {
-                'alignment_strategy': filler_analysis['strategy'],
-                'padding_purpose': filler_analysis['purpose'],
-                'memory_impact': filler_analysis['memory_impact'],
-                'performance_consideration': filler_analysis['performance']
-            }
-            
-            # Create a summary chunk for the overall filler strategy
-            filler_content = '\n'.join([match.group(0) for match in filler_matches[:5]])  # Sample of fillers
-            
-            chunk = CodeChunk(
-                program_name=copybook_name,
-                chunk_id=f"{copybook_name}_FILLER_STRATEGY",
-                chunk_type="copybook_filler_analysis",
-                content=filler_content,
-                metadata={
-                    'total_fillers': len(filler_matches),
-                    'alignment_fillers': len(alignment_matches),
-                    'sync_markers': len(sync_matches),
-                    'filler_analysis': filler_analysis
-                },
-                business_context=business_context,
-                confidence_score=0.8,
-                line_start=0,
-                line_end=0
-            )
-            chunks.append(chunk)
-        
-        return chunks
-
-    # ==================== MQ ENHANCED PARSING METHODS ====================
-
-    async def _llm_analyze_mq_patterns(self, content: str) -> Dict[str, Any]:
-        """Use LLM to analyze MQ patterns and message flows"""
-        return await self._analyze_with_llm_cached(
-            content, 'mq_analysis',
-            """
-            Analyze this IBM MQ program for message queuing patterns:
-            
-            {content}
-            
-            Identify:
-            1. Message flow patterns (point-to-point, publish-subscribe, request-reply)
-            2. Queue management strategy (persistent vs transient connections)
-            3. Transaction boundaries and commit strategies
-            4. Error handling and recovery patterns
-            5. Performance characteristics and bottlenecks
-            
-            Return as JSON:
-            {{
-                "message_patterns": [
-                    {{"pattern": "request_reply", "queues": ["REQUEST.Q", "REPLY.Q"], "volume": "high"}}
-                ],
-                "connection_strategy": "persistent",
-                "transaction_scope": "message_level",
-                "error_handling": [
-                    {{"error_type": "connection_failure", "strategy": "retry_with_backoff"}}
-                ],
-                "performance_characteristics": {{"throughput": "medium", "latency": "low"}},
-                "reliability_level": "high"
-            }}
-            """
-        )
-
-    async def _parse_mq_api_sequences(self, content: str, program_name: str, 
-                                    mq_analysis: Dict[str, Any]) -> List[CodeChunk]:
-        """Parse MQ API call sequences to understand message flow"""
-        chunks = []
-        
-        # Find all MQ API calls in sequence
-        api_calls = []
-        for api_name, pattern in self.mq_patterns.items():
-            if api_name.startswith('mq_mq'):  # Only actual API calls
-                matches = list(pattern.finditer(content))
-                for match in matches:
-                    api_calls.append({
-                        'api': api_name,
-                        'position': match.start(),
-                        'match': match,
-                        'parameters': match.group(1) if match.groups() else ""
-                    })
-        
-        # Sort by position to understand call sequence
-        api_calls.sort(key=lambda x: x['position'])
-        
-        # Group API calls into logical sequences
-        sequences = self._group_mq_api_sequences(api_calls)
-        
-        for sequence in sequences:
-            sequence_content = '\n'.join([call['match'].group(0) for call in sequence['calls']])
-            
-            # Analyze sequence with LLM
-            sequence_analysis = await self._analyze_with_llm_cached(
-                sequence_content, 'mq_sequence',
-                """
-                Analyze this MQ API call sequence:
-                
-                {content}
-                
-                Identify:
-                1. Message flow purpose and business function
-                2. Transaction boundaries
-                3. Error handling completeness
-                4. Performance implications
-                
-                Return as JSON:
-                {{
-                    "business_purpose": "customer order processing",
-                    "flow_type": "request_response",
-                    "transaction_safe": true,
-                    "error_handling_complete": false,
-                    "performance_risk": "medium"
-                }}
-                """
-            )
-            
-            business_context = {
-                'sequence_type': sequence['type'],
-                'api_count': len(sequence['calls']),
-                'business_purpose': sequence_analysis.get('analysis', {}).get('business_purpose', ''),
-                'transaction_safe': sequence_analysis.get('analysis', {}).get('transaction_safe', False),
-                'performance_risk': sequence_analysis.get('analysis', {}).get('performance_risk', 'unknown')
-            }
-            
-            chunk = CodeChunk(
-                program_name=program_name,
-                chunk_id=f"{program_name}_MQ_SEQUENCE_{sequence['sequence_id']}",
-                chunk_type="mq_api_sequence",
-                content=sequence_content,
-                metadata={
-                    'api_calls': [call['api'] for call in sequence['calls']],
-                    'sequence_analysis': sequence_analysis.get('analysis', {}),
-                    'call_count': len(sequence['calls'])
-                },
-                business_context=business_context,
-                confidence_score=sequence_analysis.get('confidence_score', 0.7),
-                line_start=content[:sequence['start_pos']].count('\n'),
-                line_end=content[:sequence['end_pos']].count('\n')
-            )
-            chunks.append(chunk)
-        
-        return chunks
-    # ==================== STORAGE AND DATABASE METHODS ====================
-
-    async def _store_chunks_enhanced(self, chunks: List[CodeChunk], file_hash: str):
-        """Store chunks with enhanced business context and LLM analysis"""
-        if not chunks:
-            self.logger.warning("No chunks to store")
-            return
-        
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("BEGIN TRANSACTION")
-                
-                try:
-                    stored_count = 0
-                    
-                    for chunk in chunks:
-                        try:
-                            program_name = str(chunk.program_name)
-                            chunk_id = str(chunk.chunk_id)
-                            chunk_type = str(chunk.chunk_type)
-                            content = str(chunk.content)
-                            metadata_json = json.dumps(chunk.metadata) if chunk.metadata else "{}"
-                            business_context_json = json.dumps(chunk.business_context) if chunk.business_context else "{}"
-                            embedding_id = hashlib.md5(content.encode()).hexdigest()
-                            confidence_score = getattr(chunk, 'confidence_score', 1.0)
-                            llm_analysis = json.dumps(chunk.metadata.get('llm_analysis', {})) if chunk.metadata else "{}"
-                            
-                            cursor.execute("""
-                                SELECT id FROM program_chunks 
-                                WHERE program_name = ? AND chunk_id = ?
-                            """, (program_name, chunk_id))
-                            
-                            existing = cursor.fetchone()
-                            
-                            if existing:
-                                cursor.execute("""
-                                    UPDATE program_chunks 
-                                    SET content = ?, metadata = ?, business_context = ?, 
-                                        file_hash = ?, confidence_score = ?, llm_analysis = ?,
-                                        line_start = ?, line_end = ?, 
-                                        updated_timestamp = CURRENT_TIMESTAMP
-                                    WHERE id = ?
-                                """, (
-                                    content, metadata_json, business_context_json,
-                                    str(file_hash), confidence_score, llm_analysis,
-                                    int(chunk.line_start), int(chunk.line_end), existing[0]
-                                ))
-                            else:
-                                cursor.execute("""
-                                    INSERT INTO program_chunks 
-                                    (program_name, chunk_id, chunk_type, content, metadata, 
-                                     business_context, embedding_id, file_hash, confidence_score,
-                                     llm_analysis, line_start, line_end)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (
-                                    program_name, chunk_id, chunk_type, content, 
-                                    metadata_json, business_context_json, embedding_id,
-                                    str(file_hash), confidence_score, llm_analysis,
-                                    int(chunk.line_start), int(chunk.line_end)
-                                ))
-                            
-                            stored_count += 1
-                            
-                        except sqlite3.Error as e:
-                            self.logger.error(f"Failed to store chunk {chunk.chunk_id}: {str(e)}")
-                            continue
-                    
-                    cursor.execute("COMMIT")
-                    self.logger.info(f"Successfully stored {stored_count}/{len(chunks)} chunks")
-                    
-                except Exception as e:
-                    cursor.execute("ROLLBACK")
-                    self.logger.error(f"Transaction failed, rolled back: {str(e)}")
-                    raise e
-                    
-        except Exception as e:
-            self.logger.error(f"Database operation failed: {str(e)}")
-            raise e
-
-    async def _store_copybook_analysis(self, chunks: List[CodeChunk], copybook_name: str):
-        """Store enhanced copybook structure analysis"""
-        try:
-            # Aggregate copybook analysis from chunks
-            record_layouts = []
-            field_hierarchy = {}
-            occurs_structures = []
-            redefines_structures = []
-            replacing_parameters = []
-            business_domains = set()
-            complexity_scores = []
-            
-            for chunk in chunks:
-                if chunk.chunk_type == "copybook_record_layout":
-                    record_layouts.append({
-                        'name': chunk.metadata.get('layout_indicator', ''),
-                        'business_purpose': chunk.business_context.get('business_analysis', {}).get('business_purpose', ''),
-                        'fields': chunk.metadata.get('field_count', 0)
-                    })
-                    business_domains.add(chunk.business_context.get('business_analysis', {}).get('domain', 'unknown'))
-                
-                elif chunk.chunk_type == "copybook_occurs_structure":
-                    occurs_structures.append(chunk.metadata.get('occurs_details', {}))
-                
-                elif chunk.chunk_type == "copybook_redefines_structure":
-                    redefines_structures.append({
-                        'original_field': chunk.metadata.get('original_field', ''),
-                        'redefining_fields': chunk.metadata.get('redefining_fields', [])
-                    })
-                
-                elif chunk.chunk_type == "copybook_replacing_parameters":
-                    replacing_parameters.extend(chunk.metadata.get('parameter_values', []))
-                
-                if 'complexity_score' in chunk.metadata:
-                    complexity_scores.append(chunk.metadata['complexity_score'])
-            
-            # Determine overall layout type
-            if len(record_layouts) > 1:
-                layout_type = CopybookLayoutType.MULTI_RECORD.value
-            elif redefines_structures:
-                layout_type = CopybookLayoutType.REDEFINES_LAYOUT.value
-            elif occurs_structures:
-                layout_type = CopybookLayoutType.OCCURS_LAYOUT.value
-            else:
-                layout_type = CopybookLayoutType.SINGLE_RECORD.value
-            
-            # Calculate overall complexity
-            overall_complexity = sum(complexity_scores) if complexity_scores else 0
-            
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                INSERT OR REPLACE INTO copybook_structures 
-                (copybook_name, layout_type, record_layouts, field_hierarchy,
-                 occurs_structures, redefines_structures, replacing_parameters,
-                 business_domain, complexity_score)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                copybook_name,
-                layout_type,
-                json.dumps(record_layouts),
-                json.dumps(field_hierarchy),
-                json.dumps(occurs_structures),
-                json.dumps(redefines_structures),
-                json.dumps(replacing_parameters),
-                ','.join(business_domains) if business_domains else 'unknown',
-                overall_complexity
-            ))
-            
-            conn.commit()
-            conn.close()
-            
-            self.logger.info(f"Stored copybook analysis for {copybook_name}")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to store copybook analysis: {str(e)}")
-
-    async def _store_mq_analysis(self, chunks: List[CodeChunk], content: str, program_name: str):
-        """Store enhanced MQ program analysis"""
-        try:
-            # Extract MQ analysis from chunks
-            queue_operations = []
-            message_flow_patterns = []
-            api_sequences = []
-            
-            for chunk in chunks:
-                if chunk.chunk_type == "mq_api_sequence":
-                    api_sequences.append({
-                        'sequence_type': chunk.business_context.get('sequence_type', ''),
-                        'api_calls': chunk.metadata.get('api_calls', []),
-                        'business_purpose': chunk.business_context.get('business_purpose', '')
-                    })
-                elif chunk.chunk_type == "mq_data_structure":
-                    queue_operations.append(chunk.metadata.get('structure_type', ''))
-            
-            # Analyze overall MQ usage
-            mq_usage = self._analyze_mq_usage_patterns(content)
-            
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                INSERT OR REPLACE INTO mq_analysis 
-                (program_name, connection_type, message_paradigm, queue_operations,
-                 message_flow_patterns, transaction_scope, error_handling_strategy,
-                 performance_characteristics, business_purpose)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                program_name,
-                mq_usage.get('connection_pattern', 'unknown'),
-                mq_usage.get('paradigm', 'unknown'),
-                json.dumps(queue_operations),
-                json.dumps(message_flow_patterns),
-                mq_usage.get('transaction_model', 'unknown'),
-                mq_usage.get('reliability', 'unknown'),
-                json.dumps(mq_usage),
-                'message_processing'  # Default business purpose
-            ))
-            
-            conn.commit()
-            conn.close()
-            
-            self.logger.info(f"Stored MQ analysis for {program_name}")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to store MQ analysis: {str(e)}")
-
-    async def _store_db2_procedure_analysis(self, chunks: List[CodeChunk], procedure_name: str):
-        """Store enhanced DB2 stored procedure analysis"""
-        try:
-            # Extract DB2 analysis from chunks
-            parameters = []
-            sql_operations = []
-            cursors = []
-            exception_handlers = []
-            
-            for chunk in chunks:
-                if chunk.chunk_type == "db2_parameter":
-                    parameters.append(chunk.metadata)
-                elif chunk.chunk_type == "db2_sql_statement":
-                    sql_operations.append({
-                        'operation_type': chunk.metadata.get('operation_type', ''),
-                        'tables_accessed': chunk.metadata.get('tables_accessed', []),
-                        'complexity_score': chunk.metadata.get('complexity_score', 0)
-                    })
-                elif chunk.chunk_type == "db2_cursor":
-                    cursors.append(chunk.metadata)
-                elif chunk.chunk_type == "db2_exception_handler":
-                    exception_handlers.append(chunk.metadata)
-            
-            # Calculate overall complexity
-            complexity_scores = [op.get('complexity_score', 0) for op in sql_operations]
-            overall_complexity = sum(complexity_scores) if complexity_scores else 0
-            
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                INSERT OR REPLACE INTO db2_procedure_analysis 
-                (procedure_name, parameter_list, sql_operations, cursor_definitions,
-                 exception_handlers, transaction_control, performance_hints,
-                 business_logic_complexity, security_classification)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                procedure_name,
-                json.dumps(parameters),
-                json.dumps(sql_operations),
-                json.dumps(cursors),
-                json.dumps(exception_handlers),
-                json.dumps({'commit_strategy': 'unknown'}),  # Default
-                json.dumps([]),  # Performance hints
-                overall_complexity,
-                'standard'  # Default security classification
-            ))
-            
-            conn.commit()
-            conn.close()
-            
-            self.logger.info(f"Stored DB2 procedure analysis for {procedure_name}")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to store DB2 analysis: {str(e)}")
-
-    # ==================== HELPER METHODS ====================
-
-    def _group_redefines_structures(self, redefines_matches: List, content: str) -> List[Dict[str, Any]]:
-        """Group related REDEFINES structures together"""
-        groups = []
-        
-        for match in redefines_matches:
-            level = int(match.group(1))
-            redefining_field = match.group(2)
-            original_field = match.group(3)
-            
-            # Find if this belongs to an existing group
-            group_found = False
-            for group in groups:
-                if original_field == group['original_field']:
-                    group['redefining_fields'].append(redefining_field)
-                    group['end_pos'] = match.end()
-                    group_found = True
-                    break
-            
-            if not group_found:
-                groups.append({
-                    'original_field': original_field,
-                    'redefining_fields': [redefining_field],
-                    'start_pos': match.start(),
-                    'end_pos': match.end()
-                })
-        
-        return groups
-
-    def _group_replacing_parameters(self, replacements: List[Dict]) -> List[Dict[str, Any]]:
-        """Group REPLACING parameters by proximity"""
-        if not replacements:
-            return []
-        
-        replacements.sort(key=lambda x: x['position'])
-        groups = []
-        current_group = {'replacements': [replacements[0]], 'group_id': 1}
-        current_group['start_pos'] = replacements[0]['position']
-        current_group['end_pos'] = replacements[0]['position']
-        
-        for i in range(1, len(replacements)):
-            # If the next replacement is within 200 characters, add to current group
-            if replacements[i]['position'] - current_group['end_pos'] < 200:
-                current_group['replacements'].append(replacements[i])
-                current_group['end_pos'] = replacements[i]['position']
-            else:
-                # Start new group
-                groups.append(current_group)
-                current_group = {
-                    'replacements': [replacements[i]], 
-                    'group_id': len(groups) + 1,
-                    'start_pos': replacements[i]['position'],
-                    'end_pos': replacements[i]['position']
-                }
-        
-        groups.append(current_group)
-        return groups
-
-    async def _analyze_filler_patterns(self, content: str, filler_matches: List, 
-                                     alignment_matches: List, sync_matches: List) -> Dict[str, Any]:
-        """Analyze filler patterns to determine alignment strategy"""
-        
-        # Calculate filler sizes
-        filler_sizes = []
-        for match in filler_matches:
-            size = int(match.group(1))
-            filler_sizes.append(size)
-        
-        # Determine alignment strategy
-        if sync_matches:
-            strategy = "hardware_alignment"
-            purpose = "optimize_memory_access"
-            performance = "high_performance"
-        elif any(size % 4 == 0 for size in filler_sizes):
-            strategy = "word_boundary_alignment"
-            purpose = "memory_efficiency"
-            performance = "good_performance"
-        elif filler_sizes and max(filler_sizes) > 100:
-            strategy = "padding_for_compatibility"
-            purpose = "legacy_system_compatibility"
-            performance = "memory_overhead"
-        else:
-            strategy = "minimal_padding"
-            purpose = "structure_completion"
-            performance = "standard"
-        
-        # Calculate memory impact
-        total_filler_bytes = sum(filler_sizes)
-        memory_impact = "high" if total_filler_bytes > 1000 else "medium" if total_filler_bytes > 100 else "low"
-        
-        return {
-            'strategy': strategy,
-            'purpose': purpose,
-            'performance': performance,
-            'memory_impact': memory_impact,
-            'total_filler_bytes': total_filler_bytes,
-            'filler_count': len(filler_matches),
-            'alignment_count': len(alignment_matches),
-            'sync_count': len(sync_matches)
-        }
-
-    def _group_mq_api_sequences(self, api_calls: List[Dict]) -> List[Dict[str, Any]]:
-        """Group MQ API calls into logical sequences"""
-        sequences = []
-        current_sequence = None
-        sequence_id = 1
-        
-        for call in api_calls:
-            api_name = call['api']
-            
-            # Connection sequence
-            if api_name in ['mq_mqconn', 'mq_mqconnx']:
-                if current_sequence:
-                    sequences.append(current_sequence)
-                current_sequence = {
-                    'type': 'connection_sequence',
-                    'sequence_id': sequence_id,
-                    'calls': [call],
-                    'start_pos': call['position'],
-                    'end_pos': call['position']
-                }
-                sequence_id += 1
-            
-            # Message operations
-            elif api_name in ['mq_mqput', 'mq_mqput1', 'mq_mqget']:
-                if current_sequence and current_sequence['type'] in ['connection_sequence', 'message_sequence']:
-                    current_sequence['calls'].append(call)
-                    current_sequence['end_pos'] = call['position']
-                    current_sequence['type'] = 'message_sequence'
-                else:
-                    if current_sequence:
-                        sequences.append(current_sequence)
-                    current_sequence = {
-                        'type': 'message_sequence',
-                        'sequence_id': sequence_id,
-                        'calls': [call],
-                        'start_pos': call['position'],
-                        'end_pos': call['position']
-                    }
-                    sequence_id += 1
-            
-            # Transaction operations
-            elif api_name in ['mq_mqbegin', 'mq_mqcmit', 'mq_mqback']:
-                if current_sequence and current_sequence['type'] in ['connection_sequence', 'message_sequence', 'transaction_sequence']:
-                    current_sequence['calls'].append(call)
-                    current_sequence['end_pos'] = call['position']
-                    current_sequence['type'] = 'transaction_sequence'
-                else:
-                    if current_sequence:
-                        sequences.append(current_sequence)
-                    current_sequence = {
-                        'type': 'transaction_sequence',
-                        'sequence_id': sequence_id,
-                        'calls': [call],
-                        'start_pos': call['position'],
-                        'end_pos': call['position']
-                    }
-                    sequence_id += 1
-            
-            # Other operations - add to current sequence or create new one
-            else:
-                if current_sequence:
-                    current_sequence['calls'].append(call)
-                    current_sequence['end_pos'] = call['position']
-                else:
-                    current_sequence = {
-                        'type': 'general_sequence',
-                        'sequence_id': sequence_id,
-                        'calls': [call],
-                        'start_pos': call['position'],
-                        'end_pos': call['position']
-                    }
-                    sequence_id += 1
-        
-        if current_sequence:
-            sequences.append(current_sequence)
-        
-        return sequences
-
-    def _analyze_mq_usage_patterns(self, content: str) -> Dict[str, Any]:
-        """Analyze MQ usage patterns in the program"""
-        content_upper = content.upper()
-        
-        # Detect connection patterns
-        has_mqconn = 'MQCONN' in content_upper
-        has_mqdisc = 'MQDISC' in content_upper
-        has_mqopen = 'MQOPEN' in content_upper
-        has_mqclose = 'MQCLOSE' in content_upper
-        
-        # Detect message operations
-        has_mqput = 'MQPUT' in content_upper and 'MQPUT1' not in content_upper
-        has_mqput1 = 'MQPUT1' in content_upper
-        has_mqget = 'MQGET' in content_upper
-        
-        # Detect transaction operations
-        has_mqbegin = 'MQBEGIN' in content_upper
-        has_mqcmit = 'MQCMIT' in content_upper
-        has_mqback = 'MQBACK' in content_upper
-        
-        # Determine patterns
-        connection_pattern = 'persistent' if has_mqconn and has_mqdisc else 'transient'
-        
-        if has_mqput1:
-            paradigm = 'fire_and_forget'
-        elif has_mqput and has_mqget:
-            paradigm = 'request_reply'
-        elif has_mqput:
-            paradigm = 'producer'
-        elif has_mqget:
-            paradigm = 'consumer'
-        else:
-            paradigm = 'unknown'
-        
-        transaction_model = 'transactional' if (has_mqbegin and (has_mqcmit or has_mqback)) else 'non_transactional'
-        reliability = 'high' if transaction_model == 'transactional' else 'medium'
-        
-        # Estimate throughput based on patterns
-        if has_mqput1:
-            throughput_estimate = 'low'  # MQPUT1 is slower
-        elif paradigm == 'request_reply':
-            throughput_estimate = 'medium'
-        elif paradigm in ['producer', 'consumer']:
-            throughput_estimate = 'high'
-        else:
-            throughput_estimate = 'unknown'
-        
-        return {
-            'connection_pattern': connection_pattern,
-            'paradigm': paradigm,
-            'transaction_model': transaction_model,
-            'reliability': reliability,
-            'throughput_estimate': throughput_estimate
-        }
-
-    async def _verify_chunks_stored(self, program_name: str) -> int:
-        """Verify that chunks were properly stored in database"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT COUNT(*) FROM program_chunks 
-                WHERE program_name = ?
-            """, (program_name,))
-            
-            count = cursor.fetchone()[0]
-            conn.close()
-            
-            return count
-            
-        except Exception as e:
-            self.logger.error(f"Chunk verification failed: {str(e)}")
-            return 0
-
-    async def _generate_metadata_enhanced(self, chunks: List[CodeChunk], file_type: str, 
-                                        business_violations: List = None) -> Dict[str, Any]:
-        """Generate enhanced metadata with comprehensive business context"""
-        metadata = {
-            "total_chunks": len(chunks),
-            "file_type": file_type,
-            "chunk_types": {},
-            "complexity_metrics": {},
-            "business_violations": len(business_violations) if business_violations else 0,
-            "llm_analysis_summary": {},
-            "confidence_scores": {},
-            "processing_timestamp": dt.now().isoformat()
-        }
-        
-        # Count chunk types and collect confidence scores
-        confidence_scores = []
-        llm_analyses = []
-        
-        for chunk in chunks:
-            chunk_type = chunk.chunk_type
-            metadata["chunk_types"][chunk_type] = metadata["chunk_types"].get(chunk_type, 0) + 1
-            
-            if hasattr(chunk, 'confidence_score'):
-                confidence_scores.append(chunk.confidence_score)
-            
-            if chunk.metadata and 'llm_analysis' in chunk.metadata:
-                llm_analyses.append(chunk.metadata['llm_analysis'])
-        
-        # Calculate confidence statistics
-        if confidence_scores:
-            metadata["confidence_scores"] = {
-                "average": sum(confidence_scores) / len(confidence_scores),
-                "minimum": min(confidence_scores),
-                "maximum": max(confidence_scores),
-                "count": len(confidence_scores)
-            }
-        
-        # Summarize LLM analyses
-        if llm_analyses:
-            business_functions = set()
-            complexity_indicators = []
-            
-            for analysis in llm_analyses:
-                if isinstance(analysis, dict):
-                    if 'business_functions' in analysis:
-                        if isinstance(analysis['business_functions'], list):
-                            for func in analysis['business_functions']:
-                                if isinstance(func, dict) and 'name' in func:
-                                    business_functions.add(func['name'])
-                                elif isinstance(func, str):
-                                    business_functions.add(func)
-                    
-                    if 'complexity_score' in analysis:
-                        complexity_indicators.append(analysis['complexity_score'])
-            
-            metadata["llm_analysis_summary"] = {
-                "business_functions_identified": list(business_functions),
-                "average_complexity": sum(complexity_indicators) / len(complexity_indicators) if complexity_indicators else 0,
-                "analysis_count": len(llm_analyses)
-            }
-        
-        # Enhanced complexity metrics based on file type
-        if file_type == 'cobol':
-            metadata["complexity_metrics"] = {
-                "total_paragraphs": metadata["chunk_types"].get("paragraph", 0),
-                "total_sql_blocks": metadata["chunk_types"].get("sql_block", 0),
-                "total_cics_commands": metadata["chunk_types"].get("cics_command", 0),
-                "total_file_operations": metadata["chunk_types"].get("file_operation", 0),
-                "total_data_items": metadata["chunk_types"].get("data_item", 0),
-                "has_complex_logic": any(chunk.chunk_type in ["if_statement", "evaluate_statement", "perform_statement"] for chunk in chunks),
-                "business_complexity_score": self._calculate_business_complexity_score(chunks),
-                "maintainability_score": self._calculate_maintainability_score(chunks)
-            }
-        elif file_type == 'copybook':
-            metadata["complexity_metrics"] = {
-                "layout_complexity": metadata["chunk_types"].get("copybook_record_layout", 0),
-                "occurs_structures": metadata["chunk_types"].get("copybook_occurs_structure", 0),
-                "redefines_structures": metadata["chunk_types"].get("copybook_redefines_structure", 0),
-                "replacing_parameters": metadata["chunk_types"].get("copybook_replacing_parameters", 0),
-                "conditional_fields": metadata["chunk_types"].get("copybook_conditional_field", 0),
-                "structure_complexity": self._calculate_copybook_complexity(chunks)
-            }
-        elif file_type == 'mq_program':
-            metadata["complexity_metrics"] = {
-                "api_sequences": metadata["chunk_types"].get("mq_api_sequence", 0),
-                "data_structures": metadata["chunk_types"].get("mq_data_structure", 0),
-                "message_flows": metadata["chunk_types"].get("mq_message_flow", 0),
-                "transaction_patterns": metadata["chunk_types"].get("mq_transaction_pattern", 0),
-                "integration_complexity": self._calculate_mq_complexity(chunks)
-            }
-        elif file_type == 'db2_procedure':
-            metadata["complexity_metrics"] = {
-                "sql_statements": metadata["chunk_types"].get("db2_sql_statement", 0),
-                "cursor_operations": metadata["chunk_types"].get("db2_cursor", 0),
-                "exception_handlers": metadata["chunk_types"].get("db2_exception_handler", 0),
-                "control_structures": metadata["chunk_types"].get("db2_control_flow", 0),
-                "database_complexity": self._calculate_db2_complexity(chunks)
-            }
-        
-        return metadata
-
-    def _calculate_business_complexity_score(self, chunks: List[CodeChunk]) -> int:
-        """Calculate business complexity score based on enhanced analysis"""
-        score = 0
-        
-        for chunk in chunks:
-            # Base complexity from chunk type
-            if chunk.chunk_type == "paragraph":
-                score += 2
-            elif chunk.chunk_type in ["if_statement", "evaluate_statement"]:
-                score += 3
-            elif chunk.chunk_type == "perform_statement":
-                score += 2
-            elif chunk.chunk_type == "sql_block":
-                score += 4
-            elif chunk.chunk_type == "cics_command":
-                score += 2
-            
-            # Enhanced complexity from business context and LLM analysis
-            if chunk.business_context:
-                if chunk.business_context.get('control_complexity', 0) > 5:
-                    score += 2
-                if chunk.business_context.get('business_function') == 'error_handling':
-                    score += 1
-                if 'financial' in chunk.business_context.get('data_category', ''):
-                    score += 1
-            
-            # LLM-derived complexity
-            if chunk.metadata and 'llm_analysis' in chunk.metadata:
-                llm_analysis = chunk.metadata['llm_analysis']
-                if isinstance(llm_analysis, dict) and 'complexity_score' in llm_analysis:
-                    score += llm_analysis['complexity_score'] // 2  # Scale down LLM scores
-        
-        return min(score, 100)
-
-    def _calculate_copybook_complexity(self, chunks: List[CodeChunk]) -> int:
-        """Calculate copybook structure complexity"""
-        complexity = 0
-        
-        for chunk in chunks:
-            if chunk.chunk_type == "copybook_occurs_structure":
-                complexity += 3
-            elif chunk.chunk_type == "copybook_redefines_structure":
-                complexity += 4
-            elif chunk.chunk_type == "copybook_conditional_field":
-                complexity += 2
-            elif chunk.chunk_type == "copybook_replacing_parameters":
-                complexity += 1
-        
-        return min(complexity, 50)
-
-    def _calculate_mq_complexity(self, chunks: List[CodeChunk]) -> int:
-        """Calculate MQ program complexity"""
-        complexity = 0
-        
-        for chunk in chunks:
-            if chunk.chunk_type == "mq_api_sequence":
-                api_count = chunk.metadata.get('call_count', 0)
-                complexity += api_count
-            elif chunk.chunk_type == "mq_message_flow":
-                complexity += 3
-            elif chunk.chunk_type == "mq_transaction_pattern":
-                complexity += 2
-        
-        return min(complexity, 50)
-
-    def _calculate_db2_complexity(self, chunks: List[CodeChunk]) -> int:
-        """Calculate DB2 procedure complexity"""
-        complexity = 0
-        
-        for chunk in chunks:
-            if chunk.chunk_type == "db2_sql_statement":
-                complexity += chunk.metadata.get('complexity_score', 2)
-            elif chunk.chunk_type == "db2_cursor":
-                complexity += 3
-            elif chunk.chunk_type == "db2_exception_handler":
-                complexity += 2
-            elif chunk.chunk_type == "db2_control_flow":
-                complexity += 4
-        
-        return min(complexity, 100)
-
-    def _calculate_maintainability_score(self, chunks: List[CodeChunk]) -> int:
-        """Calculate overall maintainability score"""
-        scores = []
-        
-        for chunk in chunks:
-            if chunk.business_context and 'maintainability_score' in chunk.business_context:
-                scores.append(chunk.business_context['maintainability_score'])
-            elif chunk.metadata and 'maintainability_score' in chunk.metadata:
-                scores.append(chunk.metadata['maintainability_score'])
-            elif hasattr(chunk, 'confidence_score'):
-                # Use confidence score as proxy for maintainability
-                scores.append(int(chunk.confidence_score * 10))
-        
-        return int(sum(scores) / len(scores)) if scores else 7
-
+    
     # ==================== PUBLIC API METHODS ====================
 
     def cleanup(self):
@@ -3305,4 +4316,4 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
 
 
 # Export the enhanced class
-EnhancedCodeParserAgent = EnhancedCodeParserAgent
+__all__ = ['EnhancedCodeParserAgent']
