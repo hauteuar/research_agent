@@ -25,12 +25,24 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, validator
 from vllm import AsyncLLMEngine, SamplingParams
+
+# Handle vLLM version compatibility
 try:
     from vllm import EngineArgs
 except ImportError:
-    # Fallback for older vLLM versions
-    from vllm import AsyncEngineArgs as EngineArgs
-from vllm.utils import random_uuid
+    try:
+        # Fallback for older vLLM versions
+        from vllm import AsyncEngineArgs as EngineArgs
+    except ImportError:
+        logger.error("Unable to import EngineArgs from vLLM. Please check your vLLM installation.")
+        sys.exit(1)
+
+try:
+    from vllm.utils import random_uuid
+except ImportError:
+    # Fallback if random_uuid is not available
+    def random_uuid():
+        return str(uuid.uuid4())
 
 # Configure logging
 logging.basicConfig(
@@ -38,6 +50,20 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Log version information for debugging
+logger.info(f"PyTorch version: {torch.__version__}")
+logger.info(f"CUDA available: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    logger.info(f"CUDA version: {torch.version.cuda}")
+    logger.info(f"GPU count: {torch.cuda.device_count()}")
+
+# Check vLLM version compatibility
+try:
+    import vllm
+    logger.info(f"vLLM version: {vllm.__version__}")
+except:
+    logger.warning("Could not determine vLLM version")
 
 # ==================== GPU Detection and Management ====================
 
@@ -64,6 +90,9 @@ class GPUManager:
             # Restore original device
             torch.cuda.set_device(current_device)
             
+            # Handle multiprocessor_count attribute safely (not available in older PyTorch versions)
+            multiprocessor_count = getattr(properties, 'multiprocessor_count', 'unknown')
+            
             return {
                 "gpu_id": gpu_id,
                 "name": properties.name,
@@ -78,7 +107,7 @@ class GPUManager:
                 "usage_percent": usage_percent,
                 "is_heavily_used": usage_percent > 20,  # Consider >20% as heavily used
                 "compute_capability": f"{properties.major}.{properties.minor}",
-                "multiprocessor_count": properties.multiprocessor_count
+                "multiprocessor_count": multiprocessor_count
             }
         except Exception as e:
             logger.error(f"Failed to get GPU {gpu_id} memory usage: {str(e)}")
@@ -471,18 +500,27 @@ class GPUModelLoader:
             # Set CUDA visible devices
             os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, self.config.gpu_ids))
             
-            # Create engine arguments with only valid parameters
-            engine_args = EngineArgs(
-                model=self.config.model_path or self.config.model_name,
-                tensor_parallel_size=self.config.tensor_parallel_size,
-                gpu_memory_utilization=0.7,  # Reduced from 0.9 to leave room for CUDA graphs
-                max_model_len=min(self.config.max_model_len, 2048),  # Reduce context length
-                trust_remote_code=True,
-                # Disable CUDA graph to save memory (trades speed for memory)
-                disable_cuda_graph=True,
-                # Reduce batch size to save memory
-                max_num_seqs=16,  # Reduce from default
-            )
+            # Create engine arguments - handle compatibility issues
+            engine_kwargs = {
+                "model": self.config.model_path or self.config.model_name,
+                "tensor_parallel_size": self.config.tensor_parallel_size,
+                "gpu_memory_utilization": 0.7,  # Reduced from 0.9 to leave room for CUDA graphs
+                "max_model_len": min(self.config.max_model_len, 2048),  # Reduce context length
+                "trust_remote_code": True,
+            }
+            
+            # Add optional parameters that may not exist in all vLLM versions
+            try:
+                # Try to add newer parameters safely
+                engine_kwargs.update({
+                    "disable_cuda_graph": True,  # Disable CUDA graph to save memory
+                    "max_num_seqs": 16,  # Reduce batch size to save memory
+                })
+            except Exception as e:
+                logger.warning(f"[{self.config.server_id}] Some vLLM parameters not supported in this version: {str(e)}")
+            
+            # Create engine arguments
+            engine_args = EngineArgs(**engine_kwargs)
             
             # Create async engine
             self.engine = AsyncLLMEngine.from_engine_args(engine_args)
@@ -495,6 +533,12 @@ class GPUModelLoader:
             
         except Exception as e:
             logger.error(f"[{self.config.server_id}] Failed to initialize model: {str(e)}")
+            # Log more detailed error info for debugging
+            logger.error(f"[{self.config.server_id}] PyTorch version: {torch.__version__}")
+            logger.error(f"[{self.config.server_id}] CUDA available: {torch.cuda.is_available()}")
+            if torch.cuda.is_available():
+                logger.error(f"[{self.config.server_id}] CUDA version: {torch.version.cuda}")
+                logger.error(f"[{self.config.server_id}] GPU count: {torch.cuda.device_count()}")
             raise
     
     def _collect_gpu_info(self):
