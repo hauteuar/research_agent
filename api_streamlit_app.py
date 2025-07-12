@@ -321,7 +321,15 @@ async def init_api_coordinator_single_gpu():
     if not COORDINATOR_AVAILABLE:
         return {"error": "API Coordinator module not available"}
     
-    if st.session_state.coordinator is None:
+    # Clean up existing coordinator first
+    if st.session_state.coordinator is not None:
+        try:
+            await st.session_state.coordinator.shutdown()
+        except Exception as e:
+            st.warning(f"Error cleaning up existing coordinator: {e}")
+        finally:
+            st.session_state.coordinator = None
+    
         try:
             with st.spinner("🔍 Detecting available GPU servers..."):
                 # Auto-detect servers if none configured
@@ -379,10 +387,29 @@ async def init_api_coordinator_single_gpu():
                     return {"error": f"Validation failed: {validation_results['message']}"}
         
         except Exception as e:
+            if 'coordinator' in locals():
+                try:
+                    await coordinator.shutdown()
+                except:
+                    pass
             st.session_state.initialization_status = f"error: {str(e)}"
             return {"error": str(e)}
     
     return {"success": True, "message": "Coordinator already initialized"}
+
+def cleanup_on_session_end():
+    """Cleanup function to call when session ends"""
+    try:
+        if st.session_state.get('coordinator'):
+            # Use sync cleanup for session end
+            if hasattr(st.session_state.coordinator, 'cleanup'):
+                st.session_state.coordinator.cleanup()
+    except Exception as e:
+        print(f"Cleanup error: {e}")  # Use print since st may not be available
+
+# Register cleanup
+import atexit
+atexit.register(cleanup_on_session_end)
 
 async def validate_single_gpu_setup(coordinator) -> Dict[str, Any]:
     """Validate single GPU coordinator setup"""
@@ -540,7 +567,8 @@ def restart_coordinator():
     """Restart the coordinator"""
     try:
         if st.session_state.coordinator:
-            st.session_state.coordinator.cleanup()
+            # Properly shutdown the coordinator
+            safe_run_async(st.session_state.coordinator.shutdown())
         
         st.session_state.coordinator = None
         st.session_state.initialization_status = 'not_started'

@@ -475,11 +475,22 @@ class APIOpulenceCoordinator:
     
     async def shutdown(self):
         """Shutdown the coordinator"""
-        if self.health_check_task:
-            self.health_check_task.cancel()
+        try:
+            # Cancel health check task first
+            if self.health_check_task and not self.health_check_task.done():
+                self.health_check_task.cancel()
+                try:
+                    await self.health_check_task
+                except asyncio.CancelledError:
+                    pass  # Expected when cancelling
+            
+            # Close client session
+            await self.client.close()
+            
+            self.logger.info("API Coordinator shut down successfully")
         
-        await self.client.close()
-        self.logger.info("API Coordinator shut down")
+        except Exception as e:
+            self.logger.error(f"Error during shutdown: {str(e)}")
     
     def _init_database(self):
         """Initialize database (same as original)"""
@@ -583,18 +594,22 @@ class APIOpulenceCoordinator:
     
     async def _health_check_loop(self):
         """Background health checking loop"""
-        while True:
-            try:
+        try:
+            while True:
                 await asyncio.sleep(self.config.health_check_interval)
                 
                 # Check all servers
                 for server in self.load_balancer.servers:
-                    await self.client.health_check(server)
+                    try:
+                        await self.client.health_check(server)
+                    except Exception as e:
+                        self.logger.warning(f"Health check failed for {server.config.name}: {e}")
             
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                self.logger.error(f"Health check loop error: {e}")
+        except asyncio.CancelledError:
+            self.logger.info("Health check loop cancelled")
+            raise  # Re-raise to ensure proper cancellation
+        except Exception as e:
+            self.logger.error(f"Health check loop error: {e}")
     
     async def call_model_api(self, prompt: str, params: Dict[str, Any] = None, 
                            preferred_gpu_id: int = None) -> Dict[str, Any]:
