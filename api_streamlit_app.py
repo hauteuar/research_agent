@@ -3,7 +3,8 @@
 Enhanced Streamlit Application for Opulence API Research Agent - Part 1
 Core setup, utilities, and single GPU initialization
 """
-
+import nest_asyncio
+nest_asyncio.apply()
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -96,73 +97,26 @@ AGENT_TYPES = [
 # UTILITY FUNCTIONS
 # ============================================================================
 def safe_run_async(coroutine, timeout=30):
-    """Safe async function runner for Streamlit with timeout - COMPLETELY REWRITTEN"""
-    import threading
-    import concurrent.futures
-    
-    def run_async_in_thread():
-        """Run async code in a separate thread with its own event loop"""
-        try:
-            # Create a completely fresh event loop for this thread
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            
-            try:
-                # Run the coroutine with timeout
-                result = new_loop.run_until_complete(
-                    asyncio.wait_for(coroutine, timeout=timeout)
-                )
-                return {"success": True, "result": result}
-            except asyncio.TimeoutError:
-                return {"success": False, "error": f"Operation timed out after {timeout} seconds"}
-            except Exception as e:
-                return {"success": False, "error": str(e)}
-            finally:
-                # Clean shutdown of the loop
-                try:
-                    # Cancel all remaining tasks
-                    pending_tasks = asyncio.all_tasks(new_loop)
-                    if pending_tasks:
-                        for task in pending_tasks:
-                            task.cancel()
-                        
-                        # Wait briefly for cancellation
-                        try:
-                            new_loop.run_until_complete(
-                                asyncio.wait_for(
-                                    asyncio.gather(*pending_tasks, return_exceptions=True),
-                                    timeout=1.0
-                                )
-                            )
-                        except asyncio.TimeoutError:
-                            pass
-                except Exception:
-                    pass
-                finally:
-                    # Close the loop
-                    if not new_loop.is_closed():
-                        new_loop.close()
-        
-        except Exception as e:
-            return {"success": False, "error": f"Thread execution failed: {str(e)}"}
+    """AGGRESSIVE FIX: Use nest_asyncio for Streamlit compatibility"""
+    import nest_asyncio
+    nest_asyncio.apply()  # Apply every time to be safe
     
     try:
-        # Run in a separate thread to avoid event loop conflicts
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(run_async_in_thread)
-            thread_result = future.result(timeout=timeout + 10)
+        # Try to get existing loop first
+        try:
+            loop = asyncio.get_running_loop()
+            # If we have a running loop, use create_task
+            task = asyncio.create_task(asyncio.wait_for(coroutine, timeout=timeout))
+            return loop.run_until_complete(task)
+        except RuntimeError:
+            # No running loop, create new one
+            return asyncio.run(asyncio.wait_for(coroutine, timeout=timeout))
             
-            if thread_result["success"]:
-                return thread_result["result"]
-            else:
-                st.error(f"Async operation failed: {thread_result['error']}")
-                return {"error": thread_result["error"]}
-                
-    except concurrent.futures.TimeoutError:
+    except asyncio.TimeoutError:
         st.error(f"Operation timed out after {timeout} seconds")
         return {"error": "Operation timed out"}
     except Exception as e:
-        st.error(f"Failed to execute async operation: {str(e)}")
+        st.error(f"Async operation failed: {str(e)}")
         return {"error": str(e)}
     
 def with_error_handling(func):
