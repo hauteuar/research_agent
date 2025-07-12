@@ -23,26 +23,11 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Response, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field, validator
-from vllm import AsyncLLMEngine, SamplingParams
-
-# Handle vLLM version compatibility
-try:
-    from vllm import EngineArgs
-except ImportError:
-    try:
-        # Fallback for older vLLM versions
-        from vllm import AsyncEngineArgs as EngineArgs
-    except ImportError:
-        logger.error("Unable to import EngineArgs from vLLM. Please check your vLLM installation.")
-        sys.exit(1)
-
-try:
-    from vllm.utils import random_uuid
-except ImportError:
-    # Fallback if random_uuid is not available
-    def random_uuid():
-        return str(uuid.uuid4())
+from pydantic import BaseModel, Field, field_validator
+from vllm.engine.arg_utils import AsyncEngineArgs
+from vllm.engine.async_llm_engine import AsyncLLMEngine
+from vllm.sampling_params import SamplingParams
+from vllm.utils import random_uuid
 
 # Configure logging
 logging.basicConfig(
@@ -83,15 +68,56 @@ class GPUManager:
             properties = torch.cuda.get_device_properties(gpu_id)
             memory_allocated = torch.cuda.memory_allocated(gpu_id)
             memory_reserved = torch.cuda.memory_reserved(gpu_id)
-            memory_free = properties.total_memory - memory_reserved
             
-            usage_percent = (memory_reserved / properties.total_memory) * 100
+            # Use reserved memory as the "used" memory since it's more accurate
+            # for detecting if GPU is busy with other processes
+            memory_used = memory_reserved
+            memory_free = properties.total_memory - memory_used
+            
+            # If reserved memory is very low, check allocated memory instead
+            # This handles cases where memory is allocated but not reserved by PyTorch
+            if memory_reserved < memory_allocated:
+                memory_used = memory_allocated
+                memory_free = properties.total_memory - memory_allocated
+            
+            # Calculate usage percentage based on used memory
+            usage_percent = (memory_used / properties.total_memory) * 100
+            
+            # Try to get more accurate memory info using nvidia-ml-py if available
+            try:
+                import pynvml
+                pynvml.nvmlInit()
+                handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_id)
+                nvidia_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                
+                # Use NVIDIA's more accurate memory reporting
+                nvidia_used = nvidia_info.used
+                nvidia_free = nvidia_info.free
+                nvidia_total = nvidia_info.total
+                nvidia_usage_percent = (nvidia_used / nvidia_total) * 100
+                
+                # Use NVIDIA data if it shows higher usage (more accurate)
+                if nvidia_usage_percent > usage_percent:
+                    memory_used = nvidia_used
+                    memory_free = nvidia_free
+                    usage_percent = nvidia_usage_percent
+                    properties.total_memory = nvidia_total
+                    
+                logger.debug(f"GPU {gpu_id} NVIDIA-ML: {nvidia_usage_percent:.1f}% used ({nvidia_used/1024**3:.1f}GB/{nvidia_total/1024**3:.1f}GB)")
+                
+            except ImportError:
+                logger.debug(f"pynvml not available, using PyTorch memory stats only")
+            except Exception as e:
+                logger.debug(f"Failed to get NVIDIA-ML stats for GPU {gpu_id}: {str(e)}")
             
             # Restore original device
             torch.cuda.set_device(current_device)
             
-            # Handle multiprocessor_count attribute safely (not available in older PyTorch versions)
+            # Handle multiprocessor_count attribute safely
             multiprocessor_count = getattr(properties, 'multiprocessor_count', 'unknown')
+            
+            # More conservative availability check
+            is_heavily_used = usage_percent > 15  # Lowered threshold for better detection
             
             return {
                 "gpu_id": gpu_id,
@@ -102,10 +128,12 @@ class GPUManager:
                 "memory_allocated_gb": memory_allocated / (1024**3),
                 "memory_reserved": memory_reserved,
                 "memory_reserved_gb": memory_reserved / (1024**3),
+                "memory_used": memory_used,
+                "memory_used_gb": memory_used / (1024**3),
                 "memory_free": memory_free,
                 "memory_free_gb": memory_free / (1024**3),
                 "usage_percent": usage_percent,
-                "is_heavily_used": usage_percent > 20,  # Consider >20% as heavily used
+                "is_heavily_used": is_heavily_used,
                 "compute_capability": f"{properties.major}.{properties.minor}",
                 "multiprocessor_count": multiprocessor_count
             }
@@ -114,13 +142,13 @@ class GPUManager:
             return {}
     
     @staticmethod
-    def get_available_gpus(memory_threshold_percent: float = 20.0, 
-                          min_free_memory_gb: float = 4.0) -> List[Dict[str, Any]]:
+    def get_available_gpus(memory_threshold_percent: float = 15.0, 
+                          min_free_memory_gb: float = 6.0) -> List[Dict[str, Any]]:
         """Get list of available GPUs with memory usage details
         
         Args:
-            memory_threshold_percent: Consider GPU unavailable if usage > this percent
-            min_free_memory_gb: Minimum free memory required in GB
+            memory_threshold_percent: Consider GPU unavailable if usage > this percent (lowered to 15%)
+            min_free_memory_gb: Minimum free memory required in GB (increased to 6GB)
         """
         if not torch.cuda.is_available():
             logger.error("CUDA is not available")
@@ -130,6 +158,7 @@ class GPUManager:
         gpu_count = torch.cuda.device_count()
         
         logger.info(f"Scanning {gpu_count} GPUs for availability...")
+        logger.info(f"Criteria: Usage < {memory_threshold_percent}%, Free > {min_free_memory_gb}GB")
         
         for gpu_id in range(gpu_count):
             try:
@@ -158,18 +187,26 @@ class GPUManager:
                 )
                 
                 gpu_info["is_available"] = is_available
-                gpu_info["availability_reason"] = GPUManager._get_availability_reason(gpu_info, memory_threshold_percent, min_free_memory_gb)
+                gpu_info["availability_reason"] = GPUManager._get_availability_reason(
+                    gpu_info, memory_threshold_percent, min_free_memory_gb
+                )
                 
                 available_gpus.append(gpu_info)
                 
-                # Log GPU status
+                # Log GPU status with more detail
                 status = "✅ AVAILABLE" if is_available else "❌ BUSY/FULL"
                 logger.info(
-                    f"GPU {gpu_id} ({gpu_info['name']}): {status} - "
-                    f"Usage: {gpu_info['usage_percent']:.1f}%, "
-                    f"Free: {gpu_info['memory_free_gb']:.1f}GB, "
-                    f"Total: {gpu_info['total_memory_gb']:.1f}GB"
+                    f"GPU {gpu_id} ({gpu_info['name']}): {status}"
                 )
+                logger.info(
+                    f"  Usage: {gpu_info['usage_percent']:.1f}% "
+                    f"({gpu_info['memory_used_gb']:.1f}GB used / {gpu_info['total_memory_gb']:.1f}GB total)"
+                )
+                logger.info(
+                    f"  Free: {gpu_info['memory_free_gb']:.1f}GB"
+                )
+                if not is_available:
+                    logger.info(f"  Reason: {gpu_info['availability_reason']}")
                 
             except Exception as e:
                 logger.warning(f"GPU {gpu_id} is not accessible: {str(e)}")
@@ -251,17 +288,28 @@ class GPUManager:
         
         Args:
             num_servers: Number of server instances to create
-            memory_threshold_percent: GPU usage threshold (default from env or 20%)
-            min_free_memory_gb: Minimum free memory per GPU (default from env or 4GB)
+            memory_threshold_percent: GPU usage threshold (default from env or 15%)
+            min_free_memory_gb: Minimum free memory per GPU (default from env or 6GB)
         """
         # Get thresholds from environment or use defaults
         if memory_threshold_percent is None:
-            memory_threshold_percent = float(os.getenv("GPU_MEMORY_THRESHOLD_PERCENT", "20.0"))
+            memory_threshold_percent = float(os.getenv("GPU_MEMORY_THRESHOLD_PERCENT", "15.0"))
         
         if min_free_memory_gb is None:
-            min_free_memory_gb = float(os.getenv("GPU_MIN_FREE_MEMORY_GB", "4.0"))
+            min_free_memory_gb = float(os.getenv("GPU_MIN_FREE_MEMORY_GB", "6.0"))
         
+        logger.info("=" * 60)
+        logger.info("🔍 DETAILED GPU MEMORY ANALYSIS")
+        logger.info("=" * 60)
         logger.info(f"GPU allocation criteria: <{memory_threshold_percent}% usage, >{min_free_memory_gb}GB free")
+        
+        # Try to install pynvml for better GPU monitoring
+        try:
+            import pynvml
+            logger.info("✅ Using NVIDIA-ML for accurate memory detection")
+        except ImportError:
+            logger.warning("⚠️  pynvml not found - install with: pip install nvidia-ml-py")
+            logger.warning("   Using PyTorch memory stats (may be less accurate)")
         
         # Calculate total GPUs needed (assuming 1 GPU per server by default)
         gpus_per_server = int(os.getenv("GPUS_PER_SERVER", "1"))
@@ -275,6 +323,10 @@ class GPUManager:
         )
         
         if not best_gpus:
+            logger.error("❌ No suitable GPUs found!")
+            logger.error("💡 Try relaxing constraints:")
+            logger.error(f"   GPU_MEMORY_THRESHOLD_PERCENT=30 (current: {memory_threshold_percent})")
+            logger.error(f"   GPU_MIN_FREE_MEMORY_GB=3 (current: {min_free_memory_gb})")
             raise RuntimeError("No suitable GPUs found for server deployment")
         
         # Allocate GPUs to servers
@@ -301,7 +353,9 @@ class GPUManager:
                     gpu_allocations.append([best_gpus[i % len(best_gpus)]])
         
         # Log allocation results
-        logger.info(f"GPU allocation for {num_servers} servers:")
+        logger.info("=" * 60)
+        logger.info("📋 FINAL GPU ALLOCATION")
+        logger.info("=" * 60)
         total_memory_needed = 0
         
         for i, gpu_ids in enumerate(gpu_allocations):
@@ -312,12 +366,15 @@ class GPUManager:
             for gpu_id in gpu_ids:
                 gpu_info = GPUManager.get_gpu_memory_usage(gpu_id)
                 gpu_info_list.append(f"GPU{gpu_id}({gpu_info.get('memory_free_gb', 0):.1f}GB free)")
-                server_memory_needed += 2.0  # Estimate 2GB per model
+                server_memory_needed += 3.0  # Estimate 3GB per model (conservative)
             
             total_memory_needed += server_memory_needed
-            logger.info(f"  {server_id}: {gpu_ids} - {', '.join(gpu_info_list)} - Est. {server_memory_needed:.1f}GB needed")
+            logger.info(f"🖥️  {server_id}: {gpu_ids}")
+            logger.info(f"   Available: {', '.join(gpu_info_list)}")
+            logger.info(f"   Estimated need: {server_memory_needed:.1f}GB")
         
-        logger.info(f"Total estimated memory needed: {total_memory_needed:.1f}GB")
+        logger.info(f"📊 Total estimated memory needed: {total_memory_needed:.1f}GB")
+        logger.info("=" * 60)
         
         return gpu_allocations
 
@@ -335,7 +392,7 @@ class ModelServerConfig:
     
     # Server configuration
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 8100
     workers: int = 1
     timeout: int = 300
     server_id: str = "server_0"
@@ -360,7 +417,7 @@ class ModelServerConfig:
     request_logging: bool = True
     
     @classmethod
-    def from_env(cls, server_id: str = "server_0", port: int = 8000, gpu_ids: List[int] = None) -> 'ModelServerConfig':
+    def from_env(cls, server_id: str = "server_0", port: int = 8100, gpu_ids: List[int] = None) -> 'ModelServerConfig':
         """Load configuration from environment variables"""
         config = cls()
         
@@ -414,8 +471,9 @@ class GenerationRequest(BaseModel):
     stream: bool = Field(default=False, description="Enable streaming response")
     seed: Optional[int] = Field(default=None, description="Random seed for reproducibility")
     
-    @validator('max_tokens')
-    def validate_max_tokens(cls, v, values):
+    @field_validator('max_tokens')
+    @classmethod
+    def validate_max_tokens(cls, v, info):
         config = getattr(cls, '_config', None)
         if config and v > config.max_tokens_per_request:
             raise ValueError(f"max_tokens cannot exceed {config.max_tokens_per_request}")
@@ -513,14 +571,23 @@ class GPUModelLoader:
             try:
                 # Try to add newer parameters safely
                 engine_kwargs.update({
-                    "disable_cuda_graph": True,  # Disable CUDA graph to save memory
+                    "enforce_eager": True,  # Use eager execution instead of CUDA graphs to save memory
                     "max_num_seqs": 16,  # Reduce batch size to save memory
                 })
             except Exception as e:
                 logger.warning(f"[{self.config.server_id}] Some vLLM parameters not supported in this version: {str(e)}")
+                # Fallback to older parameter names if needed
+                try:
+                    engine_kwargs.update({
+                        "disable_cuda_graph": True,  # Legacy parameter name
+                        "max_num_seqs": 16,
+                    })
+                except Exception as e2:
+                    logger.warning(f"[{self.config.server_id}] Legacy parameters also not supported: {str(e2)}")
+                    logger.info(f"[{self.config.server_id}] Continuing with basic parameters only")
             
             # Create engine arguments
-            engine_args = EngineArgs(**engine_kwargs)
+            engine_args = AsyncEngineArgs(**engine_kwargs)
             
             # Create async engine
             self.engine = AsyncLLMEngine.from_engine_args(engine_args)
@@ -1004,7 +1071,7 @@ class MultiServerManager:
         self.processes = []
         self.server_configs = []
         
-    def setup_servers(self, num_servers: int = 2, base_port: int = 8000):
+    def setup_servers(self, num_servers: int = 2, base_port: int = 8100):
         """Setup configuration for multiple servers with intelligent GPU allocation"""
         
         # Get configuration parameters
@@ -1197,7 +1264,7 @@ def main():
     try:
         # Get configuration
         num_servers_env = os.getenv("NUM_SERVERS", "auto")
-        base_port = int(os.getenv("BASE_PORT", "8000"))
+        base_port = int(os.getenv("BASE_PORT", "8100"))
         
         # Display startup banner
         logger.info("🚀 Starting Opulence Multi-GPU Model Server")
@@ -1323,7 +1390,7 @@ def main():
             
             logger.info("✅ All servers started successfully!")
             logger.info("📝 Usage examples:")
-            logger.info("  curl -X POST http://localhost:8000/generate -d '{\"prompt\":\"Hello\"}' -H 'Content-Type: application/json'")
+            logger.info("  curl -X POST http://localhost:8100/generate -d '{\"prompt\":\"Hello\"}' -H 'Content-Type: application/json'")
             logger.info("Press Ctrl+C to stop all servers")
             
             # Wait for servers or handle shutdown
