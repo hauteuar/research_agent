@@ -22,6 +22,7 @@ from pathlib import Path
 import os
 from enum import Enum
 
+from agents.base_agent_api import BaseOpulenceAgent, APIEngineContext
 # Import existing agents unchanged
 try:
     from agents.code_parser_agent_api import CodeParserAgent
@@ -409,20 +410,52 @@ class APIEngineContext:
     
     async def generate(self, prompt: str, sampling_params, request_id: str = None):
         """Generate text via API (compatible with vLLM interface)"""
-        # Convert sampling_params to API parameters
-        params = {
-            "max_tokens": getattr(sampling_params, 'max_tokens', 512),
-            "temperature": getattr(sampling_params, 'temperature', 0.7),
-            "top_p": getattr(sampling_params, 'top_p', 0.9),
-            "top_k": getattr(sampling_params, 'top_k', 50),
-            "frequency_penalty": getattr(sampling_params, 'frequency_penalty', 0.0),
-            "presence_penalty": getattr(sampling_params, 'presence_penalty', 0.0),
-            "stop": getattr(sampling_params, 'stop', None),
-            "seed": getattr(sampling_params, 'seed', None),
-        }
+        # Convert sampling_params to API parameters with validation
+        params = {}
+        
+        # Handle different sampling_params formats
+        if hasattr(sampling_params, '__dict__'):
+            # Object with attributes (like vLLM SamplingParams)
+            for attr in ['max_tokens', 'temperature', 'top_p', 'top_k', 
+                        'frequency_penalty', 'presence_penalty', 'stop', 'seed']:
+                if hasattr(sampling_params, attr):
+                    value = getattr(sampling_params, attr)
+                    if value is not None:
+                        params[attr] = value
+        elif isinstance(sampling_params, dict):
+            # Dictionary format
+            params = sampling_params.copy()
+        else:
+            # Fallback defaults
+            params = {
+                "max_tokens": 512,
+                "temperature": 0.7,
+                "top_p": 0.9
+            }
+        
+        # Validate and clean parameters
+        validated_params = {}
+        for key, value in params.items():
+            if value is not None:
+                if key == "max_tokens":
+                    validated_params[key] = max(1, min(value, 4096))
+                elif key == "temperature":
+                    validated_params[key] = max(0.0, min(value, 2.0))
+                elif key == "top_p":
+                    validated_params[key] = max(0.0, min(value, 1.0))
+                elif key == "top_k":
+                    validated_params[key] = max(1, min(value, 100))
+                elif key in ["frequency_penalty", "presence_penalty"]:
+                    validated_params[key] = max(-2.0, min(value, 2.0))
+                else:
+                    validated_params[key] = value
         
         # Call API
-        result = await self.coordinator.call_model_api(prompt, params, self.preferred_gpu_id)
+        result = await self.coordinator.call_model_api(
+            prompt=prompt, 
+            params=validated_params, 
+            preferred_gpu_id=self.preferred_gpu_id
+        )
         
         # Convert API response to vLLM-compatible format
         class MockOutput:
@@ -433,7 +466,22 @@ class APIEngineContext:
         
         class MockRequestOutput:
             def __init__(self, result: Dict[str, Any]):
-                self.outputs = [MockOutput(result.get('text', ''), result.get('finish_reason', 'stop'))]
+                # Extract text from various possible response formats
+                if isinstance(result, dict):
+                    text = (
+                        result.get('text') or 
+                        result.get('response') or 
+                        result.get('content') or
+                        result.get('generated_text') or
+                        str(result.get('choices', [{}])[0].get('text', '')) or
+                        ''
+                    )
+                    finish_reason = result.get('finish_reason', 'stop')
+                else:
+                    text = str(result)
+                    finish_reason = 'stop'
+                
+                self.outputs = [MockOutput(text, finish_reason)]
                 self.finished = True
                 self.prompt_token_ids = []  # Not available from API
         
@@ -456,6 +504,7 @@ class APIOpulenceCoordinator:
         # Agent storage - keep existing agents unchanged
         self.agents = {}
         
+        self.base_agent_class = BaseOpulenceAgent
         # Health check task
         self.health_check_task: Optional[asyncio.Task] = None
         
@@ -472,6 +521,57 @@ class APIOpulenceCoordinator:
             "coordinator_type": "api_based"
         }
         
+        self.agent_configs = {
+            "code_parser": {
+                "max_tokens": 2000,
+                "temperature": 0.1,
+                "top_p": 0.9,
+                "description": "Analyzes and parses code structures"
+            },
+            "vector_index": {
+                "max_tokens": 1000,
+                "temperature": 0.2,
+                "top_p": 0.9,
+                "description": "Handles vector embeddings and similarity search"
+            },
+            "data_loader": {
+                "max_tokens": 1500,
+                "temperature": 0.1,
+                "top_p": 0.9,
+                "description": "Processes and loads data files"
+            },
+            "lineage_analyzer": {
+                "max_tokens": 2000,
+                "temperature": 0.2,
+                "top_p": 0.9,
+                "description": "Analyzes data and code lineage"
+            },
+            "logic_analyzer": {
+                "max_tokens": 2500,
+                "temperature": 0.1,
+                "top_p": 0.9,
+                "description": "Analyzes program logic and flow"
+            },
+            "documentation": {
+                "max_tokens": 3000,
+                "temperature": 0.3,
+                "top_p": 0.95,
+                "description": "Generates documentation"
+            },
+            "db2_comparator": {
+                "max_tokens": 1500,
+                "temperature": 0.1,
+                "top_p": 0.9,
+                "description": "Compares database schemas and data"
+            },
+            "chat_agent": {
+                "max_tokens": 1000,
+                "temperature": 0.4,
+                "top_p": 0.9,
+                "description": "Handles interactive chat queries"
+            }
+        }
+
         # For backwards compatibility - selected GPUs are now API endpoints
         self.selected_gpus = [server.config.gpu_id for server in self.load_balancer.servers]
         
@@ -655,94 +755,113 @@ class APIOpulenceCoordinator:
         return self.agents[agent_type]
     
     def _create_agent(self, agent_type: str):
-        """Create agent using API-based engine context"""
+        """Create agent using API-based engine context with proper base agent integration"""
         self.logger.info(f"🔗 Creating {agent_type} agent (API-based)")
         
-        # Create agents but inject API-based engine context
+        # Get agent configuration
+        agent_config = self.agent_configs.get(agent_type, {})
+        
+        # Select GPU for this agent (round-robin or load-balanced)
+        selected_gpu_id = self._select_gpu_for_agent(agent_type)
+        
+        # Create agents with base agent integration
         if agent_type == "code_parser" and CodeParserAgent:
             agent = CodeParserAgent(
                 llm_engine=None,  # Will be replaced with API context
                 db_path=self.db_path,
-                gpu_id=None,
+                gpu_id=selected_gpu_id,
                 coordinator=self
             )
-            # Monkey patch the get_engine_context method
-            agent.get_engine_context = self._create_engine_context_for_agent(agent)
-            return agent
-            
         elif agent_type == "vector_index" and VectorIndexAgent:
             agent = VectorIndexAgent(
                 llm_engine=None,
                 db_path=self.db_path,
-                gpu_id=None,
+                gpu_id=selected_gpu_id,
                 coordinator=self
             )
-            agent.get_engine_context = self._create_engine_context_for_agent(agent)
-            return agent
-            
         elif agent_type == "data_loader" and DataLoaderAgent:
             agent = DataLoaderAgent(
                 llm_engine=None,
                 db_path=self.db_path,
-                gpu_id=None,
+                gpu_id=selected_gpu_id,
                 coordinator=self
             )
-            agent.get_engine_context = self._create_engine_context_for_agent(agent)
-            return agent
-            
         elif agent_type == "lineage_analyzer" and LineageAnalyzerAgent:
             agent = LineageAnalyzerAgent(
                 llm_engine=None,
                 db_path=self.db_path,
-                gpu_id=None,
+                gpu_id=selected_gpu_id,
                 coordinator=self
             )
-            agent.get_engine_context = self._create_engine_context_for_agent(agent)
-            return agent
-            
         elif agent_type == "logic_analyzer" and LogicAnalyzerAgent:
             agent = LogicAnalyzerAgent(
                 llm_engine=None,
                 db_path=self.db_path,
-                gpu_id=None,
+                gpu_id=selected_gpu_id,
                 coordinator=self
             )
-            agent.get_engine_context = self._create_engine_context_for_agent(agent)
-            return agent
-            
         elif agent_type == "documentation" and DocumentationAgent:
             agent = DocumentationAgent(
                 llm_engine=None,
                 db_path=self.db_path,
-                gpu_id=None,
+                gpu_id=selected_gpu_id,
                 coordinator=self
             )
-            agent.get_engine_context = self._create_engine_context_for_agent(agent)
-            return agent
-            
         elif agent_type == "db2_comparator" and DB2ComparatorAgent:
             agent = DB2ComparatorAgent(
                 llm_engine=None,
                 db_path=self.db_path,
-                gpu_id=None,
+                gpu_id=selected_gpu_id,
                 max_rows=10000,
                 coordinator=self
             )
-            agent.get_engine_context = self._create_engine_context_for_agent(agent)
-            return agent
-            
         elif agent_type == "chat_agent" and OpulenceChatAgent:
             agent = OpulenceChatAgent(
                 coordinator=self,
                 llm_engine=None,
                 db_path=self.db_path,
-                gpu_id=None
+                gpu_id=selected_gpu_id
             )
-            agent.get_engine_context = self._create_engine_context_for_agent(agent)
-            return agent
-            
         else:
-            raise ValueError(f"Unknown or unavailable agent type: {agent_type}")
+            # ADDED: Fallback to base agent if specific agent not available
+            if self.base_agent_class:
+                self.logger.warning(f"Specific {agent_type} agent not available, using base agent")
+                agent = self.base_agent_class(
+                    coordinator=self,
+                    agent_type=agent_type,
+                    db_path=self.db_path,
+                    gpu_id=selected_gpu_id
+                )
+            else:
+                raise ValueError(f"Unknown or unavailable agent type: {agent_type}")
+        
+        # ADDED: Configure agent with type-specific settings
+        if hasattr(agent, 'update_api_params') and agent_config:
+            # Filter out non-API parameters
+            api_params = {k: v for k, v in agent_config.items() 
+                         if k in ['max_tokens', 'temperature', 'top_p', 'top_k', 
+                                 'frequency_penalty', 'presence_penalty']}
+            if api_params:
+                agent.update_api_params(**api_params)
+                self.logger.info(f"Applied configuration to {agent_type}: {api_params}")
+        
+        # ADDED: Inject API-based engine context
+        agent.get_engine_context = self._create_engine_context_for_agent(agent)
+        
+        return agent
+    
+    def _select_gpu_for_agent(self, agent_type: str) -> int:
+        """Select optimal GPU for agent based on load balancing"""
+        if not self.load_balancer.servers:
+            return 0
+        
+        # Use load balancer to select best server
+        server = self.load_balancer.select_server()
+        if server:
+            return server.config.gpu_id
+        
+        # Fallback to first available GPU
+        return self.load_balancer.servers[0].config.gpu_id
     
     def _create_engine_context_for_agent(self, agent):
         """Create API-based engine context for agent"""
@@ -757,6 +876,86 @@ class APIOpulenceCoordinator:
                 pass
         
         return api_engine_context
+
+    def _create_engine_context_for_agent(self, agent):
+        """Create API-based engine context for agent"""
+        @asynccontextmanager
+        async def api_engine_context():
+            # Create API-based engine context
+            api_context = APIEngineContext(self, getattr(agent, 'gpu_id', None))
+            try:
+                yield api_context
+            finally:
+                # No cleanup needed for API calls
+                pass
+        
+        return api_engine_context
+    
+    def list_available_agents(self) -> Dict[str, Any]:
+        """List all available agent types and their configurations"""
+        return {
+            agent_type: {
+                "config": config,
+                "available": agent_type in [
+                    "code_parser", "vector_index", "data_loader", 
+                    "lineage_analyzer", "logic_analyzer", "documentation",
+                    "db2_comparator", "chat_agent"
+                ],
+                "loaded": agent_type in self.agents
+            }
+            for agent_type, config in self.agent_configs.items()
+        }
+    
+    def get_agent_status(self) -> Dict[str, Any]:
+        """Get status of all loaded agents"""
+        status = {}
+        for agent_type, agent in self.agents.items():
+            if hasattr(agent, 'get_agent_stats'):
+                status[agent_type] = agent.get_agent_stats()
+            else:
+                status[agent_type] = {
+                    "agent_type": agent_type,
+                    "gpu_id": getattr(agent, 'gpu_id', None),
+                    "api_based": True,
+                    "status": "loaded"
+                }
+        return status
+    
+    def update_agent_config(self, agent_type: str, **config_updates):
+        """Update configuration for a specific agent type"""
+        if agent_type not in self.agent_configs:
+            raise ValueError(f"Unknown agent type: {agent_type}")
+        
+        # Update stored configuration
+        self.agent_configs[agent_type].update(config_updates)
+        
+        # Update live agent if it exists
+        if agent_type in self.agents:
+            agent = self.agents[agent_type]
+            if hasattr(agent, 'update_api_params'):
+                api_params = {k: v for k, v in config_updates.items() 
+                             if k in ['max_tokens', 'temperature', 'top_p', 'top_k', 
+                                     'frequency_penalty', 'presence_penalty']}
+                if api_params:
+                    agent.update_api_params(**api_params)
+                    self.logger.info(f"Updated live agent {agent_type} configuration: {api_params}")
+    
+    def reload_agent(self, agent_type: str):
+        """Reload a specific agent with updated configuration"""
+        if agent_type in self.agents:
+            # Cleanup old agent
+            old_agent = self.agents[agent_type]
+            if hasattr(old_agent, 'cleanup'):
+                old_agent.cleanup()
+            
+            # Remove from cache
+            del self.agents[agent_type]
+            
+            self.logger.info(f"Reloaded {agent_type} agent")
+        
+        # Agent will be recreated on next access
+        return self.get_agent(agent_type)
+    
     
     # ==================== Existing Interface Methods (Unchanged) ====================
     
@@ -806,6 +1005,65 @@ class APIOpulenceCoordinator:
             "servers_used": [s.config.name for s in self.load_balancer.servers]
         }
     
+    async def test_agent_integration(coordinator):
+        """Test agent integration with the coordinator"""
+        
+        print("🧪 Testing Agent Integration...")
+        
+        test_results = {}
+        
+        # Test each agent type
+        agent_types = ["code_parser", "chat_agent", "vector_index", "data_loader"]
+        
+        for agent_type in agent_types:
+            print(f"\n🔍 Testing {agent_type} agent...")
+            
+            try:
+                # Get agent
+                agent = coordinator.get_agent(agent_type)
+                
+                # Test basic functionality
+                if hasattr(agent, 'call_api'):
+                    # Test API call
+                    response = await agent.call_api(
+                        "Hello, please respond with 'Agent working'", 
+                        {"max_tokens": 50, "temperature": 0.1}
+                    )
+                    
+                    test_results[agent_type] = {
+                        "status": "✅ Working",
+                        "response_length": len(response),
+                        "has_api_capability": True,
+                        "response_sample": response[:100] + "..." if len(response) > 100 else response
+                    }
+                    print(f"  ✅ API call successful: {len(response)} chars")
+                
+                # Test context manager
+                try:
+                    async with agent.get_engine_context() as context:
+                        print(f"  ✅ Context manager working")
+                        test_results[agent_type]["context_manager"] = True
+                except Exception as e:
+                    print(f"  ❌ Context manager failed: {e}")
+                    test_results[agent_type]["context_manager"] = False
+                
+                # Test stats
+                if hasattr(agent, 'get_agent_stats'):
+                    stats = agent.get_agent_stats()
+                    print(f"  ✅ Stats available: {stats.get('api_calls_made', 0)} calls made")
+                    test_results[agent_type]["stats_available"] = True
+                else:
+                    test_results[agent_type]["stats_available"] = False
+                
+            except Exception as e:
+                print(f"  ❌ {agent_type} test failed: {e}")
+                test_results[agent_type] = {
+                    "status": f"❌ Failed: {str(e)}",
+                    "error": str(e)
+                }
+        
+        return test_results
+
     async def analyze_component(self, component_name: str, component_type: str = None) -> Dict[str, Any]:
         """Analyze component - same interface as original"""
         start_time = time.time()
@@ -1058,7 +1316,7 @@ class APIOpulenceCoordinator:
             conn.close()
     
     def get_health_status(self) -> Dict[str, Any]:
-        """Get coordinator health status"""
+        """Get coordinator health status including agent information"""
         available_servers = len(self.load_balancer.get_available_servers())
         total_servers = len(self.load_balancer.servers)
         
@@ -1073,18 +1331,25 @@ class APIOpulenceCoordinator:
                 "available": server.is_available()
             }
         
+        # ADDED: Agent status information
+        agent_status = self.get_agent_status()
+        available_agent_types = self.list_available_agents()
+        
         return {
             "status": "healthy" if available_servers > 0 else "unhealthy",
             "coordinator_type": "api_based",
-            "selected_gpus": self.selected_gpus,  # For backwards compatibility
+            "selected_gpus": self.selected_gpus,
             "available_servers": available_servers,
             "total_servers": total_servers,
             "server_stats": server_stats,
             "active_agents": len(self.agents),
+            "agent_status": agent_status,
+            "available_agent_types": available_agent_types,
             "stats": self.stats,
             "uptime_seconds": time.time() - self.stats["start_time"],
             "database_available": os.path.exists(self.db_path),
-            "load_balancing_strategy": self.config.load_balancing_strategy.value
+            "load_balancing_strategy": self.config.load_balancing_strategy.value,
+            "base_agent_available": self.base_agent_class is not None
         }
     
     async def get_statistics(self) -> Dict[str, Any]:
