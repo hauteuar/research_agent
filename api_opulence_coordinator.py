@@ -764,68 +764,7 @@ class APIOpulenceCoordinator:
             raise RuntimeError(f"Server not available: {debug_info}")
 
     
-    def get_health_status(self) -> Dict[str, Any]:
-        """FIXED: Get coordinator health status with safe enum handling"""
-        available_servers = len(self.load_balancer.get_available_servers())
-        total_servers = len(self.load_balancer.servers)
-        
-        # FIXED: Safe server stats collection
-        server_stats = {}
-        for server in self.load_balancer.servers:
-            try:
-                # Safe status handling
-                if hasattr(server.status, 'value'):
-                    status_value = server.status.value
-                else:
-                    status_value = str(server.status)
-                
-                server_stats[server.config.name] = {
-                    "status": status_value,  # FIXED: Use safe status
-                    "active_requests": getattr(server, 'active_requests', 0),
-                    "total_requests": getattr(server, 'total_requests', 0),
-                    "success_rate": (
-                        (server.successful_requests / server.total_requests * 100) 
-                        if getattr(server, 'total_requests', 0) > 0 else 0
-                    ),
-                    "average_latency": getattr(server, 'average_latency', 0),
-                    "available": server.is_available() if hasattr(server, 'is_available') else False
-                }
-            except Exception as e:
-                # Fallback for problematic servers
-                server_stats[server.config.name] = {
-                    "status": "error",
-                    "error": str(e),
-                    "available": False
-                }
-        
-        # Agent status with safe handling
-        available_agent_types = []
-        agent_status = {}
-        
-        try:
-            agent_status = self.get_agent_status()
-            available_agent_types = self.list_available_agents()
-        except Exception as e:
-            # Fallback if agent status fails
-            agent_status = {"error": str(e)}
-        
-        return {
-            "status": "healthy" if available_servers > 0 else "unhealthy",
-            "coordinator_type": "api_based",
-            "selected_gpus": getattr(self, 'selected_gpus', []),
-            "available_servers": available_servers,
-            "total_servers": total_servers,
-            "server_stats": server_stats,
-            "active_agents": len(getattr(self, 'agents', {})),
-            "agent_status": agent_status,
-            "available_agent_types": available_agent_types,
-            "stats": getattr(self, 'stats', {}),
-            "uptime_seconds": time.time() - self.stats.get("start_time", time.time()),
-            "database_available": os.path.exists(self.db_path),
-            "load_balancing_strategy": self.config.load_balancing_strategy.value,
-            "base_agent_available": getattr(self, 'base_agent_class', None) is not None
-        }
-
+    
     async def call_generate(self, server: ModelServer, prompt: str, 
                   params: Dict[str, Any] = None) -> Dict[str, Any]:
         """FIXED: Call model server generate endpoint with better validation"""
@@ -1503,41 +1442,67 @@ class APIOpulenceCoordinator:
             conn.close()
     
     def get_health_status(self) -> Dict[str, Any]:
-        """Get coordinator health status including agent information"""
+        """FIXED: Get coordinator health status with safe enum handling"""
         available_servers = len(self.load_balancer.get_available_servers())
         total_servers = len(self.load_balancer.servers)
         
+        # FIXED: Safe server stats collection
         server_stats = {}
         for server in self.load_balancer.servers:
-            server_stats[server.config.name] = {
-                "status": server.status.value,
-                "active_requests": server.active_requests,
-                "total_requests": server.total_requests,
-                "success_rate": (server.successful_requests / server.total_requests * 100) if server.total_requests > 0 else 0,
-                "average_latency": server.average_latency,
-                "available": server.is_available()
-            }
+            try:
+                # Safe status handling
+                if hasattr(server.status, 'value'):
+                    status_value = server.status.value
+                else:
+                    status_value = str(server.status)
+                
+                server_stats[server.config.name] = {
+                    "status": status_value,  # FIXED: Use safe status
+                    "active_requests": getattr(server, 'active_requests', 0),
+                    "total_requests": getattr(server, 'total_requests', 0),
+                    "success_rate": (
+                        (server.successful_requests / server.total_requests * 100) 
+                        if getattr(server, 'total_requests', 0) > 0 else 0
+                    ),
+                    "average_latency": getattr(server, 'average_latency', 0),
+                    "available": server.is_available() if hasattr(server, 'is_available') else False
+                }
+            except Exception as e:
+                # Fallback for problematic servers
+                server_stats[server.config.name] = {
+                    "status": "error",
+                    "error": str(e),
+                    "available": False
+                }
         
-        # ADDED: Agent status information
-        agent_status = self.get_agent_status()
-        available_agent_types = self.list_available_agents()
+        # Agent status with safe handling
+        available_agent_types = []
+        agent_status = {}
+        
+        try:
+            agent_status = self.get_agent_status()
+            available_agent_types = self.list_available_agents()
+        except Exception as e:
+            # Fallback if agent status fails
+            agent_status = {"error": str(e)}
         
         return {
             "status": "healthy" if available_servers > 0 else "unhealthy",
             "coordinator_type": "api_based",
-            "selected_gpus": self.selected_gpus,
+            "selected_gpus": getattr(self, 'selected_gpus', []),
             "available_servers": available_servers,
             "total_servers": total_servers,
             "server_stats": server_stats,
-            "active_agents": len(self.agents),
+            "active_agents": len(getattr(self, 'agents', {})),
             "agent_status": agent_status,
             "available_agent_types": available_agent_types,
-            "stats": self.stats,
-            "uptime_seconds": time.time() - self.stats["start_time"],
+            "stats": getattr(self, 'stats', {}),
+            "uptime_seconds": time.time() - self.stats.get("start_time", time.time()),
             "database_available": os.path.exists(self.db_path),
             "load_balancing_strategy": self.config.load_balancing_strategy.value,
-            "base_agent_available": self.base_agent_class is not None
+            "base_agent_available": getattr(self, 'base_agent_class', None) is not None
         }
+
     
     async def get_statistics(self) -> Dict[str, Any]:
         """Get comprehensive system statistics"""
