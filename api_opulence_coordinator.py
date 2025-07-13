@@ -1526,7 +1526,70 @@ def get_system_status_api() -> Dict[str, Any]:
     coordinator = get_global_api_coordinator()
     return coordinator.get_health_status()
 
-# ==================== Example Usage ====================
+# ==================== STREAMLIT SESSION STATE FIX ====================
+
+def ensure_streamlit_session_state():
+    """CRITICAL FIX: Ensure all session state variables are properly initialized"""
+    import streamlit as st
+    
+    # AGENT_TYPES definition for session state
+    STREAMLIT_AGENT_TYPES = [
+        'code_parser', 'chat_agent', 'vector_index', 'data_loader',
+        'lineage_analyzer', 'logic_analyzer', 'documentation', 'db2_comparator'
+    ]
+    
+    defaults = {
+        'chat_history': [],
+        'processing_history': [],
+        'uploaded_files': [],
+        'file_analysis_results': {},
+        'agent_status': {agent: {'status': 'unknown', 'last_used': None, 'total_calls': 0, 'errors': 0} 
+                        for agent in STREAMLIT_AGENT_TYPES},  # FIXED: Proper agent_status initialization
+        'model_servers': [],
+        'coordinator': None,
+        'debug_mode': False,
+        'initialization_status': 'not_started',
+        'import_error': None,
+        'auto_refresh_gpu': False,
+        'gpu_refresh_interval': 10,
+        'current_query': '',
+        'analysis_results': {},
+        'dashboard_metrics': {
+            'files_processed': 0,
+            'queries_answered': 0,
+            'components_analyzed': 0,
+            'system_uptime': 0
+        },
+        'show_manual_config': False,
+        'show_system_status': False,
+        'show_chat_stats': False,
+        'saved_conversations': {},
+        'current_page': '🏠 Dashboard',
+        'chat_response_mode': 'Detailed',
+        'chat_include_context': True,
+        'chat_max_history': 5,
+        'auto_refresh_enabled': False,
+        'refresh_interval': 10
+    }
+    
+    for key, default_value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = default_value
+            
+    # CRITICAL FIX: Ensure agent_status is always properly structured
+    if not isinstance(st.session_state.get('agent_status'), dict):
+        st.session_state.agent_status = {agent: {'status': 'unknown', 'last_used': None, 'total_calls': 0, 'errors': 0} 
+                                        for agent in STREAMLIT_AGENT_TYPES}
+    
+    # Ensure all required agents are in agent_status
+    for agent in STREAMLIT_AGENT_TYPES:
+        if agent not in st.session_state.agent_status:
+            st.session_state.agent_status[agent] = {
+                'status': 'unknown', 
+                'last_used': None, 
+                'total_calls': 0, 
+                'errors': 0
+            }
 
 async def example_usage():
     """Example of how to use the FIXED API coordinator"""
