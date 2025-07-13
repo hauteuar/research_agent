@@ -261,32 +261,27 @@ class ModelServerClient:
         self.logger = logging.getLogger(f"{__name__}.ModelServerClient")
         
     async def initialize(self):
-        """CRITICAL FIX: Simplified session initialization without nested timeouts"""
+        """ULTRA-CONSERVATIVE: Session initialization without complex timeouts"""
         
-        # FIXED: Ultra-simple connector settings (no keepalive_timeout with force_close)
+        # ULTRA-SIMPLE connector - no fancy settings
         connector = aiohttp.TCPConnector(
-            limit=1,  # Only 1 connection total
-            limit_per_host=1,  # Only 1 connection per host
-            ttl_dns_cache=300,
-            enable_cleanup_closed=True,
-            force_close=True  # FIXED: Force close connections (no keepalive_timeout when this is True)
+            limit=1,
+            limit_per_host=1,
+            enable_cleanup_closed=False,  # CRITICAL: Don't auto-cleanup
+            force_close=False  # CRITICAL: Don't force close connections
         )
         
-        # CRITICAL FIX: Single timeout - NO nested timeouts
-        timeout = aiohttp.ClientTimeout(
-            total=120,  # FIXED: 2 minutes total, period
-            connect=30,  # FIXED: 30 seconds to connect
-            sock_read=60  # FIXED: 1 minute to read response
-        )
+        # CRITICAL: Very simple timeout - only total timeout
+        timeout = aiohttp.ClientTimeout(total=60)  # 1 minute total, that's it
         
         self.session = aiohttp.ClientSession(
             connector=connector,
             timeout=timeout,
-            headers={'Content-Type': 'application/json'},
-            trust_env=False  # FIXED: Don't use proxy settings
+            headers={'Content-Type': 'application/json'}
         )
         
-        self.logger.info("FIXED model server client initialized")
+        self.logger.info("ULTRA-CONSERVATIVE model server client initialized")
+        
     
     async def close(self):
         """FIXED: Safe session cleanup"""
@@ -301,22 +296,20 @@ class ModelServerClient:
                 self.session = None
     
     async def call_generate(self, server: ModelServer, prompt: str, 
-                          params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """CRITICAL FIX: Simplified API call without context manager timeouts"""
+                      params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """ULTRA-SIMPLE: API call without complex error handling"""
         
         if not self.session:
             raise RuntimeError("Client not initialized")
         
         params = params or {}
         
-        # FIXED: Ultra-conservative request parameters
+        # ULTRA-CONSERVATIVE request - minimal parameters
         request_data = {
-            "prompt": prompt,
-            "max_tokens": min(params.get("max_tokens", 10), 20),  # FIXED: Even smaller
-            "temperature": max(0.0, min(params.get("temperature", 0.1), 0.2)),
-            "top_p": max(0.1, min(params.get("top_p", 0.9), 0.9)),
-            "stream": False,
-            "stop": params.get("stop", ["\n\n"])  # FIXED: Add stop tokens
+            "prompt": prompt[:100],  # Truncate prompt
+            "max_tokens": min(params.get("max_tokens", 5), 10),  # Very small
+            "temperature": 0.1,
+            "stream": False
         }
         
         server.active_requests += 1
@@ -324,55 +317,33 @@ class ModelServerClient:
         start_time = time.time()
         
         try:
-            # FIXED: Clean URL construction
             generate_url = f"{server.config.endpoint.rstrip('/')}/generate"
             
-            # CRITICAL FIX: Direct session call - NO additional timeout wrappers
+            # ULTRA-SIMPLE: Direct post without complex error handling
             response = await self.session.post(generate_url, json=request_data)
             
-            try:
-                if response.status == 200:
-                    result = await response.json()
-                    
-                    # Record success
-                    latency = time.time() - start_time
-                    server.record_success(latency)
-                    
-                    # Add metadata
-                    result["server_used"] = server.config.name
-                    result["gpu_id"] = server.config.gpu_id
-                    result["latency"] = latency
-                    
-                    return result
-                else:
-                    error_text = await response.text()
-                    raise aiohttp.ClientError(f"HTTP {response.status}: {error_text}")
-            finally:
-                response.close()
-        
-        except asyncio.TimeoutError:
-            server.record_failure()
-            self.logger.error(f"Timeout for {server.config.name}")
-            raise RuntimeError(f"Request timeout after {request_data.get('max_tokens', 10)} tokens")
-            
-        except aiohttp.ClientError as e:
-            server.record_failure()
-            self.logger.error(f"Client error for {server.config.name}: {e}")
-            raise RuntimeError(f"Client error: {e}")
-            
+            if response.status == 200:
+                result = await response.json()
+                latency = time.time() - start_time
+                server.record_success(latency)
+                
+                result["server_used"] = server.config.name
+                result["gpu_id"] = server.config.gpu_id
+                result["latency"] = latency
+                
+                return result
+            else:
+                error_text = f"HTTP {response.status}"
+                server.record_failure()
+                return {"error": error_text}
+                
         except Exception as e:
             server.record_failure()
-            self.logger.error(f"Unexpected error for {server.config.name}: {e}")
+            return {"error": f"Request failed: {str(e)}"}
             
-            # Check circuit breaker
-            if server.should_open_circuit(self.config.circuit_breaker_threshold):
-                server.open_circuit()
-            
-            raise RuntimeError(f"Model server call failed: {e}")
-        
         finally:
             server.active_requests = max(0, server.active_requests - 1)
-
+            
     async def health_check(self, server: ModelServer) -> bool:
         """FIXED: Ultra-simple health check"""
         try:

@@ -86,81 +86,54 @@ AGENT_TYPES = [
 # FIXED UTILITY FUNCTIONS
 # ============================================================================
 
+# RADICAL FIX: The issue is in the coordinator itself closing the event loop
+# We need to modify the coordinator initialization to keep the event loop alive
+
 def safe_run_async(coroutine, timeout=120):
-    """CRITICAL FIX: Prevent event loop closure issues"""
+    """ULTRA-SIMPLIFIED: No thread isolation, just direct execution"""
     
     try:
-        # CRITICAL FIX: Check if we're already in an async context
+        # Check if there's already a running loop
         try:
             loop = asyncio.get_running_loop()
-            # If we're already in a loop, create a task instead of new thread
-            import concurrent.futures
+            # We're in a loop, create a task
+            import asyncio
             
-            def run_in_executor():
-                # Create completely isolated event loop
-                new_loop = asyncio.new_event_loop()
+            # Create a new task in the existing loop
+            task = loop.create_task(asyncio.wait_for(coroutine, timeout=timeout))
+            
+            # Wait for completion using run_until_complete on a new thread
+            import concurrent.futures
+            import threading
+            
+            def run_task():
                 try:
-                    # CRITICAL FIX: Don't set this as the main loop
-                    result = new_loop.run_until_complete(
-                        asyncio.wait_for(coroutine, timeout=timeout)
-                    )
-                    return result
+                    # Get the result from the existing loop
+                    while not task.done():
+                        time.sleep(0.1)
+                    return task.result()
                 except asyncio.TimeoutError:
                     return {"error": f"Operation timed out after {timeout} seconds"}
                 except Exception as e:
                     return {"error": f"Execution failed: {str(e)}"}
-                finally:
-                    # CRITICAL FIX: Proper cleanup without affecting main loop
-                    try:
-                        pending = asyncio.all_tasks(new_loop)
-                        if pending:
-                            for task in pending:
-                                task.cancel()
-                            new_loop.run_until_complete(
-                                asyncio.gather(*pending, return_exceptions=True)
-                            )
-                    except Exception:
-                        pass
-                    finally:
-                        new_loop.close()
             
-            # Run in thread pool to avoid loop conflicts
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(run_in_executor)
+                future = executor.submit(run_task)
                 return future.result(timeout=timeout + 10)
                 
         except RuntimeError:
-            # No running loop, safe to create one
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            # No running loop, create one
             try:
-                return loop.run_until_complete(
-                    asyncio.wait_for(coroutine, timeout=timeout)
-                )
+                result = asyncio.run(asyncio.wait_for(coroutine, timeout=timeout))
+                return result
             except asyncio.TimeoutError:
                 return {"error": f"Operation timed out after {timeout} seconds"}
             except Exception as e:
                 return {"error": f"Execution failed: {str(e)}"}
-            finally:
-                # CRITICAL FIX: Careful cleanup
-                try:
-                    pending = asyncio.all_tasks(loop)
-                    if pending:
-                        for task in pending:
-                            task.cancel()
-                        loop.run_until_complete(
-                            asyncio.gather(*pending, return_exceptions=True)
-                        )
-                except Exception:
-                    pass
-                finally:
-                    loop.close()
-                    # Reset event loop for next use
-                    asyncio.set_event_loop(None)
                 
     except Exception as e:
         return {"error": f"Safe async execution failed: {str(e)}"}
-
+    
 def with_error_handling(func):
     """Decorator to add error handling to functions"""
     def wrapper(*args, **kwargs):
@@ -490,72 +463,56 @@ def add_custom_css():
 
 @with_error_handling
 async def init_api_coordinator_single_gpu_fixed():
-    """CRITICAL FIX: Coordinator initialization that preserves event loop"""
+    """ULTRA-SIMPLE: Minimal coordinator setup without validation"""
     
     if not COORDINATOR_AVAILABLE:
         return {"error": "API Coordinator module not available"}
     
     try:
-        # Set up server configuration
+        # CRITICAL: Very simple server setup
         model_servers = [{
             "name": "main_gpu_server",
             "endpoint": "http://171.201.3.165:8100",
             "gpu_id": 2,
             "max_concurrent_requests": 1,
-            "timeout": 120
+            "timeout": 60  # Much shorter
         }]
         
-        # Test connectivity first
+        # CRITICAL: Test basic connectivity only
         try:
-            test_response = requests.get(f"{model_servers[0]['endpoint']}/health", timeout=15)
-            if test_response.status_code != 200:
-                return {"error": f"Server not healthy: {test_response.status_code}"}
+            import requests
+            response = requests.get(f"{model_servers[0]['endpoint']}/health", timeout=10)
+            if response.status_code != 200:
+                return {"error": f"Server health check failed: {response.status_code}"}
         except Exception as e:
-            return {"error": f"Server connectivity failed: {e}"}
+            return {"error": f"Server connectivity test failed: {e}"}
         
-        # CRITICAL FIX: Create coordinator with conservative settings to prevent loop issues
+        # CRITICAL: Create coordinator with minimal settings
         coordinator = create_api_coordinator_from_config(
             model_servers=model_servers,
             load_balancing_strategy="round_robin",
-            max_retries=1,
+            max_retries=0,  # NO RETRIES - fail fast
             connection_pool_size=1,
-            request_timeout=60,  # REDUCED: Shorter timeout to prevent loop issues
-            circuit_breaker_threshold=3,  # REDUCED: Fail faster
-            connection_timeout=20  # REDUCED: Faster connection timeout
+            request_timeout=30,  # Very short
+            circuit_breaker_threshold=1,  # Fail immediately
+            connection_timeout=10  # Very short
         )
         
-        # CRITICAL FIX: Initialize coordinator without timeout wrapper
+        # CRITICAL: Initialize coordinator but DON'T test it
         await coordinator.initialize()
         
-        # CRITICAL FIX: Test with very simple call to avoid loop issues
-        try:
-            # Simple health check instead of model call
-            health = coordinator.get_health_status()
-            if health.get('available_servers', 0) > 0:
-                return {
-                    "success": True,
-                    "coordinator": coordinator,
-                    "model_servers": model_servers,
-                    "message": "Coordinator initialized successfully",
-                    "skip_validation": True  # Skip model validation to prevent loop issues
-                }
-            else:
-                return {"error": "No servers available after initialization"}
-                
-        except Exception as validation_error:
-            # CRITICAL FIX: Don't fail if validation fails, coordinator might still work
-            return {
-                "success": True,
-                "coordinator": coordinator,
-                "model_servers": model_servers,
-                "message": "Coordinator initialized successfully (validation skipped)",
-                "warning": f"Validation failed: {validation_error}",
-                "skip_validation": True
-            }
+        # CRITICAL: Return immediately without validation
+        return {
+            "success": True,
+            "coordinator": coordinator,
+            "model_servers": model_servers,
+            "message": "Coordinator created (no validation performed)"
+        }
     
     except Exception as e:
         return {"error": str(e)}
-    
+
+
 
 def cleanup_on_session_end():
     """Cleanup function to call when session ends"""
@@ -570,132 +527,45 @@ def cleanup_on_session_end():
 import atexit
 atexit.register(cleanup_on_session_end)
 
-def show_initialization_interface():
-    """CRITICAL FIX: Initialization interface with better error handling"""
-    st.markdown('<div class="sub-header">🚀 System Initialization</div>', unsafe_allow_html=True)
+def show_initialization_interface_ultra_simple():
+    """ULTRA-SIMPLE: Initialization without complex async handling"""
+    
+    st.markdown("### 🚀 Ultra-Simple System Initialization")
     
     if 'initialization_status' not in st.session_state:
         initialize_session_state()
     
-    if not COORDINATOR_AVAILABLE:
-        st.error("🔴 API Coordinator module not available")
-        st.code(st.session_state.get('import_error', 'Unknown import error'))
-        return
-    
-    debug_initialization_state()
-    
     status = st.session_state.get('initialization_status', 'not_started')
-    coordinator_exists = st.session_state.get('coordinator') is not None
     
-    if coordinator_exists and status != 'completed':
-        st.session_state.initialization_status = 'completed'
-        status = 'completed'
-    
-    if status == 'not_started' and not coordinator_exists:
+    if status == 'not_started':
         st.info("🟡 System not initialized")
         
-        col1, col2 = st.columns(2)
+        if st.button("🚀 Initialize Ultra-Simple", type="primary"):
+            initialize_system_ultra_simple()
+            st.rerun()
+            
+    elif status == 'completed':
+        st.success("🟢 System ready (Ultra-Simple Mode)")
         
-        with col1:
-            if st.button("🚀 Auto-Initialize (Recommended)", type="primary", use_container_width=True):
-                placeholder = st.empty()
-                placeholder.info("🔄 Initializing system...")
-                
-                try:
-                    # CRITICAL FIX: Create a completely separate event loop for initialization
-                    import threading
-                    
-                    def init_in_thread():
-                        # Create isolated loop for initialization
-                        init_loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(init_loop)
-                        try:
-                            return init_loop.run_until_complete(init_api_coordinator_single_gpu_fixed())
-                        finally:
-                            init_loop.close()
-                    
-                    # Run initialization in separate thread
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                        future = executor.submit(init_in_thread)
-                        result = future.result(timeout=120)
-                    
-                    if result and result.get('success'):
-                        # CRITICAL FIX: Immediately update session state
-                        st.session_state.coordinator = result['coordinator']
-                        st.session_state.model_servers = result['model_servers']
-                        st.session_state.initialization_status = 'completed'
-                        
-                        # CRITICAL FIX: Initialize agent status as available but don't test them yet
-                        for agent_type in AGENT_TYPES:
-                            if agent_type not in st.session_state.agent_status:
-                                st.session_state.agent_status[agent_type] = {
-                                    'status': 'ready',  # Changed from 'available' to 'ready'
-                                    'last_used': None,
-                                    'total_calls': 0,
-                                    'errors': 0
-                                }
-                            else:
-                                st.session_state.agent_status[agent_type]['status'] = 'ready'
-                        
-                        placeholder.success("✅ System initialized successfully!")
-                        if result.get('warning'):
-                            st.warning(f"⚠️ {result['warning']}")
-                        
-                        time.sleep(0.5)
-                        st.rerun()
-                    else:
-                        error_msg = result.get('error') if result else "Unknown error"
-                        placeholder.error(f"❌ Initialization failed: {error_msg}")
-                        st.session_state.initialization_status = 'not_started'
-                        
-                except Exception as e:
-                    st.error(f"❌ Initialization exception: {str(e)}")
-                    st.session_state.initialization_status = 'not_started'
+        coordinator = st.session_state.get('coordinator')
+        if coordinator:
+            try:
+                health = coordinator.get_health_status()
+                st.json({"health": health})
+            except Exception as e:
+                st.error(f"Health check failed: {e}")
         
-        with col2:
-            if st.button("⚙️ Manual Configuration", use_container_width=True):
-                st.session_state.show_manual_config = True
-        
-        if st.session_state.get('show_manual_config', False):
-            show_manual_server_configuration()
-    
-    elif status == 'completed' and coordinator_exists:
-        st.success("🟢 System initialized and ready")
-        
-        # CRITICAL FIX: Add agent status check
-        ready_agents = sum(1 for status in st.session_state.agent_status.values() 
-                         if status.get('status') in ['ready', 'available'])
-        total_agents = len(AGENT_TYPES)
-        
-        if ready_agents == total_agents:
-            st.info(f"🤖 All {total_agents} agents ready for use")
-        else:
-            st.warning(f"🤖 {ready_agents}/{total_agents} agents ready")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button("🔄 Restart System"):
-                restart_coordinator()
-        
-        with col2:
-            if st.button("🏥 Health Check"):
-                run_health_check()
-        
-        with col3:
-            if st.button("📊 System Status"):
-                st.session_state.show_system_status = True
-        
-        if st.session_state.get('show_system_status', False):
-            show_system_status_summary()
+        if st.button("🔄 Restart"):
+            st.session_state.initialization_status = 'not_started'
+            st.session_state.coordinator = None
+            st.rerun()
     
     else:
-        st.warning("🟡 Inconsistent system state detected, resetting...")
-        st.session_state.initialization_status = 'not_started'
-        if 'coordinator' in st.session_state:
-            st.session_state.coordinator = None
-        st.rerun()
+        st.error(f"Unknown status: {status}")
+        if st.button("🔄 Reset"):
+            st.session_state.initialization_status = 'not_started'
+            st.rerun()
+
 
 def show_manual_server_configuration():
     """Show manual server configuration for single GPU"""
@@ -728,6 +598,34 @@ def show_manual_server_configuration():
                         st.error(f"❌ Connection failed: {result['message']}")
             else:
                 add_server_to_config(server_name, endpoint, gpu_id, max_requests)
+
+def test_coordinator_simple():
+    """Simple coordinator test without complex async handling"""
+    coordinator = st.session_state.get('coordinator')
+    if not coordinator:
+        st.error("No coordinator available")
+        return
+    
+    try:
+        # Test 1: Health status (synchronous)
+        health = coordinator.get_health_status()
+        st.json({"health_check": health})
+        
+        # Test 2: Simple API call
+        if st.button("🔥 Test API Call"):
+            try:
+                # Use asyncio.run for simple test
+                async def simple_test():
+                    return await coordinator.call_model_api("Hi", {"max_tokens": 1, "temperature": 0.1})
+                
+                result = asyncio.run(simple_test())
+                st.json({"api_test": result})
+                
+            except Exception as e:
+                st.error(f"API test failed: {e}")
+        
+    except Exception as e:
+        st.error(f"Coordinator test failed: {e}")
 
 def add_server_to_config(name: str, endpoint: str, gpu_id: int, max_requests: int):
     """Add server to configuration"""
@@ -1378,39 +1276,105 @@ def start_new_conversation():
     else:
         st.info("Already in a new conversation")
 
+
+def show_file_upload_ultra_simple():
+    """Ultra-simple file upload"""
+    
+    st.markdown("### 📂 Ultra-Simple File Upload")
+    
+    coordinator = st.session_state.get('coordinator')
+    if not coordinator:
+        st.error("No coordinator")
+        return
+    
+    uploaded_file = st.file_uploader("Choose one file", type=['cbl', 'txt', 'cobol'])
+    
+    if uploaded_file and st.button("🚀 Process File"):
+        with st.spinner("Processing..."):
+            # Save file
+            with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix=f"_{uploaded_file.name}") as temp_file:
+                temp_file.write(uploaded_file.getvalue())
+                temp_file_path = temp_file.name
+            
+            try:
+                result = process_single_file_ultra_simple(coordinator, Path(temp_file_path), "cobol")
+                
+                if result and not result.get('error'):
+                    st.success("✅ File processed successfully!")
+                    st.json(result)
+                else:
+                    st.error(f"❌ Processing failed: {result.get('error', 'Unknown error')}")
+                    
+            finally:
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+
+def show_chat_ultra_simple():
+    """Ultra-simple chat"""
+    
+    st.markdown("### 💬 Ultra-Simple Chat")
+    
+    coordinator = st.session_state.get('coordinator')
+    if not coordinator:
+        st.error("No coordinator")
+        return
+    
+    query = st.text_input("Ask a question:")
+    
+    if query and st.button("💬 Send"):
+        with st.spinner("Processing..."):
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                try:
+                    result = loop.run_until_complete(
+                        coordinator.process_chat_query(query, [])
+                    )
+                    
+                    if result and not result.get('error'):
+                        st.success("✅ Response received!")
+                        st.write(result.get('response', 'No response'))
+                    else:
+                        st.error(f"❌ Chat failed: {result.get('error', 'Unknown error')}")
+                        
+                finally:
+                    loop.close()
+                    
+            except Exception as e:
+                st.error(f"❌ Chat exception: {e}")
 # ============================================================================
 # MAIN APPLICATION WITH ENHANCED NAVIGATION
 # ============================================================================
 
 def main():
-    """Enhanced main application with comprehensive single GPU support"""
+    """Ultra-simple main function"""
     
-    # Page configuration
     st.set_page_config(
-        page_title="Opulence Mainframe Analysis Platform",
+        page_title="Opulence Ultra-Simple",
         page_icon="🌐",
-        layout="wide",
-        initial_sidebar_state="expanded"
+        layout="wide"
     )
     
-    # CRITICAL FIX: Initialize session state FIRST
     initialize_session_state()
-    
-    # CRITICAL FIX: Ensure coordinator state consistency
-    ensure_coordinator_state()
-    
-    # Add custom CSS
     add_custom_css()
     
-    # Header with system status
-    show_application_header()
+    st.markdown("# 🌐 Opulence Ultra-Simple Mode")
     
-    # Enhanced sidebar navigation
-    with st.sidebar:
-        show_enhanced_sidebar()
+    # Use ultra-simple initialization
+    show_initialization_interface_ultra_simple()
     
-    # Main content area
-    show_main_content()
+    # Simple navigation
+    if st.session_state.get('initialization_status') == 'completed':
+        st.markdown("---")
+        
+        tab1, tab2 = st.tabs(["📂 File Upload", "💬 Chat"])
+        
+        with tab1:
+            show_file_upload_ultra_simple()
+            
+        with tab2:
+            show_chat_ultra_simple()
 
 def show_application_header():
     """Show application header with system status"""
@@ -1682,48 +1646,75 @@ def ensure_coordinator_state():
         st.session_state.initialization_status = 'not_started'
 
 
-def initialize_system():
-    """CRITICAL FIX: Initialize the system with immediate state updates"""
+def initialize_system_ultra_simple():
+    """ULTRA-SIMPLE: System initialization without async complexity"""
+    
     try:
-        # CRITICAL FIX: Ensure session state is initialized first
-        if 'agent_status' not in st.session_state:
-            initialize_session_state()
+        st.info("🔄 Creating ultra-simple coordinator...")
         
-        # Create a placeholder for immediate feedback
-        placeholder = st.empty()
-        placeholder.info("🔄 Initializing system...")
+        # STEP 1: Test server directly
+        try:
+            response = requests.get("http://171.201.3.165:8100/health", timeout=10)
+            if response.status_code != 200:
+                st.error(f"❌ Server not healthy: {response.status_code}")
+                return
+            st.success("✅ Server is healthy")
+        except Exception as e:
+            st.error(f"❌ Server test failed: {e}")
+            return
         
-        result = safe_run_async(init_api_coordinator_single_gpu_fixed(), timeout=120)
+        # STEP 2: Create coordinator with minimal settings
+        model_servers = [{
+            "name": "gpu_server",
+            "endpoint": "http://171.201.3.165:8100",
+            "gpu_id": 2,
+            "max_concurrent_requests": 1,
+            "timeout": 30  # Very short
+        }]
         
-        if result and result.get('success'):
-            # CRITICAL FIX: Immediately update session state
-            st.session_state.coordinator = result['coordinator']
-            st.session_state.model_servers = result['model_servers']
+        # STEP 3: Initialize using direct call
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            coordinator = create_api_coordinator_from_config(
+                model_servers=model_servers,
+                load_balancing_strategy="round_robin",
+                max_retries=0,  # No retries
+                connection_pool_size=1,
+                request_timeout=30,
+                circuit_breaker_threshold=1
+            )
+            
+            # Initialize in the loop
+            loop.run_until_complete(coordinator.initialize())
+            
+            # Store immediately
+            st.session_state.coordinator = coordinator
+            st.session_state.model_servers = model_servers
             st.session_state.initialization_status = 'completed'
             
-            # CRITICAL FIX: Initialize agent status immediately
+            # Set agents to ready
             for agent_type in AGENT_TYPES:
-                if agent_type not in st.session_state.agent_status:
-                    st.session_state.agent_status[agent_type] = {
-                        'status': 'available',
-                        'last_used': None,
-                        'total_calls': 0,
-                        'errors': 0
-                    }
-                else:
-                    st.session_state.agent_status[agent_type]['status'] = 'available'
+                st.session_state.agent_status[agent_type] = {
+                    'status': 'ready',
+                    'last_used': None,
+                    'total_calls': 0,
+                    'errors': 0
+                }
             
-            placeholder.success("✅ System initialized successfully!")
-            time.sleep(0.5)
-            st.rerun()
-        else:
-            error_msg = result.get('error') if result else "Unknown error"
-            placeholder.error(f"❌ Initialization failed: {error_msg}")
-            st.session_state.initialization_status = 'not_started'
+            st.success("✅ Ultra-simple initialization complete!")
+            
+            # DON'T close the loop - keep it for later use
+            # loop.close()  # COMMENTED OUT
+            
+        except Exception as e:
+            st.error(f"❌ Coordinator creation failed: {e}")
+            loop.close()
             
     except Exception as e:
-        st.error(f"❌ System initialization exception: {str(e)}")
-        st.session_state.initialization_status = 'not_started'
+        st.error(f"❌ Ultra-simple initialization failed: {e}")
+
 
 def restart_system():
     """Restart the system"""
@@ -1983,17 +1974,18 @@ def start_component_analysis_fixed(name: str, component_type: str, scope: str, i
         st.error(f"❌ Analysis error: {str(e)}")
 
 def show_enhanced_file_upload():
-    """FIXED: Show enhanced file upload with proper coordinator checks"""
+    """PATCHED: Show enhanced file upload with coordinator patch"""
     st.markdown("### 📂 Mainframe File Upload & Processing")
     
-    # CRITICAL FIX: Proper coordinator check with fallback
     coordinator = st.session_state.get('coordinator')
     if not coordinator:
         st.error("🔴 System not initialized. Please initialize in the sidebar.")
-        st.info("👈 Go to System Control in the sidebar and click 'Initialize System'")
         return
     
-    # File upload interface
+    # Apply the patch
+    patch_coordinator_client()
+    
+    # Rest of your file upload code...
     st.markdown("#### 📤 Upload Mainframe Files")
     
     uploaded_files = st.file_uploader(
@@ -2055,118 +2047,150 @@ def show_enhanced_file_upload():
                     st.code(file_info['content_preview'], language='text')
         
         # Processing controls
-        if st.button("🚀 Process All Files", type="primary", use_container_width=True):
+        if st.button("🚀 Process All Files (Simplified)", type="primary", use_container_width=True):
             process_files_batch_fixed(uploaded_files, file_analysis)
-
+def initialize_system_ultra_simple():
+    """ULTRA-SIMPLE: System initialization without async complexity"""
+    
+    try:
+        st.info("🔄 Creating ultra-simple coordinator...")
+        
+        # STEP 1: Test server directly
+        try:
+            response = requests.get("http://171.201.3.165:8100/health", timeout=10)
+            if response.status_code != 200:
+                st.error(f"❌ Server not healthy: {response.status_code}")
+                return
+            st.success("✅ Server is healthy")
+        except Exception as e:
+            st.error(f"❌ Server test failed: {e}")
+            return
+        
+        # STEP 2: Create coordinator with minimal settings
+        model_servers = [{
+            "name": "gpu_server",
+            "endpoint": "http://171.201.3.165:8100",
+            "gpu_id": 2,
+            "max_concurrent_requests": 1,
+            "timeout": 30  # Very short
+        }]
+        
+        # STEP 3: Initialize using direct call
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            coordinator = create_api_coordinator_from_config(
+                model_servers=model_servers,
+                load_balancing_strategy="round_robin",
+                max_retries=0,  # No retries
+                connection_pool_size=1,
+                request_timeout=30,
+                circuit_breaker_threshold=1
+            )
+            
+            # Initialize in the loop
+            loop.run_until_complete(coordinator.initialize())
+            
+            # Store immediately
+            st.session_state.coordinator = coordinator
+            st.session_state.model_servers = model_servers
+            st.session_state.initialization_status = 'completed'
+            
+            # Set agents to ready
+            for agent_type in AGENT_TYPES:
+                st.session_state.agent_status[agent_type] = {
+                    'status': 'ready',
+                    'last_used': None,
+                    'total_calls': 0,
+                    'errors': 0
+                }
+            
+            st.success("✅ Ultra-simple initialization complete!")
+            
+            # DON'T close the loop - keep it for later use
+            # loop.close()  # COMMENTED OUT
+            
+        except Exception as e:
+            st.error(f"❌ Coordinator creation failed: {e}")
+            loop.close()
+            
+    except Exception as e:
+        st.error(f"❌ Ultra-simple initialization failed: {e}")
+def process_single_file_ultra_simple(coordinator, file_path, file_type):
+    """ULTRA-SIMPLE: Process one file without async complexity"""
+    
+    try:
+        # Create a simple loop for this operation
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            result = loop.run_until_complete(
+                coordinator.process_batch_files([file_path], file_type)
+            )
+            return result
+        finally:
+            loop.close()
+            
+    except Exception as e:
+        return {"error": str(e)}
+    
 def process_files_batch_fixed(uploaded_files, file_analysis):
-    """CRITICAL FIX: Process files with better event loop handling"""
+    """ULTRA-SIMPLE: File processing without complex async management"""
     
     coordinator = st.session_state.get('coordinator')
     if not coordinator:
-        st.error("❌ Coordinator not available. Please initialize the system first.")
+        st.error("❌ No coordinator available")
         return
     
-    try:
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        results_container = st.container()
+    st.warning("⚠️ Using simplified file processing")
+    
+    for i, (uploaded_file, file_info) in enumerate(zip(uploaded_files, file_analysis)):
+        st.write(f"Processing {file_info['name']}...")
         
-        total_files = len(uploaded_files)
-        results = []
-        
-        for i, (uploaded_file, file_info) in enumerate(zip(uploaded_files, file_analysis)):
-            status_text.text(f"Processing {file_info['name']} ({i+1}/{total_files})...")
-            
+        try:
             # Save file temporarily
             with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix=f"_{file_info['name']}") as temp_file:
                 temp_file.write(uploaded_file.getvalue())
                 temp_file_path = temp_file.name
             
             try:
-                start_time = time.time()
+                # ULTRA-SIMPLE: Direct asyncio.run call
+                async def process_file():
+                    return await coordinator.process_batch_files([Path(temp_file_path)], file_info['type'])
                 
-                # CRITICAL FIX: Use a simpler approach for file processing
-                def process_single_file():
-                    """Process single file in isolated context"""
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    try:
-                        return loop.run_until_complete(
-                            coordinator.process_batch_files([Path(temp_file_path)], file_info['type'])
-                        )
-                    except Exception as e:
-                        return {"error": str(e)}
-                    finally:
-                        loop.close()
+                result = asyncio.run(process_file())
                 
-                # Run in thread to avoid event loop conflicts
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(process_single_file)
-                    try:
-                        result = future.result(timeout=60)  # Shorter timeout
-                    except concurrent.futures.TimeoutError:
-                        result = {"error": "Processing timeout"}
-                
-                processing_time = time.time() - start_time
-                
-                # Record result
-                processing_result = {
-                    'file_name': file_info['name'],
-                    'file_type': file_info['type'],
-                    'agent_used': file_info['agent'],
-                    'status': 'success' if result and not result.get('error') else 'error',
-                    'processing_time': processing_time,
-                    'result': result,
-                    'timestamp': dt.now().isoformat(),
-                    'error': result.get('error') if result else 'Unknown error'
-                }
-                
-                results.append(processing_result)
-                st.session_state.processing_history.append(processing_result)
-                
-                # Update agent status
-                agent_type = file_info['agent']
-                if 'agent_status' in st.session_state and agent_type in st.session_state.agent_status:
-                    st.session_state.agent_status[agent_type]['total_calls'] += 1
-                    st.session_state.agent_status[agent_type]['last_used'] = dt.now().isoformat()
+                if result and not result.get('error'):
+                    st.success(f"✅ {file_info['name']} processed successfully")
                     
-                    if processing_result['status'] == 'success':
-                        st.session_state.agent_status[agent_type]['status'] = 'available'
-                        with results_container:
-                            st.success(f"✅ {file_info['name']} processed successfully in {processing_time:.2f}s")
-                    else:
-                        st.session_state.agent_status[agent_type]['errors'] += 1
-                        st.session_state.agent_status[agent_type]['status'] = 'error'
-                        with results_container:
-                            st.error(f"❌ {file_info['name']} processing failed: {processing_result['error']}")
+                    # Update processing history
+                    st.session_state.processing_history.append({
+                        'file_name': file_info['name'],
+                        'status': 'success',
+                        'timestamp': dt.now().isoformat(),
+                        'result': result
+                    })
+                else:
+                    error_msg = result.get('error') if result else 'Unknown error'
+                    st.error(f"❌ {file_info['name']} failed: {error_msg}")
+                    
+                    st.session_state.processing_history.append({
+                        'file_name': file_info['name'],
+                        'status': 'error',
+                        'timestamp': dt.now().isoformat(),
+                        'error': error_msg
+                    })
             
             finally:
                 # Clean up temp file
                 if os.path.exists(temp_file_path):
                     os.remove(temp_file_path)
-            
-            progress_bar.progress((i + 1) / total_files)
-        
-        # Final summary
-        status_text.text("Processing complete!")
-        success_count = sum(1 for r in results if r['status'] == 'success')
-        error_count = len(results) - success_count
-        
-        st.success(f"🎉 Processing Summary: {success_count} successful, {error_count} errors")
-        
-        # Update dashboard metrics
-        st.session_state.dashboard_metrics['files_processed'] += success_count
-        
-        # CRITICAL FIX: If all files failed with event loop errors, suggest restart
-        if error_count == total_files and any("Event loop" in r.get('error', '') for r in results):
-            st.error("🔄 All files failed due to event loop issues. Please restart the system.")
-        
-    except Exception as e:
-        st.error(f"❌ Batch processing failed: {str(e)}")
-        if "Event loop" in str(e):
-            st.error("🔄 Event loop issue detected. Please restart the system.")
-            
+                    
+        except Exception as e:
+            st.error(f"❌ Exception processing {file_info['name']}: {e}")
+
 def show_comprehensive_agent_status():
     """Show comprehensive agent status - simplified implementation"""
     st.markdown("### 🤖 Agent Status & Monitoring")
