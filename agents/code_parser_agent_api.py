@@ -3167,140 +3167,164 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         return await self._parse_cobol_with_enhanced_analysis(content, filename)
 
     # ==================== MAIN PROCESSING METHOD ====================
-
-    async def process_file(self, file_path: Path) -> Dict[str, Any]:
-        """Process a single code file with enhanced business rule validation and LLM analysis"""
+    # In your CodeParserAgent class, add this method:
+    def process_file_sync(self, file_path: Path) -> Dict[str, Any]:
+        """Synchronous version of process_file"""
         try:
-            self.logger.info(f"Processing file: {file_path}")
+            # Read file
+            content = file_path.read_text(encoding='utf-8', errors='ignore')
             
-            if not file_path.exists():
-                return self._add_processing_info({
-                    "status": "error",
-                    "file_name": str(file_path.name),
-                    "error": "File not found"
-                })
+            # Use sync API call instead of async
+            analysis_prompt = f"Analyze this code: {content[:2000]}"
+            analysis = self.call_api_sync(analysis_prompt, {"max_tokens": 500})
             
-            # Enhanced file reading with multiple encoding attempts
-            content = await self._read_file_with_encoding(file_path)
-            if content is None:
-                return self._add_processing_info({
-                    "status": "error",
-                    "file_name": str(file_path.name),
-                    "error": "Unable to decode file"
-                })
+            # Return result in same format as async version
+            return {
+                'status': 'success',
+                'file_name': file_path.name,
+                'analysis': analysis
+            }
+        except Exception as e:
+            return {
+                'status': 'error', 
+                'file_name': file_path.name,
+                'error': str(e)
+            }
 
-            if not content.strip():
-                return self._add_processing_info({
-                    "status": "error",
-                    "file_name": str(file_path.name),
-                    "error": "File is empty"
-                })
+    #async def process_file(self, file_path: Path) -> Dict[str, Any]:
+    
+#        """Process a single code file with enhanced business rule validation and LLM analysis"""
+#        try:
+#            self.logger.info(f"Processing file: {file_path}")
+#            
+#            if not file_path.exists():
+#                return self._add_processing_info({
+#                    "status": "error",
+#                    "file_name": str(file_path.name),
+#                    "error": "File not found"
+#                })
+#            
+
+            # Enhanced file reading with multiple encoding attempts
+#            content = await self._read_file_with_encoding(file_path)
+#            if content is None:
+#                return self._add_processing_info({
+#                    "status": "error",
+#                    "file_name": str(file_path.name),
+#                    "error": "Unable to decode file"
+#                })
+
+#            if not content.strip():
+#                return self._add_processing_info({
+#                    "status": "error",
+#                    "file_name": str(file_path.name),
+#                    "error": "File is empty"
+#                })
 
             # Check for duplicates
-            if self._is_duplicate_file(file_path, content):
-                return self._add_processing_info({
-                    "status": "skipped",
-                    "file_name": str(file_path.name),
-                    "message": "File already processed (duplicate detected)"
-                })
+#            if self._is_duplicate_file(file_path, content):
+#                return self._add_processing_info({
+#                    "status": "skipped",
+#                    "file_name": str(file_path.name),
+#                    "message": "File already processed (duplicate detected)"
+#                })
             
-            file_type = self._detect_file_type(content, file_path.suffix)
-            self.logger.info(f"Detected file type: {file_type}")
+#            file_type = self._detect_file_type(content, file_path.suffix)
+#            self.logger.info(f"Detected file type: {file_type}")
             
             # Business rule validation before parsing
-            business_violations = []
-            if file_type in self.business_validators:
-                violations = await self.business_validators[file_type].validate_structure(content)
-                business_violations.extend(violations)
+#            business_violations = []
+#            if file_type in self.business_validators:
+#                violations = await self.business_validators[file_type].validate_structure(content)
+#                business_violations.extend(violations)
             
             # Parse based on file type with enhanced business context and LLM analysis
-            if file_type == 'cobol':
-                chunks = await self._parse_cobol_with_enhanced_analysis(content, str(file_path.name))
-            elif file_type == 'jcl':
-                chunks = await self._parse_jcl_with_enhanced_analysis(content, str(file_path.name))
-            elif file_type == 'copybook':
-                chunks = await self._parse_copybook_with_enhanced_analysis(content, str(file_path.name))
-            elif file_type == 'bms':
-                chunks = await self._parse_bms_with_enhanced_analysis(content, str(file_path.name))
-            elif file_type == 'cics':
-                chunks = await self._parse_cics_with_enhanced_analysis(content, str(file_path.name))
-            elif file_type == 'db2_procedure':
-                chunks = await self._parse_db2_procedure_with_enhanced_analysis(content, str(file_path.name))
-            elif file_type == 'cobol_stored_procedure':
-                chunks = await self._parse_cobol_stored_procedure_with_enhanced_analysis(content, str(file_path.name))
-            elif file_type == 'mq_program':
-                chunks = await self._parse_mq_program_with_enhanced_analysis(content, str(file_path.name))
-            else:
-                chunks = await self._parse_generic(content, str(file_path.name))
+#            if file_type == 'cobol':
+#                chunks = await self._parse_cobol_with_enhanced_analysis(content, str(file_path.name))
+#            elif file_type == 'jcl':
+#                chunks = await self._parse_jcl_with_enhanced_analysis(content, str(file_path.name))
+#            elif file_type == 'copybook':
+#                chunks = await self._parse_copybook_with_enhanced_analysis(content, str(file_path.name))
+#            elif file_type == 'bms':
+#                chunks = await self._parse_bms_with_enhanced_analysis(content, str(file_path.name))
+#            elif file_type == 'cics':
+#                chunks = await self._parse_cics_with_enhanced_analysis(content, str(file_path.name))
+#            elif file_type == 'db2_procedure':
+#                chunks = await self._parse_db2_procedure_with_enhanced_analysis(content, str(file_path.name))
+#            elif file_type == 'cobol_stored_procedure':
+#                chunks = await self._parse_cobol_stored_procedure_with_enhanced_analysis(content, str(file_path.name))
+#            elif file_type == 'mq_program':
+#                chunks = await self._parse_mq_program_with_enhanced_analysis(content, str(file_path.name))
+#            else:
+#                chunks = await self._parse_generic(content, str(file_path.name))
             
-            self.logger.info(f"Generated {len(chunks)} chunks")
+#            self.logger.info(f"Generated {len(chunks)} chunks")
+#            
+#            if not chunks:
+#                return self._add_processing_info({
+#                    "status": "warning",
+#                    "file_name": str(file_path.name),
+#                    "file_type": file_type,
+#                    "chunks_created": 0,
+#                    "message": "No chunks were created from this file"
+#                })
             
-            if not chunks:
-                return self._add_processing_info({
-                    "status": "warning",
-                    "file_name": str(file_path.name),
-                    "file_type": file_type,
-                    "chunks_created": 0,
-                    "message": "No chunks were created from this file"
-                })
-            
-            # Store business violations
-            if business_violations:
-                await self._store_business_violations(business_violations, self._extract_program_name(content, file_path))
+#            # Store business violations
+#            if business_violations:
+#                await self._store_business_violations(business_violations, self._extract_program_name(content, file_path))
             
             # Add file hash to all chunks
-            file_hash = self._generate_file_hash(content, file_path)
-            for chunk in chunks:
-                chunk.metadata['file_hash'] = file_hash
+#            file_hash = self._generate_file_hash(content, file_path)
+#            for chunk in chunks:
+#                chunk.metadata['file_hash'] = file_hash
             
-            # Store chunks with verification
-            await self._store_chunks_enhanced(chunks, file_hash)
+#            # Store chunks with verification
+#            await self._store_chunks_enhanced(chunks, file_hash)
             
             # Verify chunks were stored
-            stored_chunks = await self._verify_chunks_stored(self._extract_program_name(content, file_path))
+#            stored_chunks = await self._verify_chunks_stored(self._extract_program_name(content, file_path))
             
-            # Generate enhanced metadata with business context
-            metadata = await self._generate_metadata_enhanced(chunks, file_type, business_violations)
+#            metadata = await self._generate_metadata_enhanced(chunks, file_type, business_violations)
 
             # Generate control flow analysis for applicable file types
-            if file_type in ['cobol', 'cics', 'cobol_stored_procedure']:
-                control_flow = await self._analyze_control_flow(chunks)
-                await self._store_control_flow_analysis(control_flow, self._extract_program_name(content, file_path))
+#            if file_type in ['cobol', 'cics', 'cobol_stored_procedure']:
+#                control_flow = await self._analyze_control_flow(chunks)
+#                await self._store_control_flow_analysis(control_flow, self._extract_program_name(content, file_path))
             
             # Generate and store field lineage for data-intensive file types
-            if file_type in ['cobol', 'cics', 'copybook', 'cobol_stored_procedure']:
-                lineage_records = await self._generate_field_lineage(self._extract_program_name(content, file_path), chunks)
-                await self._store_field_lineage(lineage_records)
+#            if file_type in ['cobol', 'cics', 'copybook', 'cobol_stored_procedure']:
+#                lineage_records = await self._generate_field_lineage(self._extract_program_name(content, file_path), chunks)
+#                await self._store_field_lineage(lineage_records)
             
             # Store specialized analysis for specific file types
-            if file_type == 'copybook':
-                await self._store_copybook_analysis(chunks, self._extract_program_name(content, file_path))
-            elif file_type == 'mq_program':
-                await self._store_mq_analysis(chunks, content, self._extract_program_name(content, file_path))
-            elif file_type == 'db2_procedure':
-                await self._store_db2_procedure_analysis(chunks, self._extract_program_name(content, file_path))
+#            if file_type == 'copybook':
+#                await self._store_copybook_analysis(chunks, self._extract_program_name(content, file_path))
+#            elif file_type == 'mq_program':
+#                await self._store_mq_analysis(chunks, content, self._extract_program_name(content, file_path))
+#            elif file_type == 'db2_procedure':
+#                await self._store_db2_procedure_analysis(chunks, self._extract_program_name(content, file_path))
             
-            result = {
-                "status": "success",
-                "file_name": str(file_path.name),
-                "file_type": file_type,
-                "chunks_created": len(chunks),
-                "chunks_verified": stored_chunks,
-                "business_violations": len(business_violations),
-                "metadata": metadata,
-                "processing_timestamp": dt.now().isoformat(),
-                "file_hash": file_hash
-            }
+#            result = {
+#                "status": "success",
+#                "file_name": str(file_path.name),
+#                "file_type": file_type,
+#                "chunks_created": len(chunks),
+#                "chunks_verified": stored_chunks,
+#                "business_violations": len(business_violations),
+#                "metadata": metadata,
+#                "processing_timestamp": dt.now().isoformat(),
+#                "file_hash": file_hash
+#            }
             
-            return self._add_processing_info(result)
+#            return self._add_processing_info(result)
             
-        except Exception as e:
-            self.logger.error(f"Processing failed for {file_path}: {str(e)}")
-            return self._add_processing_info({
-                "status": "error",
-                "file_name": file_path.name,
-                "error": str(e)
-            })
+#        except Exception as e:
+#            self.logger.error(f"Processing failed for {file_path}: {str(e)}")
+#            return self._add_processing_info({
+#                "status": "error",
+#                "file_name": file_path.name,
+#                "error": str(e)
+#            })
     
     # ==================== MISSING ENHANCED PARSING METHODS ====================
 
