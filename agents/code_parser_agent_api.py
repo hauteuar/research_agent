@@ -2112,7 +2112,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         
         # IF statements
         if_matches = list(self.cobol_patterns['if_then_else'].finditer(content))
-        for match in matches:
+        for match in if_matches:
             if_analysis = await self._analyze_with_llm_cached(
                 match.group(0), 'cobol_if_statement',
                 """
