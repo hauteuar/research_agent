@@ -775,12 +775,14 @@ def show_system_status_summary():
 # ============================================================================
 
 def show_enhanced_chat_analysis():
-    """Enhanced chat analysis interface with conversation management"""
+    """FIXED: Enhanced chat analysis interface with proper coordinator checks"""
     st.markdown('<div class="sub-header">💬 Enhanced Chat Analysis</div>', unsafe_allow_html=True)
     
-    if not st.session_state.coordinator:
+    # CRITICAL FIX: Proper coordinator check
+    coordinator = st.session_state.get('coordinator')
+    if not coordinator:
         st.error("🔴 System not initialized. Please initialize in the sidebar.")
-        show_initialization_interface()
+        st.info("👈 Go to System Control in the sidebar and click 'Initialize System'")
         return
     
     # Chat interface layout
@@ -874,8 +876,14 @@ def show_chat_interface():
     display_chat_conversation()
 
 def process_chat_query_fixed(query: str):
-    """FIXED: Process user chat query with proper timeout handling"""
+    """FIXED: Process user chat query with proper coordinator checks"""
     if not query.strip():
+        return
+    
+    # CRITICAL FIX: Check coordinator first
+    coordinator = st.session_state.get('coordinator')
+    if not coordinator:
+        st.error("❌ Coordinator not available. Please initialize the system first.")
         return
     
     # Add user message to history
@@ -891,12 +899,8 @@ def process_chat_query_fixed(query: str):
     # Show processing indicator
     with st.spinner("🤖 Processing your query..."):
         try:
-            # FIXED: Check coordinator first
-            if not st.session_state.coordinator:
-                raise RuntimeError("Coordinator not available")
-            
-            # FIXED: Check server availability
-            health = st.session_state.coordinator.get_health_status()
+            # Check server availability
+            health = coordinator.get_health_status()
             if health.get('available_servers', 0) == 0:
                 raise RuntimeError("No model servers available")
             
@@ -915,7 +919,7 @@ def process_chat_query_fixed(query: str):
             
             # Create the coroutine for the chat query
             async def chat_query_task():
-                return await st.session_state.coordinator.process_chat_query(
+                return await coordinator.process_chat_query(
                     query, 
                     conversation_history,
                     **query_config
@@ -941,10 +945,11 @@ def process_chat_query_fixed(query: str):
                 
                 st.session_state.chat_history.append(assistant_message)
                 
-                # Update agent status
-                st.session_state.agent_status['chat_agent']['total_calls'] += 1
-                st.session_state.agent_status['chat_agent']['last_used'] = dt.now().isoformat()
-                st.session_state.agent_status['chat_agent']['status'] = 'available'
+                # CRITICAL FIX: Safe agent status update
+                if 'agent_status' in st.session_state and 'chat_agent' in st.session_state.agent_status:
+                    st.session_state.agent_status['chat_agent']['total_calls'] += 1
+                    st.session_state.agent_status['chat_agent']['last_used'] = dt.now().isoformat()
+                    st.session_state.agent_status['chat_agent']['status'] = 'available'
                 
                 st.success(f"✅ Response generated in {processing_time:.2f} seconds")
             
@@ -963,7 +968,10 @@ def process_chat_query_fixed(query: str):
                 }
                 
                 st.session_state.chat_history.append(error_response)
-                st.session_state.agent_status['chat_agent']['errors'] += 1
+                
+                # CRITICAL FIX: Safe agent status error update
+                if 'agent_status' in st.session_state and 'chat_agent' in st.session_state.agent_status:
+                    st.session_state.agent_status['chat_agent']['errors'] += 1
                 
                 st.error(f"❌ Query failed: {error_message}")
         
@@ -981,7 +989,10 @@ def process_chat_query_fixed(query: str):
             }
             
             st.session_state.chat_history.append(exception_response)
-            st.session_state.agent_status['chat_agent']['errors'] += 1
+            
+            # CRITICAL FIX: Safe agent status error update
+            if 'agent_status' in st.session_state and 'chat_agent' in st.session_state.agent_status:
+                st.session_state.agent_status['chat_agent']['errors'] += 1
             
             st.error(f"❌ Unexpected error: {error_msg}")
             
@@ -991,7 +1002,7 @@ def process_chat_query_fixed(query: str):
     
     # Rerun to show new messages
     st.rerun()
-
+    
 def get_conversation_context():
     """Get conversation context for chat agent"""
     max_history = st.session_state.get('chat_max_history', 5)
@@ -1318,7 +1329,7 @@ def main():
     
     # Main content area
     show_main_content()
-    
+
 def show_application_header():
     """Show application header with system status"""
     st.markdown('<div class="main-header">🌐 Opulence Fixed Mainframe Analysis Platform</div>', unsafe_allow_html=True)
@@ -1761,12 +1772,14 @@ def show_enhanced_dashboard():
         st.error(f"Failed to get system health: {str(e)}")
 
 def show_enhanced_component_analysis():
-    """Show enhanced component analysis - simplified implementation"""
+    """FIXED: Show enhanced component analysis with proper coordinator checks"""
     st.markdown("### 🔍 Enhanced Component Analysis")
     
-    if not st.session_state.coordinator:
+    # CRITICAL FIX: Proper coordinator check
+    coordinator = st.session_state.get('coordinator')
+    if not coordinator:
         st.error("🔴 System not initialized. Please initialize in the sidebar.")
-        show_initialization_interface()
+        st.info("👈 Go to System Control in the sidebar and click 'Initialize System'")
         return
     
     st.markdown("#### 🎯 Component Investigation")
@@ -1826,14 +1839,21 @@ def show_enhanced_component_analysis():
                 st.json(result)
 
 def start_component_analysis_fixed(name: str, component_type: str, scope: str, include_deps: bool):
-    """FIXED: Start component analysis with proper timeout handling"""
+    """FIXED: Start component analysis with proper coordinator checks"""
+    
+    # CRITICAL FIX: Check coordinator first
+    coordinator = st.session_state.get('coordinator')
+    if not coordinator:
+        st.error("❌ Coordinator not available. Please initialize the system first.")
+        return
+    
     try:
         with st.spinner(f"🔍 Analyzing component: {name}..."):
             start_time = time.time()
             
             # Create the coroutine for component analysis
             async def analysis_task():
-                return await st.session_state.coordinator.analyze_component(
+                return await coordinator.analyze_component(
                     name, 
                     component_type,
                     include_dependencies=include_deps
@@ -1881,11 +1901,14 @@ def start_component_analysis_fixed(name: str, component_type: str, scope: str, i
         st.error(f"❌ Analysis error: {str(e)}")
 
 def show_enhanced_file_upload():
-    """Show enhanced file upload - simplified implementation"""
+    """FIXED: Show enhanced file upload with proper coordinator checks"""
     st.markdown("### 📂 Mainframe File Upload & Processing")
     
-    if not st.session_state.coordinator:
+    # CRITICAL FIX: Proper coordinator check with fallback
+    coordinator = st.session_state.get('coordinator')
+    if not coordinator:
         st.error("🔴 System not initialized. Please initialize in the sidebar.")
+        st.info("👈 Go to System Control in the sidebar and click 'Initialize System'")
         return
     
     # File upload interface
@@ -1954,7 +1977,14 @@ def show_enhanced_file_upload():
             process_files_batch_fixed(uploaded_files, file_analysis)
 
 def process_files_batch_fixed(uploaded_files, file_analysis):
-    """FIXED: Process files in batch with proper timeout handling"""
+    """FIXED: Process files in batch with proper coordinator checks"""
+    
+    # CRITICAL FIX: Check coordinator first
+    coordinator = st.session_state.get('coordinator')
+    if not coordinator:
+        st.error("❌ Coordinator not available. Please initialize the system first.")
+        return
+    
     try:
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -1977,7 +2007,7 @@ def process_files_batch_fixed(uploaded_files, file_analysis):
                 
                 # Create the coroutine for file processing
                 async def file_processing_task():
-                    return await st.session_state.coordinator.process_batch_files(
+                    return await coordinator.process_batch_files(
                         [Path(temp_file_path)], 
                         file_info['type']
                     )
@@ -2002,19 +2032,32 @@ def process_files_batch_fixed(uploaded_files, file_analysis):
                 results.append(processing_result)
                 st.session_state.processing_history.append(processing_result)
                 
-                # Update agent status
+                # CRITICAL FIX: Safe agent status update
                 agent_type = file_info['agent']
-                st.session_state.agent_status[agent_type]['total_calls'] += 1
-                st.session_state.agent_status[agent_type]['last_used'] = dt.now().isoformat()
-                
-                if processing_result['status'] == 'success':
-                    st.session_state.agent_status[agent_type]['status'] = 'available'
-                    with results_container:
-                        st.success(f"✅ {file_info['name']} processed successfully in {processing_time:.2f}s")
+                if 'agent_status' in st.session_state and agent_type in st.session_state.agent_status:
+                    st.session_state.agent_status[agent_type]['total_calls'] += 1
+                    st.session_state.agent_status[agent_type]['last_used'] = dt.now().isoformat()
+                    
+                    if processing_result['status'] == 'success':
+                        st.session_state.agent_status[agent_type]['status'] = 'available'
+                        with results_container:
+                            st.success(f"✅ {file_info['name']} processed successfully in {processing_time:.2f}s")
+                    else:
+                        st.session_state.agent_status[agent_type]['errors'] += 1
+                        with results_container:
+                            st.error(f"❌ {file_info['name']} processing failed: {processing_result['error']}")
                 else:
-                    st.session_state.agent_status[agent_type]['errors'] += 1
-                    with results_container:
-                        st.error(f"❌ {file_info['name']} processing failed: {processing_result['error']}")
+                    # Initialize agent status if missing
+                    if 'agent_status' not in st.session_state:
+                        initialize_session_state()
+                    
+                    if agent_type not in st.session_state.agent_status:
+                        st.session_state.agent_status[agent_type] = {
+                            'status': 'available' if processing_result['status'] == 'success' else 'error',
+                            'last_used': dt.now().isoformat(),
+                            'total_calls': 1,
+                            'errors': 1 if processing_result['status'] != 'success' else 0
+                        }
             
             finally:
                 # Clean up temp file
