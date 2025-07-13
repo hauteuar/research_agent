@@ -637,9 +637,13 @@ class APIOpulenceCoordinator:
                     chunk_type TEXT NOT NULL,
                     content TEXT NOT NULL,
                     metadata TEXT,
+                    business_context TEXT,
                     embedding_id TEXT,
                     file_hash TEXT,
+                    confidence_score REAL DEFAULT 1.0,
+                    llm_analysis TEXT,
                     created_timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
                     line_start INTEGER,
                     line_end INTEGER,
                     UNIQUE(program_name, chunk_id)
