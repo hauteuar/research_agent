@@ -96,14 +96,51 @@ AGENT_TYPES = [
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
-def safe_run_async(coroutine, timeout=60):
-    """Simple async runner with nest_asyncio"""
+def safe_run_async(coroutine, timeout=120):
+    """FIXED: Enhanced async runner for Streamlit with proper timeout handling"""
+    
+    import streamlit as st
+    
     try:
-        return asyncio.run(coroutine)
+        # For Streamlit, we need to handle the event loop carefully
+        try:
+            # Check if we're already in an event loop
+            loop = asyncio.get_running_loop()
+            if loop.is_running():
+                # We're in a running loop, need to use a different approach
+                import concurrent.futures
+                
+                # Create a new event loop in a thread
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, coroutine)
+                    try:
+                        return future.result(timeout=timeout)
+                    except concurrent.futures.TimeoutError:
+                        st.error(f"Operation timed out after {timeout} seconds")
+                        return {"error": f"Timeout after {timeout} seconds"}
+            else:
+                # No running loop, we can use asyncio.run
+                return asyncio.run(coroutine)
+                
+        except RuntimeError:
+            # No event loop, create one
+            return asyncio.run(coroutine)
+            
+    except asyncio.TimeoutError:
+        st.error(f"Operation timed out after {timeout} seconds")
+        return {"error": f"Timeout after {timeout} seconds"}
     except Exception as e:
         st.error(f"Operation failed: {str(e)}")
         return {"error": str(e)}
         
+async def timeout_wrapper(coro, timeout_seconds: float = 60.0):
+    """Simple timeout wrapper that works inside async tasks"""
+    
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout_seconds)
+    except asyncio.TimeoutError:
+        raise RuntimeError(f"Operation timed out after {timeout_seconds} seconds")
+
 def with_error_handling(func):
     """Decorator to add error handling to functions"""
     def wrapper(*args, **kwargs):

@@ -8,7 +8,7 @@ KEEPS ALL CLASS NAMES AND FUNCTION SIGNATURES FOR COMPATIBILITY
 import weakref
 from contextlib import asynccontextmanager
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union, List
 import time
 import json
 
