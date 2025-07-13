@@ -96,35 +96,34 @@ AGENT_TYPES = [
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
-def safe_run_async(coroutine, timeout=120):
-    """FIXED: Enhanced async runner for Streamlit with proper timeout handling"""
-    
-    import streamlit as st
+def safe_run_async(coroutine, timeout=360):
+    """FIXED: Streamlit async runner with proper timeout handling"""
     
     try:
-        # For Streamlit, we need to handle the event loop carefully
-        try:
-            # Check if we're already in an event loop
-            loop = asyncio.get_running_loop()
-            if loop.is_running():
-                # We're in a running loop, need to use a different approach
-                import concurrent.futures
+        # Simpler approach for Streamlit
+        import concurrent.futures
+        import threading
+        
+        def run_in_thread():
+            """Run coroutine in separate thread with new event loop"""
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                return new_loop.run_until_complete(coroutine)
+            finally:
+                new_loop.close()
+        
+        # Execute in thread with timeout
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(run_in_thread)
+            try:
+                return future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError:
+                return {"error": f"Operation timed out after {timeout} seconds"}
                 
-                # Create a new event loop in a thread
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, coroutine)
-                    try:
-                        return future.result(timeout=timeout)
-                    except concurrent.futures.TimeoutError:
-                        st.error(f"Operation timed out after {timeout} seconds")
-                        return {"error": f"Timeout after {timeout} seconds"}
-            else:
-                # No running loop, we can use asyncio.run
-                return asyncio.run(coroutine)
-                
-        except RuntimeError:
-            # No event loop, create one
-            return asyncio.run(coroutine)
+    except Exception as e:
+        return {"error": f"Execution failed: {str(e)}"}
+
             
     except asyncio.TimeoutError:
         st.error(f"Operation timed out after {timeout} seconds")

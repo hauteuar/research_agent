@@ -250,58 +250,53 @@ class LoadBalancer:
 # ==================== API Client for Model Servers ====================
 
 class ModelServerClient:
-    """HTTP client for calling model servers"""
+    """FIXED: HTTP client without nested timeouts"""
     
-    def __init__(self, config: APIOpulenceConfig):
+    def __init__(self, config):
         self.config = config
         self.session: Optional[aiohttp.ClientSession] = None
         self.logger = logging.getLogger(f"{__name__}.ModelServerClient")
         
     async def initialize(self):
-        """Initialize HTTP session with simpler timeout"""
+        """FIXED: Simple session initialization without complex timeouts"""
+        
+        # Simple connector without complex timeout configurations
         connector = aiohttp.TCPConnector(
-            limit=self.config.connection_pool_size,
-            limit_per_host=10,
+            limit=10,  # Reduced from 50
+            limit_per_host=5,  # Reduced from 10
             ttl_dns_cache=300,
             keepalive_timeout=30,
             enable_cleanup_closed=True
         )
         
-        # Use a simple timeout without complex nested timeouts
-        #timeout = aiohttp.ClientTimeout(total=60)  # Simple 60s timeout
+        # CRITICAL FIX: Single simple timeout - no nested timeouts
+        timeout = aiohttp.ClientTimeout(total=180)  # 3 minutes total timeout
         
         self.session = aiohttp.ClientSession(
             connector=connector,
-            #timeout=timeout,  # This is the ONLY timeout we use
+            timeout=timeout,  # This is the ONLY timeout we use
             headers={
                 'Content-Type': 'application/json',
                 'User-Agent': 'OpulenceCoordinator/1.0.0'
             }
         )
         
-        self.logger.info("Model server client initialized with simplified timeout")
+        self.logger.info("Model server client initialized with simple timeout")
     
-    async def close(self):
-        """Close HTTP session"""
-        if self.session:
-            await self.session.close()
-            self.session = None
-    
-    async def call_generate(self, server: ModelServer, prompt: str, 
-                  params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """FIXED: Call model server without nested timeout managers"""
+    async def call_generate(self, server, prompt: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """FIXED: Simple API call without nested timeout managers"""
         
         if not self.session:
             raise RuntimeError("Client not initialized")
         
         params = params or {}
         
-        # Prepare request data
+        # Conservative request parameters
         request_data = {
             "prompt": prompt,
-            "max_tokens": min(params.get("max_tokens", 512), 1024),
-            "temperature": max(0.0, min(params.get("temperature", 0.1), 1.0)),
-            "top_p": max(0.1, min(params.get("top_p", 0.9), 1.0)),
+            "max_tokens": min(params.get("max_tokens", 100), 200),  # Much smaller
+            "temperature": max(0.0, min(params.get("temperature", 0.1), 0.3)),  # Lower
+            "top_p": max(0.1, min(params.get("top_p", 0.9), 0.9)),
             "stream": False
         }
         
@@ -310,11 +305,11 @@ class ModelServerClient:
         start_time = time.time()
         
         try:
-            # Remove nested timeout - use session timeout only
-            generate_url = urljoin(server.config.endpoint, "/generate")
+            generate_url = f"{server.config.endpoint.rstrip('/')}/generate"
             
-            # Simple request without additional timeout wrapper
+            # CRITICAL FIX: Simple request without additional timeout wrapper
             async with self.session.post(generate_url, json=request_data) as response:
+                
                 if response.status == 200:
                     result = await response.json()
                     
@@ -332,11 +327,19 @@ class ModelServerClient:
                     error_text = await response.text()
                     raise aiohttp.ClientError(f"HTTP {response.status}: {error_text}")
         
+        except asyncio.TimeoutError:
+            server.record_failure()
+            raise RuntimeError(f"Request timeout after {request_data.get('max_tokens', 100)} tokens")
+            
+        except aiohttp.ClientError as e:
+            server.record_failure()
+            raise RuntimeError(f"Client error: {e}")
+            
         except Exception as e:
             server.record_failure()
             
             # Check circuit breaker
-            if server.should_open_circuit(self.config.circuit_breaker_threshold):
+            if server.should_open_circuit(5):  # Conservative threshold
                 server.open_circuit()
             
             raise RuntimeError(f"Model server call failed: {e}")
@@ -344,53 +347,25 @@ class ModelServerClient:
         finally:
             server.active_requests -= 1
 
-
-    
-    async def _health_check_loop(self):
-        """Background health checking loop"""
-        try:
-            while True:
-                await asyncio.sleep(self.config.health_check_interval)
-                
-                # Check if event loop is still running
-                if asyncio.get_event_loop().is_closed():
-                    self.logger.info("Event loop closed, stopping health check")
-                    break
-                    
-                for server in self.load_balancer.servers:
-                    try:
-                        await self.client.health_check(server)
-                    except Exception as e:
-                        self.logger.warning(f"Health check failed for {server.config.name}: {e}")
-            
-        except asyncio.CancelledError:
-            self.logger.info("Health check loop cancelled")
-            return  # Don't re-raise, just return
-        except Exception as e:
-            self.logger.error(f"Health check loop error: {e}")
-    
-
-    async def health_check(self, server: ModelServer) -> bool:
-        """Check server health"""
+    async def health_check(self, server) -> bool:
+        """FIXED: Simple health check"""
         try:
             if not self.session:
                 return False
                 
-            health_url = urljoin(server.config.endpoint, "/health")
+            health_url = f"{server.config.endpoint.rstrip('/')}/health"
             
-            async with self.session.get(
-                health_url,
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as response:
+            # Use session's default timeout - no additional timeout wrapper
+            async with self.session.get(health_url) as response:
                 if response.status == 200:
-                    server.status = ModelServerStatus.HEALTHY
+                    server.status = "healthy"
                     return True
                 else:
-                    server.status = ModelServerStatus.UNHEALTHY
+                    server.status = "unhealthy"
                     return False
                     
         except Exception as e:
-            server.status = ModelServerStatus.UNHEALTHY
+            server.status = "unhealthy"
             self.logger.debug(f"Health check failed for {server.config.name}: {e}")
             return False
         
@@ -725,34 +700,57 @@ class APIOpulenceCoordinator:
         except Exception as e:
             self.logger.error(f"Health check loop error: {e}")
     
-    async def call_model_api(self, prompt: str, params: Dict[str, Any] = None, 
-                    preferred_gpu_id: int = None) -> Dict[str, Any]:
-        """FIXED: Remove nested timeout handling"""
+    async def initialize(self):
+        """FIXED: Simple initialization"""
+        await self.client.initialize()
         
-        server = self.load_balancer.select_server()        
+        # Test connectivity with a simple ping
+        for server in self.load_balancer.servers:
+            try:
+                is_healthy = await self.client.health_check(server)
+                if is_healthy:
+                    self.logger.info(f"✅ {server.config.name} - Connected")
+                else:
+                    self.logger.warning(f"❌ {server.config.name} - Failed")
+            except Exception as e:
+                self.logger.error(f"Server test failed: {e}")
+    
+    async def call_model_api(self, prompt: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """FIXED: Simple API call with conservative parameters"""
+        
+        # Get available server
+        server = self.load_balancer.select_server()
         if not server:
             raise RuntimeError("No available servers found")
         
+        # Use very conservative parameters to avoid timeouts
+        safe_params = {
+            "max_tokens": min(params.get("max_tokens", 50) if params else 50, 100),
+            "temperature": 0.1,  # Very low for faster generation
+            "top_p": 0.9,
+            "stream": False
+        }
+        
         try:
-            self.logger.debug(f"Routing request to {server.config.name}")
+            self.logger.info(f"🔧 Making API call to {server.config.name} with {safe_params['max_tokens']} tokens")
             
-            # Direct call without additional timeout wrapping
-            result = await self.client.call_generate(server, prompt, params)
-            self.stats["total_api_calls"] += 1
+            result = await self.client.call_generate(server, prompt, safe_params)
+            
+            self.logger.info(f"✅ API call successful in {result.get('latency', 0):.2f}s")
             return result
             
         except Exception as e:
-            self.logger.warning(f"Request failed on {server.config.name}: {e}")
+            self.logger.error(f"❌ API call failed: {e}")
             
-            # Simple retry without timeout complexity
+            # Try one more server if available
             retry_server = self.load_balancer.select_server()
             if retry_server and retry_server != server:
                 try:
-                    result = await self.client.call_generate(retry_server, prompt, params)
-                    self.stats["total_api_calls"] += 1
+                    self.logger.info(f"🔄 Retrying with {retry_server.config.name}")
+                    result = await self.client.call_generate(retry_server, prompt, safe_params)
                     return result
                 except Exception as retry_e:
-                    self.logger.error(f"Retry failed: {retry_e}")
+                    self.logger.error(f"Retry also failed: {retry_e}")
             
             raise RuntimeError(f"All servers failed: {str(e)}")
     
