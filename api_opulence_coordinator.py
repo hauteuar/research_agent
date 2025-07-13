@@ -966,6 +966,14 @@ class APIOpulenceCoordinator:
                 else:
                     agent = self.get_agent("code_parser")
                 
+                # DEBUG: Check what agent we get
+                
+                
+                # CRITICAL DEBUG LINES - ADD THESE:
+                self.logger.info(f"🔍 Agent type requested: {agent}")
+                self.logger.info(f"🔍 Agent class returned: {type(agent).__name__}")
+                self.logger.info(f"🔍 Agent module: {type(agent).__module__}")
+                self.logger.info(f"🔍 Agent has process_file: {hasattr(agent, 'process_file')}")
                 # Process with API-based agent
                 result = await agent.process_file(file_path)
                 await self._ensure_file_stored_in_db(file_path, result, file_type)
