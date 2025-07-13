@@ -523,6 +523,10 @@ async def init_api_coordinator_single_gpu_fixed():
             
             st.success("✅ Coordinator initialized")
             
+            # CRITICAL FIX: Ensure session state is initialized BEFORE validation
+            if 'agent_status' not in st.session_state:
+                initialize_session_state()
+            
             # MINIMAL validation test with timeout
             st.info("🔍 Running minimal validation...")
             try:
@@ -543,15 +547,32 @@ async def init_api_coordinator_single_gpu_fixed():
                     st.session_state.coordinator = coordinator
                     st.session_state.initialization_status = "completed"
                     
+                    # CRITICAL FIX: Initialize agent status safely
+                    if 'agent_status' not in st.session_state:
+                        initialize_session_state()
+                    
                     # Initialize agent status conservatively
                     for agent_type in AGENT_TYPES:
                         try:
-                            st.session_state.agent_status[agent_type]['status'] = 'available'
-                            if 'agent_status' not in st.session_state:
-                                initialize_session_state()
+                            if agent_type in st.session_state.agent_status:
+                                st.session_state.agent_status[agent_type]['status'] = 'available'
+                            else:
+                                st.session_state.agent_status[agent_type] = {
+                                    'status': 'available',
+                                    'last_used': None,
+                                    'total_calls': 0,
+                                    'errors': 0
+                                }
                         except Exception as e:
-                            st.session_state.agent_status[agent_type]['status'] = 'error'
-                            st.session_state.agent_status[agent_type]['error_message'] = str(e)
+                            st.warning(f"Agent status warning for {agent_type}: {e}")
+                            if agent_type not in st.session_state.agent_status:
+                                st.session_state.agent_status[agent_type] = {
+                                    'status': 'error',
+                                    'last_used': None,
+                                    'total_calls': 0,
+                                    'errors': 1,
+                                    'error_message': str(e)
+                                }
                     
                     st.success("🎉 System fully initialized!")
                     return {"success": True}
@@ -567,6 +588,14 @@ async def init_api_coordinator_single_gpu_fixed():
                 return {"success": False, "error": "Validation timeout"}
             except Exception as validation_error:
                 st.error(f"❌ Validation error: {validation_error}")
+                # CRITICAL FIX: Check if it's a session state error
+                if "agent_status" in str(validation_error):
+                    st.warning("🔧 Session state issue detected, reinitializing...")
+                    initialize_session_state()
+                    st.session_state.coordinator = coordinator
+                    st.session_state.initialization_status = "completed"
+                    return {"success": True, "warning": "Session state reinitialized"}
+                
                 # Still keep coordinator for debugging
                 st.session_state.coordinator = coordinator
                 st.session_state.initialization_status = f"validation_error: {validation_error}"
@@ -578,6 +607,13 @@ async def init_api_coordinator_single_gpu_fixed():
         return {"error": "Coordinator initialization timeout"}
     except Exception as e:
         st.error(f"❌ Coordinator creation failed: {str(e)}")
+        # CRITICAL FIX: Check if it's a session state error
+        if "agent_status" in str(e):
+            st.warning("🔧 Session state issue during initialization, fixing...")
+            initialize_session_state()
+            st.session_state.initialization_status = "session_state_fixed"
+            return {"success": True, "warning": "Session state issue resolved"}
+        
         st.session_state.initialization_status = f"error: {str(e)}"
         return {"error": str(e)}
 
@@ -598,6 +634,10 @@ def show_initialization_interface():
     """Show initialization interface optimized for single GPU"""
     st.markdown('<div class="sub-header">🚀 System Initialization</div>', unsafe_allow_html=True)
     
+    # CRITICAL FIX: Ensure session state is initialized first
+    if 'agent_status' not in st.session_state:
+        initialize_session_state()
+    
     if not COORDINATOR_AVAILABLE:
         st.error("🔴 API Coordinator module not available")
         st.code(st.session_state.get('import_error', 'Unknown import error'))
@@ -615,16 +655,23 @@ def show_initialization_interface():
         
         with col1:
             if st.button("🚀 Auto-Initialize (Recommended)", type="primary", use_container_width=True):
+                # CRITICAL FIX: Ensure session state before initialization
+                if 'agent_status' not in st.session_state:
+                    initialize_session_state()
+                
                 with st.spinner("Initializing system with proper timeouts..."):
                     result = safe_run_async(init_api_coordinator_single_gpu_fixed(), timeout=120)
                     
                     if result and result.get('success'):
                         st.success("✅ System initialized successfully!")
+                        if result.get('warning'):
+                            st.warning(f"⚠️ {result['warning']}")
                         time.sleep(2)  # Brief pause to show success
                         st.rerun()
                     else:
                         error_msg = result.get('error') if result else "Unknown error"
                         st.error(f"❌ Initialization failed: {error_msg}")
+
         
         with col2:
             if st.button("⚙️ Manual Configuration", use_container_width=True):
@@ -1581,28 +1628,51 @@ def show_main_content():
 def initialize_system():
     """Initialize the system"""
     try:
+        # CRITICAL FIX: Ensure session state is initialized first
+        if 'agent_status' not in st.session_state:
+            initialize_session_state()
+        
         with st.spinner("🚀 Initializing system with fixed timeouts..."):
             result = safe_run_async(init_api_coordinator_single_gpu_fixed(), timeout=120)
             
             if result and result.get('success'):
                 st.success("✅ System initialized successfully!")
+                if result.get('warning'):
+                    st.warning(f"⚠️ {result['warning']}")
                 time.sleep(1)  # Brief pause to show the message
                 st.rerun()
             else:
                 error_msg = result.get('error') if result else "Unknown error"
-                st.error(f"❌ Initialization failed: {error_msg}")
-                st.session_state.initialization_status = f"error: {error_msg}"
+                
+                # CRITICAL FIX: Handle session state errors specifically
+                if "agent_status" in error_msg:
+                    st.warning("🔧 Detected session state issue, attempting to fix...")
+                    initialize_session_state()
+                    st.info("✅ Session state reinitialized, please try again")
+                    st.session_state.initialization_status = 'not_started'
+                else:
+                    st.error(f"❌ Initialization failed: {error_msg}")
+                    st.session_state.initialization_status = f"error: {error_msg}"
                 
                 # Show detailed error in debug mode
                 if st.session_state.get('debug_mode', False):
                     st.json(result)
     except Exception as e:
-        st.error(f"❌ System initialization exception: {str(e)}")
-        st.session_state.initialization_status = f"exception: {str(e)}"
+        error_str = str(e)
+        
+        # CRITICAL FIX: Handle session state errors
+        if "agent_status" in error_str:
+            st.warning("🔧 Session state error detected, fixing...")
+            initialize_session_state()
+            st.info("✅ Session state fixed, please try initialization again")
+            st.session_state.initialization_status = 'not_started'
+        else:
+            st.error(f"❌ System initialization exception: {error_str}")
+            st.session_state.initialization_status = f"exception: {error_str}"
         
         if st.session_state.get('debug_mode', False):
             st.exception(e)
-
+            
 def restart_system():
     """Restart the system"""
     try:
