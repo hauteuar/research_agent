@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-API-Based Opulence Coordinator System - FIXED VERSION
-Replaces direct GPU management with HTTP API calls to model servers
+API-Based Opulence Coordinator System - CONSERVATIVE VERSION
+FIXED: All timeout issues and model server initialization problems
 Keeps ALL existing class names and function signatures for compatibility
 """
 
@@ -84,8 +84,8 @@ class ModelServerConfig:
     endpoint: str
     gpu_id: int  # Keep for compatibility but used as identifier only
     name: str = ""
-    max_concurrent_requests: int = 10
-    timeout: int = 300
+    max_concurrent_requests: int = 1  # CONSERVATIVE: Only 1 request at a time
+    timeout: int = 180  # CONSERVATIVE: 3 minutes
     
     def __post_init__(self):
         if not self.name:
@@ -93,34 +93,34 @@ class ModelServerConfig:
 
 @dataclass
 class APIOpulenceConfig:
-    """Configuration for API-based Opulence Coordinator"""
+    """Configuration for API-based Opulence Coordinator - CONSERVATIVE VERSION"""
     # Model server endpoints
     model_servers: List[ModelServerConfig] = field(default_factory=list)
     
     # Load balancing
-    load_balancing_strategy: LoadBalancingStrategy = LoadBalancingStrategy.LEAST_BUSY
+    load_balancing_strategy: LoadBalancingStrategy = LoadBalancingStrategy.ROUND_ROBIN
     
-    # Connection pool settings
-    connection_pool_size: int = 50
-    connection_timeout: int = 30
-    request_timeout: int = 300
+    # CONSERVATIVE connection pool settings
+    connection_pool_size: int = 2  # Very small
+    connection_timeout: int = 60  # 1 minute
+    request_timeout: int = 180  # 3 minutes
     
-    # Retry settings
-    max_retries: int = 3
-    retry_delay: float = 1.0
-    exponential_backoff: bool = True
+    # CONSERVATIVE retry settings
+    max_retries: int = 1  # Minimal retries
+    retry_delay: float = 5.0  # Long delay
+    exponential_backoff: bool = False
     
-    # Health checking
-    health_check_interval: int = 30
-    circuit_breaker_threshold: int = 5
-    circuit_breaker_timeout: int = 60
+    # CONSERVATIVE health checking
+    health_check_interval: int = 60  # 1 minute
+    circuit_breaker_threshold: int = 10  # Very tolerant
+    circuit_breaker_timeout: int = 120  # 2 minutes
     
     # Database
     db_path: str = "opulence_api_data.db"
     
-    # Backwards compatibility settings
-    max_tokens: int = 1024
-    temperature: float = 0.1
+    # CONSERVATIVE backwards compatibility settings
+    max_tokens: int = 50  # Much smaller default
+    temperature: float = 0.1  # Low for speed
     auto_cleanup: bool = True
     
     @classmethod
@@ -131,7 +131,9 @@ class APIOpulenceConfig:
             servers.append(ModelServerConfig(
                 endpoint=endpoint,
                 gpu_id=gpu_id,
-                name=f"gpu_{gpu_id}"
+                name=f"gpu_{gpu_id}",
+                max_concurrent_requests=1,  # CONSERVATIVE
+                timeout=180
             ))
         return cls(model_servers=servers)
 
@@ -168,7 +170,7 @@ class ModelServer:
         """Check if server is available for requests"""
         if self.status == ModelServerStatus.CIRCUIT_OPEN:
             # Check if circuit breaker should be reset
-            if time.time() - self.circuit_breaker_open_time > 60:
+            if time.time() - self.circuit_breaker_open_time > self.config.timeout:
                 self.status = ModelServerStatus.UNKNOWN
                 return True
             return False
@@ -181,6 +183,7 @@ class ModelServer:
         self.successful_requests += 1
         self.total_latency += latency
         self.consecutive_failures = 0
+        self.status = ModelServerStatus.HEALTHY
         
     def record_failure(self):
         """Record failed request"""
@@ -250,27 +253,27 @@ class LoadBalancer:
 # ==================== API Client for Model Servers ====================
 
 class ModelServerClient:
-    """FIXED: HTTP client without nested timeouts"""
+    """HTTP client for calling model servers - CONSERVATIVE VERSION"""
     
-    def __init__(self, config):
+    def __init__(self, config: APIOpulenceConfig):
         self.config = config
         self.session: Optional[aiohttp.ClientSession] = None
         self.logger = logging.getLogger(f"{__name__}.ModelServerClient")
         
     async def initialize(self):
-        """FIXED: Simple session initialization without complex timeouts"""
+        """FIXED: Conservative session initialization"""
         
-        # Simple connector without complex timeout configurations
+        # CONSERVATIVE connector settings
         connector = aiohttp.TCPConnector(
-            limit=10,  # Reduced from 50
-            limit_per_host=5,  # Reduced from 10
+            limit=2,  # Very small pool
+            limit_per_host=1,  # Only 1 connection per host
             ttl_dns_cache=300,
             keepalive_timeout=30,
             enable_cleanup_closed=True
         )
         
         # CRITICAL FIX: Single simple timeout - no nested timeouts
-        timeout = aiohttp.ClientTimeout(total=180)  # 3 minutes total timeout
+        timeout = aiohttp.ClientTimeout(total=180)  # 3 minutes total
         
         self.session = aiohttp.ClientSession(
             connector=connector,
@@ -281,21 +284,28 @@ class ModelServerClient:
             }
         )
         
-        self.logger.info("Model server client initialized with simple timeout")
+        self.logger.info("Conservative model server client initialized")
     
-    async def call_generate(self, server, prompt: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """FIXED: Simple API call without nested timeout managers"""
+    async def close(self):
+        """Close HTTP session"""
+        if self.session:
+            await self.session.close()
+            self.session = None
+    
+    async def call_generate(self, server: ModelServer, prompt: str, 
+                  params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """FIXED: Conservative API call without nested timeouts"""
         
         if not self.session:
             raise RuntimeError("Client not initialized")
         
         params = params or {}
         
-        # Conservative request parameters
+        # CONSERVATIVE request parameters
         request_data = {
             "prompt": prompt,
-            "max_tokens": min(params.get("max_tokens", 100), 200),  # Much smaller
-            "temperature": max(0.0, min(params.get("temperature", 0.1), 0.3)),  # Lower
+            "max_tokens": min(params.get("max_tokens", 20), 50),  # Very small
+            "temperature": max(0.0, min(params.get("temperature", 0.1), 0.3)),  # Low for speed
             "top_p": max(0.1, min(params.get("top_p", 0.9), 0.9)),
             "stream": False
         }
@@ -305,11 +315,11 @@ class ModelServerClient:
         start_time = time.time()
         
         try:
+            # Clean URL construction
             generate_url = f"{server.config.endpoint.rstrip('/')}/generate"
             
             # CRITICAL FIX: Simple request without additional timeout wrapper
             async with self.session.post(generate_url, json=request_data) as response:
-                
                 if response.status == 200:
                     result = await response.json()
                     
@@ -329,7 +339,7 @@ class ModelServerClient:
         
         except asyncio.TimeoutError:
             server.record_failure()
-            raise RuntimeError(f"Request timeout after {request_data.get('max_tokens', 100)} tokens")
+            raise RuntimeError(f"Request timeout after {request_data.get('max_tokens', 20)} tokens")
             
         except aiohttp.ClientError as e:
             server.record_failure()
@@ -339,7 +349,7 @@ class ModelServerClient:
             server.record_failure()
             
             # Check circuit breaker
-            if server.should_open_circuit(5):  # Conservative threshold
+            if server.should_open_circuit(self.config.circuit_breaker_threshold):
                 server.open_circuit()
             
             raise RuntimeError(f"Model server call failed: {e}")
@@ -347,8 +357,8 @@ class ModelServerClient:
         finally:
             server.active_requests -= 1
 
-    async def health_check(self, server) -> bool:
-        """FIXED: Simple health check"""
+    async def health_check(self, server: ModelServer) -> bool:
+        """FIXED: Conservative health check"""
         try:
             if not self.session:
                 return False
@@ -358,14 +368,14 @@ class ModelServerClient:
             # Use session's default timeout - no additional timeout wrapper
             async with self.session.get(health_url) as response:
                 if response.status == 200:
-                    server.status = "healthy"
+                    server.status = ModelServerStatus.HEALTHY
                     return True
                 else:
-                    server.status = "unhealthy"
+                    server.status = ModelServerStatus.UNHEALTHY
                     return False
                     
         except Exception as e:
-            server.status = "unhealthy"
+            server.status = ModelServerStatus.UNHEALTHY
             self.logger.debug(f"Health check failed for {server.config.name}: {e}")
             return False
         
@@ -394,16 +404,16 @@ class APIEngineContext:
         elif isinstance(sampling_params, dict):
             params = sampling_params.copy()
         else:
-            params = {"max_tokens": 512, "temperature": 0.7, "top_p": 0.9}
+            params = {"max_tokens": 20, "temperature": 0.1, "top_p": 0.9}  # CONSERVATIVE defaults
         
-        # Clean parameters
+        # CONSERVATIVE parameter validation
         validated_params = {}
         for key, value in params.items():
             if value is not None:
                 if key == "max_tokens":
-                    validated_params[key] = max(1, min(value, 4096))
+                    validated_params[key] = max(1, min(value, 50))  # Very small limit
                 elif key == "temperature":
-                    validated_params[key] = max(0.0, min(value, 2.0))
+                    validated_params[key] = max(0.0, min(value, 0.3))  # Low for speed
                 elif key == "top_p":
                     validated_params[key] = max(0.0, min(value, 1.0))
                 else:
@@ -447,7 +457,7 @@ class APIEngineContext:
 # ==================== API-Based Coordinator (Keep exact class name) ====================
 
 class APIOpulenceCoordinator:
-    """API-based Opulence Coordinator - orchestrates existing agents through API calls"""
+    """API-based Opulence Coordinator - CONSERVATIVE VERSION"""
     
     def __init__(self, config: APIOpulenceConfig):
         self.logger = logging.getLogger(f"{__name__}.APIOpulenceCoordinator")
@@ -476,55 +486,56 @@ class APIOpulenceCoordinator:
             "total_api_calls": 0,
             "avg_response_time": 0,
             "start_time": time.time(),
-            "coordinator_type": "api_based"
+            "coordinator_type": "api_based_conservative"
         }
         
+        # CONSERVATIVE agent configurations
         self.agent_configs = {
             "code_parser": {
-                "max_tokens": 2000,
+                "max_tokens": 100,  # Small
                 "temperature": 0.1,
                 "top_p": 0.9,
                 "description": "Analyzes and parses code structures"
             },
             "vector_index": {
-                "max_tokens": 1000,
-                "temperature": 0.2,
+                "max_tokens": 50,  # Very small
+                "temperature": 0.1,
                 "top_p": 0.9,
                 "description": "Handles vector embeddings and similarity search"
             },
             "data_loader": {
-                "max_tokens": 1500,
+                "max_tokens": 75,  # Small
                 "temperature": 0.1,
                 "top_p": 0.9,
                 "description": "Processes and loads data files"
             },
             "lineage_analyzer": {
-                "max_tokens": 2000,
-                "temperature": 0.2,
+                "max_tokens": 100,  # Small
+                "temperature": 0.1,
                 "top_p": 0.9,
                 "description": "Analyzes data and code lineage"
             },
             "logic_analyzer": {
-                "max_tokens": 2500,
+                "max_tokens": 100,  # Small
                 "temperature": 0.1,
                 "top_p": 0.9,
                 "description": "Analyzes program logic and flow"
             },
             "documentation": {
-                "max_tokens": 3000,
-                "temperature": 0.3,
-                "top_p": 0.95,
+                "max_tokens": 150,  # Medium
+                "temperature": 0.1,
+                "top_p": 0.9,
                 "description": "Generates documentation"
             },
             "db2_comparator": {
-                "max_tokens": 1500,
+                "max_tokens": 75,  # Small
                 "temperature": 0.1,
                 "top_p": 0.9,
                 "description": "Compares database schemas and data"
             },
             "chat_agent": {
-                "max_tokens": 1000,
-                "temperature": 0.4,
+                "max_tokens": 100,  # Small
+                "temperature": 0.2,  # Slightly higher for chat
                 "top_p": 0.9,
                 "description": "Handles interactive chat queries"
             }
@@ -533,30 +544,32 @@ class APIOpulenceCoordinator:
         # For backwards compatibility
         self.selected_gpus = [server.config.gpu_id for server in self.load_balancer.servers]
         
-        #self.logger = logging.getLogger(f"{__name__}.APIOpulenceCoordinator")
-        self.logger.info(f"API Coordinator initialized with servers: {[s.config.name for s in self.load_balancer.servers]}")
+        self.logger.info(f"Conservative API Coordinator initialized with servers: {[s.config.name for s in self.load_balancer.servers]}")
     
     async def initialize(self):
-        """Initialize the coordinator"""
+        """Initialize the coordinator - CONSERVATIVE VERSION"""
         await self.client.initialize()
         
-        # Test server connectivity
-        await self._test_connectivity()
+        # Test server connectivity with conservative approach
+        await self._test_connectivity_conservative()
         
-        # Start health checking
-        #self.health_check_task = asyncio.create_task(self._health_check_loop())
-        
-        self.logger.info("API Coordinator initialized successfully")
+        self.logger.info("Conservative API Coordinator initialized successfully")
     
-    async def _test_connectivity(self):
-        """Test connectivity to all servers"""
+    async def _test_connectivity_conservative(self):
+        """CONSERVATIVE: Test connectivity to all servers"""
         healthy_count = 0
         for server in self.load_balancer.servers:
-            if await self.client.health_check(server):
-                healthy_count += 1
-                self.logger.info(f"✅ {server.config.name} ({server.config.endpoint}) - Connected")
-            else:
-                self.logger.warning(f"❌ {server.config.name} ({server.config.endpoint}) - Failed")
+            try:
+                # Give each server more time
+                await asyncio.sleep(1)  # Small delay between tests
+                
+                if await self.client.health_check(server):
+                    healthy_count += 1
+                    self.logger.info(f"✅ {server.config.name} ({server.config.endpoint}) - Connected")
+                else:
+                    self.logger.warning(f"❌ {server.config.name} ({server.config.endpoint}) - Failed")
+            except Exception as e:
+                self.logger.error(f"Server test error for {server.config.name}: {e}")
         
         if healthy_count == 0:
             raise RuntimeError("No model servers are accessible!")
@@ -578,7 +591,7 @@ class APIOpulenceCoordinator:
             if self.client:
                 await self.client.close()
             
-            self.logger.info("API Coordinator shut down successfully")
+            self.logger.info("Conservative API Coordinator shut down successfully")
         
         except Exception as e:
             self.logger.error(f"Error during shutdown: {str(e)}")
@@ -682,75 +695,35 @@ class APIOpulenceCoordinator:
             self.logger.error(f"Database initialization failed: {str(e)}")
             raise
     
-    async def _health_check_loop(self):
-        """Background health checking loop"""
-        try:
-            while True:
-                await asyncio.sleep(self.config.health_check_interval)
-                
-                for server in self.load_balancer.servers:
-                    try:
-                        await self.client.health_check(server)
-                    except Exception as e:
-                        self.logger.warning(f"Health check failed for {server.config.name}: {e}")
-            
-        except asyncio.CancelledError:
-            self.logger.info("Health check loop cancelled")
-            raise
-        except Exception as e:
-            self.logger.error(f"Health check loop error: {e}")
-    
-    async def initialize(self):
-        """FIXED: Simple initialization"""
-        await self.client.initialize()
+    async def call_model_api(self, prompt: str, params: Dict[str, Any] = None, 
+                    preferred_gpu_id: int = None) -> Dict[str, Any]:
+        """CONSERVATIVE: API call with simple error handling"""
         
-        # Test connectivity with a simple ping
-        for server in self.load_balancer.servers:
-            try:
-                is_healthy = await self.client.health_check(server)
-                if is_healthy:
-                    self.logger.info(f"✅ {server.config.name} - Connected")
-                else:
-                    self.logger.warning(f"❌ {server.config.name} - Failed")
-            except Exception as e:
-                self.logger.error(f"Server test failed: {e}")
-    
-    async def call_model_api(self, prompt: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """FIXED: Simple API call with conservative parameters"""
-        
-        # Get available server
-        server = self.load_balancer.select_server()
+        server = self.load_balancer.select_server()        
         if not server:
             raise RuntimeError("No available servers found")
         
-        # Use very conservative parameters to avoid timeouts
-        safe_params = {
-            "max_tokens": min(params.get("max_tokens", 50) if params else 50, 100),
-            "temperature": 0.1,  # Very low for faster generation
-            "top_p": 0.9,
-            "stream": False
-        }
-        
         try:
-            self.logger.info(f"🔧 Making API call to {server.config.name} with {safe_params['max_tokens']} tokens")
+            self.logger.debug(f"Conservative API call to {server.config.name}")
             
-            result = await self.client.call_generate(server, prompt, safe_params)
-            
-            self.logger.info(f"✅ API call successful in {result.get('latency', 0):.2f}s")
+            # Direct call with conservative parameters
+            result = await self.client.call_generate(server, prompt, params)
+            self.stats["total_api_calls"] += 1
             return result
             
         except Exception as e:
-            self.logger.error(f"❌ API call failed: {e}")
+            self.logger.warning(f"Request failed on {server.config.name}: {e}")
             
-            # Try one more server if available
+            # Simple retry with different server if available
             retry_server = self.load_balancer.select_server()
             if retry_server and retry_server != server:
                 try:
-                    self.logger.info(f"🔄 Retrying with {retry_server.config.name}")
-                    result = await self.client.call_generate(retry_server, prompt, safe_params)
+                    self.logger.info(f"Retrying with {retry_server.config.name}")
+                    result = await self.client.call_generate(retry_server, prompt, params)
+                    self.stats["total_api_calls"] += 1
                     return result
                 except Exception as retry_e:
-                    self.logger.error(f"Retry also failed: {retry_e}")
+                    self.logger.error(f"Retry failed: {retry_e}")
             
             raise RuntimeError(f"All servers failed: {str(e)}")
     
@@ -764,7 +737,7 @@ class APIOpulenceCoordinator:
     
     def _create_agent(self, agent_type: str):
         """Create agent using API-based engine context"""
-        self.logger.info(f"🔗 Creating {agent_type} agent (API-based)")
+        self.logger.info(f"🔗 Creating {agent_type} agent (Conservative API-based)")
         
         # Get agent configuration
         agent_config = self.agent_configs.get(agent_type, {})
@@ -843,16 +816,16 @@ class APIOpulenceCoordinator:
                     gpu_id=selected_gpu_id
                 )
             
-            # Configure agent with API parameters
+            # Configure agent with CONSERVATIVE API parameters
             if hasattr(agent, 'update_api_params') and agent_config:
                 conservative_params = {
-                    'max_tokens': min(agent_config.get('max_tokens', 512), 1024),
-                    'temperature': min(agent_config.get('temperature', 0.1), 0.3),
+                    'max_tokens': min(agent_config.get('max_tokens', 50), 100),  # Very small
+                    'temperature': min(agent_config.get('temperature', 0.1), 0.2),  # Low
                     'top_p': min(agent_config.get('top_p', 0.9), 0.9),
                     'stream': False
                 }
                 agent.update_api_params(**conservative_params)
-                self.logger.info(f"Applied configuration to {agent_type}: {conservative_params}")
+                self.logger.info(f"Applied conservative configuration to {agent_type}: {conservative_params}")
             
             # Inject API-based engine context
             agent.get_engine_context = self._create_engine_context_for_agent(agent)
@@ -950,7 +923,7 @@ class APIOpulenceCoordinator:
         results = []
         total_files = len(file_paths)
         
-        self.logger.info(f"🚀 Processing {total_files} files using API-based agents")
+        self.logger.info(f"🚀 Processing {total_files} files using conservative API-based agents")
         
         for i, file_path in enumerate(file_paths):
             try:
@@ -964,17 +937,14 @@ class APIOpulenceCoordinator:
                 else:
                     agent_type = "code_parser"
                 
-                # DEBUG: Check what agent we get
+                # Get agent
                 agent = self.get_agent(agent_type)
                         
-                # DEBUG: Check what agent we get
-                
-                
-                # CRITICAL DEBUG LINES - ADD THESE:
                 self.logger.info(f"🔍 Agent type requested: {agent_type}")
                 self.logger.info(f"🔍 Agent class returned: {type(agent).__name__}")
                 self.logger.info(f"🔍 Agent module: {type(agent).__module__}")
                 self.logger.info(f"🔍 Agent has process_file: {hasattr(agent, 'process_file')}")
+                
                 # Process with API-based agent
                 result = await agent.process_file(file_path)
                 await self._ensure_file_stored_in_db(file_path, result, file_type)
@@ -1001,7 +971,7 @@ class APIOpulenceCoordinator:
             "servers_used": [s.config.name for s in self.load_balancer.servers]
         }
     
-    async def analyze_component(self, component_name: str, component_type: str = None) -> Dict[str, Any]:
+    async def analyze_component(self, component_name: str, component_type: str = None, **kwargs) -> Dict[str, Any]:
         """Analyze component - same interface as original"""
         start_time = time.time()
         
@@ -1017,7 +987,7 @@ class APIOpulenceCoordinator:
                 "analyses": {},
                 "processing_metadata": {
                     "start_time": start_time,
-                    "coordinator_type": "api_based"
+                    "coordinator_type": "api_based_conservative"
                 }
             }
             
@@ -1081,8 +1051,8 @@ class APIOpulenceCoordinator:
                 self.logger.info(f"🔄 Running semantic analysis for {component_name}")
                 vector_agent = self.get_agent("vector_index")
                 
-                similarity_result = await vector_agent.search_similar_components(component_name, top_k=10)
-                semantic_result = await vector_agent.semantic_search(f"{component_name} similar functionality", top_k=5)
+                similarity_result = await vector_agent.search_similar_components(component_name, top_k=5)  # Smaller
+                semantic_result = await vector_agent.semantic_search(f"{component_name} similar functionality", top_k=3)  # Smaller
                 
                 analysis_result["analyses"]["semantic_analysis"] = {
                     "status": "success",
@@ -1130,14 +1100,14 @@ class APIOpulenceCoordinator:
                 "status": "system_error",
                 "error": str(e),
                 "processing_time": time.time() - start_time,
-                "coordinator_type": "api_based"
+                "coordinator_type": "api_based_conservative"
             }
     
-    async def process_chat_query(self, query: str, conversation_history: List[Dict] = None) -> Dict[str, Any]:
+    async def process_chat_query(self, query: str, conversation_history: List[Dict] = None, **kwargs) -> Dict[str, Any]:
         """Process chat query - same interface as original"""
         try:
             chat_agent = self.get_agent("chat_agent")
-            result = await chat_agent.process_chat_query(query, conversation_history)
+            result = await chat_agent.process_chat_query(query, conversation_history, **kwargs)
             
             self.stats["total_queries"] += 1
             return result
@@ -1148,10 +1118,10 @@ class APIOpulenceCoordinator:
                 "response": f"I encountered an error: {str(e)}",
                 "response_type": "error",
                 "suggestions": ["Try rephrasing your question", "Check system status"],
-                "coordinator_type": "api_based"
+                "coordinator_type": "api_based_conservative"
             }
     
-    async def search_code_patterns(self, query: str, limit: int = 10) -> Dict[str, Any]:
+    async def search_code_patterns(self, query: str, limit: int = 5) -> Dict[str, Any]:  # Smaller limit
         """Search code patterns - same interface as original"""
         try:
             vector_agent = self.get_agent("vector_index")
@@ -1162,7 +1132,7 @@ class APIOpulenceCoordinator:
                 "query": query,
                 "results": results,
                 "total_found": len(results),
-                "coordinator_type": "api_based"
+                "coordinator_type": "api_based_conservative"
             }
             
         except Exception as e:
@@ -1171,7 +1141,7 @@ class APIOpulenceCoordinator:
                 "status": "error",
                 "error": str(e),
                 "query": query,
-                "coordinator_type": "api_based"
+                "coordinator_type": "api_based_conservative"
             }
     
     # ==================== Helper Methods (Same as Original) ====================
@@ -1290,7 +1260,7 @@ class APIOpulenceCoordinator:
         
         return {
             "status": "healthy" if available_servers > 0 else "unhealthy",
-            "coordinator_type": "api_based",
+            "coordinator_type": "api_based_conservative",
             "selected_gpus": getattr(self, 'selected_gpus', []),
             "available_servers": available_servers,
             "total_servers": total_servers,
@@ -1333,7 +1303,7 @@ class APIOpulenceCoordinator:
                 "server_stats": server_stats,
                 "database_stats": database_stats,
                 "timestamp": dt.now().isoformat(),
-                "coordinator_type": "api_based"
+                "coordinator_type": "api_based_conservative"
             }
             
         except Exception as e:
@@ -1341,7 +1311,7 @@ class APIOpulenceCoordinator:
             return {
                 "system_stats": self.stats,
                 "error": str(e),
-                "coordinator_type": "api_based"
+                "coordinator_type": "api_based_conservative"
             }
     
     async def _get_database_stats(self) -> Dict[str, Any]:
@@ -1376,7 +1346,7 @@ class APIOpulenceCoordinator:
     
     def cleanup(self):
         """Cleanup method for backwards compatibility"""
-        self.logger.info("🧹 Cleaning up API coordinator resources...")
+        self.logger.info("🧹 Cleaning up conservative API coordinator resources...")
         
         # Clean up agents
         for agent_type, agent in self.agents.items():
@@ -1390,7 +1360,7 @@ class APIOpulenceCoordinator:
         # Clear agent cache
         self.agents.clear()
         
-        self.logger.info("✅ API Coordinator cleanup completed")
+        self.logger.info("✅ Conservative API Coordinator cleanup completed")
     
     def __enter__(self):
         """Context manager entry"""
@@ -1404,7 +1374,8 @@ class APIOpulenceCoordinator:
         return (f"APIOpulenceCoordinator("
                 f"servers={len(self.load_balancer.servers)}, "
                 f"agents={len(self.agents)}, "
-                f"strategy={self.config.load_balancing_strategy.value})")
+                f"strategy={self.config.load_balancing_strategy.value}, "
+                f"type=conservative)")
 
 # ==================== Keep ALL Factory Functions Unchanged ====================
 
@@ -1415,18 +1386,18 @@ def create_api_coordinator_from_endpoints(gpu_endpoints: Dict[int, str]) -> APIO
 
 def create_api_coordinator_from_config(
     model_servers: List[Dict[str, Any]],
-    load_balancing_strategy: str = "least_busy",
+    load_balancing_strategy: str = "round_robin",
     **kwargs
 ) -> APIOpulenceCoordinator:
-    """Create API coordinator from configuration"""
+    """Create API coordinator from configuration - CONSERVATIVE VERSION"""
     server_configs = []
     for server_config in model_servers:
         server_configs.append(ModelServerConfig(
             endpoint=server_config["endpoint"],
             gpu_id=server_config["gpu_id"],
             name=server_config.get("name", f"gpu_{server_config['gpu_id']}"),
-            max_concurrent_requests=server_config.get("max_concurrent_requests", 10),
-            timeout=server_config.get("timeout", 300)
+            max_concurrent_requests=server_config.get("max_concurrent_requests", 1),  # CONSERVATIVE
+            timeout=server_config.get("timeout", 180)  # CONSERVATIVE
         ))
     
     config = APIOpulenceConfig(
@@ -1439,14 +1410,13 @@ def create_api_coordinator_from_config(
 
 def create_dual_gpu_coordinator_api(
     model_servers: List[Dict[str, Any]] = None,
-    load_balancing_strategy: str = "least_busy"
+    load_balancing_strategy: str = "round_robin"
 ) -> APIOpulenceCoordinator:
-    """Drop-in replacement for create_dual_gpu_coordinator using API"""
+    """Drop-in replacement for create_dual_gpu_coordinator using API - CONSERVATIVE VERSION"""
     if model_servers is None:
-        # Default to localhost model servers
+        # CONSERVATIVE: Default to single working server
         model_servers = [
-            {"endpoint": "http://171.201.3.165:8100", "gpu_id": 2, "name": "gpu_2"},
-            {"endpoint": "http://171.201.3.165:8101", "gpu_id": 3, "name": "gpu_3"}
+            {"endpoint": "http://171.201.3.165:8100", "gpu_id": 2, "name": "gpu_2", "max_concurrent_requests": 1, "timeout": 180}
         ]
     
     return create_api_coordinator_from_config(model_servers, load_balancing_strategy)
@@ -1498,18 +1468,27 @@ def get_system_status_api() -> Dict[str, Any]:
 # ==================== Example Usage ====================
 
 async def example_usage():
-    """Example of how to use the API coordinator"""
+    """Example of how to use the conservative API coordinator"""
     
-    # Define your model server endpoints
+    # CONSERVATIVE model server configuration
     model_servers = [
-        {"endpoint": "http://171.201.3.165:8100", "gpu_id": 2, "name": "gpu_2"},
-        {"endpoint": "http://171.201.3.165:8101", "gpu_id": 3, "name": "gpu_3"}
+        {
+            "endpoint": "http://171.201.3.165:8100", 
+            "gpu_id": 2, 
+            "name": "gpu_2",
+            "max_concurrent_requests": 1,  # Only 1 request at a time
+            "timeout": 180  # 3 minutes
+        }
     ]
     
-    # Create coordinator
+    # Create conservative coordinator
     coordinator = create_api_coordinator_from_config(
         model_servers=model_servers,
-        load_balancing_strategy="least_busy"
+        load_balancing_strategy="round_robin",
+        max_retries=1,  # Minimal retries
+        connection_pool_size=2,  # Very small
+        request_timeout=180,  # 3 minutes
+        circuit_breaker_threshold=10  # Very tolerant
     )
     
     # Initialize

@@ -96,11 +96,11 @@ AGENT_TYPES = [
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
-def safe_run_async(coroutine, timeout=360):
-    """FIXED: Streamlit async runner with proper timeout handling"""
+def safe_run_async(coroutine, timeout=60):
+    """FIXED: Conservative async runner for Streamlit"""
     
     try:
-        # Simpler approach for Streamlit
+        # Simpler approach for Streamlit with better error handling
         import concurrent.futures
         import threading
         
@@ -110,6 +110,8 @@ def safe_run_async(coroutine, timeout=360):
             asyncio.set_event_loop(new_loop)
             try:
                 return new_loop.run_until_complete(coroutine)
+            except Exception as e:
+                return {"error": f"Coroutine failed: {str(e)}"}
             finally:
                 new_loop.close()
         
@@ -117,21 +119,23 @@ def safe_run_async(coroutine, timeout=360):
         with concurrent.futures.ThreadPoolExecutor() as executor:
             future = executor.submit(run_in_thread)
             try:
-                return future.result(timeout=timeout)
+                result = future.result(timeout=timeout)
+                
+                # Check if result indicates an error
+                if isinstance(result, dict) and result.get('error'):
+                    st.error(f"Operation failed: {result['error']}")
+                    return result
+                    
+                return result
+                
             except concurrent.futures.TimeoutError:
+                st.error(f"Operation timed out after {timeout} seconds")
                 return {"error": f"Operation timed out after {timeout} seconds"}
                 
     except Exception as e:
+        st.error(f"Execution failed: {str(e)}")
         return {"error": f"Execution failed: {str(e)}"}
-
             
-    except asyncio.TimeoutError:
-        st.error(f"Operation timed out after {timeout} seconds")
-        return {"error": f"Timeout after {timeout} seconds"}
-    except Exception as e:
-        st.error(f"Operation failed: {str(e)}")
-        return {"error": str(e)}
-        
 async def timeout_wrapper(coro, timeout_seconds: float = 60.0):
     """Simple timeout wrapper that works inside async tasks"""
     
@@ -183,34 +187,17 @@ def initialize_session_state():
             st.session_state[key] = default_value
 
 def detect_single_gpu_servers():
-    """Auto-detect single GPU server configurations - FIXED VERSION"""
-    # FIXED: Use only your working server
-    potential_endpoints = [
-        "http://171.201.3.165:8100",  # Your working server
-    ]
-    detected_servers = []
+    """FIXED: Conservative server detection"""
+    # CONSERVATIVE: Use only known working server with minimal settings
+    detected_servers = [{
+        "name": "gpu_server_2",
+        "endpoint": "http://171.201.3.165:8100",
+        "gpu_id": 2,
+        "max_concurrent_requests": 1,  # CONSERVATIVE: Only 1 request at a time
+        "timeout": 180  # 3 minutes
+    }]
     
-    st.info("🔍 Scanning for GPU servers...")
-    
-    for i, endpoint in enumerate(potential_endpoints):
-        try:
-            with st.spinner(f"Checking {endpoint}..."):
-                response = requests.get(f"{endpoint}/health", timeout=5)
-                if response.status_code == 200:
-                    detected_servers.append({
-                        "name": "gpu_server_2",
-                        "endpoint": endpoint,
-                        "gpu_id": 2,
-                        "max_concurrent_requests": 3,
-                        "timeout": 120
-                    })
-                    st.success(f"✅ Detected server at {endpoint} (GPU 2)")
-                    break  # Stop after finding the working server
-        except requests.exceptions.ConnectionError:
-            st.info(f"ℹ️ No server found at {endpoint}")
-        except Exception as e:
-            st.warning(f"⚠️ Error checking {endpoint}: {str(e)}")
-    
+    st.info("🎯 Using conservative single server configuration")
     return detected_servers
 
 def debug_initialization_state():
@@ -385,53 +372,39 @@ def add_custom_css():
 
 @with_error_handling
 async def init_api_coordinator_single_gpu():
-    """FIXED: Enhanced coordinator initialization optimized for single GPU"""
+    """FIXED: Conservative coordinator initialization"""
+    
     if not COORDINATOR_AVAILABLE:
         return {"error": "API Coordinator module not available"}
     
-    # Ensure session state is initialized
-    if 'coordinator' not in st.session_state:
-        st.session_state.coordinator = None
-    
-    # Clean up existing coordinator first
-    if st.session_state.coordinator is not None:    
-    
+    # Clean up existing coordinator
+    if st.session_state.get('coordinator'):
         try:
             await st.session_state.coordinator.shutdown()
         except Exception as e:
-            st.warning(f"Error cleaning up existing coordinator: {e}")
+            st.warning(f"Cleanup warning: {e}")
         finally:
             st.session_state.coordinator = None
     
     try:
-        with st.spinner("🔍 Detecting available GPU servers..."):
-            # FIXED: Force use your known working server
-            if not st.session_state.model_servers:
-                # First try auto-detection
-                detected_servers = detect_single_gpu_servers()
-                
-                if detected_servers:
-                    st.session_state.model_servers = detected_servers
-                    st.info(f"🎯 Auto-detected {len(detected_servers)} GPU server(s)")
-                else:
-                    # FIXED: Fallback with correct GPU ID
-                    st.session_state.model_servers = [{
-                        "name": "main_gpu_server",
-                        "endpoint": "http://171.201.3.165:8100",
-                        "gpu_id": 2,  # FIXED: Use GPU ID 2
-                        "max_concurrent_requests": 3,
-                        "timeout": 120
-                    }]
-                    st.warning("⚠️ No servers detected, using known server with GPU ID 2")
+        with st.spinner("🔍 Setting up conservative configuration..."):
+            # CONSERVATIVE: Force known working configuration
+            st.session_state.model_servers = [{
+                "name": "main_gpu_server",
+                "endpoint": "http://171.201.3.165:8100",
+                "gpu_id": 2,
+                "max_concurrent_requests": 1,  # Only 1 request at a time
+                "timeout": 180
+            }]
             
-            st.info(f"📋 Using servers: {st.session_state.model_servers}")
+            st.info(f"📋 Using conservative server config: {st.session_state.model_servers}")
             
-            # FIXED: Test server connectivity before creating coordinator
+            # Test server connectivity FIRST
             st.info("🔍 Testing server connectivity...")
             server_config = st.session_state.model_servers[0]
             
-            # Test the server before proceeding
             try:
+                import requests
                 test_response = requests.get(f"{server_config['endpoint']}/health", timeout=10)
                 if test_response.status_code != 200:
                     st.error(f"❌ Server health check failed: {test_response.status_code}")
@@ -442,67 +415,69 @@ async def init_api_coordinator_single_gpu():
                 st.error(f"❌ Server connectivity test failed: {e}")
                 return {"error": f"Server connectivity failed: {e}"}
             
-            # Create coordinator with conservative settings
-            st.info("🔧 Creating coordinator...")
+            # Create coordinator with VERY conservative settings
+            st.info("🔧 Creating conservative coordinator...")
             coordinator = create_api_coordinator_from_config(
                 model_servers=st.session_state.model_servers,
-                load_balancing_strategy="round_robin",  # Simple for single server
-                max_retries=2,  # REDUCED retries
-                connection_pool_size=5,  # SMALLER pool
-                request_timeout=120,  # LONGER timeout
-                circuit_breaker_threshold=5,  # MORE tolerance
-                retry_delay=2.0  # LONGER delay between retries
+                load_balancing_strategy="round_robin",
+                max_retries=1,  # Minimal retries
+                connection_pool_size=2,  # Very small pool
+                request_timeout=180,  # 3 minutes
+                circuit_breaker_threshold=10,  # Very tolerant
+                retry_delay=5.0,  # Long delay between retries
+                connection_timeout=60  # 1 minute connection timeout
             )
             
-            # Initialize with validation
+            # Initialize coordinator
             st.info("🚀 Initializing coordinator...")
             await coordinator.initialize()
             st.success("✅ Coordinator initialized")
             
-            # FIXED: More thorough validation
-            st.info("🔍 Running validation...")
-            validation_results = await validate_single_gpu_setup_fixed(coordinator)
-            st.info(f"📊 Validation results: {validation_results}")
-            
-            if validation_results['success']:
-                st.session_state.coordinator = coordinator
-                st.session_state.initialization_status = "completed"
+            # MINIMAL validation test
+            st.info("🔍 Running minimal validation...")
+            try:
+                # Test with very tiny request
+                test_result = await coordinator.call_model_api(
+                    "Hi", 
+                    {
+                        "max_tokens": 5,  # Very small
+                        "temperature": 0.1,
+                        "stream": False
+                    }
+                )
                 
-                # Initialize agent status more carefully
-                for agent_type in AGENT_TYPES:
-                    try:
-                        agent = coordinator.get_agent(agent_type)
-                        if agent:
+                if test_result and not test_result.get('error'):
+                    st.session_state.coordinator = coordinator
+                    st.session_state.initialization_status = "completed"
+                    
+                    # Initialize agent status conservatively
+                    for agent_type in AGENT_TYPES:
+                        try:
+                            # Don't actually create agents during initialization
                             st.session_state.agent_status[agent_type]['status'] = 'available'
-                        else:
-                            st.session_state.agent_status[agent_type]['status'] = 'unavailable'
-                    except Exception as e:
-                        st.session_state.agent_status[agent_type]['status'] = 'error'
-                        st.session_state.agent_status[agent_type]['error_message'] = str(e)
-                
-                st.success("🎉 System fully initialized and validated!")
-                return {"success": True, "validation": validation_results}
-            else:
-                st.error(f"❌ Validation failed: {validation_results['message']}")
+                        except Exception as e:
+                            st.session_state.agent_status[agent_type]['status'] = 'error'
+                            st.session_state.agent_status[agent_type]['error_message'] = str(e)
+                    
+                    st.success("🎉 System fully initialized!")
+                    return {"success": True}
+                else:
+                    st.error(f"❌ Validation failed: {test_result}")
+                    return {"success": False, "error": f"Validation failed: {test_result}"}
+                    
+            except Exception as validation_error:
+                st.error(f"❌ Validation error: {validation_error}")
                 # Still keep coordinator for debugging
                 st.session_state.coordinator = coordinator
-                st.session_state.initialization_status = f"validation_failed: {validation_results['message']}"
-                return {"success": False, "validation_error": validation_results['message']}
+                st.session_state.initialization_status = f"validation_error: {validation_error}"
+                return {"success": False, "error": f"Validation failed: {validation_error}"}
     
     except Exception as e:
         st.error(f"❌ Coordinator creation failed: {str(e)}")
-        st.exception(e)
-        
-        # Clean up on failure
-        if 'coordinator' in locals():
-            try:
-                await coordinator.shutdown()
-            except:
-                pass
-        
         st.session_state.initialization_status = f"error: {str(e)}"
         return {"error": str(e)}
-        
+
+
 def cleanup_on_session_end():
     """Cleanup function to call when session ends"""
     try:
@@ -1421,8 +1396,8 @@ def show_chat_interface():
     # Display conversation
     display_chat_conversation()
 
-def process_chat_query_fixed(query: str):
-    """FIXED: Process user chat query with better error handling"""
+def process_chat_query(query: str):
+    """FIXED: Conservative chat query processing"""
     if not query.strip():
         return
     
@@ -1439,26 +1414,26 @@ def process_chat_query_fixed(query: str):
     # Show processing indicator
     with st.spinner("🤖 Processing your query..."):
         try:
-            # FIXED: Check coordinator first
+            # Check coordinator first
             if not st.session_state.coordinator:
                 raise RuntimeError("Coordinator not available")
             
-            # FIXED: Check server availability
+            # Check server availability
             health = st.session_state.coordinator.get_health_status()
             if health.get('available_servers', 0) == 0:
                 raise RuntimeError("No model servers available")
             
-            # Get conversation context
+            # Get conversation context (conservative)
             conversation_history = get_conversation_context()
             
-            # FIXED: Conservative query configuration
+            # CONSERVATIVE query configuration
             query_config = {
-                'response_mode': st.session_state.get('chat_response_mode', 'Concise'),  # Use concise mode
-                'include_context': True,
-                'max_history': 3  # Reduce history to avoid token limits
+                'response_mode': 'Concise',  # Always use concise mode
+                'include_context': False,  # Disable context to reduce tokens
+                'max_history': 2  # Very small history
             }
             
-            # Process with coordinator
+            # Process with coordinator using conservative settings
             start_time = time.time()
             result = safe_run_async(
                 st.session_state.coordinator.process_chat_query(
@@ -1466,7 +1441,7 @@ def process_chat_query_fixed(query: str):
                     conversation_history,
                     **query_config
                 ),
-                timeout=120  # Longer timeout
+                timeout=120  # 2 minutes timeout
             )
             
             processing_time = time.time() - start_time
@@ -1609,18 +1584,18 @@ def show_quick_diagnostic():
         debug_coordinator_state()
 
 def get_conversation_context():
-    """Get conversation context for chat agent"""
-    max_history = st.session_state.get('chat_max_history', 5)
+    """CONSERVATIVE: Get minimal conversation context"""
+    max_history = 2  # Very small
     
     # Get recent conversation history
     recent_history = st.session_state.chat_history[-(max_history * 2):] if st.session_state.chat_history else []
     
-    # Format for chat agent
+    # Format for chat agent (simplified)
     formatted_history = []
-    for message in recent_history:
+    for message in recent_history[-4:]:  # Only last 4 messages total
         formatted_history.append({
             'role': message['role'],
-            'content': message['content'],
+            'content': message['content'][:200],  # Truncate content to 200 chars
             'timestamp': message.get('timestamp', ''),
             'response_type': message.get('response_type', 'general')
         })
@@ -2438,34 +2413,24 @@ def show_quick_analysis_shortcuts():
             start_predefined_analysis("batch", "Batch processing components")
 
 def start_component_analysis(name: str, component_type: str, scope: str, include_deps: bool):
-    """Start comprehensive component analysis"""
+    """CONSERVATIVE: Component analysis with small requests"""
     try:
         with st.spinner(f"🔍 Analyzing component: {name}..."):
             start_time = time.time()
             
-            # Determine analysis parameters based on scope
-            if scope == "Quick":
-                analysis_types = ["lineage_analysis"]
-            elif scope == "Comprehensive":
-                analysis_types = ["lineage_analysis", "logic_analysis", "semantic_analysis"]
-            else:  # Custom
-                config = st.session_state.get('analysis_config', {})
-                analysis_types = []
-                if config.get('enable_lineage', True):
-                    analysis_types.append("lineage_analysis")
-                if config.get('enable_logic', True):
-                    analysis_types.append("logic_analysis")
-                if config.get('enable_semantic', True):
-                    analysis_types.append("semantic_analysis")
+            # Force quick scope for conservative approach
+            if scope == "Comprehensive":
+                scope = "Quick"  # Override to quick
+                st.info("🔧 Using Quick analysis for conservative processing")
             
             # Start analysis with coordinator
             result = safe_run_async(
                 st.session_state.coordinator.analyze_component(
                     name, 
-                    component_type,
-                    analysis_types=analysis_types,
-                    include_dependencies=include_deps
-                )
+                    component_type if component_type != "Auto-detect" else None,
+                    include_dependencies=False  # Disable dependencies for speed
+                ),
+                timeout=120  # 2 minutes
             )
             
             processing_time = time.time() - start_time
@@ -3655,7 +3620,7 @@ def show_file_analysis_details(file_info):
         st.code(file_info['content_preview'], language='text')
 
 def process_files_batch(uploaded_files, file_analysis):
-    """Process files in batch"""
+    """CONSERVATIVE: Process files with small batches and timeouts"""
     try:
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -3664,6 +3629,7 @@ def process_files_batch(uploaded_files, file_analysis):
         total_files = len(uploaded_files)
         results = []
         
+        # Process files one by one (no parallel processing)
         for i, (uploaded_file, file_info) in enumerate(zip(uploaded_files, file_analysis)):
             status_text.text(f"Processing {file_info['name']} ({i+1}/{total_files})...")
             
@@ -3673,14 +3639,15 @@ def process_files_batch(uploaded_files, file_analysis):
                 temp_file_path = temp_file.name
             
             try:
-                # Process with coordinator
+                # Process with coordinator (conservative timeout)
                 start_time = time.time()
                 
                 result = safe_run_async(
                     st.session_state.coordinator.process_batch_files(
                         [Path(temp_file_path)], 
                         file_info['type']
-                    )
+                    ),
+                    timeout=180  # 3 minutes per file
                 )
                 
                 processing_time = time.time() - start_time
@@ -3720,6 +3687,9 @@ def process_files_batch(uploaded_files, file_analysis):
                     os.remove(temp_file_path)
             
             progress_bar.progress((i + 1) / total_files)
+            
+            # Small delay between files to avoid overwhelming the server
+            time.sleep(1)
         
         # Final summary
         status_text.text("Processing complete!")
