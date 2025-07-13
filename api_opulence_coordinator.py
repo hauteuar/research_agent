@@ -958,19 +958,22 @@ class APIOpulenceCoordinator:
             try:
                 self.logger.info(f"📄 Processing file {i+1}/{total_files}: {file_path.name}")
                 
-                # Get appropriate agent (same logic as original)
+                # Determine agent type
                 if file_type == "cobol" or file_path.suffix.lower() in ['.cbl', '.cob']:
-                    agent = self.get_agent("code_parser")
+                    agent_type = "code_parser"
                 elif file_type == "csv" or file_path.suffix.lower() == '.csv':
-                    agent = self.get_agent("data_loader")
+                    agent_type = "data_loader"
                 else:
-                    agent = self.get_agent("code_parser")
+                    agent_type = "code_parser"
                 
+                # DEBUG: Check what agent we get
+                agent = self.get_agent(agent_type)
+                        
                 # DEBUG: Check what agent we get
                 
                 
                 # CRITICAL DEBUG LINES - ADD THESE:
-                self.logger.info(f"🔍 Agent type requested: {agent}")
+                self.logger.info(f"🔍 Agent type requested: {agent_type}")
                 self.logger.info(f"🔍 Agent class returned: {type(agent).__name__}")
                 self.logger.info(f"🔍 Agent module: {type(agent).__module__}")
                 self.logger.info(f"🔍 Agent has process_file: {hasattr(agent, 'process_file')}")
