@@ -12,6 +12,50 @@ from typing import Dict, Any, Optional
 import time
 import json
 
+class SamplingParams:
+    """Simple SamplingParams class compatible with vLLM interface"""
+    
+    def __init__(self, 
+                 max_tokens: int = 512,
+                 temperature: float = 0.1,
+                 top_p: float = 0.9,
+                 top_k: int = -1,
+                 frequency_penalty: float = 0.0,
+                 presence_penalty: float = 0.0,
+                 stop: Optional[Union[str, List[str]]] = None,
+                 seed: Optional[int] = None,
+                 **kwargs):
+        
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+        self.top_p = top_p
+        self.top_k = top_k
+        self.frequency_penalty = frequency_penalty
+        self.presence_penalty = presence_penalty
+        self.stop = stop if isinstance(stop, list) else [stop] if stop else []
+        self.seed = seed
+        
+        # Store any additional parameters
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for API calls"""
+        return {
+            'max_tokens': self.max_tokens,
+            'temperature': self.temperature,
+            'top_p': self.top_p,
+            'top_k': self.top_k if self.top_k > 0 else None,
+            'frequency_penalty': self.frequency_penalty,
+            'presence_penalty': self.presence_penalty,
+            'stop': self.stop if self.stop else None,
+            'seed': self.seed
+        }
+    
+    def __repr__(self):
+        return f"SamplingParams(max_tokens={self.max_tokens}, temperature={self.temperature}, top_p={self.top_p})"
+
+
 class BaseOpulenceAgent:
     """Base class for all API-based Opulence agents - EXACT SAME CLASS NAME"""
     
