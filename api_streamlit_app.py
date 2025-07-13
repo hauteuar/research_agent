@@ -87,49 +87,79 @@ AGENT_TYPES = [
 # ============================================================================
 
 def safe_run_async(coroutine, timeout=120):
-    """CRITICAL FIX: Streamlit async runner with bulletproof session state preservation"""
+    """CRITICAL FIX: Prevent event loop closure issues"""
     
     try:
-        def run_in_thread():
-            """Run coroutine in separate thread with session state preservation"""
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
+        # CRITICAL FIX: Check if we're already in an async context
+        try:
+            loop = asyncio.get_running_loop()
+            # If we're already in a loop, create a task instead of new thread
+            import concurrent.futures
+            
+            def run_in_executor():
+                # Create completely isolated event loop
+                new_loop = asyncio.new_event_loop()
+                try:
+                    # CRITICAL FIX: Don't set this as the main loop
+                    result = new_loop.run_until_complete(
+                        asyncio.wait_for(coroutine, timeout=timeout)
+                    )
+                    return result
+                except asyncio.TimeoutError:
+                    return {"error": f"Operation timed out after {timeout} seconds"}
+                except Exception as e:
+                    return {"error": f"Execution failed: {str(e)}"}
+                finally:
+                    # CRITICAL FIX: Proper cleanup without affecting main loop
+                    try:
+                        pending = asyncio.all_tasks(new_loop)
+                        if pending:
+                            for task in pending:
+                                task.cancel()
+                            new_loop.run_until_complete(
+                                asyncio.gather(*pending, return_exceptions=True)
+                            )
+                    except Exception:
+                        pass
+                    finally:
+                        new_loop.close()
+            
+            # Run in thread pool to avoid loop conflicts
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(run_in_executor)
+                return future.result(timeout=timeout + 10)
+                
+        except RuntimeError:
+            # No running loop, safe to create one
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             try:
-                async def run_with_timeout():
-                    return await asyncio.wait_for(coroutine, timeout=timeout)
-                
-                return new_loop.run_until_complete(run_with_timeout())
-                
+                return loop.run_until_complete(
+                    asyncio.wait_for(coroutine, timeout=timeout)
+                )
             except asyncio.TimeoutError:
                 return {"error": f"Operation timed out after {timeout} seconds"}
             except Exception as e:
                 return {"error": f"Execution failed: {str(e)}"}
             finally:
+                # CRITICAL FIX: Careful cleanup
                 try:
-                    pending = asyncio.all_tasks(new_loop)
-                    for task in pending:
-                        task.cancel()
-                    
+                    pending = asyncio.all_tasks(loop)
                     if pending:
-                        new_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-                except:
+                        for task in pending:
+                            task.cancel()
+                        loop.run_until_complete(
+                            asyncio.gather(*pending, return_exceptions=True)
+                        )
+                except Exception:
                     pass
                 finally:
-                    new_loop.close()
-        
-        # Execute in thread with timeout
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(run_in_thread)
-            try:
-                result = future.result(timeout=timeout + 10)
-                return result
-                
-            except concurrent.futures.TimeoutError:
-                return {"error": f"Thread execution timed out after {timeout + 10} seconds"}
+                    loop.close()
+                    # Reset event loop for next use
+                    asyncio.set_event_loop(None)
                 
     except Exception as e:
         return {"error": f"Safe async execution failed: {str(e)}"}
-
 
 def with_error_handling(func):
     """Decorator to add error handling to functions"""
@@ -460,7 +490,7 @@ def add_custom_css():
 
 @with_error_handling
 async def init_api_coordinator_single_gpu_fixed():
-    """CRITICAL FIX: Coordinator initialization with immediate session state updates"""
+    """CRITICAL FIX: Coordinator initialization that preserves event loop"""
     
     if not COORDINATOR_AVAILABLE:
         return {"error": "API Coordinator module not available"}
@@ -483,30 +513,49 @@ async def init_api_coordinator_single_gpu_fixed():
         except Exception as e:
             return {"error": f"Server connectivity failed: {e}"}
         
-        # Create coordinator
+        # CRITICAL FIX: Create coordinator with conservative settings to prevent loop issues
         coordinator = create_api_coordinator_from_config(
             model_servers=model_servers,
             load_balancing_strategy="round_robin",
             max_retries=1,
             connection_pool_size=1,
-            request_timeout=120,
-            circuit_breaker_threshold=5
+            request_timeout=60,  # REDUCED: Shorter timeout to prevent loop issues
+            circuit_breaker_threshold=3,  # REDUCED: Fail faster
+            connection_timeout=20  # REDUCED: Faster connection timeout
         )
         
-        # Initialize coordinator
-        await asyncio.wait_for(coordinator.initialize(), timeout=60)
+        # CRITICAL FIX: Initialize coordinator without timeout wrapper
+        await coordinator.initialize()
         
-        # CRITICAL FIX: Store results in a way that persists
-        return {
-            "success": True,
-            "coordinator": coordinator,
-            "model_servers": model_servers,
-            "message": "Coordinator initialized successfully"
-        }
+        # CRITICAL FIX: Test with very simple call to avoid loop issues
+        try:
+            # Simple health check instead of model call
+            health = coordinator.get_health_status()
+            if health.get('available_servers', 0) > 0:
+                return {
+                    "success": True,
+                    "coordinator": coordinator,
+                    "model_servers": model_servers,
+                    "message": "Coordinator initialized successfully",
+                    "skip_validation": True  # Skip model validation to prevent loop issues
+                }
+            else:
+                return {"error": "No servers available after initialization"}
+                
+        except Exception as validation_error:
+            # CRITICAL FIX: Don't fail if validation fails, coordinator might still work
+            return {
+                "success": True,
+                "coordinator": coordinator,
+                "model_servers": model_servers,
+                "message": "Coordinator initialized successfully (validation skipped)",
+                "warning": f"Validation failed: {validation_error}",
+                "skip_validation": True
+            }
     
     except Exception as e:
         return {"error": str(e)}
-
+    
 
 def cleanup_on_session_end():
     """Cleanup function to call when session ends"""
@@ -522,10 +571,9 @@ import atexit
 atexit.register(cleanup_on_session_end)
 
 def show_initialization_interface():
-    """CRITICAL FIX: Show initialization interface with bulletproof state management"""
+    """CRITICAL FIX: Initialization interface with better error handling"""
     st.markdown('<div class="sub-header">🚀 System Initialization</div>', unsafe_allow_html=True)
     
-    # CRITICAL FIX: Ensure session state is initialized first
     if 'initialization_status' not in st.session_state:
         initialize_session_state()
     
@@ -536,11 +584,9 @@ def show_initialization_interface():
     
     debug_initialization_state()
     
-    # CRITICAL FIX: Get status with fallback
     status = st.session_state.get('initialization_status', 'not_started')
     coordinator_exists = st.session_state.get('coordinator') is not None
     
-    # CRITICAL FIX: Consolidated status check
     if coordinator_exists and status != 'completed':
         st.session_state.initialization_status = 'completed'
         status = 'completed'
@@ -552,12 +598,27 @@ def show_initialization_interface():
         
         with col1:
             if st.button("🚀 Auto-Initialize (Recommended)", type="primary", use_container_width=True):
-                # CRITICAL FIX: Use a placeholder for immediate feedback
                 placeholder = st.empty()
                 placeholder.info("🔄 Initializing system...")
                 
                 try:
-                    result = safe_run_async(init_api_coordinator_single_gpu_fixed(), timeout=120)
+                    # CRITICAL FIX: Create a completely separate event loop for initialization
+                    import threading
+                    
+                    def init_in_thread():
+                        # Create isolated loop for initialization
+                        init_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(init_loop)
+                        try:
+                            return init_loop.run_until_complete(init_api_coordinator_single_gpu_fixed())
+                        finally:
+                            init_loop.close()
+                    
+                    # Run initialization in separate thread
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(init_in_thread)
+                        result = future.result(timeout=120)
                     
                     if result and result.get('success'):
                         # CRITICAL FIX: Immediately update session state
@@ -565,22 +626,23 @@ def show_initialization_interface():
                         st.session_state.model_servers = result['model_servers']
                         st.session_state.initialization_status = 'completed'
                         
-                        # CRITICAL FIX: Initialize agent status immediately
+                        # CRITICAL FIX: Initialize agent status as available but don't test them yet
                         for agent_type in AGENT_TYPES:
                             if agent_type not in st.session_state.agent_status:
                                 st.session_state.agent_status[agent_type] = {
-                                    'status': 'available',
+                                    'status': 'ready',  # Changed from 'available' to 'ready'
                                     'last_used': None,
                                     'total_calls': 0,
                                     'errors': 0
                                 }
                             else:
-                                st.session_state.agent_status[agent_type]['status'] = 'available'
+                                st.session_state.agent_status[agent_type]['status'] = 'ready'
                         
                         placeholder.success("✅ System initialized successfully!")
+                        if result.get('warning'):
+                            st.warning(f"⚠️ {result['warning']}")
                         
-                        # CRITICAL FIX: Force immediate UI update
-                        time.sleep(0.5)  # Brief pause to show success
+                        time.sleep(0.5)
                         st.rerun()
                     else:
                         error_msg = result.get('error') if result else "Unknown error"
@@ -595,12 +657,21 @@ def show_initialization_interface():
             if st.button("⚙️ Manual Configuration", use_container_width=True):
                 st.session_state.show_manual_config = True
         
-        # Manual configuration
         if st.session_state.get('show_manual_config', False):
             show_manual_server_configuration()
     
     elif status == 'completed' and coordinator_exists:
         st.success("🟢 System initialized and ready")
+        
+        # CRITICAL FIX: Add agent status check
+        ready_agents = sum(1 for status in st.session_state.agent_status.values() 
+                         if status.get('status') in ['ready', 'available'])
+        total_agents = len(AGENT_TYPES)
+        
+        if ready_agents == total_agents:
+            st.info(f"🤖 All {total_agents} agents ready for use")
+        else:
+            st.warning(f"🤖 {ready_agents}/{total_agents} agents ready")
         
         col1, col2, col3 = st.columns(3)
         
@@ -616,18 +687,15 @@ def show_initialization_interface():
             if st.button("📊 System Status"):
                 st.session_state.show_system_status = True
         
-        # Show system status if requested
         if st.session_state.get('show_system_status', False):
             show_system_status_summary()
     
     else:
-        # Inconsistent state - fix it
         st.warning("🟡 Inconsistent system state detected, resetting...")
         st.session_state.initialization_status = 'not_started'
         if 'coordinator' in st.session_state:
             st.session_state.coordinator = None
         st.rerun()
-
 
 def show_manual_server_configuration():
     """Show manual server configuration for single GPU"""
@@ -773,7 +841,21 @@ def show_system_status_summary():
 # ============================================================================
 # FIXED CHAT ANALYSIS IMPLEMENTATION
 # ============================================================================
-
+async def safe_agent_call(coordinator, agent_method, *args, **kwargs):
+    """Safely call agent methods with better error handling"""
+    try:
+        # Ensure we have a fresh event loop context
+        result = await agent_method(*args, **kwargs)
+        return result
+    except Exception as e:
+        error_msg = str(e)
+        if "Event loop is closed" in error_msg:
+            return {"error": "Event loop issue - please restart the system"}
+        elif "No available servers" in error_msg:
+            return {"error": "All servers are busy or unavailable - please try again"}
+        else:
+            return {"error": f"Agent call failed: {error_msg}"}
+        
 def show_enhanced_chat_analysis():
     """FIXED: Enhanced chat analysis interface with proper coordinator checks"""
     st.markdown('<div class="sub-header">💬 Enhanced Chat Analysis</div>', unsafe_allow_html=True)
@@ -1002,7 +1084,7 @@ def process_chat_query_fixed(query: str):
     
     # Rerun to show new messages
     st.rerun()
-    
+
 def get_conversation_context():
     """Get conversation context for chat agent"""
     max_history = st.session_state.get('chat_max_history', 5)
@@ -1977,9 +2059,8 @@ def show_enhanced_file_upload():
             process_files_batch_fixed(uploaded_files, file_analysis)
 
 def process_files_batch_fixed(uploaded_files, file_analysis):
-    """FIXED: Process files in batch with proper coordinator checks"""
+    """CRITICAL FIX: Process files with better event loop handling"""
     
-    # CRITICAL FIX: Check coordinator first
     coordinator = st.session_state.get('coordinator')
     if not coordinator:
         st.error("❌ Coordinator not available. Please initialize the system first.")
@@ -2002,18 +2083,30 @@ def process_files_batch_fixed(uploaded_files, file_analysis):
                 temp_file_path = temp_file.name
             
             try:
-                # Process with API-based coordinator using timeout
                 start_time = time.time()
                 
-                # Create the coroutine for file processing
-                async def file_processing_task():
-                    return await coordinator.process_batch_files(
-                        [Path(temp_file_path)], 
-                        file_info['type']
-                    )
+                # CRITICAL FIX: Use a simpler approach for file processing
+                def process_single_file():
+                    """Process single file in isolated context"""
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        return loop.run_until_complete(
+                            coordinator.process_batch_files([Path(temp_file_path)], file_info['type'])
+                        )
+                    except Exception as e:
+                        return {"error": str(e)}
+                    finally:
+                        loop.close()
                 
-                # Use safe_run_async with timeout
-                result = safe_run_async(file_processing_task(), timeout=120)
+                # Run in thread to avoid event loop conflicts
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(process_single_file)
+                    try:
+                        result = future.result(timeout=60)  # Shorter timeout
+                    except concurrent.futures.TimeoutError:
+                        result = {"error": "Processing timeout"}
                 
                 processing_time = time.time() - start_time
                 
@@ -2032,7 +2125,7 @@ def process_files_batch_fixed(uploaded_files, file_analysis):
                 results.append(processing_result)
                 st.session_state.processing_history.append(processing_result)
                 
-                # CRITICAL FIX: Safe agent status update
+                # Update agent status
                 agent_type = file_info['agent']
                 if 'agent_status' in st.session_state and agent_type in st.session_state.agent_status:
                     st.session_state.agent_status[agent_type]['total_calls'] += 1
@@ -2044,20 +2137,9 @@ def process_files_batch_fixed(uploaded_files, file_analysis):
                             st.success(f"✅ {file_info['name']} processed successfully in {processing_time:.2f}s")
                     else:
                         st.session_state.agent_status[agent_type]['errors'] += 1
+                        st.session_state.agent_status[agent_type]['status'] = 'error'
                         with results_container:
                             st.error(f"❌ {file_info['name']} processing failed: {processing_result['error']}")
-                else:
-                    # Initialize agent status if missing
-                    if 'agent_status' not in st.session_state:
-                        initialize_session_state()
-                    
-                    if agent_type not in st.session_state.agent_status:
-                        st.session_state.agent_status[agent_type] = {
-                            'status': 'available' if processing_result['status'] == 'success' else 'error',
-                            'last_used': dt.now().isoformat(),
-                            'total_calls': 1,
-                            'errors': 1 if processing_result['status'] != 'success' else 0
-                        }
             
             finally:
                 # Clean up temp file
@@ -2076,9 +2158,15 @@ def process_files_batch_fixed(uploaded_files, file_analysis):
         # Update dashboard metrics
         st.session_state.dashboard_metrics['files_processed'] += success_count
         
+        # CRITICAL FIX: If all files failed with event loop errors, suggest restart
+        if error_count == total_files and any("Event loop" in r.get('error', '') for r in results):
+            st.error("🔄 All files failed due to event loop issues. Please restart the system.")
+        
     except Exception as e:
         st.error(f"❌ Batch processing failed: {str(e)}")
-
+        if "Event loop" in str(e):
+            st.error("🔄 Event loop issue detected. Please restart the system.")
+            
 def show_comprehensive_agent_status():
     """Show comprehensive agent status - simplified implementation"""
     st.markdown("### 🤖 Agent Status & Monitoring")
