@@ -263,14 +263,13 @@ class ModelServerClient:
     async def initialize(self):
         """CRITICAL FIX: Simplified session initialization without nested timeouts"""
         
-        # FIXED: Ultra-simple connector settings
+        # FIXED: Ultra-simple connector settings (no keepalive_timeout with force_close)
         connector = aiohttp.TCPConnector(
             limit=1,  # Only 1 connection total
             limit_per_host=1,  # Only 1 connection per host
             ttl_dns_cache=300,
-            keepalive_timeout=10,  # FIXED: Shorter keepalive
             enable_cleanup_closed=True,
-            force_close=True  # FIXED: Force close connections
+            force_close=True  # FIXED: Force close connections (no keepalive_timeout when this is True)
         )
         
         # CRITICAL FIX: Single timeout - NO nested timeouts
