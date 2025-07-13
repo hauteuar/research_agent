@@ -142,14 +142,26 @@ def with_error_handling(func):
     return wrapper
 
 def initialize_session_state():
-    """Initialize all required session state variables"""
+    """FIXED: Initialize all required session state variables"""
+    
+    # Define agent types for this session
+    AGENT_TYPES = [
+        'code_parser', 'chat_agent', 'vector_index', 'data_loader',
+        'lineage_analyzer', 'logic_analyzer', 'documentation', 'db2_comparator'
+    ]
+    
     defaults = {
         'chat_history': [],
         'processing_history': [],
         'uploaded_files': [],
         'file_analysis_results': {},
-        'agent_status': {agent: {'status': 'unknown', 'last_used': None, 'total_calls': 0, 'errors': 0} 
-                        for agent in AGENT_TYPES},
+        'agent_status': {agent: {
+            'status': 'unknown', 
+            'last_used': None, 
+            'total_calls': 0, 
+            'errors': 0,
+            'error_message': None
+        } for agent in AGENT_TYPES},  # CRITICAL FIX: Proper agent_status initialization
         'model_servers': [],
         'coordinator': None,
         'debug_mode': False,
@@ -164,12 +176,103 @@ def initialize_session_state():
             'queries_answered': 0,
             'components_analyzed': 0,
             'system_uptime': 0
-        }
+        },
+        # Additional session state variables that might be missing
+        'show_manual_config': False,
+        'show_system_status': False,
+        'show_chat_stats': False,
+        'saved_conversations': {},
+        'current_page': '🏠 Dashboard',
+        'chat_response_mode': 'Detailed',
+        'chat_include_context': True,
+        'chat_max_history': 5,
+        'auto_refresh_enabled': False,
+        'refresh_interval': 10
     }
     
+    # Initialize all defaults
     for key, default_value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = default_value
+    
+    # CRITICAL FIX: Double-check agent_status structure
+    if not isinstance(st.session_state.get('agent_status'), dict):
+        st.session_state.agent_status = {agent: {
+            'status': 'unknown', 
+            'last_used': None, 
+            'total_calls': 0, 
+            'errors': 0,
+            'error_message': None
+        } for agent in AGENT_TYPES}
+    
+    # Ensure all agents are present in agent_status
+    for agent in AGENT_TYPES:
+        if agent not in st.session_state.agent_status:
+            st.session_state.agent_status[agent] = {
+                'status': 'unknown', 
+                'last_used': None, 
+                'total_calls': 0, 
+                'errors': 0,
+                'error_message': None
+            }
+        
+        # Ensure each agent has all required fields
+        for field in ['status', 'last_used', 'total_calls', 'errors']:
+            if field not in st.session_state.agent_status[agent]:
+                if field == 'status':
+                    st.session_state.agent_status[agent][field] = 'unknown'
+                elif field in ['total_calls', 'errors']:
+                    st.session_state.agent_status[agent][field] = 0
+                else:
+                    st.session_state.agent_status[agent][field] = None
+
+def get_agent_status_safe(agent_type: str) -> dict:
+    """Safely get agent status with fallback"""
+    try:
+        if 'agent_status' not in st.session_state:
+            initialize_session_state()
+        
+        if agent_type not in st.session_state.agent_status:
+            st.session_state.agent_status[agent_type] = {
+                'status': 'unknown', 
+                'last_used': None, 
+                'total_calls': 0, 
+                'errors': 0,
+                'error_message': None
+            }
+        
+        return st.session_state.agent_status[agent_type]
+    except Exception as e:
+        st.error(f"Error accessing agent status for {agent_type}: {e}")
+        return {
+            'status': 'error', 
+            'last_used': None, 
+            'total_calls': 0, 
+            'errors': 1,
+            'error_message': str(e)
+        }
+
+def update_agent_status_safe(agent_type: str, **updates):
+    """Safely update agent status"""
+    try:
+        if 'agent_status' not in st.session_state:
+            initialize_session_state()
+        
+        if agent_type not in st.session_state.agent_status:
+            st.session_state.agent_status[agent_type] = {
+                'status': 'unknown', 
+                'last_used': None, 
+                'total_calls': 0, 
+                'errors': 0,
+                'error_message': None
+            }
+        
+        # Update the agent status
+        st.session_state.agent_status[agent_type].update(updates)
+        
+    except Exception as e:
+        st.error(f"Error updating agent status for {agent_type}: {e}")
+
 
 def detect_single_gpu_servers():
     """FIXED: Conservative server detection"""
@@ -444,6 +547,8 @@ async def init_api_coordinator_single_gpu_fixed():
                     for agent_type in AGENT_TYPES:
                         try:
                             st.session_state.agent_status[agent_type]['status'] = 'available'
+                            if 'agent_status' not in st.session_state:
+                                initialize_session_state()
                         except Exception as e:
                             st.session_state.agent_status[agent_type]['status'] = 'error'
                             st.session_state.agent_status[agent_type]['error_message'] = str(e)
