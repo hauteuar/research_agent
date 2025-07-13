@@ -97,34 +97,13 @@ AGENT_TYPES = [
 # UTILITY FUNCTIONS
 # ============================================================================
 def safe_run_async(coroutine, timeout=30):
-    """FIXED: Simple version without timeout context manager"""
-    import nest_asyncio
-    nest_asyncio.apply()
-    
+    """Simple async runner with nest_asyncio"""
     try:
-        # Just run the coroutine without wait_for timeout
-        try:
-            loop = asyncio.get_running_loop()
-            task = loop.create_task(coroutine)
-            return loop.run_until_complete(task)
-        except RuntimeError:
-            return asyncio.run(coroutine)
-            
+        return asyncio.run(coroutine)
     except Exception as e:
-        st.error(f"Async operation failed: {str(e)}")
-        return {"error": str(e)}    
-def with_error_handling(func):
-    """Decorator to add error handling to functions"""
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            st.error(f"Error in {func.__name__}: {str(e)}")
-            if st.session_state.get('debug_mode', False):
-                st.exception(e)
-            return None
-    return wrapper
-
+        st.error(f"Operation failed: {str(e)}")
+        return {"error": str(e)}
+    
 def initialize_session_state():
     """Initialize all required session state variables"""
     defaults = {
