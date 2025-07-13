@@ -96,14 +96,26 @@ AGENT_TYPES = [
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
-def safe_run_async(coroutine, timeout=30):
+def safe_run_async(coroutine, timeout=60):
     """Simple async runner with nest_asyncio"""
     try:
         return asyncio.run(coroutine)
     except Exception as e:
         st.error(f"Operation failed: {str(e)}")
         return {"error": str(e)}
-    
+        
+def with_error_handling(func):
+    """Decorator to add error handling to functions"""
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            st.error(f"Error in {func.__name__}: {str(e)}")
+            if st.session_state.get('debug_mode', False):
+                st.exception(e)
+            return None
+    return wrapper
+
 def initialize_session_state():
     """Initialize all required session state variables"""
     defaults = {
