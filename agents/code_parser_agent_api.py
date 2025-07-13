@@ -1771,7 +1771,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                 
                 chunk = CodeChunk(
                     program_name=program_name,
-                    chunk_id=f"{program_name}_{div_name}_DIVISION",
+                    chunk_id=f"{program_name[:20]}_{div_name}_DIV",
                     chunk_type=f"cobol_{div_name.lower()}_division",
                     content=division_content,
                     metadata={
@@ -1847,7 +1847,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             chunk = CodeChunk(
                 program_name=program_name,
-                chunk_id=f"{program_name}_SECTION_{section_name}",
+                chunk_id=f"{program_name[:20]}_SEC_{section_name[:20]}",
                 chunk_type="cobol_section",
                 content=section_content,
                 metadata={
@@ -1917,7 +1917,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                 
                 chunk = CodeChunk(
                     program_name=program_name,
-                    chunk_id=f"{program_name}_DATA_GROUP_{group['group_id']}",
+                    chunk_id=f"{program_name[:20]}_DATA_{group['group_id']}",
                     chunk_type="cobol_data_group",
                     content=group_content,
                     metadata={
@@ -2020,7 +2020,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             chunk = CodeChunk(
                 program_name=program_name,
-                chunk_id=f"{program_name}_PARA_{para_name}",
+                chunk_id=f"{program_name[:20]}_PARA_{para_name}",
                 chunk_type="cobol_paragraph",
                 content=para_content,
                 metadata={
@@ -2089,7 +2089,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                 
                 chunk = CodeChunk(
                     program_name=program_name,
-                    chunk_id=f"{program_name}_PERFORM_{hash(match.group(0))%10000}",
+                    chunk_id=f"{program_name[:20]}_PERFORM_{hash(match.group(0))%10000}",
                     chunk_type=f"cobol_perform_{perform_type}",
                     content=match.group(0),
                     metadata={
@@ -2147,7 +2147,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             chunk = CodeChunk(
                 program_name=program_name,
-                chunk_id=f"{program_name}_IF_{hash(match.group(0))%10000}",
+                chunk_id=f"{program_name[:20]}_IF_{hash(match.group(0))%10000}",
                 chunk_type="cobol_if_statement",
                 content=match.group(0),
                 metadata={
@@ -2199,7 +2199,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             chunk = CodeChunk(
                 program_name=program_name,
-                chunk_id=f"{program_name}_EVALUATE_{hash(match.group(0))%10000}",
+                chunk_id=f"{program_name[:20]}_EVALUATE_{hash(match.group(0))%10000}",
                 chunk_type="cobol_evaluate_statement",
                 content=match.group(0),
                 metadata={
@@ -2267,7 +2267,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                 
                 chunk = CodeChunk(
                     program_name=program_name,
-                    chunk_id=f"{program_name}_FILE_{op_type.upper()}_{hash(match.group(0))%10000}",
+                    chunk_id=f"{program_name[:20]}_FILE_{op_type.upper()}_{hash(match.group(0))%10000}",
                     chunk_type=f"cobol_file_{op_type}",
                     content=match.group(0),
                     metadata={
@@ -2333,7 +2333,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             chunk = CodeChunk(
                 program_name=program_name,
-                chunk_id=f"{program_name}_SQL_{hash(sql_content)%10000}",
+                chunk_id=f"{program_name[:20]}_SQL_{hash(sql_content)%10000}",
                 chunk_type="cobol_sql_block",
                 content=match.group(0),
                 metadata={
@@ -2404,7 +2404,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                 
                 chunk = CodeChunk(
                     program_name=program_name,
-                    chunk_id=f"{program_name}_CICS_{cmd_type.upper()}_{hash(match.group(0))%10000}",
+                    chunk_id=f"{program_name[:20]}_CICS_{cmd_type.upper()}_{hash(match.group(0))%10000}",
                     chunk_type=f"cics_{cmd_type}",
                     content=match.group(0),
                     metadata={
@@ -2467,7 +2467,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             chunk = CodeChunk(
                 program_name=program_name,
-                chunk_id=f"{program_name}_COPY_{copybook_name}",
+                chunk_id=f"{program_name[:20]}_COPY_{copybook_name}",
                 chunk_type="cobol_copy_statement",
                 content=match.group(0),
                 metadata={
@@ -2559,7 +2559,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             chunk = CodeChunk(
                 program_name=program_name,
-                chunk_id=f"{program_name}_JOB_CARD",
+                chunk_id=f"{program_name[:20]}_JOB_CARD",
                 chunk_type="jcl_job_card",
                 content=job_match.group(0),
                 metadata={
@@ -2622,7 +2622,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             chunk = CodeChunk(
                 program_name=program_name,
-                chunk_id=f"{program_name}_STEP_{step_name}",
+                chunk_id=f"{program_name[:20]}_STEP_{step_name}",
                 chunk_type="jcl_job_step",
                 content=match.group(0),
                 metadata={
@@ -2690,7 +2690,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             chunk = CodeChunk(
                 program_name=program_name,
-                chunk_id=f"{program_name}_DD_{dd_name}",
+                chunk_id=f"{program_name[:20]}_DD_{dd_name}",
                 chunk_type="jcl_dd_statement",
                 content=match.group(0),
                 metadata={
@@ -2806,7 +2806,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             chunk = CodeChunk(
                 program_name=program_name,
-                chunk_id=f"{program_name}_PROC_{proc_name}",
+                chunk_id=f"{program_name[:20]}_PROC_{proc_name}",
                 chunk_type="jcl_proc_definition",
                 content=proc_content,
                 metadata={
@@ -2876,7 +2876,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             chunk = CodeChunk(
                 program_name=program_name,
-                chunk_id=f"{program_name}_CONTROL_{hash(if_condition)%10000}",
+                chunk_id=f"{program_name[:20]}_CONTROL_{hash(if_condition)%10000}",
                 chunk_type="jcl_control_flow",
                 content=control_block,
                 metadata={
@@ -2956,7 +2956,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             chunk = CodeChunk(
                 program_name=program_name,
-                chunk_id=f"{program_name}_MAPSET_{mapset_name}",
+                chunk_id=f"{program_name[:20]}_MAPSET_{mapset_name}",
                 chunk_type="bms_mapset",
                 content=match.group(0),
                 metadata={
@@ -3022,7 +3022,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             chunk = CodeChunk(
                 program_name=program_name,
-                chunk_id=f"{program_name}_MAP_{map_name}",
+                chunk_id=f"{program_name[:20]}_MAP_{map_name}",
                 chunk_type="bms_map",
                 content=match.group(0),
                 metadata={
@@ -3086,7 +3086,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             chunk = CodeChunk(
                 program_name=program_name,
-                chunk_id=f"{program_name}_FIELDS_{group['group_id']}",
+                chunk_id=f"{program_name[:20]}_FIELDS_{group['group_id']}",
                 chunk_type="bms_field_group",
                 content=group_content,
                 metadata={
@@ -3169,7 +3169,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
     # ==================== MAIN PROCESSING METHOD ====================
     
 
-    #async def process_file(self, file_path: Path) -> Dict[str, Any]:
+    async def process_file(self, file_path: Path) -> Dict[str, Any]:
     
         """Process a single code file with enhanced business rule validation and LLM analysis"""
         try:
@@ -3549,7 +3549,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                 
                 chunk = CodeChunk(
                     program_name=program_name,
-                    chunk_id=f"{program_name}_MQ_STRUCT_{struct_type}_{struct_name}",
+                    chunk_id=f"{program_name[:20]}_MQ_STRUCT_{struct_type}_{struct_name}",
                     chunk_type=f"mq_{struct_type}",
                     content=structure_content,
                     metadata={
@@ -3617,7 +3617,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                 
                 chunk = CodeChunk(
                     program_name=program_name,
-                    chunk_id=f"{program_name}_MQ_FLOW_{flow_type}_{hash(flow_content)%10000}",
+                    chunk_id=f"{program_name[:20]}_MQ_FLOW_{flow_type}_{hash(flow_content)%10000}",
                     chunk_type="mq_message_flow",
                     content=flow_content,
                     metadata={
@@ -3682,7 +3682,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             chunk = CodeChunk(
                 program_name=program_name,
-                chunk_id=f"{program_name}_MQ_ERROR_{error_field}",
+                chunk_id=f"{program_name[:20]}_MQ_ERROR_{error_field}",
                 chunk_type="mq_error_handling",
                 content=error_context,
                 metadata={
@@ -3745,7 +3745,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                 
                 chunk = CodeChunk(
                     program_name=program_name,
-                    chunk_id=f"{program_name}_MQ_TRANS_{trans_type}_{hash(match.group(0))%10000}",
+                    chunk_id=f"{program_name[:20]}_MQ_TRANS_{trans_type}_{hash(match.group(0))%10000}",
                     chunk_type="mq_transaction_pattern",
                     content=match.group(0),
                     metadata={
@@ -5046,7 +5046,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             chunk = CodeChunk(
                 program_name=program_name,
-                chunk_id=f"{program_name}_MQ_SEQUENCE_{sequence['sequence_id']}",
+                chunk_id=f"{program_name[:20]}_MQ_SEQUENCE_{sequence['sequence_id']}",
                 chunk_type="mq_api_sequence",
                 content=sequence_content,
                 metadata={
@@ -5772,7 +5772,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             if chunk_content.strip():
                 chunk = CodeChunk(
                     program_name=program_name,
-                    chunk_id=f"{program_name}_GENERIC_{i//chunk_size + 1}",
+                    chunk_id=f"{program_name[:20]}_GENERIC_{i//chunk_size + 1}",
                     chunk_type="generic_code_block",
                     content=chunk_content,
                     metadata={
