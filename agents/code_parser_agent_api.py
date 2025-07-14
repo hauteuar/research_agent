@@ -1528,7 +1528,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             # COBOL Stored Procedure SQL patterns
             'cobol_sql_procedure': re.compile(r'EXEC\s+SQL\s+CREATE\s+PROCEDURE\s+(.*?)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
-            'cobol_procedure_call': re.compile(r'EXEC\s+SQL\s+CALL\s+([A-Z][A-Z0-9_]*)\s*(?:\((.*?)\))?\s+END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cobol_procedure_call': re.compile(r'EXEC\s+SQL\s+CALL\s+([A-Z][A-Z0-9_]*)\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE),
             'cobol_result_set': re.compile(r'EXEC\s+SQL\s+ASSOCIATE\s+(?:RESULT\s+SET\s+)?LOCATOR\s*\((.*?)\)\s+END-EXEC', re.IGNORECASE),
             'cobol_allocate_cursor': re.compile(r'EXEC\s+SQL\s+ALLOCATE\s+([A-Z][A-Z0-9_]*)\s+CURSOR\s+FOR\s+RESULT\s+SET\s+([A-Z][A-Z0-9_]*)\s+END-EXEC', re.IGNORECASE),
             
@@ -1537,21 +1537,17 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             'sql_dynamic_execute': re.compile(r'EXEC\s+SQL\s+EXECUTE\s+([A-Z][A-Z0-9_]*)(?:\s+USING\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*))?\s+END-EXEC', re.IGNORECASE),
             'sql_dynamic_open': re.compile(r'EXEC\s+SQL\s+OPEN\s+([A-Z][A-Z0-9_]*)(?:\s+USING\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*))?\s+END-EXEC', re.IGNORECASE),
             
-            # SQL Error handling patterns - FIXED WITH PROPER CAPTURE GROUPS
-            'sql_whenever_sqlerror': re.compile(r'EXEC\s+SQL\s+WHENEVER\s+(SQLERROR)\s+(CONTINUE|GOTO\s+[A-Z][A-Z0-9-]*|STOP)', re.IGNORECASE),
-            'sql_whenever_not_found': re.compile(r'EXEC\s+SQL\s+WHENEVER\s+(NOT\s+FOUND)\s+(CONTINUE|GOTO\s+[A-Z][A-Z0-9-]*|STOP)', re.IGNORECASE),
-            'sql_whenever_sqlwarning': re.compile(r'EXEC\s+SQL\s+WHENEVER\s+(SQLWARNING)\s+(CONTINUE|GOTO\s+[A-Z][A-Z0-9-]*|STOP)', re.IGNORECASE),
+            # SQL Error handling patterns
+            'sql_whenever_sqlerror': re.compile(r'EXEC\s+SQL\s+WHENEVER\s+SQLERROR\s+(CONTINUE|GOTO\s+[A-Z][A-Z0-9-]*|STOP)', re.IGNORECASE),
+            'sql_whenever_not_found': re.compile(r'EXEC\s+SQL\s+WHENEVER\s+NOT\s+FOUND\s+(CONTINUE|GOTO\s+[A-Z][A-Z0-9-]*|STOP)', re.IGNORECASE),
+            'sql_whenever_sqlwarning': re.compile(r'EXEC\s+SQL\s+WHENEVER\s+SQLWARNING\s+(CONTINUE|GOTO\s+[A-Z][A-Z0-9-]*|STOP)', re.IGNORECASE),
             
             # SQL Communication Area patterns
             'sqlca_check': re.compile(r'IF\s+SQLCODE\s*(?:=|NOT\s*=|<|>|<=|>=)\s*([0-9-]+)', re.IGNORECASE),
             'sqlstate_check': re.compile(r'IF\s+SQLSTATE\s*(?:=|NOT\s*=)\s*[\'"]([0-9A-Z]{5})[\'"]', re.IGNORECASE),
             'sql_return_code': re.compile(r'([A-Z][A-Z0-9-]*(?:RC|RETURN-CODE|RET-CODE))', re.IGNORECASE),
-            
-            # Transaction control
-            'sql_commit': re.compile(r'EXEC\s+SQL\s+COMMIT(?:\s+WORK)?\s+END-EXEC', re.IGNORECASE),
-            'sql_rollback': re.compile(r'EXEC\s+SQL\s+ROLLBACK(?:\s+WORK)?\s+END-EXEC', re.IGNORECASE),
         }
-        
+
     def _init_jcl_patterns(self):
         """Initialize comprehensive JCL patterns"""
         self.jcl_patterns = {
@@ -5189,97 +5185,6 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         chunks.extend(transaction_chunks)
         
         return chunks
-    
-    def _safe_extract_groups(self, match, expected_groups: int = 1, default_values: List[str] = None) -> List[str]:
-        """
-        Safely extract groups from regex match with fallbacks
-        
-        Args:
-            match: The regex match object
-            expected_groups: Number of groups expected
-            default_values: Default values to use if groups are missing
-        
-        Returns:
-            List of extracted group values with fallbacks
-        """
-        if default_values is None:
-            default_values = ['unknown'] * expected_groups
-        
-        if not match:
-            return default_values
-        
-        try:
-            groups = match.groups()
-            if not groups:
-                return default_values
-            
-            result = []
-            for i in range(expected_groups):
-                if i < len(groups) and groups[i] is not None:
-                    result.append(groups[i].strip())
-                else:
-                    result.append(default_values[i] if i < len(default_values) else 'unknown')
-            
-            return result
-            
-        except (IndexError, AttributeError) as e:
-            self.logger.warning(f"Error extracting match groups: {e}")
-            return default_values
-
-    def _extract_from_match_text(self, match_text: str, pattern_type: str) -> Dict[str, str]:
-        """
-        Extract information from match text when groups are not available
-        
-        Args:
-            match_text: The full matched text
-            pattern_type: Type of pattern being matched
-        
-        Returns:
-            Dictionary with extracted information
-        """
-        result = {}
-        text_upper = match_text.upper()
-        
-        if pattern_type == 'whenever':
-            if 'SQLERROR' in text_upper:
-                result['condition'] = 'SQLERROR'
-            elif 'NOT FOUND' in text_upper:
-                result['condition'] = 'NOT FOUND'
-            elif 'SQLWARNING' in text_upper:
-                result['condition'] = 'SQLWARNING'
-            else:
-                result['condition'] = 'unknown'
-                
-            # Extract action
-            if 'CONTINUE' in text_upper:
-                result['action'] = 'CONTINUE'
-            elif 'GOTO' in text_upper or 'GO TO' in text_upper:
-                # Try to extract goto target
-                goto_match = re.search(r'GO\s*TO\s+([A-Z][A-Z0-9-]*)', text_upper)
-                if goto_match:
-                    result['action'] = f"GOTO {goto_match.group(1)}"
-                else:
-                    result['action'] = 'GOTO'
-            else:
-                result['action'] = 'unknown'
-        
-        elif pattern_type == 'procedure_call':
-            # Extract procedure name from CALL statement
-            call_match = re.search(r'CALL\s+([A-Z][A-Z0-9_]*)', text_upper)
-            if call_match:
-                result['procedure_name'] = call_match.group(1)
-            else:
-                result['procedure_name'] = 'unknown'
-            
-            # Extract parameters (basic extraction)
-            paren_start = match_text.find('(')
-            paren_end = match_text.rfind(')')
-            if paren_start != -1 and paren_end != -1 and paren_end > paren_start:
-                result['parameters'] = match_text[paren_start+1:paren_end].strip()
-            else:
-                result['parameters'] = ''
-        
-        return result
 
     async def _parse_host_variables_enhanced(self, content: str, procedure_name: str,
                                     sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
@@ -6295,7 +6200,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             }}
             """
         )
-    
+
     async def _parse_sql_communication_areas_enhanced(self, content: str, procedure_name: str,
                                                 sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
         """Parse SQL communication areas with enhanced analysis"""
@@ -6356,6 +6261,21 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         
         return chunks
 
+    def _safe_extract_groups(self, match, expected_groups=1, default_values=None):
+        """Safely extract regex groups with defaults"""
+        if not match or not match.groups():
+            return default_values or ['unknown'] * expected_groups
+        
+        result = []
+        for i in range(expected_groups):
+            if i < len(match.groups()) and match.group(i + 1):
+                result.append(match.group(i + 1))
+            else:
+                default_val = default_values[i] if default_values and i < len(default_values) else 'unknown'
+                result.append(default_val)
+        
+        return result
+    
     async def _parse_embedded_sql_enhanced(self, content: str, procedure_name: str,
                                  sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
         """Parse embedded SQL with enhanced host variable analysis"""
@@ -6367,14 +6287,8 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         whenever_matches.extend(list(self.sql_patterns['sql_whenever_sqlwarning'].finditer(content)))
         
         for match in whenever_matches:
-            # Use safe extraction method
-            groups = self._safe_extract_groups(match, 2, ['unknown', 'unknown'])
-            whenever_type = groups[0]
-            
-            # If safe extraction didn't work, try text extraction
-            if whenever_type == 'unknown':
-                extracted_info = self._extract_from_match_text(match.group(0), 'whenever')
-                whenever_type = extracted_info.get('condition', 'unknown')
+            # Safely extract the whenever type
+            whenever_type = self._safe_extract_groups(match, 1, ['unknown'])[0]
             
             whenever_analysis = await self._analyze_with_llm_cached(
                 match.group(0), 'sql_whenever_statement',
@@ -6401,7 +6315,6 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             business_context = {
                 'statement_type': 'error_handling',
-                'whenever_type': whenever_type,
                 'error_strategy': whenever_analysis.get('analysis', {}).get('error_strategy', ''),
                 'flow_impact': whenever_analysis.get('analysis', {}).get('flow_impact', ''),
                 'business_continuity': whenever_analysis.get('analysis', {}).get('business_continuity', 'unknown')
@@ -6409,7 +6322,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             chunk = CodeChunk(
                 program_name=procedure_name,
-                chunk_id=f"{procedure_name}_WHENEVER_{whenever_type}_{hash(match.group(0))%10000}",
+                chunk_id=f"{procedure_name}_WHENEVER_{hash(match.group(0))%10000}",
                 chunk_type="sql_whenever_statement",
                 content=match.group(0),
                 metadata={
@@ -6424,6 +6337,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             chunks.append(chunk)
         
         return chunks
+
 
     async def _parse_result_set_handling(self, content: str, procedure_name: str,
                                    sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
@@ -6491,28 +6405,10 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         call_matches = list(self.sql_patterns['cobol_procedure_call'].finditer(content))
         
         for match in call_matches:
-            # Safely extract groups with comprehensive error handling
-            called_proc = 'unknown'
-            parameters = ''
-            
-            try:
-                if match.groups() and len(match.groups()) >= 1:
-                    called_proc = match.group(1).strip() if match.group(1) else 'unknown'
-                if match.groups() and len(match.groups()) >= 2:
-                    parameters = match.group(2).strip() if match.group(2) else ''
-                
-                # If we couldn't get the procedure name from groups, try to extract from full match
-                if called_proc == 'unknown':
-                    match_text = match.group(0)
-                    # Look for CALL followed by procedure name
-                    call_pattern = re.search(r'CALL\s+([A-Z][A-Z0-9_]*)', match_text, re.IGNORECASE)
-                    if call_pattern:
-                        called_proc = call_pattern.group(1)
-                        
-            except (IndexError, AttributeError) as e:
-                self.logger.warning(f"Error extracting procedure call info: {e}")
-                called_proc = 'unknown'
-                parameters = ''
+            # Safely extract procedure name and parameters
+            extracted = self._safe_extract_groups(match, 2, ['unknown', ''])
+            called_proc = extracted[0]
+            parameters = extracted[1]
             
             call_analysis = await self._analyze_with_llm_cached(
                 match.group(0), 'sql_procedure_call',
@@ -6546,7 +6442,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             chunk = CodeChunk(
                 program_name=procedure_name,
-                chunk_id=f"{procedure_name}_CALL_{called_proc}_{hash(match.group(0))%10000}",
+                chunk_id=f"{procedure_name}_CALL_{called_proc}",
                 chunk_type="sql_procedure_call",
                 content=match.group(0),
                 metadata={
