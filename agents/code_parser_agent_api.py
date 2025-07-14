@@ -5187,7 +5187,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         return chunks
 
     async def _parse_host_variables_enhanced(self, content: str, procedure_name: str,
-                                        sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
+                                    sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
         """Parse host variables with enhanced SQL integration analysis"""
         chunks = []
         
@@ -5275,7 +5275,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         return chunks
 
     async def _parse_cobol_transaction_patterns(self, content: str, procedure_name: str,
-                                            sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
+                                        sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
         """Parse COBOL transaction coordination patterns"""
         chunks = []
         
@@ -5341,7 +5341,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             chunks.append(chunk)
         
         return chunks
-
+    
     def _group_host_variables(self, data_items: List, ws_content: str) -> List[Dict[str, Any]]:
         """Group host variables by their SQL usage patterns"""
         groups = []
@@ -5350,9 +5350,19 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         
         for i, match in enumerate(data_items):
             try:
-                level = int(match.group(1))
+                # Safely extract match groups with fallbacks
+                if not match.groups() or len(match.groups()) < 2:
+                    continue
+                    
+                level_str = match.group(1)
                 field_name = match.group(2)
                 field_content = match.group(0)
+                
+                # Validate level is numeric
+                if not level_str or not level_str.isdigit():
+                    continue
+                    
+                level = int(level_str)
                 
                 # Determine if this looks like a host variable
                 is_host_var = False
@@ -5390,7 +5400,9 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                         })
                         current_group['end_pos'] = match.end()
                         
-            except (ValueError, IndexError):
+            except (ValueError, IndexError, AttributeError) as e:
+                # Log the error and continue processing
+                self.logger.debug(f"Error processing data item {i}: {e}")
                 continue
         
         if current_group and current_group['variables']:
@@ -5400,6 +5412,9 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
 
     def _determine_host_var_purpose(self, field_name: str, field_content: str) -> str:
         """Determine the purpose of host variable group"""
+        if not field_name or not field_content:
+            return 'general_purpose'
+            
         field_upper = field_name.upper()
         content_upper = field_content.upper()
         
@@ -6185,9 +6200,9 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             }}
             """
         )
-
+    
     async def _parse_sql_communication_areas_enhanced(self, content: str, procedure_name: str,
-                                                    sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
+                                                sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
         """Parse SQL communication areas with enhanced analysis"""
         chunks = []
         
@@ -6247,7 +6262,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         return chunks
 
     async def _parse_embedded_sql_enhanced(self, content: str, procedure_name: str,
-                                         sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
+                                     sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
         """Parse embedded SQL with enhanced host variable analysis"""
         chunks = []
         
@@ -6260,6 +6275,9 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         whenever_matches.extend(list(self.sql_patterns['sql_whenever_sqlwarning'].finditer(content)))
         
         for match in whenever_matches:
+            # Safely get the first group with a fallback
+            whenever_type = match.group(1) if match.groups() and len(match.groups()) >= 1 else 'unknown'
+            
             whenever_analysis = await self._analyze_with_llm_cached(
                 match.group(0), 'sql_whenever_statement',
                 """
@@ -6296,7 +6314,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                 chunk_type="sql_whenever_statement",
                 content=match.group(0),
                 metadata={
-                    'whenever_type': match.group(1) if match.groups() else 'unknown',
+                    'whenever_type': whenever_type,
                     'llm_analysis': whenever_analysis.get('analysis', {})
                 },
                 business_context=business_context,
@@ -6309,7 +6327,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         return chunks
 
     async def _parse_result_set_handling(self, content: str, procedure_name: str,
-                                       sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
+                                   sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
         """Parse result set handling patterns"""
         chunks = []
         
@@ -6366,7 +6384,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         return chunks
 
     async def _parse_procedure_calls_enhanced(self, content: str, procedure_name: str,
-                                            sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
+                                        sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
         """Parse procedure calls with parameter analysis"""
         chunks = []
         
@@ -6374,8 +6392,13 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         call_matches = list(self.sql_patterns['cobol_procedure_call'].finditer(content))
         
         for match in call_matches:
-            called_proc = match.group(1) if match.groups() else 'unknown'
-            parameters = match.group(2) if match.groups() and len(match.groups()) > 1 else ''
+            # Safely get groups with fallbacks
+            called_proc = 'unknown'
+            parameters = ''
+            
+            if match.groups():
+                called_proc = match.group(1) if len(match.groups()) >= 1 and match.group(1) else 'unknown'
+                parameters = match.group(2) if len(match.groups()) >= 2 and match.group(2) else ''
             
             call_analysis = await self._analyze_with_llm_cached(
                 match.group(0), 'sql_procedure_call',
@@ -6425,7 +6448,6 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             chunks.append(chunk)
         
         return chunks
-
     def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Add processing metadata to result"""
         result["processor"] = "EnhancedCodeParserAgent"
