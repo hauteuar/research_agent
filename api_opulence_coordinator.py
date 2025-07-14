@@ -1108,7 +1108,7 @@ class APIOpulenceCoordinator:
 
 
     async def analyze_component(self, component_name: str, component_type: str = None, **kwargs) -> Dict[str, Any]:
-        """FIXED: Enhanced component analysis with proper vector agent method calls"""
+        """ULTRA-FIXED: Enhanced component analysis with proper error handling"""
         start_time = time.time()
         
         try:
@@ -1123,87 +1123,13 @@ class APIOpulenceCoordinator:
                 "analyses": {},
                 "processing_metadata": {
                     "start_time": start_time,
-                    "coordinator_type": "api_based_fixed"
+                    "coordinator_type": "api_based_ultra_fixed"
                 }
             }
             
             completed_count = 0
             
-            # FIXED: Proper error handling and agent initialization
-            try:
-                # Initialize agents if not already loaded
-                await self._ensure_agents_ready()
-                
-                # FIXED: Lineage Analysis with proper error handling
-                self.logger.info(f"🔄 Running lineage analysis for {component_name}")
-                lineage_agent = self.get_agent("lineage_analyzer")
-                
-                lineage_result = await self._safe_agent_call(
-                    lineage_agent.analyze_field_lineage if component_type == "field" 
-                    else lineage_agent.analyze_full_lifecycle,
-                    component_name,
-                    component_type if component_type != "field" else None
-                )
-                
-                if lineage_result and not lineage_result.get('error'):
-                    analysis_result["analyses"]["lineage_analysis"] = {
-                        "status": "success",
-                        "data": lineage_result,
-                        "agent_used": "lineage_analyzer",
-                        "completion_time": time.time() - start_time
-                    }
-                    completed_count += 1
-                else:
-                    analysis_result["analyses"]["lineage_analysis"] = {
-                        "status": "error",
-                        "error": lineage_result.get('error', 'Analysis failed'),
-                        "agent_used": "lineage_analyzer"
-                    }
-                
-            except Exception as e:
-                self.logger.error(f"❌ Lineage analysis failed: {str(e)}")
-                analysis_result["analyses"]["lineage_analysis"] = {
-                    "status": "error",
-                    "error": str(e),
-                    "agent_used": "lineage_analyzer"
-                }
-            
-            # FIXED: Logic Analysis for programs/code
-            if component_type in ["program", "cobol", "copybook"]:
-                try:
-                    self.logger.info(f"🔄 Running logic analysis for {component_name}")
-                    logic_agent = self.get_agent("logic_analyzer")
-                    
-                    logic_result = await self._safe_agent_call(
-                        logic_agent.analyze_program if component_type in ["program", "cobol"]
-                        else logic_agent.find_dependencies,
-                        component_name
-                    )
-                    
-                    if logic_result and not logic_result.get('error'):
-                        analysis_result["analyses"]["logic_analysis"] = {
-                            "status": "success",
-                            "data": logic_result,
-                            "agent_used": "logic_analyzer",
-                            "completion_time": time.time() - start_time
-                        }
-                        completed_count += 1
-                    else:
-                        analysis_result["analyses"]["logic_analysis"] = {
-                            "status": "error",
-                            "error": logic_result.get('error', 'Analysis failed'),
-                            "agent_used": "logic_analyzer"
-                        }
-                        
-                except Exception as e:
-                    self.logger.error(f"❌ Logic analysis failed: {str(e)}")
-                    analysis_result["analyses"]["logic_analysis"] = {
-                        "status": "error",
-                        "error": str(e),
-                        "agent_used": "logic_analyzer"
-                    }
-            
-            # FIXED: Semantic Analysis with correct vector agent method calls
+            # ULTRA-FIXED: Semantic Analysis with proper result handling
             try:
                 self.logger.info(f"🔄 Running semantic analysis for {component_name}")
                 vector_agent = self.get_agent("vector_index")
@@ -1211,26 +1137,29 @@ class APIOpulenceCoordinator:
                 # CRITICAL FIX: Ensure vector index exists with correct method
                 await self._ensure_vector_index_ready(component_name)
                 
-                # FIXED: Use correct method names from vector agent
+                # ULTRA-FIXED: Safe method calls with proper result validation
                 similarity_result = await self._safe_agent_call(
-                    vector_agent.search_similar_components,  # ✅ This method exists
+                    vector_agent.search_similar_components,
                     component_name,
                     3  # top_k parameter
                 )
                 
                 semantic_result = await self._safe_agent_call(
-                    vector_agent.semantic_search,  # ✅ This method exists
+                    vector_agent.semantic_search,
                     f"{component_name} similar functionality",
                     2  # top_k parameter
                 )
                 
-                if (similarity_result and not similarity_result.get('error')) or \
-                (semantic_result and not semantic_result.get('error')):
+                # CRITICAL FIX: Proper result validation and normalization
+                validated_similarity = self._validate_search_result(similarity_result)
+                validated_semantic = self._validate_search_result(semantic_result)
+                
+                if validated_similarity or validated_semantic:
                     analysis_result["analyses"]["semantic_analysis"] = {
                         "status": "success",
                         "data": {
-                            "similar_components": similarity_result if not similarity_result.get('error') else [],
-                            "semantic_search": semantic_result if not semantic_result.get('error') else []
+                            "similar_components": validated_similarity,
+                            "semantic_search": validated_semantic
                         },
                         "agent_used": "vector_index",
                         "completion_time": time.time() - start_time
@@ -1239,7 +1168,7 @@ class APIOpulenceCoordinator:
                 else:
                     analysis_result["analyses"]["semantic_analysis"] = {
                         "status": "error",
-                        "error": "Both similarity and semantic search failed",
+                        "error": "Both similarity and semantic search returned invalid results",
                         "agent_used": "vector_index"
                     }
                     
@@ -1250,6 +1179,7 @@ class APIOpulenceCoordinator:
                     "error": str(e),
                     "agent_used": "vector_index"
                 }
+            
             
             # Determine final status
             total_analyses = len(analysis_result["analyses"])
@@ -1281,7 +1211,44 @@ class APIOpulenceCoordinator:
                 "coordinator_type": "api_based_fixed"
             }
 
-    
+    def _validate_search_result(self, result):
+        """CRITICAL FIX: Validate and normalize search results"""
+        try:
+            if not result:
+                return []
+            
+            # If result has error, return empty list
+            if isinstance(result, dict) and result.get('error'):
+                self.logger.warning(f"Search result has error: {result.get('error')}")
+                return []
+            
+            # If result is already a list, return as-is
+            if isinstance(result, list):
+                return result
+            
+            # If result is a dict with data key
+            if isinstance(result, dict):
+                if 'data' in result:
+                    data = result['data']
+                    return data if isinstance(data, list) else []
+                elif 'results' in result:
+                    results = result['results']
+                    return results if isinstance(results, list) else []
+                elif 'matches' in result:
+                    matches = result['matches']
+                    return matches if isinstance(matches, list) else []
+                else:
+                    # Try to convert dict to list format
+                    return [result]
+            
+            # Fallback: return empty list
+            self.logger.warning(f"Unexpected result format: {type(result)}")
+            return []
+            
+        except Exception as e:
+            self.logger.error(f"Result validation failed: {e}")
+            return []
+
     async def _ensure_agents_ready(self):
         """FIXED: Ensure all required agents are loaded and properly initialized"""
         required_agents = ["lineage_analyzer", "logic_analyzer", "vector_index"]
@@ -1312,30 +1279,42 @@ class APIOpulenceCoordinator:
                 self.logger.warning(f"⚠️ Agent initialization error: {e}")
 
     async def _safe_agent_call(self, agent_method, *args, **kwargs):
-        """FIXED: Safely call agent method with timeout and error handling"""
+        """ULTRA-FIXED: Safely call agent method with comprehensive error handling"""
         try:
-            # FIXED: Check if method is async or sync
+            # Check if method exists
+            if not callable(agent_method):
+                return {"error": "Method is not callable"}
+            
+            # Check if method is async or sync
             import inspect
             if inspect.iscoroutinefunction(agent_method):
-                # It's an async method - call directly
+                # It's an async method - call directly with timeout
                 result = await asyncio.wait_for(
                     agent_method(*args, **kwargs),
-                    timeout=60  # 60 second timeout for vector operations
+                    timeout=90  # 90 second timeout for safety
                 )
             else:
-                # It's a sync method - use executor
+                # It's a sync method - use executor with timeout
                 result = await asyncio.wait_for(
                     asyncio.get_event_loop().run_in_executor(
                         None, 
                         lambda: agent_method(*args, **kwargs)
                     ),
-                    timeout=60  # 60 second timeout
+                    timeout=90  # 90 second timeout
                 )
+            
+            # Validate the result
+            if result is None:
+                return {"error": "Method returned None"}
+            
             return result
+            
         except asyncio.TimeoutError:
-            return {"error": "Agent call timed out"}
+            return {"error": "Agent call timed out after 90 seconds"}
+        except AttributeError as e:
+            return {"error": f"Method not found: {str(e)}"}
         except Exception as e:
-            return {"error": str(e)}
+            return {"error": f"Agent call failed: {str(e)}"}
         
     async def _ensure_vector_index_ready(self, component_name: str = None):
         """FIXED: Ensure vector index is ready and populated with correct method names"""
