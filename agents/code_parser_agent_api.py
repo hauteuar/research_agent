@@ -1788,16 +1788,20 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         
         return chunks
 
-    async def _parse_cobol_sections_enhanced(self, content: str, program_name: str,
-                                           program_analysis: Dict[str, Any]) -> List[CodeChunk]:
-        """Parse COBOL sections with enhanced business context"""
+    async def _parse_cobol_sections_enhanced(self, content: str, program_name: str, 
+                                       program_analysis: Dict[str, Any] = None) -> List[CodeChunk]:
+        """Parse COBOL sections with enhanced business context - FIXED SIGNATURE"""
         chunks = []
+        
+        # Provide default if program_analysis is None
+        if program_analysis is None:
+            program_analysis = {'analysis': {}, 'confidence_score': 0.5}
         
         # Find all sections
         section_matches = list(self.cobol_patterns['section'].finditer(content))
         
         for i, match in enumerate(section_matches):
-            section_name = match.group(1)
+            section_name = match.group(1) if match.groups() else f'SECTION_{i+1}'
             start_pos = match.start()
             
             # Find end of section (next section or division)
@@ -1813,30 +1817,43 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             section_content = content[start_pos:end_pos].strip()
             
-            # Analyze section purpose
-            section_analysis = await self._analyze_with_llm_cached(
-                section_content, 'cobol_section',
-                """
-                Analyze this COBOL section:
-                
-                {content}
-                
-                Identify:
-                1. Section purpose and functionality
-                2. Data definitions or procedures within
-                3. Business logic complexity
-                4. Integration points
-                
-                Return as JSON:
-                {{
-                    "purpose": "file control definitions",
-                    "functionality": "defines file access methods",
-                    "complexity": "medium",
-                    "business_impact": "high",
-                    "integration_points": ["database", "files"]
-                }}
-                """
-            )
+            # Only analyze if content is substantial
+            if len(section_content) > 50:
+                try:
+                    section_analysis = await self._analyze_with_llm_cached(
+                        section_content, 'cobol_section',
+                        """
+                        Analyze this COBOL section:
+                        
+                        {content}
+                        
+                        Identify:
+                        1. Section purpose and functionality
+                        2. Data definitions or procedures within
+                        3. Business logic complexity
+                        4. Integration points
+                        
+                        Return as JSON:
+                        {{
+                            "purpose": "file control definitions",
+                            "functionality": "defines file access methods",
+                            "complexity": "medium",
+                            "business_impact": "high",
+                            "integration_points": ["database", "files"]
+                        }}
+                        """
+                    )
+                except Exception as e:
+                    self.logger.warning(f"LLM analysis failed for section {section_name}: {e}")
+                    section_analysis = {
+                        'analysis': {'error': str(e), 'purpose': 'unknown'},
+                        'confidence_score': 0.3
+                    }
+            else:
+                section_analysis = {
+                    'analysis': {'purpose': 'small_section', 'functionality': 'minimal'},
+                    'confidence_score': 0.7
+                }
             
             business_context = {
                 'section_name': section_name,
@@ -1865,47 +1882,71 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         return chunks
 
     async def _parse_data_items_enhanced(self, content: str, program_name: str,
-                                       program_analysis: Dict[str, Any]) -> List[CodeChunk]:
-        """Parse COBOL data items with enhanced business analysis"""
+                                   program_analysis: Dict[str, Any] = None) -> List[CodeChunk]:
+        """Parse COBOL data items with enhanced business analysis - FIXED SIGNATURE"""
         chunks = []
+        
+        # Provide default if program_analysis is None
+        if program_analysis is None:
+            program_analysis = {'analysis': {}, 'confidence_score': 0.5}
         
         # Find all data items
         data_matches = list(self.cobol_patterns['data_item'].finditer(content))
         
+        if not data_matches:
+            return chunks
+        
         # Group data items by level hierarchy
-        data_groups = self._group_data_items_by_hierarchy(data_matches)
+        try:
+            data_groups = self._group_data_items_by_hierarchy(data_matches)
+        except Exception as e:
+            self.logger.warning(f"Data grouping failed: {e}")
+            return chunks
         
         for group in data_groups:
             if len(group['items']) > 1:  # Only process groups with multiple items
                 group_content = '\n'.join([item['match'].group(0) for item in group['items']])
                 
-                # Analyze data group with LLM
-                data_analysis = await self._analyze_with_llm_cached(
-                    group_content, 'cobol_data_group',
-                    """
-                    Analyze this COBOL data group:
-                    
-                    {content}
-                    
-                    Identify:
-                    1. Business entity represented
-                    2. Data usage patterns
-                    3. Field relationships and dependencies
-                    4. Data validation requirements
-                    5. Performance considerations
-                    
-                    Return as JSON:
-                    {{
-                        "business_entity": "customer_record",
-                        "usage_patterns": ["input", "processing", "output"],
-                        "field_relationships": [
-                            {{"parent": "field1", "children": ["field1a", "field1b"]}}
-                        ],
-                        "validation_requirements": ["required_fields", "format_checks"],
-                        "performance_impact": "medium"
-                    }}
-                    """
-                )
+                # Only analyze substantial groups
+                if len(group_content) > 100:
+                    try:
+                        data_analysis = await self._analyze_with_llm_cached(
+                            group_content, 'cobol_data_group',
+                            """
+                            Analyze this COBOL data group:
+                            
+                            {content}
+                            
+                            Identify:
+                            1. Business entity represented
+                            2. Data usage patterns
+                            3. Field relationships and dependencies
+                            4. Data validation requirements
+                            5. Performance considerations
+                            
+                            Return as JSON:
+                            {{
+                                "business_entity": "customer_record",
+                                "usage_patterns": ["input", "processing", "output"],
+                                "field_relationships": [
+                                    {{"parent": "field1", "children": ["field1a", "field1b"]}}
+                                ],
+                                "validation_requirements": ["required_fields", "format_checks"],
+                                "performance_impact": "medium"
+                            }}
+                            """
+                        )
+                    except Exception as e:
+                        self.logger.warning(f"LLM analysis failed for data group: {e}")
+                        data_analysis = {
+                            'analysis': {'error': str(e), 'business_entity': 'unknown'},
+                            'confidence_score': 0.3
+                        }
+                else:
+                    data_analysis = {
+                        'analysis': {'business_entity': 'small_data_group'},
+                        'confidence_score': 0.6
+                    }
                 
                 business_context = {
                     'data_group_type': 'hierarchical_structure',
@@ -1934,11 +1975,15 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                 chunks.append(chunk)
         
         return chunks
-
+    
     async def _parse_procedure_division_enhanced(self, content: str, program_name: str,
-                                               program_analysis: Dict[str, Any]) -> List[CodeChunk]:
-        """Parse COBOL procedure division with comprehensive flow analysis"""
+                                           program_analysis: Dict[str, Any] = None) -> List[CodeChunk]:
+        """Parse COBOL procedure division with comprehensive flow analysis - FIXED SIGNATURE"""
         chunks = []
+        
+        # Provide default if program_analysis is None
+        if program_analysis is None:
+            program_analysis = {'analysis': {}, 'confidence_score': 0.5}
         
         # Find procedure division
         proc_div_match = self.cobol_patterns['procedure_division'].search(content)
@@ -1948,21 +1993,21 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         proc_start = proc_div_match.start()
         proc_content = content[proc_start:]
         
-        # Parse paragraphs
-        paragraph_chunks = await self._parse_paragraphs_enhanced(proc_content, program_name)
-        chunks.extend(paragraph_chunks)
+        # Parse components with error handling
+        parsing_methods = [
+            (self._parse_paragraphs_enhanced, "paragraphs"),
+            (self._parse_perform_statements_enhanced, "PERFORM statements"), 
+            (self._parse_control_flow_enhanced, "control flow"),
+            (self._parse_file_operations_enhanced, "file operations")
+        ]
         
-        # Parse PERFORM statements
-        perform_chunks = await self._parse_perform_statements_enhanced(proc_content, program_name)
-        chunks.extend(perform_chunks)
-        
-        # Parse control flow statements
-        control_chunks = await self._parse_control_flow_enhanced(proc_content, program_name)
-        chunks.extend(control_chunks)
-        
-        # Parse file operations
-        file_chunks = await self._parse_file_operations_enhanced(proc_content, program_name)
-        chunks.extend(file_chunks)
+        for method, description in parsing_methods:
+            try:
+                component_chunks = await method(proc_content, program_name)
+                chunks.extend(component_chunks)
+                self.logger.info(f"✅ Parsed {len(component_chunks)} {description} chunks")
+            except Exception as e:
+                self.logger.warning(f"Failed to parse {description}: {e}")
         
         return chunks
 
@@ -2319,43 +2364,59 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         return results
 
     async def _parse_sql_blocks_enhanced(self, content: str, program_name: str) -> List[CodeChunk]:
-        """Parse SQL blocks with host variable analysis"""
+        """Parse SQL blocks with host variable analysis - SIMPLIFIED SIGNATURE"""
         chunks = []
         
         sql_matches = list(self.cobol_patterns['sql_block'].finditer(content))
         
         for match in sql_matches:
-            sql_content = match.group(1).strip()
+            sql_content = match.group(1).strip() if match.groups() else match.group(0).strip()
             
-            # Analyze SQL with LLM
-            sql_analysis = await self._analyze_with_llm_cached(
-                sql_content, 'cobol_sql_block',
-                """
-                Analyze this embedded SQL block:
-                
-                {content}
-                
-                Identify:
-                1. SQL operation type and complexity
-                2. Host variables used
-                3. Database tables accessed
-                4. Performance characteristics
-                5. Business transaction purpose
-                
-                Return as JSON:
-                {{
-                    "operation_type": "select_with_join",
-                    "complexity": "medium",
-                    "host_variables": [":customer-id", ":customer-name"],
-                    "tables_accessed": ["CUSTOMER", "ACCOUNT"],
-                    "performance_impact": "medium",
-                    "business_purpose": "customer_account_lookup"
-                }}
-                """
-            )
+            # Only analyze substantial SQL blocks
+            if len(sql_content) > 20:
+                try:
+                    sql_analysis = await self._analyze_with_llm_cached(
+                        sql_content, 'cobol_sql_block',
+                        """
+                        Analyze this embedded SQL block:
+                        
+                        {content}
+                        
+                        Identify:
+                        1. SQL operation type and complexity
+                        2. Host variables used
+                        3. Database tables accessed
+                        4. Performance characteristics
+                        5. Business transaction purpose
+                        
+                        Return as JSON:
+                        {{
+                            "operation_type": "select_with_join",
+                            "complexity": "medium",
+                            "host_variables": [":customer-id", ":customer-name"],
+                            "tables_accessed": ["CUSTOMER", "ACCOUNT"],
+                            "performance_impact": "medium",
+                            "business_purpose": "customer_account_lookup"
+                        }}
+                        """
+                    )
+                except Exception as e:
+                    self.logger.warning(f"LLM analysis failed for SQL block: {e}")
+                    sql_analysis = {
+                        'analysis': {'error': str(e), 'operation_type': 'unknown'},
+                        'confidence_score': 0.3
+                    }
+            else:
+                sql_analysis = {
+                    'analysis': {'operation_type': 'simple_sql'},
+                    'confidence_score': 0.6
+                }
             
-            # Extract host variables
-            host_vars = self.cobol_patterns['sql_host_var'].findall(sql_content)
+            # Extract host variables safely
+            try:
+                host_vars = self.cobol_patterns['sql_host_var'].findall(sql_content)
+            except:
+                host_vars = []
             
             business_context = {
                 'sql_type': 'embedded_sql',
@@ -2386,24 +2447,17 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         return chunks
 
     async def _parse_cics_commands_enhanced(self, content: str, program_name: str) -> List[CodeChunk]:
-        """Parse CICS commands with transaction context"""
+        """Parse CICS commands with transaction context - SIMPLIFIED SIGNATURE"""
         chunks = []
         
-        # Major CICS command patterns
-        cics_commands = {
-            'send_map': self.cics_patterns['cics_send_map'],
-            'receive_map': self.cics_patterns['cics_receive_map'],
-            'read': self.cics_patterns['cics_read'],
-            'write': self.cics_patterns['cics_write'],
-            'link': self.cics_patterns['cics_link'],
-            'xctl': self.cics_patterns['cics_xctl'],
-            'return': self.cics_patterns['cics_return']
-        }
+        # Major CICS command patterns - simplified approach
+        cics_pattern = re.compile(r'EXEC\s+CICS\s+(\w+).*?END-EXEC', re.IGNORECASE | re.DOTALL)
+        matches = list(cics_pattern.finditer(content))
         
-        for cmd_type, pattern in cics_commands.items():
-            matches = list(pattern.finditer(content))
+        for match in matches:
+            cmd_type = match.group(1).lower() if match.groups() else 'unknown'
             
-            for match in matches:
+            try:
                 cics_analysis = await self._analyze_with_llm_cached(
                     match.group(0), f'cics_{cmd_type}',
                     """
@@ -2428,68 +2482,81 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                     }}
                     """
                 )
-                
-                business_context = {
-                    'cics_command': cmd_type,
-                    'transaction_purpose': cics_analysis.get('analysis', {}).get('transaction_purpose', ''),
-                    'business_function': cics_analysis.get('analysis', {}).get('business_function', ''),
-                    'interaction_pattern': cics_analysis.get('analysis', {}).get('interaction_pattern', 'unknown')
+            except Exception as e:
+                self.logger.warning(f"LLM analysis failed for CICS command: {e}")
+                cics_analysis = {
+                    'analysis': {'error': str(e), 'transaction_purpose': 'unknown'},
+                    'confidence_score': 0.3
                 }
-                
-                chunk = CodeChunk(
-                    program_name=program_name,
-                    chunk_id=f"{program_name[:20]}_CICS_{cmd_type.upper()}_{hash(match.group(0))%10000}",
-                    chunk_type=f"cics_{cmd_type}",
-                    content=match.group(0),
-                    metadata={
-                        'command_type': cmd_type,
-                        'llm_analysis': cics_analysis.get('analysis', {}),
-                        'command_length': len(match.group(0))
-                    },
-                    business_context=business_context,
-                    confidence_score=cics_analysis.get('confidence_score', 0.8),
-                    line_start=content[:match.start()].count('\n'),
-                    line_end=content[:match.end()].count('\n')
-                )
-                chunks.append(chunk)
+            
+            business_context = {
+                'cics_command': cmd_type,
+                'transaction_purpose': cics_analysis.get('analysis', {}).get('transaction_purpose', ''),
+                'business_function': cics_analysis.get('analysis', {}).get('business_function', ''),
+                'interaction_pattern': cics_analysis.get('analysis', {}).get('interaction_pattern', 'unknown')
+            }
+            
+            chunk = CodeChunk(
+                program_name=program_name,
+                chunk_id=f"{program_name[:20]}_CICS_{cmd_type.upper()}_{hash(match.group(0))%10000}",
+                chunk_type=f"cics_{cmd_type}",
+                content=match.group(0),
+                metadata={
+                    'command_type': cmd_type,
+                    'llm_analysis': cics_analysis.get('analysis', {}),
+                    'command_length': len(match.group(0))
+                },
+                business_context=business_context,
+                confidence_score=cics_analysis.get('confidence_score', 0.8),
+                line_start=content[:match.start()].count('\n'),
+                line_end=content[:match.end()].count('\n')
+            )
+            chunks.append(chunk)
         
         return chunks
 
     async def _parse_copy_statements_enhanced(self, content: str, program_name: str) -> List[CodeChunk]:
-        """Parse COPY statements with replacement analysis"""
+        """Parse COPY statements with replacement analysis - SIMPLIFIED SIGNATURE"""
         chunks = []
         
         copy_matches = list(self.cobol_patterns['copy_statement'].finditer(content))
         
         for match in copy_matches:
-            copybook_name = match.group(1)
+            copybook_name = match.group(1) if match.groups() else 'UNKNOWN'
             library = match.group(2) if match.groups() and len(match.groups()) > 1 else None
             replacing_clause = match.group(3) if match.groups() and len(match.groups()) > 2 else None
             
-            copy_analysis = await self._analyze_with_llm_cached(
-                match.group(0), 'cobol_copy_statement',
-                """
-                Analyze this COPY statement:
-                
-                {content}
-                
-                Identify:
-                1. Copybook purpose and domain
-                2. Replacement strategy (if any)
-                3. Code reuse pattern
-                4. Integration complexity
-                5. Maintenance implications
-                
-                Return as JSON:
-                {{
-                    "copybook_purpose": "customer_data_structure",
-                    "domain": "customer_management",
-                    "replacement_strategy": "parameter_substitution",
-                    "reuse_pattern": "standard_record_layout",
-                    "maintenance_impact": "low"
-                }}
-                """
-            )
+            try:
+                copy_analysis = await self._analyze_with_llm_cached(
+                    match.group(0), 'cobol_copy_statement',
+                    """
+                    Analyze this COPY statement:
+                    
+                    {content}
+                    
+                    Identify:
+                    1. Copybook purpose and domain
+                    2. Replacement strategy (if any)
+                    3. Code reuse pattern
+                    4. Integration complexity
+                    5. Maintenance implications
+                    
+                    Return as JSON:
+                    {{
+                        "copybook_purpose": "customer_data_structure",
+                        "domain": "customer_management",
+                        "replacement_strategy": "parameter_substitution",
+                        "reuse_pattern": "standard_record_layout",
+                        "maintenance_impact": "low"
+                    }}
+                    """
+                )
+            except Exception as e:
+                self.logger.warning(f"LLM analysis failed for COPY statement: {e}")
+                copy_analysis = {
+                    'analysis': {'error': str(e), 'copybook_purpose': 'unknown'},
+                    'confidence_score': 0.3
+                }
             
             business_context = {
                 'copybook_name': copybook_name,
@@ -2518,7 +2585,6 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             chunks.append(chunk)
         
         return chunks
-
     async def _parse_jcl_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
         """Enhanced JCL parsing with job flow analysis"""
         chunks = []
@@ -3341,18 +3407,19 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
     # ==================== MISSING ENHANCED PARSING METHODS ====================
 
     async def _parse_cobol_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
-        """Enhanced COBOL parsing with guaranteed LLM analysis and debugging"""
+        """Enhanced COBOL parsing with comprehensive LLM analysis - FIXED VERSION"""
         chunks = []
         program_name = self._extract_program_name(content, Path(filename))
         
         self.logger.info(f"🔍 Starting enhanced COBOL analysis for {program_name}")
         
-        # FORCE at least one LLM analysis for debugging
-        forced_analysis = await self._force_llm_analysis_for_cobol(content, program_name)
-        self.logger.info(f"🤖 Forced LLM analysis completed for {program_name}")
-        
-        # Get LLM analysis for overall program structure
-        program_analysis = await self._llm_analyze_complex_pattern(content, 'business_logic')
+        try:
+            # Get LLM analysis for overall program structure
+            program_analysis = await self._llm_analyze_complex_pattern(content, 'business_logic')
+            self.logger.info(f"✅ Program analysis completed for {program_name}")
+        except Exception as e:
+            self.logger.warning(f"Program analysis failed for {program_name}: {e}")
+            program_analysis = {'analysis': {}, 'confidence_score': 0.5}
         
         # Parse divisions with enhanced validation and LLM insights
         try:
@@ -3361,30 +3428,64 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             chunks.extend(division_chunks)
             self.logger.info(f"✅ Parsed {len(division_chunks)} division chunks for {program_name}")
         except Exception as e:
-            self.logger.error(f"❌ Division parsing failed for {program_name}: {e}")
+            self.logger.warning(f"Division parsing failed for {program_name}: {e}")
         
-        # Parse other components with individual logging
-        parse_methods = [
-            (self._parse_cobol_sections_enhanced, "sections"),
-            (self._parse_data_items_enhanced, "data items"),
-            (self._parse_procedure_division_enhanced, "procedure division"),
-            (self._parse_sql_blocks_enhanced, "SQL blocks"),
-            (self._parse_cics_commands_enhanced, "CICS commands"),
-            (self._parse_copy_statements_enhanced, "COPY statements")
-        ]
+        # Parse sections with comprehensive context - PASS program_analysis
+        try:
+            self.logger.info(f"📊 Parsing sections for {program_name}")
+            section_chunks = await self._parse_cobol_sections_enhanced(content, program_name, program_analysis)
+            chunks.extend(section_chunks)
+            self.logger.info(f"✅ Parsed {len(section_chunks)} section chunks for {program_name}")
+        except Exception as e:
+            self.logger.warning(f"Section parsing failed for {program_name}: {e}")
         
-        for parse_method, description in parse_methods:
-            try:
-                self.logger.info(f"📊 Parsing {description} for {program_name}")
-                component_chunks = await parse_method(content, program_name)
-                chunks.extend(component_chunks)
-                self.logger.info(f"✅ Parsed {len(component_chunks)} {description} chunks for {program_name}")
-            except Exception as e:
-                self.logger.error(f"❌ {description.title()} parsing failed for {program_name}: {e}")
+        # Parse data items with advanced business rule validation - PASS program_analysis
+        try:
+            self.logger.info(f"📊 Parsing data items for {program_name}")
+            data_chunks = await self._parse_data_items_enhanced(content, program_name, program_analysis)
+            chunks.extend(data_chunks)
+            self.logger.info(f"✅ Parsed {len(data_chunks)} data chunks for {program_name}")
+        except Exception as e:
+            self.logger.warning(f"Data parsing failed for {program_name}: {e}")
+        
+        # Parse procedure division with comprehensive flow analysis - PASS program_analysis
+        try:
+            self.logger.info(f"📊 Parsing procedure division for {program_name}")
+            procedure_chunks = await self._parse_procedure_division_enhanced(content, program_name, program_analysis)
+            chunks.extend(procedure_chunks)
+            self.logger.info(f"✅ Parsed {len(procedure_chunks)} procedure chunks for {program_name}")
+        except Exception as e:
+            self.logger.warning(f"Procedure division parsing failed for {program_name}: {e}")
+        
+        # Parse SQL blocks with enhanced host variable validation - NO extra parameters
+        try:
+            self.logger.info(f"📊 Parsing SQL blocks for {program_name}")
+            sql_chunks = await self._parse_sql_blocks_enhanced(content, program_name)
+            chunks.extend(sql_chunks)
+            self.logger.info(f"✅ Parsed {len(sql_chunks)} SQL chunks for {program_name}")
+        except Exception as e:
+            self.logger.warning(f"SQL parsing failed for {program_name}: {e}")
+        
+        # Parse CICS commands with transaction context - NO extra parameters
+        try:
+            self.logger.info(f"📊 Parsing CICS commands for {program_name}")
+            cics_chunks = await self._parse_cics_commands_enhanced(content, program_name)
+            chunks.extend(cics_chunks)
+            self.logger.info(f"✅ Parsed {len(cics_chunks)} CICS chunks for {program_name}")
+        except Exception as e:
+            self.logger.warning(f"CICS parsing failed for {program_name}: {e}")
+        
+        # Parse COPY statements with replacement analysis - NO extra parameters
+        try:
+            self.logger.info(f"📊 Parsing COPY statements for {program_name}")
+            copy_chunks = await self._parse_copy_statements_enhanced(content, program_name)
+            chunks.extend(copy_chunks)
+            self.logger.info(f"✅ Parsed {len(copy_chunks)} COPY chunks for {program_name}")
+        except Exception as e:
+            self.logger.warning(f"COPY parsing failed for {program_name}: {e}")
         
         self.logger.info(f"🎯 Total chunks created for {program_name}: {len(chunks)}")
         return chunks
-
     async def _parse_copybook_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
         """Enhanced copybook parsing with comprehensive layout analysis"""
         chunks = []
