@@ -2284,6 +2284,40 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         
         return chunks
 
+    def _safe_parse_sql_patterns(self, content: str, pattern_dict: dict) -> List[Dict[str, Any]]:
+        """Safely parse SQL patterns with defensive group extraction"""
+        results = []
+        
+        for pattern_name, pattern in pattern_dict.items():
+            try:
+                matches = list(pattern.finditer(content))
+                for match in matches:
+                    # Create a safe match result
+                    match_result = {
+                        'pattern_name': pattern_name,
+                        'full_match': match.group(0),
+                        'start': match.start(),
+                        'end': match.end(),
+                        'groups': []
+                    }
+                    
+                    # Safely extract all groups
+                    if match.groups():
+                        for i in range(len(match.groups())):
+                            try:
+                                group_value = match.group(i + 1)
+                                match_result['groups'].append(group_value if group_value else '')
+                            except IndexError:
+                                match_result['groups'].append('')
+                    
+                    results.append(match_result)
+                    
+            except Exception as e:
+                self.logger.warning(f"Error parsing pattern {pattern_name}: {e}")
+                continue
+        
+        return results
+
     async def _parse_sql_blocks_enhanced(self, content: str, program_name: str) -> List[CodeChunk]:
         """Parse SQL blocks with host variable analysis"""
         chunks = []
@@ -3307,41 +3341,48 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
     # ==================== MISSING ENHANCED PARSING METHODS ====================
 
     async def _parse_cobol_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
-        """Enhanced COBOL parsing with comprehensive LLM analysis"""
+        """Enhanced COBOL parsing with guaranteed LLM analysis and debugging"""
         chunks = []
         program_name = self._extract_program_name(content, Path(filename))
+        
+        self.logger.info(f"🔍 Starting enhanced COBOL analysis for {program_name}")
+        
+        # FORCE at least one LLM analysis for debugging
+        forced_analysis = await self._force_llm_analysis_for_cobol(content, program_name)
+        self.logger.info(f"🤖 Forced LLM analysis completed for {program_name}")
         
         # Get LLM analysis for overall program structure
         program_analysis = await self._llm_analyze_complex_pattern(content, 'business_logic')
         
         # Parse divisions with enhanced validation and LLM insights
-        division_chunks = await self._parse_cobol_divisions_enhanced(content, program_name, program_analysis)
-        chunks.extend(division_chunks)
+        try:
+            self.logger.info(f"📊 Parsing divisions for {program_name}")
+            division_chunks = await self._parse_cobol_divisions_enhanced(content, program_name, program_analysis)
+            chunks.extend(division_chunks)
+            self.logger.info(f"✅ Parsed {len(division_chunks)} division chunks for {program_name}")
+        except Exception as e:
+            self.logger.error(f"❌ Division parsing failed for {program_name}: {e}")
         
-        # Parse sections with comprehensive context
-        section_chunks = await self._parse_cobol_sections_enhanced(content, program_name, program_analysis)
-        chunks.extend(section_chunks)
+        # Parse other components with individual logging
+        parse_methods = [
+            (self._parse_cobol_sections_enhanced, "sections"),
+            (self._parse_data_items_enhanced, "data items"),
+            (self._parse_procedure_division_enhanced, "procedure division"),
+            (self._parse_sql_blocks_enhanced, "SQL blocks"),
+            (self._parse_cics_commands_enhanced, "CICS commands"),
+            (self._parse_copy_statements_enhanced, "COPY statements")
+        ]
         
-        # Parse data items with advanced business rule validation
-        data_chunks = await self._parse_data_items_enhanced(content, program_name, program_analysis)
-        chunks.extend(data_chunks)
+        for parse_method, description in parse_methods:
+            try:
+                self.logger.info(f"📊 Parsing {description} for {program_name}")
+                component_chunks = await parse_method(content, program_name)
+                chunks.extend(component_chunks)
+                self.logger.info(f"✅ Parsed {len(component_chunks)} {description} chunks for {program_name}")
+            except Exception as e:
+                self.logger.error(f"❌ {description.title()} parsing failed for {program_name}: {e}")
         
-        # Parse procedure division with comprehensive flow analysis
-        procedure_chunks = await self._parse_procedure_division_enhanced(content, program_name, program_analysis)
-        chunks.extend(procedure_chunks)
-        
-        # Parse SQL blocks with enhanced host variable validation
-        sql_chunks = await self._parse_sql_blocks_enhanced(content, program_name)
-        chunks.extend(sql_chunks)
-        
-        # Parse CICS commands with transaction context
-        cics_chunks = await self._parse_cics_commands_enhanced(content, program_name)
-        chunks.extend(cics_chunks)
-        
-        # Parse COPY statements with replacement analysis
-        copy_chunks = await self._parse_copy_statements_enhanced(content, program_name)
-        chunks.extend(copy_chunks)
-        
+        self.logger.info(f"🎯 Total chunks created for {program_name}: {len(chunks)}")
         return chunks
 
     async def _parse_copybook_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
@@ -5148,44 +5189,53 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
 
     # ==================== MISSING COBOL STORED PROCEDURE PARSING ====================
 
-    async def _parse_cobol_stored_procedure_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
-        """Enhanced COBOL stored procedure parsing with comprehensive SQL integration analysis"""
+    async def parse_cobol_stored_procedure_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
+        """Enhanced COBOL stored procedure parsing with comprehensive error handling"""
         chunks = []
         procedure_name = self._extract_program_name(content, Path(filename))
         
-        # Analyze COBOL SP patterns with LLM
-        sp_analysis = await self._llm_analyze_cobol_sp_patterns(content)
+        try:
+            # Analyze COBOL SP patterns with LLM
+            sp_analysis = await self._llm_analyze_cobol_sp_patterns(content)
+            
+            # First parse as regular COBOL with SP enhancements
+            base_cobol_chunks = await self._parse_cobol_with_enhanced_analysis(content, filename)
+            chunks.extend(base_cobol_chunks)
+            
+            # Parse SQL communication areas (SQLCA, SQLDA) with safety
+            try:
+                comm_chunks = await self._parse_sql_communication_areas_enhanced_safe(content, procedure_name, sp_analysis)
+                chunks.extend(comm_chunks)
+            except Exception as e:
+                self.logger.warning(f"Failed to parse SQL communication areas: {e}")
+            
+            # Parse embedded SQL with enhanced host variable validation
+            try:
+                embedded_sql_chunks = await self._parse_embedded_sql_enhanced(content, procedure_name, sp_analysis)
+                chunks.extend(embedded_sql_chunks)
+            except Exception as e:
+                self.logger.warning(f"Failed to parse embedded SQL: {e}")
+            
+            # Parse other components with individual error handling
+            for parse_method, description in [
+                (self._parse_result_set_handling, "result set handling"),
+                (self._parse_procedure_calls_enhanced, "procedure calls"),
+                (self._parse_host_variables_enhanced, "host variables"),
+                (self._parse_cobol_transaction_patterns, "transaction patterns")
+            ]:
+                try:
+                    component_chunks = await parse_method(content, procedure_name, sp_analysis)
+                    chunks.extend(component_chunks)
+                except Exception as e:
+                    self.logger.warning(f"Failed to parse {description}: {e}")
+            
+            return chunks
+            
+        except Exception as e:
+            self.logger.error(f"Failed to parse COBOL stored procedure {procedure_name}: {e}")
+            # Fallback to basic COBOL parsing
+            return await self._parse_cobol_with_enhanced_analysis(content, filename)
         
-        # First parse as regular COBOL with SP enhancements
-        base_cobol_chunks = await self._parse_cobol_with_enhanced_analysis(content, filename)
-        chunks.extend(base_cobol_chunks)
-        
-        # Parse SQL communication areas (SQLCA, SQLDA)
-        comm_chunks = await self._parse_sql_communication_areas_enhanced(content, procedure_name, sp_analysis)
-        chunks.extend(comm_chunks)
-        
-        # Parse embedded SQL with enhanced host variable validation
-        embedded_sql_chunks = await self._parse_embedded_sql_enhanced(content, procedure_name, sp_analysis)
-        chunks.extend(embedded_sql_chunks)
-        
-        # Parse result set handling patterns
-        result_set_chunks = await self._parse_result_set_handling(content, procedure_name, sp_analysis)
-        chunks.extend(result_set_chunks)
-        
-        # Parse procedure calls with parameter analysis
-        proc_call_chunks = await self._parse_procedure_calls_enhanced(content, procedure_name, sp_analysis)
-        chunks.extend(proc_call_chunks)
-        
-        # Parse host variable declarations and usage
-        host_var_chunks = await self._parse_host_variables_enhanced(content, procedure_name, sp_analysis)
-        chunks.extend(host_var_chunks)
-        
-        # Parse transaction coordination patterns
-        transaction_chunks = await self._parse_cobol_transaction_patterns(content, procedure_name, sp_analysis)
-        chunks.extend(transaction_chunks)
-        
-        return chunks
-
     async def _parse_host_variables_enhanced(self, content: str, procedure_name: str,
                                     sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
         """Parse host variables with enhanced SQL integration analysis"""
@@ -6146,6 +6196,43 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         except Exception as e:
             self.logger.error(f"Failed to store field lineage: {str(e)}")
 
+    
+    # Add a method to force LLM analysis for debugging
+    async def _force_llm_analysis_for_cobol(self, content: str, program_name: str) -> Dict[str, Any]:
+        """Force LLM analysis for debugging purposes"""
+        self.logger.info(f"🔍 FORCING LLM analysis for {program_name}")
+        
+        # Force basic business logic analysis
+        business_analysis = await self._analyze_with_llm_cached(
+            content, 'forced_business_analysis',
+            """
+            Analyze this COBOL program for business logic:
+            
+            {content}
+            
+            Identify:
+            1. Main business purpose
+            2. Key operations performed
+            3. Data processing patterns
+            4. Integration points
+            5. Complexity assessment
+            
+            Return as JSON:
+            {{
+                "business_purpose": "description of main purpose",
+                "key_operations": ["operation1", "operation2"],
+                "data_patterns": ["pattern1", "pattern2"],
+                "integration_points": ["database", "files", "other_programs"],
+                "complexity": "low|medium|high",
+                "maintainability": "good|fair|poor"
+            }}
+            """
+        )
+        
+        return business_analysis
+
+
+
     async def _llm_analyze_db2_patterns(self, content: str) -> Dict[str, Any]:
         """Use LLM to analyze DB2 patterns and SQL complexity"""
         return await self._analyze_with_llm_cached(
@@ -6201,20 +6288,24 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             """
         )
 
-    async def _parse_sql_communication_areas_enhanced(self, content: str, procedure_name: str,
+    async def _parse_sql_communication_areas_enhanced_safe(self, content: str, procedure_name: str,
                                                 sp_analysis: Dict[str, Any]) -> List[CodeChunk]:
-        """Parse SQL communication areas with enhanced analysis"""
+        """Parse SQL communication areas with enhanced safety"""
         chunks = []
         
-        # Find SQLCA and SQLDA includes
-        sqlca_matches = list(self.sql_patterns['sql_include_sqlca'].finditer(content))
-        sqlda_matches = list(self.sql_patterns['sql_include_sqlda'].finditer(content))
+        # Use safe pattern parsing
+        sql_comm_patterns = {
+            'sqlca': self.sql_patterns['sql_include_sqlca'],
+            'sqlda': self.sql_patterns['sql_include_sqlda']
+        }
         
-        for match in sqlca_matches + sqlda_matches:
-            comm_type = 'SQLCA' if 'SQLCA' in match.group(0) else 'SQLDA'
+        matches = self._safe_parse_sql_patterns(content, sql_comm_patterns)
+        
+        for match_info in matches:
+            comm_type = 'SQLCA' if 'sqlca' in match_info['pattern_name'] else 'SQLDA'
             
             comm_analysis = await self._analyze_with_llm_cached(
-                match.group(0), f'sql_communication_{comm_type.lower()}',
+                match_info['full_match'], f'sql_communication_{comm_type.lower()}',
                 """
                 Analyze this SQL communication area:
                 
@@ -6247,15 +6338,15 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                 program_name=procedure_name,
                 chunk_id=f"{procedure_name}_{comm_type}_INCLUDE",
                 chunk_type=f"sql_communication_{comm_type.lower()}",
-                content=match.group(0),
+                content=match_info['full_match'],
                 metadata={
                     'communication_type': comm_type,
                     'llm_analysis': comm_analysis.get('analysis', {})
                 },
                 business_context=business_context,
                 confidence_score=comm_analysis.get('confidence_score', 0.9),
-                line_start=content[:match.start()].count('\n'),
-                line_end=content[:match.end()].count('\n')
+                line_start=content[:match_info['start']].count('\n'),
+                line_end=content[:match_info['end']].count('\n')
             )
             chunks.append(chunk)
         
@@ -6550,17 +6641,17 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         
         # Order matters - check most specific patterns first
         
-        # DB2 Stored Procedure detection (most specific)
+        # DB2 Stored Procedure detection (most specific SQL patterns)
         if self._is_db2_procedure(content_upper):
             return 'db2_procedure'
         
-        # COBOL Stored Procedure detection
-        if self._is_cobol_stored_procedure(content_upper):
-            return 'cobol_stored_procedure'
-        
-        # MQ Program detection
+        # MQ Program detection (check BEFORE COBOL stored procedure)
         if self._is_mq_program(content_upper):
             return 'mq_program'
+        
+        # COBOL Stored Procedure detection (after MQ check)
+        if self._is_cobol_stored_procedure(content_upper):
+            return 'cobol_stored_procedure'
         
         # BMS detection (most specific mapset format)
         if self._is_bms_file(content_upper):
@@ -6599,30 +6690,81 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         
         return 'unknown'
 
+    
+
     def _is_db2_procedure(self, content_upper: str) -> bool:
         """Check if file is DB2 stored procedure"""
         return (any(marker in content_upper for marker in ['CREATE PROCEDURE', 'CREATE OR REPLACE PROCEDURE']) and
                 any(marker in content_upper for marker in ['LANGUAGE SQL', 'PARAMETER STYLE', 'BEGIN ATOMIC', 'BEGIN']))
 
     def _is_cobol_stored_procedure(self, content_upper: str) -> bool:
-        """Check if file is COBOL stored procedure"""
-        return ('EXEC SQL CREATE PROCEDURE' in content_upper or
-                ('EXEC SQL CALL' in content_upper and 'PROCEDURE DIVISION' in content_upper) or
-                ('SQLCA' in content_upper and 'PROCEDURE DIVISION' in content_upper and 
-                 any(marker in content_upper for marker in ['EXEC SQL', 'SQLCODE', 'SQLSTATE'])))
-
-    def _is_mq_program(self, content_upper: str) -> bool:
-        """Check if file is MQ program"""
-        mq_indicators = ['MQOPEN', 'MQPUT', 'MQGET', 'MQCLOSE', 'MQCONN', 'MQDISC', 'MQBEGIN', 'MQCMIT', 'MQBACK']
-        mq_count = sum(content_upper.count(f'CALL "{indicator}"') + content_upper.count(f"CALL '{indicator}'") 
-                      for indicator in mq_indicators)
+        """Enhanced COBOL stored procedure detection - more restrictive"""
+        # Must have PROCEDURE DIVISION (basic COBOL requirement)
+        if 'PROCEDURE DIVISION' not in content_upper:
+            return False
         
-        # Also check for MQ data structures
-        mq_structures = ['MQMD', 'MQOD', 'MQPMO', 'MQGMO', 'MQSD', 'MQCNO']
+        # Check for explicit SQL stored procedure creation
+        if 'EXEC SQL CREATE PROCEDURE' in content_upper:
+            return True
+        
+        # Check for strong SQL integration indicators
+        sql_indicators = [
+            'SQLCA' in content_upper,
+            'EXEC SQL' in content_upper,
+            'SQLCODE' in content_upper,
+            'SQLSTATE' in content_upper
+        ]
+        
+        # Must have at least 2 SQL indicators AND specific stored procedure patterns
+        sql_count = sum(sql_indicators)
+        
+        # Stored procedure specific patterns
+        sp_patterns = [
+            'EXEC SQL CALL' in content_upper,
+            'RESULT SET' in content_upper,
+            'ASSOCIATE LOCATOR' in content_upper,
+            'ALLOCATE CURSOR' in content_upper
+        ]
+        
+        sp_count = sum(sp_patterns)
+        
+        # Require strong evidence of stored procedure usage
+        return sql_count >= 2 and sp_count >= 1
+    
+    def _is_mq_program(self, content_upper: str) -> bool:
+        """Enhanced MQ program detection"""
+        # MQ API calls (more comprehensive)
+        mq_api_calls = [
+            'MQOPEN', 'MQPUT', 'MQGET', 'MQCLOSE', 'MQCONN', 'MQCONNX', 'MQDISC', 
+            'MQBEGIN', 'MQCMIT', 'MQBACK', 'MQPUT1', 'MQINQ', 'MQSET', 'MQSUB'
+        ]
+        
+        # Count different patterns of MQ calls
+        call_count = 0
+        for api in mq_api_calls:
+            # Check for CALL statements
+            call_count += content_upper.count(f'CALL "{api}"')
+            call_count += content_upper.count(f"CALL '{api}'")
+            call_count += content_upper.count(f'CALL {api}')
+        
+        # MQ data structures
+        mq_structures = ['MQMD', 'MQOD', 'MQPMO', 'MQGMO', 'MQSD', 'MQCNO', 'MQHCONN', 'MQHOBJ']
         structure_count = sum(content_upper.count(structure) for structure in mq_structures)
         
-        return mq_count >= 2 or structure_count >= 1  # At least 2 MQ calls or 1 MQ structure
-
+        # MQ specific variables and constants
+        mq_constants = ['MQCC_', 'MQRC_', 'MQOT_', 'MQOO_', 'MQGMO_', 'MQPMO_']
+        constant_count = sum(content_upper.count(constant) for constant in mq_constants)
+        
+        # Enhanced detection logic
+        is_mq = (
+            call_count >= 1 or  # At least 1 MQ API call
+            structure_count >= 1 or  # At least 1 MQ structure
+            constant_count >= 2 or  # At least 2 MQ constants
+            ('QUEUE' in content_upper and 'MANAGER' in content_upper and call_count > 0)
+        )
+        
+        return is_mq
+    
     def _is_bms_file(self, content_upper: str) -> bool:
         """Check if file is BMS mapset"""
         return any(marker in content_upper for marker in ['DFHMSD', 'DFHMDI', 'DFHMDF'])
@@ -6683,7 +6825,11 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
 
     async def _analyze_with_llm_cached(self, content: str, analysis_type: str, 
                                       prompt_template: str, **kwargs) -> Dict[str, Any]:
-        """Analyze content with LLM using caching for performance"""
+        """Analyze content with LLM using caching for performance - with debug logging"""
+        
+        # Log the analysis attempt
+        self.logger.info(f"🤖 LLM Analysis requested: {analysis_type} (content length: {len(content)})")
+        
         # Generate cache key
         cache_key_data = f"{content[:500]}:{analysis_type}:{prompt_template[:100]}"
         content_hash = hashlib.sha256(cache_key_data.encode()).hexdigest()
@@ -6701,6 +6847,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             cached_result = cursor.fetchone()
             if cached_result:
+                self.logger.info(f"📋 LLM Analysis cache HIT for {analysis_type}")
                 cursor.execute("""
                     UPDATE llm_analysis_cache 
                     SET last_accessed = CURRENT_TIMESTAMP 
@@ -6714,13 +6861,17 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                     'confidence_score': cached_result[1],
                     'cached': True
                 }
+            else:
+                self.logger.info(f"📋 LLM Analysis cache MISS for {analysis_type}")
             
             conn.close()
         except Exception as e:
-            self.logger.warning(f"Cache lookup failed: {e}")
+            self.logger.warning(f"Cache lookup failed for {analysis_type}: {e}")
         
         # Perform LLM analysis
         try:
+            self.logger.info(f"🚀 Calling LLM for {analysis_type} analysis...")
+            
             # Format prompt with content and any additional parameters
             formatted_prompt = prompt_template.format(content=content[:2000], **kwargs)
             
@@ -6730,16 +6881,20 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                 "max_tokens": 1000
             })
             
+            self.logger.info(f"✅ LLM response received for {analysis_type} (length: {len(response)})")
+            
             # Parse response
             if '{' in response:
                 json_start = response.find('{')
                 json_end = response.rfind('}') + 1
                 analysis_result = json.loads(response[json_start:json_end])
                 confidence_score = 0.8  # Default confidence for successful parse
+                self.logger.info(f"✅ LLM response parsed successfully for {analysis_type}")
             else:
                 # Fallback for non-JSON response
                 analysis_result = {'raw_response': response, 'parsed': False}
                 confidence_score = 0.5
+                self.logger.warning(f"⚠️ LLM response not JSON for {analysis_type}, using fallback")
             
             # Cache the result
             try:
@@ -6751,12 +6906,13 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                     (content_hash, analysis_type, analysis_result, confidence_score, model_version)
                     VALUES (?, ?, ?, ?, ?)
                 """, (content_hash, analysis_type, json.dumps(analysis_result), 
-                     confidence_score, "claude-sonnet-4"))
+                    confidence_score, "claude-sonnet-4"))
                 
                 conn.commit()
                 conn.close()
+                self.logger.info(f"💾 LLM analysis cached for {analysis_type}")
             except Exception as e:
-                self.logger.warning(f"Cache storage failed: {e}")
+                self.logger.warning(f"Cache storage failed for {analysis_type}: {e}")
             
             return {
                 'analysis': analysis_result,
@@ -6765,7 +6921,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             }
             
         except Exception as e:
-            self.logger.error(f"LLM analysis failed for {analysis_type}: {e}")
+            self.logger.error(f"❌ LLM analysis failed for {analysis_type}: {e}")
             return {
                 'analysis': {'error': str(e)},
                 'confidence_score': 0.0,
