@@ -1107,13 +1107,13 @@ class APIOpulenceCoordinator:
             return []
 
 
-    def analyze_component(self, component_name: str, component_type: str = None, **kwargs) -> Dict[str, Any]:
+    async def analyze_component(self, component_name: str, component_type: str = None, **kwargs) -> Dict[str, Any]:
         """ULTRA-FIXED: Complete component analysis with proper sequence and error handling"""
         start_time = time.time()
         
         try:
             if not component_type or component_type == "auto-detect":
-                component_type = self._determine_component_type(component_name)
+                component_type = await self._determine_component_type(component_name)
             
             analysis_result = {
                 "component_name": component_name,
@@ -1132,12 +1132,12 @@ class APIOpulenceCoordinator:
             # STEP 1: LINEAGE ANALYSIS (FOUNDATIONAL - MUST RUN FIRST)
             try:
                 # Initialize agents if not already loaded
-                self._ensure_agents_ready()
+                await self._ensure_agents_ready()
                 
                 self.logger.info(f"🔄 Step 1: Running lineage analysis for {component_name}")
                 lineage_agent = self.get_agent("lineage_analyzer")
                 
-                lineage_result = self._safe_agent_call(
+                lineage_result = await self._safe_agent_call(
                     lineage_agent.analyze_field_lineage if component_type == "field" 
                     else lineage_agent.analyze_full_lifecycle,
                     component_name,
@@ -1181,7 +1181,7 @@ class APIOpulenceCoordinator:
                     # Normalize component type for logic analysis
                     normalized_type = self._normalize_component_type(component_type)
                     
-                    logic_result = self._safe_agent_call(
+                    logic_result = await self._safe_agent_call(
                         logic_agent.analyze_program if normalized_type in ["program", "cobol"]
                         else logic_agent.find_dependencies,
                         component_name
@@ -1225,16 +1225,16 @@ class APIOpulenceCoordinator:
                 vector_agent = self.get_agent("vector_index")
                 
                 # CRITICAL FIX: Ensure vector index exists with correct method
-                self._ensure_vector_index_ready(component_name)
+                await self._ensure_vector_index_ready(component_name)
                 
                 # ULTRA-FIXED: Safe method calls with proper result validation
-                similarity_result = self._safe_agent_call(
+                similarity_result = await self._safe_agent_call(
                     vector_agent.search_similar_components,
                     component_name,
                     3  # top_k parameter
                 )
                 
-                semantic_result = self._safe_agent_call(
+                semantic_result = await self._safe_agent_call(
                     vector_agent.semantic_search,
                     f"{component_name} similar functionality",
                     2  # top_k parameter
