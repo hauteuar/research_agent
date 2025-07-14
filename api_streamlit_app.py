@@ -1453,7 +1453,7 @@ def show_enhanced_file_upload():
                     queue_files_for_processing(valid_files, file_analysis)
 
 def process_single_file_enhanced_complete(uploaded_file, file_info):
-    """Process a single file with complete error handling"""
+    """FIXED: Process single file with vector index update"""
     coordinator = st.session_state.get('coordinator')
     if not coordinator:
         st.error("❌ No coordinator available")
@@ -1470,7 +1470,7 @@ def process_single_file_enhanced_complete(uploaded_file, file_info):
                 temp_file_path = temp_file.name
             
             try:
-                # Process file
+                # Process file with vector index update
                 result = safe_async_call(
                     coordinator,
                     coordinator.process_batch_files,
@@ -1480,6 +1480,9 @@ def process_single_file_enhanced_complete(uploaded_file, file_info):
                 
                 processing_time = time.time() - start_time
                 
+                # Verify vector index was updated
+                vector_updated = result.get('vector_index_updated', False) if result else False
+                
                 # Track performance
                 track_performance_metric(
                     "single_file_processing", 
@@ -1487,10 +1490,11 @@ def process_single_file_enhanced_complete(uploaded_file, file_info):
                     'success' if result and not result.get('error') else 'error',
                     agent_type=file_info['agent'],
                     file_type=file_info['type'],
-                    file_size=file_info['size']
+                    file_size=file_info['size'],
+                    vector_index_updated=vector_updated
                 )
                 
-                # Record result
+                # Record result with vector index status
                 processing_result = {
                     'file_name': file_info['name'],
                     'file_type': file_info['type'],
@@ -1501,7 +1505,8 @@ def process_single_file_enhanced_complete(uploaded_file, file_info):
                     'timestamp': dt.now().isoformat(),
                     'error': result.get('error') if result and result.get('error') else None,
                     'file_hash': file_info['hash'],
-                    'file_size': file_info['size']
+                    'file_size': file_info['size'],
+                    'vector_index_updated': vector_updated
                 }
                 
                 st.session_state.processing_history.append(processing_result)
@@ -1514,7 +1519,10 @@ def process_single_file_enhanced_complete(uploaded_file, file_info):
                     
                     if processing_result['status'] == 'success':
                         st.session_state.agent_status[agent_type]['status'] = 'available'
-                        st.success(f"✅ {file_info['name']} processed successfully in {processing_time:.2f}s")
+                        success_msg = f"✅ {file_info['name']} processed successfully in {processing_time:.2f}s"
+                        if vector_updated:
+                            success_msg += " (Vector index updated)"
+                        st.success(success_msg)
                         add_notification(f"File {file_info['name']} processed successfully", "success")
                     else:
                         st.session_state.agent_status[agent_type]['errors'] += 1
@@ -1552,6 +1560,32 @@ def process_single_file_enhanced_complete(uploaded_file, file_info):
             error_message=str(e),
             file_type=file_info['type']
         )
+
+def show_vector_index_status():
+    """Show vector index status in sidebar"""
+    coordinator = st.session_state.get('coordinator')
+    if not coordinator:
+        return
+    
+    try:
+        vector_agent = coordinator.get_agent("vector_index")
+        
+        # Check if index is ready
+        if hasattr(vector_agent, 'get_index_stats'):
+            stats = vector_agent.get_index_stats()
+            if stats:
+                chunk_count = stats.get('total_chunks', 0)
+                if chunk_count > 0:
+                    st.success(f"🔍 Vector Index: {chunk_count} chunks")
+                else:
+                    st.warning("🔍 Vector Index: Empty")
+            else:
+                st.error("🔍 Vector Index: Not Ready")
+        else:
+            st.info("🔍 Vector Index: Unknown Status")
+            
+    except Exception as e:
+        st.error(f"🔍 Vector Index: Error ({str(e)[:20]}...)")
 
 def process_files_batch_enhanced_complete(uploaded_files, file_analysis):
     """Enhanced batch file processing with comprehensive tracking"""
@@ -2308,7 +2342,7 @@ def show_enhanced_component_analysis():
 
 def start_component_analysis_enhanced_complete(name: str, component_type: str, scope: str, 
                                              include_deps: bool, **options):
-    """WORKING: Enhanced component analysis with comprehensive options"""
+    """FIXED: Streamlit component analysis with proper error handling"""
     
     coordinator = st.session_state.get('coordinator')
     if not coordinator:
@@ -2319,13 +2353,14 @@ def start_component_analysis_enhanced_complete(name: str, component_type: str, s
         with st.spinner(f"🔍 Analyzing component: {name}..."):
             start_time = time.time()
             
-            # Use working async approach with options
+            # FIXED: Prepare analysis configuration
             analysis_config = {
                 'include_dependencies': include_deps,
                 'analysis_scope': scope,
                 **options
             }
             
+            # FIXED: Use proper async call with timeout
             result = safe_async_call(
                 coordinator,
                 coordinator.analyze_component,
@@ -2340,12 +2375,12 @@ def start_component_analysis_enhanced_complete(name: str, component_type: str, s
             track_performance_metric(
                 "component_analysis", 
                 processing_time,
-                'success' if result and not result.get('error') else 'error',
+                'success' if result and not result.get('error') and result.get('status') != 'system_error' else 'error',
                 component_type=component_type,
                 analysis_scope=scope
             )
             
-            if result:
+            if result and not result.get('error') and result.get('status') != 'system_error':
                 # Store results with enhanced metadata
                 analysis_id = f"{name}_{int(time.time())}"
                 
@@ -2364,7 +2399,7 @@ def start_component_analysis_enhanced_complete(name: str, component_type: str, s
                 # Update dashboard metrics
                 st.session_state.dashboard_metrics['components_analyzed'] += 1
                 
-                # Show success and results
+                # Show success and results based on actual status
                 status = result.get('status', 'unknown')
                 
                 if status == 'completed':
@@ -2374,16 +2409,17 @@ def start_component_analysis_enhanced_complete(name: str, component_type: str, s
                     st.warning(f"⚠️ Partial analysis completed for {name} in {processing_time:.2f} seconds")
                     add_notification(f"Partial component analysis for {name}", "warning")
                 else:
-                    st.error(f"❌ Analysis failed for {name}")
+                    st.error(f"❌ Analysis failed for {name}: {result.get('error', 'Unknown error')}")
                     add_notification(f"Component analysis failed for {name}", "error")
-                    add_system_error(f"Component analysis failed for {name}", "component_analysis")
+                    add_system_error(f"Component analysis failed for {name}: {result.get('error')}", "component_analysis")
                 
                 # Display comprehensive results
                 display_component_analysis_results(result, analysis_id)
                 
             else:
-                st.error(f"❌ Analysis failed for {name}")
-                add_system_error(f"Component analysis returned no results for {name}", "component_analysis")
+                error_msg = result.get('error', 'Analysis returned no valid results') if result else 'No result returned'
+                st.error(f"❌ Analysis failed for {name}: {error_msg}")
+                add_system_error(f"Component analysis failed for {name}: {error_msg}", "component_analysis")
     
     except Exception as e:
         error_msg = f"Analysis error for {name}: {str(e)}"
@@ -3529,6 +3565,8 @@ def show_enhanced_sidebar():
     
     # System information
     show_sidebar_system_info_complete()
+
+    show_vector_index_status()
     
     # Notifications panel
     if st.session_state.get('notification_messages'):

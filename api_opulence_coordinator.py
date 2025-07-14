@@ -929,59 +929,130 @@ class APIOpulenceCoordinator:
     # ==================== Existing Interface Methods (Keep Unchanged) ====================
     
     async def process_batch_files(self, file_paths: List[Path], file_type: str = "auto") -> Dict[str, Any]:
-        """FIXED: Process files with proper error handling"""
+        """FIXED: Process files with immediate vector index update"""
         start_time = time.time()
         results = []
         total_files = len(file_paths)
         
-        self.logger.info(f"🚀 Processing {total_files} files using FIXED API-based agents")
+        self.logger.info(f"🚀 Processing {total_files} files with vector index update")
         
-        for i, file_path in enumerate(file_paths):
-            try:
-                self.logger.info(f"📄 Processing file {i+1}/{total_files}: {file_path.name}")
-                
-                # Determine agent type
-                if file_type == "cobol" or file_path.suffix.lower() in ['.cbl', '.cob']:
-                    agent_type = "code_parser"
-                elif file_type == "csv" or file_path.suffix.lower() == '.csv':
-                    agent_type = "data_loader"
-                else:
-                    agent_type = "code_parser"
-                
-                # Get agent
-                agent = self.get_agent(agent_type)
-                        
-                self.logger.info(f"🔍 Agent type requested: {agent_type}")
-                self.logger.info(f"🔍 Agent class returned: {type(agent).__name__}")
-                
-                # Process with API-based agent
-                result = await agent.process_file(file_path)
-                await self._ensure_file_stored_in_db(file_path, result, file_type)
-                
-                results.append(result)
-                
-            except Exception as e:
-                self.logger.error(f"❌ Failed to process {file_path}: {str(e)}")
-                results.append({
-                    "status": "error",
-                    "file": str(file_path),
-                    "error": str(e)
-                })
-        
-        # Update statistics
-        processing_time = time.time() - start_time
-        self.stats["total_files_processed"] += total_files
-        
-        return {
-            "status": "success",
-            "files_processed": total_files,
-            "processing_time": processing_time,
-            "results": results,
-            "servers_used": [s.config.name for s in self.load_balancer.servers]
-        }
+        try:
+            for i, file_path in enumerate(file_paths):
+                try:
+                    self.logger.info(f"📄 Processing file {i+1}/{total_files}: {file_path.name}")
+                    
+                    # Determine agent type
+                    if file_type == "cobol" or file_path.suffix.lower() in ['.cbl', '.cob']:
+                        agent_type = "code_parser"
+                    elif file_type == "csv" or file_path.suffix.lower() == '.csv':
+                        agent_type = "data_loader"
+                    else:
+                        agent_type = "code_parser"
+                    
+                    # Get agent
+                    agent = self.get_agent(agent_type)
+                    
+                    # Process file
+                    result = await agent.process_file(file_path)
+                    
+                    # CRITICAL FIX: Immediately update vector index
+                    if result and result.get('status') == 'success':
+                        await self._update_vector_index_for_file(file_path, result)
+                    
+                    await self._ensure_file_stored_in_db(file_path, result, file_type)
+                    results.append(result)
+                    
+                except Exception as e:
+                    self.logger.error(f"❌ Failed to process {file_path}: {str(e)}")
+                    results.append({
+                        "status": "error",
+                        "file": str(file_path),
+                        "error": str(e)
+                    })
+            
+            # Final vector index rebuild to ensure consistency
+            await self._ensure_vector_index_ready()
+            
+            # Update statistics
+            processing_time = time.time() - start_time
+            self.stats["total_files_processed"] += total_files
+            
+            return {
+                "status": "success",
+                "files_processed": total_files,
+                "processing_time": processing_time,
+                "results": results,
+                "servers_used": [s.config.name for s in self.load_balancer.servers],
+                "vector_index_updated": True
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Batch processing failed: {e}")
+            return {
+                "status": "error",
+                "error": str(e),
+                "files_processed": 0,
+                "results": []
+            }
     
+    async def _update_vector_index_for_file(self, file_path: Path, process_result: Dict[str, Any]):
+        """Update vector index immediately after file processing"""
+        try:
+            # Get new chunks for this file
+            chunks = await self._get_chunks_for_file(file_path.name)
+            
+            if chunks:
+                vector_agent = self.get_agent("vector_index")
+                
+                # Add chunks to vector index
+                update_result = await self._safe_agent_call(
+                    vector_agent.add_chunks_to_index,
+                    chunks
+                )
+                
+                if update_result and not update_result.get('error'):
+                    self.logger.info(f"✅ Vector index updated for {file_path.name} with {len(chunks)} chunks")
+                else:
+                    self.logger.warning(f"⚠️ Vector index update failed for {file_path.name}")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Vector index update failed for {file_path.name}: {e}")
+
+    async def _get_chunks_for_file(self, file_name: str):
+        """Get chunks for a specific file"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT program_name, chunk_id, chunk_type, content, metadata
+                FROM program_chunks
+                WHERE program_name = ? AND content IS NOT NULL AND content != ''
+                ORDER BY created_timestamp DESC
+            """, (file_name,))
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            chunks = []
+            for row in rows:
+                chunks.append({
+                    'program_name': row[0],
+                    'chunk_id': row[1],
+                    'chunk_type': row[2],
+                    'content': row[3],
+                    'metadata': row[4]
+                })
+            
+            return chunks
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to get chunks for {file_name}: {e}")
+            return []
+
+
     async def analyze_component(self, component_name: str, component_type: str = None, **kwargs) -> Dict[str, Any]:
-        """FIXED: Analyze component with proper error handling"""
+        """FIXED: Enhanced component analysis with proper orchestration"""
         start_time = time.time()
         
         try:
@@ -1002,23 +1073,36 @@ class APIOpulenceCoordinator:
             
             completed_count = 0
             
-            # FIXED: Lineage Analysis with error handling
+            # FIXED: Proper error handling and agent initialization
             try:
+                # Initialize agents if not already loaded
+                await self._ensure_agents_ready()
+                
+                # FIXED: Lineage Analysis with proper error handling
                 self.logger.info(f"🔄 Running lineage analysis for {component_name}")
                 lineage_agent = self.get_agent("lineage_analyzer")
                 
-                if component_type == "field":
-                    lineage_result = await lineage_agent.analyze_field_lineage(component_name)
-                else:
-                    lineage_result = await lineage_agent.analyze_full_lifecycle(component_name, component_type)
+                lineage_result = await self._safe_agent_call(
+                    lineage_agent.analyze_field_lineage if component_type == "field" 
+                    else lineage_agent.analyze_full_lifecycle,
+                    component_name,
+                    component_type if component_type != "field" else None
+                )
                 
-                analysis_result["analyses"]["lineage_analysis"] = {
-                    "status": "success",
-                    "data": lineage_result,
-                    "agent_used": "lineage_analyzer",
-                    "completion_time": time.time() - start_time
-                }
-                completed_count += 1
+                if lineage_result and not lineage_result.get('error'):
+                    analysis_result["analyses"]["lineage_analysis"] = {
+                        "status": "success",
+                        "data": lineage_result,
+                        "agent_used": "lineage_analyzer",
+                        "completion_time": time.time() - start_time
+                    }
+                    completed_count += 1
+                else:
+                    analysis_result["analyses"]["lineage_analysis"] = {
+                        "status": "error",
+                        "error": lineage_result.get('error', 'Analysis failed'),
+                        "agent_used": "lineage_analyzer"
+                    }
                 
             except Exception as e:
                 self.logger.error(f"❌ Lineage analysis failed: {str(e)}")
@@ -1028,25 +1112,33 @@ class APIOpulenceCoordinator:
                     "agent_used": "lineage_analyzer"
                 }
             
-            # FIXED: Logic Analysis with error handling
+            # FIXED: Logic Analysis for programs/code
             if component_type in ["program", "cobol", "copybook"]:
                 try:
                     self.logger.info(f"🔄 Running logic analysis for {component_name}")
                     logic_agent = self.get_agent("logic_analyzer")
                     
-                    if component_type in ["program", "cobol"]:
-                        logic_result = await logic_agent.analyze_program(component_name)
+                    logic_result = await self._safe_agent_call(
+                        logic_agent.analyze_program if component_type in ["program", "cobol"]
+                        else logic_agent.find_dependencies,
+                        component_name
+                    )
+                    
+                    if logic_result and not logic_result.get('error'):
+                        analysis_result["analyses"]["logic_analysis"] = {
+                            "status": "success",
+                            "data": logic_result,
+                            "agent_used": "logic_analyzer",
+                            "completion_time": time.time() - start_time
+                        }
+                        completed_count += 1
                     else:
-                        logic_result = await logic_agent.find_dependencies(component_name)
-                    
-                    analysis_result["analyses"]["logic_analysis"] = {
-                        "status": "success",
-                        "data": logic_result,
-                        "agent_used": "logic_analyzer",
-                        "completion_time": time.time() - start_time
-                    }
-                    completed_count += 1
-                    
+                        analysis_result["analyses"]["logic_analysis"] = {
+                            "status": "error",
+                            "error": logic_result.get('error', 'Analysis failed'),
+                            "agent_used": "logic_analyzer"
+                        }
+                        
                 except Exception as e:
                     self.logger.error(f"❌ Logic analysis failed: {str(e)}")
                     analysis_result["analyses"]["logic_analysis"] = {
@@ -1055,25 +1147,45 @@ class APIOpulenceCoordinator:
                         "agent_used": "logic_analyzer"
                     }
             
-            # FIXED: Semantic Analysis with error handling
+            # FIXED: Semantic Analysis with vector index creation
             try:
                 self.logger.info(f"🔄 Running semantic analysis for {component_name}")
                 vector_agent = self.get_agent("vector_index")
                 
-                similarity_result = await vector_agent.search_similar_components(component_name, top_k=3)  # FIXED: Smaller
-                semantic_result = await vector_agent.semantic_search(f"{component_name} similar functionality", top_k=2)  # FIXED: Smaller
+                # CRITICAL FIX: Ensure vector index exists
+                await self._ensure_vector_index_ready(component_name)
                 
-                analysis_result["analyses"]["semantic_analysis"] = {
-                    "status": "success",
-                    "data": {
-                        "similar_components": similarity_result,
-                        "semantic_search": semantic_result
-                    },
-                    "agent_used": "vector_index",
-                    "completion_time": time.time() - start_time
-                }
-                completed_count += 1
+                similarity_result = await self._safe_agent_call(
+                    vector_agent.search_similar_components,
+                    component_name,
+                    top_k=3
+                )
                 
+                semantic_result = await self._safe_agent_call(
+                    vector_agent.semantic_search,
+                    f"{component_name} similar functionality",
+                    top_k=2
+                )
+                
+                if (similarity_result and not similarity_result.get('error')) or \
+                (semantic_result and not semantic_result.get('error')):
+                    analysis_result["analyses"]["semantic_analysis"] = {
+                        "status": "success",
+                        "data": {
+                            "similar_components": similarity_result if not similarity_result.get('error') else [],
+                            "semantic_search": semantic_result if not semantic_result.get('error') else []
+                        },
+                        "agent_used": "vector_index",
+                        "completion_time": time.time() - start_time
+                    }
+                    completed_count += 1
+                else:
+                    analysis_result["analyses"]["semantic_analysis"] = {
+                        "status": "error",
+                        "error": "Both similarity and semantic search failed",
+                        "agent_used": "vector_index"
+                    }
+                    
             except Exception as e:
                 self.logger.error(f"❌ Semantic analysis failed: {str(e)}")
                 analysis_result["analyses"]["semantic_analysis"] = {
@@ -1112,6 +1224,109 @@ class APIOpulenceCoordinator:
                 "coordinator_type": "api_based_fixed"
             }
     
+    async def _ensure_agents_ready(self):
+        """Ensure all required agents are loaded and ready"""
+        required_agents = ["lineage_analyzer", "logic_analyzer", "vector_index"]
+        
+        for agent_type in required_agents:
+            if agent_type not in self.agents:
+                try:
+                    self.logger.info(f"Loading {agent_type} agent...")
+                    agent = self._create_agent(agent_type)
+                    self.agents[agent_type] = agent
+                    self.logger.info(f"✅ {agent_type} agent loaded successfully")
+                except Exception as e:
+                    self.logger.error(f"❌ Failed to load {agent_type}: {e}")
+                    raise RuntimeError(f"Required agent {agent_type} failed to load: {e}")
+
+    async def _safe_agent_call(self, agent_method, *args, **kwargs):
+            """Safely call agent method with timeout and error handling"""
+            try:
+                # Use asyncio.wait_for for timeout
+                result = await asyncio.wait_for(
+                    asyncio.get_event_loop().run_in_executor(
+                        None, 
+                        lambda: agent_method(*args, **kwargs)
+                    ),
+                    timeout=30  # 30 second timeout
+                )
+                return result
+            except asyncio.TimeoutError:
+                return {"error": "Agent call timed out"}
+            except Exception as e:
+                return {"error": str(e)}
+        
+    async def _ensure_vector_index_ready(self, component_name: str = None):
+        """CRITICAL FIX: Ensure vector index is ready and populated"""
+        try:
+            vector_agent = self.get_agent("vector_index")
+            
+            # Check if vector index exists and has data
+            if hasattr(vector_agent, 'check_index_ready'):
+                is_ready = await self._safe_agent_call(vector_agent.check_index_ready)
+                if is_ready and not is_ready.get('error'):
+                    self.logger.info("✅ Vector index is ready")
+                    return True
+            
+            # If not ready, create/rebuild index from database
+            self.logger.info("🔄 Creating/updating vector index...")
+            
+            # Get all processed chunks from database
+            chunks = await self._get_processed_chunks()
+            
+            if chunks:
+                # Build vector index
+                build_result = await self._safe_agent_call(
+                    vector_agent.build_index_from_chunks,
+                    chunks
+                )
+                
+                if build_result and not build_result.get('error'):
+                    self.logger.info(f"✅ Vector index built with {len(chunks)} chunks")
+                    return True
+                else:
+                    self.logger.error(f"❌ Vector index build failed: {build_result.get('error')}")
+                    return False
+            else:
+                self.logger.warning("⚠️ No processed chunks found for vector index")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"❌ Vector index preparation failed: {e}")
+            return False
+
+    async def _get_processed_chunks(self):
+        """Get all processed chunks from database for vector index"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT program_name, chunk_id, chunk_type, content, metadata
+                FROM program_chunks
+                WHERE content IS NOT NULL AND content != ''
+                ORDER BY created_timestamp DESC
+            """)
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            chunks = []
+            for row in rows:
+                chunks.append({
+                    'program_name': row[0],
+                    'chunk_id': row[1],
+                    'chunk_type': row[2],
+                    'content': row[3],
+                    'metadata': row[4]
+                })
+            
+            return chunks
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to get processed chunks: {e}")
+            return []
+
     async def process_chat_query(self, query: str, conversation_history: List[Dict] = None, **kwargs) -> Dict[str, Any]:
         """FIXED: Process chat query with proper error handling"""
         try:
@@ -1500,6 +1715,7 @@ def get_system_status_api() -> Dict[str, Any]:
     """Get system status using API coordinator"""
     coordinator = get_global_api_coordinator()
     return coordinator.get_health_status()
+
 
 # ==================== STREAMLIT SESSION STATE FIX ====================
 
