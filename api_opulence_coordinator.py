@@ -1108,41 +1108,52 @@ class APIOpulenceCoordinator:
 
 
     async def analyze_component(self, component_name: str, component_type: str = None, **kwargs) -> Dict[str, Any]:
-        """ULTRA-FIXED: Complete component analysis with proper sequence and error handling"""
+        """CLEAN: Complete component analysis with proper sequence and error handling"""
         start_time = time.time()
         
         try:
+            # Auto-detect component type if not provided
             if not component_type or component_type == "auto-detect":
                 component_type = await self._determine_component_type(component_name)
+            
+            # Normalize the component type for processing
+            normalized_type = self._normalize_component_type(component_type)
             
             analysis_result = {
                 "component_name": component_name,
                 "component_type": component_type,
+                "normalized_type": normalized_type,
                 "analysis_timestamp": dt.now().isoformat(),
                 "status": "in_progress",
                 "analyses": {},
                 "processing_metadata": {
                     "start_time": start_time,
-                    "coordinator_type": "api_based_ultra_fixed"
+                    "coordinator_type": "api_based_clean_fix"
                 }
             }
             
             completed_count = 0
             
-            # STEP 1: LINEAGE ANALYSIS (FOUNDATIONAL - MUST RUN FIRST)
+            # Ensure all required agents are ready
+            await self._ensure_agents_ready()
+            
+            # STEP 1: LINEAGE ANALYSIS (FOUNDATIONAL)
             try:
-                # Initialize agents if not already loaded
-                await self._ensure_agents_ready()
-                
-                self.logger.info(f"🔄 Step 1: Running lineage analysis for {component_name}")
+                self.logger.info(f"🔄 Step 1: Running lineage analysis for {component_name} (type: {normalized_type})")
                 lineage_agent = self.get_agent("lineage_analyzer")
                 
-                lineage_result = await self._safe_agent_call(
-                    lineage_agent.analyze_field_lineage if component_type == "field" 
-                    else lineage_agent.analyze_full_lifecycle,
-                    component_name,
-                    component_type if component_type != "field" else None
-                )
+                # Call appropriate lineage method based on type
+                if normalized_type == "field":
+                    lineage_result = await self._safe_agent_call(
+                        lineage_agent.analyze_field_lineage,
+                        component_name
+                    )
+                else:
+                    lineage_result = await self._safe_agent_call(
+                        lineage_agent.analyze_full_lifecycle,
+                        component_name,
+                        normalized_type
+                    )
                 
                 if lineage_result and not lineage_result.get('error'):
                     analysis_result["analyses"]["lineage_analysis"] = {
@@ -1155,16 +1166,17 @@ class APIOpulenceCoordinator:
                     completed_count += 1
                     self.logger.info(f"✅ Step 1: Lineage analysis completed successfully")
                 else:
+                    error_msg = lineage_result.get('error', 'No result returned') if lineage_result else 'No result returned'
                     analysis_result["analyses"]["lineage_analysis"] = {
                         "status": "error",
-                        "error": lineage_result.get('error', 'Analysis failed'),
+                        "error": error_msg,
                         "agent_used": "lineage_analyzer",
                         "step": 1
                     }
-                    self.logger.warning(f"⚠️ Step 1: Lineage analysis failed")
+                    self.logger.warning(f"⚠️ Step 1: Lineage analysis failed: {error_msg}")
                 
             except Exception as e:
-                self.logger.error(f"❌ Step 1: Lineage analysis failed: {str(e)}")
+                self.logger.error(f"❌ Step 1: Lineage analysis exception: {str(e)}")
                 analysis_result["analyses"]["lineage_analysis"] = {
                     "status": "error",
                     "error": str(e),
@@ -1172,20 +1184,23 @@ class APIOpulenceCoordinator:
                     "step": 1
                 }
             
-            # STEP 2: LOGIC ANALYSIS (STRUCTURAL - RUNS AFTER LINEAGE)
-            if component_type in ["program", "cobol", "copybook", "cbl", "cob", "copy", "cpy"]:
+            # STEP 2: LOGIC ANALYSIS (FOR COBOL/PROGRAM TYPES)
+            if normalized_type in ["cobol", "copybook", "program", "jcl"]:
                 try:
-                    self.logger.info(f"🔄 Step 2: Running logic analysis for {component_name} (type: {component_type})")
+                    self.logger.info(f"🔄 Step 2: Running logic analysis for {component_name} (type: {normalized_type})")
                     logic_agent = self.get_agent("logic_analyzer")
                     
-                    # Normalize component type for logic analysis
-                    normalized_type = self._normalize_component_type(component_type)
-                    
-                    logic_result = await self._safe_agent_call(
-                        logic_agent.analyze_program if normalized_type in ["program", "cobol"]
-                        else logic_agent.find_dependencies,
-                        component_name
-                    )
+                    # Call appropriate logic method based on type
+                    if normalized_type in ["cobol", "program"]:
+                        logic_result = await self._safe_agent_call(
+                            logic_agent.analyze_program,
+                            component_name
+                        )
+                    else:
+                        logic_result = await self._safe_agent_call(
+                            logic_agent.find_dependencies,
+                            component_name
+                        )
                     
                     if logic_result and not logic_result.get('error'):
                         analysis_result["analyses"]["logic_analysis"] = {
@@ -1197,19 +1212,19 @@ class APIOpulenceCoordinator:
                             "normalized_type": normalized_type
                         }
                         completed_count += 1
-                        self.logger.info(f"✅ Step 2: Logic analysis completed successfully for {normalized_type}")
+                        self.logger.info(f"✅ Step 2: Logic analysis completed successfully")
                     else:
+                        error_msg = logic_result.get('error', 'No result returned') if logic_result else 'No result returned'
                         analysis_result["analyses"]["logic_analysis"] = {
                             "status": "error",
-                            "error": logic_result.get('error', 'Analysis failed'),
+                            "error": error_msg,
                             "agent_used": "logic_analyzer",
-                            "step": 2,
-                            "normalized_type": normalized_type
+                            "step": 2
                         }
-                        self.logger.warning(f"⚠️ Step 2: Logic analysis failed for {normalized_type}")
+                        self.logger.warning(f"⚠️ Step 2: Logic analysis failed: {error_msg}")
                         
                 except Exception as e:
-                    self.logger.error(f"❌ Step 2: Logic analysis failed: {str(e)}")
+                    self.logger.error(f"❌ Step 2: Logic analysis exception: {str(e)}")
                     analysis_result["analyses"]["logic_analysis"] = {
                         "status": "error",
                         "error": str(e),
@@ -1217,57 +1232,66 @@ class APIOpulenceCoordinator:
                         "step": 2
                     }
             else:
-                self.logger.info(f"ℹ️ Step 2: Skipping logic analysis for component type: {component_type}")
+                self.logger.info(f"ℹ️ Step 2: Skipping logic analysis for type: {normalized_type}")
             
-            # STEP 3: SEMANTIC ANALYSIS (SIMILARITY SEARCH - RUNS LAST)
+            # STEP 3: SEMANTIC ANALYSIS (VECTOR SEARCH)
             try:
                 self.logger.info(f"🔄 Step 3: Running semantic analysis for {component_name}")
                 vector_agent = self.get_agent("vector_index")
                 
-                # CRITICAL FIX: Ensure vector index exists with correct method
-                await self._ensure_vector_index_ready(component_name)
-                
-                # ULTRA-FIXED: Safe method calls with proper result validation
-                similarity_result = await self._safe_agent_call(
-                    vector_agent.search_similar_components,
-                    component_name,
-                    3  # top_k parameter
-                )
-                
-                semantic_result = await self._safe_agent_call(
-                    vector_agent.semantic_search,
-                    f"{component_name} similar functionality",
-                    2  # top_k parameter
-                )
-                
-                # CRITICAL FIX: Proper result validation and normalization
-                validated_similarity = self._validate_search_result(similarity_result)
-                validated_semantic = self._validate_search_result(semantic_result)
-                
-                if validated_similarity or validated_semantic:
+                # Ensure vector index is ready
+                vector_ready = await self._ensure_vector_index_ready()
+                if not vector_ready:
+                    self.logger.warning(f"⚠️ Vector index not ready, skipping semantic analysis")
                     analysis_result["analyses"]["semantic_analysis"] = {
-                        "status": "success",
-                        "data": {
-                            "similar_components": validated_similarity,
-                            "semantic_search": validated_semantic
-                        },
+                        "status": "skipped",
+                        "error": "Vector index not available",
                         "agent_used": "vector_index",
-                        "completion_time": time.time() - start_time,
                         "step": 3
                     }
-                    completed_count += 1
-                    self.logger.info(f"✅ Step 3: Semantic analysis completed successfully")
                 else:
-                    analysis_result["analyses"]["semantic_analysis"] = {
-                        "status": "error",
-                        "error": "Both similarity and semantic search returned invalid results",
-                        "agent_used": "vector_index",
-                        "step": 3
-                    }
-                    self.logger.warning(f"⚠️ Step 3: Semantic analysis failed - no valid results")
+                    # Perform similarity search
+                    similarity_result = await self._safe_agent_call(
+                        vector_agent.search_similar_components,
+                        component_name,
+                        3
+                    )
+                    
+                    # Perform semantic search
+                    semantic_result = await self._safe_agent_call(
+                        vector_agent.semantic_search,
+                        f"{component_name} similar functionality",
+                        2
+                    )
+                    
+                    # Validate and normalize results
+                    validated_similarity = self._validate_search_result(similarity_result)
+                    validated_semantic = self._validate_search_result(semantic_result)
+                    
+                    if validated_similarity or validated_semantic:
+                        analysis_result["analyses"]["semantic_analysis"] = {
+                            "status": "success",
+                            "data": {
+                                "similar_components": validated_similarity,
+                                "semantic_search": validated_semantic
+                            },
+                            "agent_used": "vector_index",
+                            "completion_time": time.time() - start_time,
+                            "step": 3
+                        }
+                        completed_count += 1
+                        self.logger.info(f"✅ Step 3: Semantic analysis completed successfully")
+                    else:
+                        analysis_result["analyses"]["semantic_analysis"] = {
+                            "status": "error",
+                            "error": "No valid search results returned",
+                            "agent_used": "vector_index",
+                            "step": 3
+                        }
+                        self.logger.warning(f"⚠️ Step 3: Semantic analysis failed - no valid results")
                     
             except Exception as e:
-                self.logger.error(f"❌ Step 3: Semantic analysis failed: {str(e)}")
+                self.logger.error(f"❌ Step 3: Semantic analysis exception: {str(e)}")
                 analysis_result["analyses"]["semantic_analysis"] = {
                     "status": "error",
                     "error": str(e),
@@ -1306,43 +1330,41 @@ class APIOpulenceCoordinator:
                 "status": "system_error",
                 "error": str(e),
                 "processing_time": time.time() - start_time,
-                "coordinator_type": "api_based_ultra_fixed"
+                "coordinator_type": "api_based_clean_fix"
             }
 
+
     def _normalize_component_type(self, component_type: str) -> str:
-        """ULTRA-FIXED: Normalize component type for proper agent handling"""
+        """Normalize component type for proper agent handling"""
+        if not component_type:
+            return "cobol"
+        
         component_type_lower = component_type.lower()
         
         # Map file extensions and variations to standard types
         if component_type_lower in ['cbl', 'cob', 'cobol', 'program']:
-            return "cbl"
+            return "cobol"
         elif component_type_lower in ['copy', 'cpy', 'copybook']:
-            return "cpy" 
+            return "copybook" 
         elif component_type_lower in ['jcl', 'job', 'proc']:
             return "jcl"
         elif component_type_lower in ['field', 'data_field', 'variable']:
             return "field"
         else:
-            # Default to cobol for unknown COBOL-related types
-            return "cbl"
+            return "cobol"  # Safe default
 
 
     def _validate_search_result(self, result):
-        """CRITICAL FIX: Validate and normalize search results"""
+        """Validate and normalize search results"""
         try:
-            if not result:
-                return []
-            
-            # If result has error, return empty list
-            if isinstance(result, dict) and result.get('error'):
-                self.logger.warning(f"Search result has error: {result.get('error')}")
+            if not result or result.get('error'):
                 return []
             
             # If result is already a list, return as-is
             if isinstance(result, list):
                 return result
             
-            # If result is a dict with data key
+            # If result is a dict, extract data
             if isinstance(result, dict):
                 if 'data' in result:
                     data = result['data']
@@ -1354,123 +1376,97 @@ class APIOpulenceCoordinator:
                     matches = result['matches']
                     return matches if isinstance(matches, list) else []
                 else:
-                    # Try to convert dict to list format
                     return [result]
             
-            # Fallback: return empty list
-            self.logger.warning(f"Unexpected result format: {type(result)}")
             return []
             
         except Exception as e:
             self.logger.error(f"Result validation failed: {e}")
             return []
-
+        
     async def _ensure_agents_ready(self):
-        """FIXED: Ensure all required agents are loaded and properly initialized"""
+        """Ensure all required agents are loaded"""
         required_agents = ["lineage_analyzer", "logic_analyzer", "vector_index"]
         
         for agent_type in required_agents:
             if agent_type not in self.agents:
                 try:
                     self.logger.info(f"Loading {agent_type} agent...")
-                    agent = self._create_agent(agent_type)
-                    self.agents[agent_type] = agent
-                    self.logger.info(f"✅ {agent_type} agent loaded successfully")
+                    self.get_agent(agent_type)  # This will create the agent
+                    self.logger.info(f"✅ {agent_type} agent loaded")
                 except Exception as e:
                     self.logger.error(f"❌ Failed to load {agent_type}: {e}")
-                    raise RuntimeError(f"Required agent {agent_type} failed to load: {e}")
-        
-        # CRITICAL FIX: Wait for any pending agent initializations
-        if hasattr(self, '_initialization_tasks'):
-            try:
-                # Wait for all initialization tasks to complete with timeout
-                await asyncio.wait_for(
-                    asyncio.gather(*self._initialization_tasks, return_exceptions=True),
-                    timeout=30  # 30 second timeout
-                )
-                self.logger.info("✅ All agent initializations completed")
-            except asyncio.TimeoutError:
-                self.logger.warning("⚠️ Agent initialization timeout - continuing anyway")
-            except Exception as e:
-                self.logger.warning(f"⚠️ Agent initialization error: {e}")
+                    raise RuntimeError(f"Required agent {agent_type} failed to load")
 
     async def _safe_agent_call(self, agent_method, *args, **kwargs):
-        """ULTRA-FIXED: Safely call agent method with comprehensive error handling"""
+        """Safely call agent method with proper async handling"""
         try:
-            # Check if method exists
             if not callable(agent_method):
                 return {"error": "Method is not callable"}
             
-            # Check if method is async or sync
+            method_name = getattr(agent_method, '__name__', str(agent_method))
+            self.logger.debug(f"🔧 Calling {method_name}")
+            
+            # Check if method is async
             import inspect
             if inspect.iscoroutinefunction(agent_method):
-                # It's an async method - call directly with timeout
                 result = await asyncio.wait_for(
                     agent_method(*args, **kwargs),
-                    timeout=90  # 90 second timeout for safety
+                    timeout=120
                 )
             else:
-                # It's a sync method - use executor with timeout
                 result = await asyncio.wait_for(
                     asyncio.get_event_loop().run_in_executor(
                         None, 
                         lambda: agent_method(*args, **kwargs)
                     ),
-                    timeout=90  # 90 second timeout
+                    timeout=120
                 )
             
-            # Validate the result
             if result is None:
-                return {"error": "Method returned None"}
+                return {"error": f"Method {method_name} returned None"}
             
             return result
             
         except asyncio.TimeoutError:
-            return {"error": "Agent call timed out after 90 seconds"}
-        except AttributeError as e:
-            return {"error": f"Method not found: {str(e)}"}
+            return {"error": f"Method timed out after 120 seconds"}
         except Exception as e:
-            return {"error": f"Agent call failed: {str(e)}"}
+            return {"error": f"Method failed: {str(e)}"}
+
         
-    async def _ensure_vector_index_ready(self, component_name: str = None):
-        """FIXED: Ensure vector index is ready and populated with correct method names"""
+    async def _ensure_vector_index_ready(self) -> bool:
+        """Ensure vector index is ready"""
         try:
             vector_agent = self.get_agent("vector_index")
             
-            # FIXED: Check if vector index exists and has data using correct method
-            if hasattr(vector_agent, 'get_embedding_statistics'):
-                stats = await self._safe_agent_call(vector_agent.get_embedding_statistics)
-                if stats and not stats.get('error') and stats.get('total_embeddings', 0) > 0:
-                    self.logger.info(f"✅ Vector index is ready with {stats.get('total_embeddings')} embeddings")
+            # Check if index has embeddings
+            stats_result = await self._safe_agent_call(vector_agent.get_embedding_statistics)
+            
+            if stats_result and not stats_result.get('error'):
+                total_embeddings = stats_result.get('total_embeddings', 0)
+                if total_embeddings > 0:
+                    self.logger.info(f"✅ Vector index ready with {total_embeddings} embeddings")
                     return True
             
-            # If not ready, create/rebuild index from database
-            self.logger.info("🔄 Creating/updating vector index...")
-            
-            # Get all processed chunks from database
+            # Try to build index if not ready
+            self.logger.info("🔄 Building vector index...")
             chunks = await self._get_processed_chunks()
             
             if chunks:
-                # FIXED: Use correct method name that exists in vector agent
                 build_result = await self._safe_agent_call(
-                    vector_agent.rebuild_index_from_chunks,  # FIXED: Use rebuild_index_from_chunks
+                    vector_agent.create_embeddings_for_chunks,
                     chunks
                 )
                 
                 if build_result and not build_result.get('error'):
                     self.logger.info(f"✅ Vector index built with {len(chunks)} chunks")
                     return True
-                else:
-                    self.logger.error(f"❌ Vector index build failed: {build_result.get('error') if build_result else 'Unknown error'}")
-                    return False
-            else:
-                self.logger.warning("⚠️ No processed chunks found for vector index")
-                return False
-                
+            
+            return False
+            
         except Exception as e:
             self.logger.error(f"❌ Vector index preparation failed: {e}")
             return False
-
     async def rebuild_vector_index(self) -> Dict[str, Any]:
         """FIXED: Rebuild vector index using correct method name"""
         try:
@@ -1516,35 +1512,44 @@ class APIOpulenceCoordinator:
             }
 
     async def _get_processed_chunks(self):
-        """Get all processed chunks from database for vector index"""
+        """Get processed chunks from database"""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            def get_chunks():
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                try:
+                    cursor.execute("""
+                        SELECT program_name, chunk_id, chunk_type, content, metadata
+                        FROM program_chunks
+                        WHERE content IS NOT NULL AND content != '' AND length(content) > 10
+                        ORDER BY created_timestamp DESC
+                        LIMIT 500
+                    """)
+                    
+                    rows = cursor.fetchall()
+                    
+                    chunks = []
+                    for row in rows:
+                        chunks.append({
+                            'program_name': row[0],
+                            'chunk_id': row[1],
+                            'chunk_type': row[2],
+                            'content': row[3][:1000],  # Limit content size
+                            'metadata': row[4]
+                        })
+                    
+                    return chunks
+                    
+                finally:
+                    conn.close()
             
-            cursor.execute("""
-                SELECT program_name, chunk_id, chunk_type, content, metadata
-                FROM program_chunks
-                WHERE content IS NOT NULL AND content != ''
-                ORDER BY created_timestamp DESC
-            """)
-            
-            rows = cursor.fetchall()
-            conn.close()
-            
-            chunks = []
-            for row in rows:
-                chunks.append({
-                    'program_name': row[0],
-                    'chunk_id': row[1],
-                    'chunk_type': row[2],
-                    'content': row[3],
-                    'metadata': row[4]
-                })
-            
+            chunks = await asyncio.get_event_loop().run_in_executor(None, get_chunks)
+            self.logger.info(f"📊 Retrieved {len(chunks)} chunks from database")
             return chunks
             
         except Exception as e:
-            self.logger.error(f"❌ Failed to get processed chunks: {e}")
+            self.logger.error(f"❌ Failed to get chunks: {e}")
             return []
 
     async def process_chat_query(self, query: str, conversation_history: List[Dict] = None, **kwargs) -> Dict[str, Any]:
@@ -1637,47 +1642,77 @@ class APIOpulenceCoordinator:
             self.logger.error(f"❌ Failed to store {file_path} in database: {str(e)}")
     
     async def _determine_component_type(self, component_name: str) -> str:
-        """Determine component type from database"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        """Determine component type with proper COBOL file extension handling"""
         
+        # Check file extension first
+        component_lower = component_name.lower()
+        
+        # Handle COBOL file extensions
+        if any(component_lower.endswith(ext) for ext in ['.cbl', '.cob', '.cobol']):
+            self.logger.info(f"✅ Detected COBOL program file: {component_name}")
+            return "cobol"
+        elif any(component_lower.endswith(ext) for ext in ['.copy', '.cpy', '.copybook']):
+            self.logger.info(f"✅ Detected COBOL copybook file: {component_name}")
+            return "copybook"
+        elif any(component_lower.endswith(ext) for ext in ['.jcl', '.job', '.proc']):
+            self.logger.info(f"✅ Detected JCL file: {component_name}")
+            return "jcl"
+        
+        # Database-based detection
         try:
-            cursor.execute("""
-                SELECT chunk_type, COUNT(*) as count 
-                FROM program_chunks 
-                WHERE program_name = ?
-                GROUP BY chunk_type
-                ORDER BY count DESC
-            """, (component_name,))
+            def check_database():
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                try:
+                    # Check chunk types
+                    cursor.execute("""
+                        SELECT chunk_type, COUNT(*) as count 
+                        FROM program_chunks 
+                        WHERE program_name = ? OR program_name LIKE ?
+                        GROUP BY chunk_type
+                        ORDER BY count DESC
+                    """, (component_name, f"%{component_name}%"))
+                    
+                    chunk_types = cursor.fetchall()
+                    
+                    if chunk_types:
+                        chunk_type_names = [ct.lower() for ct, _ in chunk_types]
+                        
+                        if any('job' in ct for ct in chunk_type_names):
+                            return "jcl"
+                        elif any(ct in ['working_storage', 'procedure_division', 'data_division', 'identification_division'] for ct in chunk_type_names):
+                            return "cobol"
+                        elif any(ct in ['copybook', 'copy'] for ct in chunk_type_names):
+                            return "copybook"
+                    
+                    # Check if it's a field
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM program_chunks
+                        WHERE (content LIKE ? OR metadata LIKE ?) AND chunk_type NOT IN ('file_header', 'comment')
+                        LIMIT 1
+                    """, (f"%{component_name}%", f"%{component_name}%"))
+                    
+                    field_count = cursor.fetchone()[0]
+                    
+                    if (field_count > 0 and component_name.isupper() and 
+                        ('_' in component_name or '-' in component_name or len(component_name) <= 30) and
+                        not any(component_lower.endswith(ext) for ext in ['.cbl', '.cob', '.copy', '.cpy'])):
+                        return "field"
+                    
+                    return "cobol"  # Default
+                    
+                finally:
+                    conn.close()
             
-            chunk_types = cursor.fetchall()
-            
-            if chunk_types:
-                if any('job' in ct.lower() for ct, _ in chunk_types):
-                    return "jcl"
-                elif any(ct in ['working_storage', 'procedure_division', 'data_division'] for ct, _ in chunk_types):
-                    return "program"
-                else:
-                    return "program"
-            
-            # Check if it's a field
-            cursor.execute("""
-                SELECT COUNT(*) FROM program_chunks
-                WHERE content LIKE ? OR metadata LIKE ?
-                LIMIT 1
-            """, (f"%{component_name}%", f"%{component_name}%"))
-            
-            if cursor.fetchone()[0] > 0:
-                if component_name.isupper() and ('_' in component_name or len(component_name) <= 20):
-                    return "field"
-            
-            return "program"  # Default
+            # Run database check in executor
+            result = await asyncio.get_event_loop().run_in_executor(None, check_database)
+            return result
             
         except Exception as e:
             self.logger.error(f"❌ Component type determination failed: {e}")
-            return "program"
-        finally:
-            conn.close()
+            return "cobol"
+
     
     def get_health_status(self) -> Dict[str, Any]:
         """FIXED: Get coordinator health status with vector index info"""
