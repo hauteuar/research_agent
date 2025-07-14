@@ -1107,13 +1107,13 @@ class APIOpulenceCoordinator:
             return []
 
 
-    async def analyze_component(self, component_name: str, component_type: str = None, **kwargs) -> Dict[str, Any]:
-        """ULTRA-FIXED: Enhanced component analysis with proper error handling"""
+    def analyze_component(self, component_name: str, component_type: str = None, **kwargs) -> Dict[str, Any]:
+        """ULTRA-FIXED: Complete component analysis with proper sequence and error handling"""
         start_time = time.time()
         
         try:
             if not component_type or component_type == "auto-detect":
-                component_type = await self._determine_component_type(component_name)
+                component_type = self._determine_component_type(component_name)
             
             analysis_result = {
                 "component_name": component_name,
@@ -1129,22 +1129,112 @@ class APIOpulenceCoordinator:
             
             completed_count = 0
             
-            # ULTRA-FIXED: Semantic Analysis with proper result handling
+            # STEP 1: LINEAGE ANALYSIS (FOUNDATIONAL - MUST RUN FIRST)
             try:
-                self.logger.info(f"🔄 Running semantic analysis for {component_name}")
+                # Initialize agents if not already loaded
+                self._ensure_agents_ready()
+                
+                self.logger.info(f"🔄 Step 1: Running lineage analysis for {component_name}")
+                lineage_agent = self.get_agent("lineage_analyzer")
+                
+                lineage_result = self._safe_agent_call(
+                    lineage_agent.analyze_field_lineage if component_type == "field" 
+                    else lineage_agent.analyze_full_lifecycle,
+                    component_name,
+                    component_type if component_type != "field" else None
+                )
+                
+                if lineage_result and not lineage_result.get('error'):
+                    analysis_result["analyses"]["lineage_analysis"] = {
+                        "status": "success",
+                        "data": lineage_result,
+                        "agent_used": "lineage_analyzer",
+                        "completion_time": time.time() - start_time,
+                        "step": 1
+                    }
+                    completed_count += 1
+                    self.logger.info(f"✅ Step 1: Lineage analysis completed successfully")
+                else:
+                    analysis_result["analyses"]["lineage_analysis"] = {
+                        "status": "error",
+                        "error": lineage_result.get('error', 'Analysis failed'),
+                        "agent_used": "lineage_analyzer",
+                        "step": 1
+                    }
+                    self.logger.warning(f"⚠️ Step 1: Lineage analysis failed")
+                
+            except Exception as e:
+                self.logger.error(f"❌ Step 1: Lineage analysis failed: {str(e)}")
+                analysis_result["analyses"]["lineage_analysis"] = {
+                    "status": "error",
+                    "error": str(e),
+                    "agent_used": "lineage_analyzer",
+                    "step": 1
+                }
+            
+            # STEP 2: LOGIC ANALYSIS (STRUCTURAL - RUNS AFTER LINEAGE)
+            if component_type in ["program", "cobol", "copybook", "cbl", "cob", "copy", "cpy"]:
+                try:
+                    self.logger.info(f"🔄 Step 2: Running logic analysis for {component_name} (type: {component_type})")
+                    logic_agent = self.get_agent("logic_analyzer")
+                    
+                    # Normalize component type for logic analysis
+                    normalized_type = self._normalize_component_type(component_type)
+                    
+                    logic_result = self._safe_agent_call(
+                        logic_agent.analyze_program if normalized_type in ["program", "cobol"]
+                        else logic_agent.find_dependencies,
+                        component_name
+                    )
+                    
+                    if logic_result and not logic_result.get('error'):
+                        analysis_result["analyses"]["logic_analysis"] = {
+                            "status": "success",
+                            "data": logic_result,
+                            "agent_used": "logic_analyzer",
+                            "completion_time": time.time() - start_time,
+                            "step": 2,
+                            "normalized_type": normalized_type
+                        }
+                        completed_count += 1
+                        self.logger.info(f"✅ Step 2: Logic analysis completed successfully for {normalized_type}")
+                    else:
+                        analysis_result["analyses"]["logic_analysis"] = {
+                            "status": "error",
+                            "error": logic_result.get('error', 'Analysis failed'),
+                            "agent_used": "logic_analyzer",
+                            "step": 2,
+                            "normalized_type": normalized_type
+                        }
+                        self.logger.warning(f"⚠️ Step 2: Logic analysis failed for {normalized_type}")
+                        
+                except Exception as e:
+                    self.logger.error(f"❌ Step 2: Logic analysis failed: {str(e)}")
+                    analysis_result["analyses"]["logic_analysis"] = {
+                        "status": "error",
+                        "error": str(e),
+                        "agent_used": "logic_analyzer",
+                        "step": 2
+                    }
+            else:
+                self.logger.info(f"ℹ️ Step 2: Skipping logic analysis for component type: {component_type}")
+            
+            # STEP 3: SEMANTIC ANALYSIS (SIMILARITY SEARCH - RUNS LAST)
+            try:
+                self.logger.info(f"🔄 Step 3: Running semantic analysis for {component_name}")
                 vector_agent = self.get_agent("vector_index")
                 
                 # CRITICAL FIX: Ensure vector index exists with correct method
-                await self._ensure_vector_index_ready(component_name)
+                self._ensure_vector_index_ready(component_name)
                 
                 # ULTRA-FIXED: Safe method calls with proper result validation
-                similarity_result = await self._safe_agent_call(
+                similarity_result = self._safe_agent_call(
                     vector_agent.search_similar_components,
                     component_name,
                     3  # top_k parameter
                 )
                 
-                semantic_result = await self._safe_agent_call(
+                semantic_result = self._safe_agent_call(
                     vector_agent.semantic_search,
                     f"{component_name} similar functionality",
                     2  # top_k parameter
@@ -1162,33 +1252,40 @@ class APIOpulenceCoordinator:
                             "semantic_search": validated_semantic
                         },
                         "agent_used": "vector_index",
-                        "completion_time": time.time() - start_time
+                        "completion_time": time.time() - start_time,
+                        "step": 3
                     }
                     completed_count += 1
+                    self.logger.info(f"✅ Step 3: Semantic analysis completed successfully")
                 else:
                     analysis_result["analyses"]["semantic_analysis"] = {
                         "status": "error",
                         "error": "Both similarity and semantic search returned invalid results",
-                        "agent_used": "vector_index"
+                        "agent_used": "vector_index",
+                        "step": 3
                     }
+                    self.logger.warning(f"⚠️ Step 3: Semantic analysis failed - no valid results")
                     
             except Exception as e:
-                self.logger.error(f"❌ Semantic analysis failed: {str(e)}")
+                self.logger.error(f"❌ Step 3: Semantic analysis failed: {str(e)}")
                 analysis_result["analyses"]["semantic_analysis"] = {
                     "status": "error",
                     "error": str(e),
-                    "agent_used": "vector_index"
+                    "agent_used": "vector_index",
+                    "step": 3
                 }
-            
             
             # Determine final status
             total_analyses = len(analysis_result["analyses"])
             if completed_count == total_analyses and total_analyses > 0:
                 analysis_result["status"] = "completed"
+                self.logger.info(f"🎉 All {completed_count} analyses completed successfully")
             elif completed_count > 0:
                 analysis_result["status"] = "partial"
+                self.logger.warning(f"⚠️ Partial completion: {completed_count}/{total_analyses} analyses succeeded")
             else:
                 analysis_result["status"] = "failed"
+                self.logger.error(f"❌ All analyses failed for {component_name}")
             
             # Add final metadata
             analysis_result["processing_metadata"].update({
@@ -1196,20 +1293,39 @@ class APIOpulenceCoordinator:
                 "total_duration_seconds": time.time() - start_time,
                 "analyses_completed": completed_count,
                 "analyses_total": total_analyses,
-                "success_rate": (completed_count / total_analyses) * 100 if total_analyses > 0 else 0
+                "success_rate": (completed_count / total_analyses) * 100 if total_analyses > 0 else 0,
+                "analysis_sequence": ["lineage_analysis", "logic_analysis", "semantic_analysis"]
             })
             
             return analysis_result
             
         except Exception as e:
-            self.logger.error(f"❌ Component analysis failed: {str(e)}")
+            self.logger.error(f"❌ Component analysis system error: {str(e)}")
             return {
                 "component_name": component_name,
                 "status": "system_error",
                 "error": str(e),
                 "processing_time": time.time() - start_time,
-                "coordinator_type": "api_based_fixed"
+                "coordinator_type": "api_based_ultra_fixed"
             }
+
+    def _normalize_component_type(self, component_type: str) -> str:
+        """ULTRA-FIXED: Normalize component type for proper agent handling"""
+        component_type_lower = component_type.lower()
+        
+        # Map file extensions and variations to standard types
+        if component_type_lower in ['cbl', 'cob', 'cobol', 'program']:
+            return "cbl"
+        elif component_type_lower in ['copy', 'cpy', 'copybook']:
+            return "cpy" 
+        elif component_type_lower in ['jcl', 'job', 'proc']:
+            return "jcl"
+        elif component_type_lower in ['field', 'data_field', 'variable']:
+            return "field"
+        else:
+            # Default to cobol for unknown COBOL-related types
+            return "cbl"
+
 
     def _validate_search_result(self, result):
         """CRITICAL FIX: Validate and normalize search results"""
