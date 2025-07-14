@@ -767,13 +767,13 @@ class APIOpulenceCoordinator:
                 )
             elif agent_type == "vector_index" and VectorIndexAgent:
                 agent = VectorIndexAgent(
+                    coordinator=self,  # FIXED: Pass coordinator first
                     llm_engine=None,
                     db_path=self.db_path,
-                    gpu_id=selected_gpu_id,
-                    coordinator=self
+                    gpu_id=selected_gpu_id
                 )
-                # CRITICAL FIX: Initialize vector index agent components properly
-                self._schedule_agent_initialization(agent)
+                # CRITICAL FIX: Don't call async methods in __init__
+                # The agent will handle its own initialization
                 
             elif agent_type == "data_loader" and DataLoaderAgent:
                 agent = DataLoaderAgent(
@@ -847,7 +847,7 @@ class APIOpulenceCoordinator:
         except Exception as e:
             self.logger.error(f"Failed to create {agent_type} agent: {str(e)}")
             raise RuntimeError(f"Agent creation failed for {agent_type}: {str(e)}")
-
+        
     def _schedule_agent_initialization(self, agent):
         """CRITICAL FIX: Properly schedule async agent initialization"""
         if hasattr(agent, '_initialize_components'):
@@ -1052,7 +1052,7 @@ class APIOpulenceCoordinator:
             }
     
     async def _update_vector_index_for_file(self, file_path: Path, process_result: Dict[str, Any]):
-        """Update vector index immediately after file processing"""
+        """FIXED: Update vector index immediately after file processing"""
         try:
             # Get new chunks for this file
             chunks = await self._get_chunks_for_file(file_path.name)
@@ -1060,9 +1060,9 @@ class APIOpulenceCoordinator:
             if chunks:
                 vector_agent = self.get_agent("vector_index")
                 
-                # Add chunks to vector index
+                # FIXED: Use correct method name from vector agent
                 update_result = await self._safe_agent_call(
-                    vector_agent.add_chunks_to_index,
+                    vector_agent.create_embeddings_for_chunks,  # FIXED: Correct method
                     chunks
                 )
                 
@@ -1108,7 +1108,7 @@ class APIOpulenceCoordinator:
 
 
     async def analyze_component(self, component_name: str, component_type: str = None, **kwargs) -> Dict[str, Any]:
-        """FIXED: Enhanced component analysis with proper orchestration"""
+        """FIXED: Enhanced component analysis with proper vector agent method calls"""
         start_time = time.time()
         
         try:
@@ -1203,24 +1203,25 @@ class APIOpulenceCoordinator:
                         "agent_used": "logic_analyzer"
                     }
             
-            # FIXED: Semantic Analysis with vector index creation
+            # FIXED: Semantic Analysis with correct vector agent method calls
             try:
                 self.logger.info(f"🔄 Running semantic analysis for {component_name}")
                 vector_agent = self.get_agent("vector_index")
                 
-                # CRITICAL FIX: Ensure vector index exists
+                # CRITICAL FIX: Ensure vector index exists with correct method
                 await self._ensure_vector_index_ready(component_name)
                 
+                # FIXED: Use correct method names from vector agent
                 similarity_result = await self._safe_agent_call(
-                    vector_agent.search_similar_components,
+                    vector_agent.search_similar_components,  # ✅ This method exists
                     component_name,
-                    top_k=3
+                    3  # top_k parameter
                 )
                 
                 semantic_result = await self._safe_agent_call(
-                    vector_agent.semantic_search,
+                    vector_agent.semantic_search,  # ✅ This method exists
                     f"{component_name} similar functionality",
-                    top_k=2
+                    2  # top_k parameter
                 )
                 
                 if (similarity_result and not similarity_result.get('error')) or \
@@ -1279,6 +1280,7 @@ class APIOpulenceCoordinator:
                 "processing_time": time.time() - start_time,
                 "coordinator_type": "api_based_fixed"
             }
+
     
     async def _ensure_agents_ready(self):
         """FIXED: Ensure all required agents are loaded and properly initialized"""
@@ -1310,32 +1312,41 @@ class APIOpulenceCoordinator:
                 self.logger.warning(f"⚠️ Agent initialization error: {e}")
 
     async def _safe_agent_call(self, agent_method, *args, **kwargs):
-            """Safely call agent method with timeout and error handling"""
-            try:
-                # Use asyncio.wait_for for timeout
+        """FIXED: Safely call agent method with timeout and error handling"""
+        try:
+            # FIXED: Check if method is async or sync
+            import inspect
+            if inspect.iscoroutinefunction(agent_method):
+                # It's an async method - call directly
+                result = await asyncio.wait_for(
+                    agent_method(*args, **kwargs),
+                    timeout=60  # 60 second timeout for vector operations
+                )
+            else:
+                # It's a sync method - use executor
                 result = await asyncio.wait_for(
                     asyncio.get_event_loop().run_in_executor(
                         None, 
                         lambda: agent_method(*args, **kwargs)
                     ),
-                    timeout=30  # 30 second timeout
+                    timeout=60  # 60 second timeout
                 )
-                return result
-            except asyncio.TimeoutError:
-                return {"error": "Agent call timed out"}
-            except Exception as e:
-                return {"error": str(e)}
+            return result
+        except asyncio.TimeoutError:
+            return {"error": "Agent call timed out"}
+        except Exception as e:
+            return {"error": str(e)}
         
     async def _ensure_vector_index_ready(self, component_name: str = None):
-        """CRITICAL FIX: Ensure vector index is ready and populated"""
+        """FIXED: Ensure vector index is ready and populated with correct method names"""
         try:
             vector_agent = self.get_agent("vector_index")
             
-            # Check if vector index exists and has data
-            if hasattr(vector_agent, 'check_index_ready'):
-                is_ready = await self._safe_agent_call(vector_agent.check_index_ready)
-                if is_ready and not is_ready.get('error'):
-                    self.logger.info("✅ Vector index is ready")
+            # FIXED: Check if vector index exists and has data using correct method
+            if hasattr(vector_agent, 'get_embedding_statistics'):
+                stats = await self._safe_agent_call(vector_agent.get_embedding_statistics)
+                if stats and not stats.get('error') and stats.get('total_embeddings', 0) > 0:
+                    self.logger.info(f"✅ Vector index is ready with {stats.get('total_embeddings')} embeddings")
                     return True
             
             # If not ready, create/rebuild index from database
@@ -1345,9 +1356,9 @@ class APIOpulenceCoordinator:
             chunks = await self._get_processed_chunks()
             
             if chunks:
-                # Build vector index
+                # FIXED: Use correct method name that exists in vector agent
                 build_result = await self._safe_agent_call(
-                    vector_agent.build_index_from_chunks,
+                    vector_agent.rebuild_index_from_chunks,  # FIXED: Use rebuild_index_from_chunks
                     chunks
                 )
                 
@@ -1355,7 +1366,7 @@ class APIOpulenceCoordinator:
                     self.logger.info(f"✅ Vector index built with {len(chunks)} chunks")
                     return True
                 else:
-                    self.logger.error(f"❌ Vector index build failed: {build_result.get('error')}")
+                    self.logger.error(f"❌ Vector index build failed: {build_result.get('error') if build_result else 'Unknown error'}")
                     return False
             else:
                 self.logger.warning("⚠️ No processed chunks found for vector index")
@@ -1364,6 +1375,50 @@ class APIOpulenceCoordinator:
         except Exception as e:
             self.logger.error(f"❌ Vector index preparation failed: {e}")
             return False
+
+    async def rebuild_vector_index(self) -> Dict[str, Any]:
+        """FIXED: Rebuild vector index using correct method name"""
+        try:
+            vector_agent = self.get_agent("vector_index")
+            
+            # FIXED: Use the correct method name that exists in vector agent
+            result = await self._safe_agent_call(vector_agent.rebuild_index)
+            
+            return {
+                "status": "success" if result and not result.get('error') else "error",
+                "result": result,
+                "coordinator_type": "api_based_fixed"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Vector index rebuild failed: {str(e)}")
+            return {
+                "status": "error",
+                "error": str(e),
+                "coordinator_type": "api_based_fixed"
+            }
+
+    async def get_vector_index_stats(self) -> Dict[str, Any]:
+        """FIXED: Get vector index statistics using correct method"""
+        try:
+            vector_agent = self.get_agent("vector_index")
+            
+            # FIXED: Use correct method name
+            stats = await self._safe_agent_call(vector_agent.get_embedding_statistics)
+            
+            return {
+                "status": "success" if stats and not stats.get('error') else "error",
+                "stats": stats if stats else {},
+                "coordinator_type": "api_based_fixed"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Vector stats failed: {str(e)}")
+            return {
+                "status": "error",
+                "error": str(e),
+                "coordinator_type": "api_based_fixed"
+            }
 
     async def _get_processed_chunks(self):
         """Get all processed chunks from database for vector index"""
@@ -1415,17 +1470,30 @@ class APIOpulenceCoordinator:
                 "coordinator_type": "api_based_fixed"
             }
     
-    async def search_code_patterns(self, query: str, limit: int = 3) -> Dict[str, Any]:  # FIXED: Smaller limit
-        """FIXED: Search code patterns with proper error handling"""
+    async def search_code_patterns(self, query: str, limit: int = 3) -> Dict[str, Any]:
+        """FIXED: Search code patterns with correct vector agent method"""
         try:
             vector_agent = self.get_agent("vector_index")
-            results = await vector_agent.semantic_search(query, top_k=limit)
+            
+            # FIXED: Use advanced semantic search if available, otherwise fall back
+            if hasattr(vector_agent, 'advanced_semantic_search'):
+                results = await self._safe_agent_call(
+                    vector_agent.advanced_semantic_search, 
+                    query, 
+                    limit
+                )
+            else:
+                results = await self._safe_agent_call(
+                    vector_agent.semantic_search, 
+                    query, 
+                    limit
+                )
             
             return {
                 "status": "success",
                 "query": query,
                 "results": results,
-                "total_found": len(results),
+                "total_found": len(results) if results else 0,
                 "coordinator_type": "api_based_fixed"
             }
             
@@ -1517,7 +1585,7 @@ class APIOpulenceCoordinator:
             conn.close()
     
     def get_health_status(self) -> Dict[str, Any]:
-        """FIXED: Get coordinator health status with proper error handling"""
+        """FIXED: Get coordinator health status with vector index info"""
         try:
             available_servers = len(self.load_balancer.get_available_servers())
             total_servers = len(self.load_balancer.servers)
@@ -1549,9 +1617,27 @@ class APIOpulenceCoordinator:
             try:
                 agent_status = self.get_agent_status()
                 available_agent_types = self.list_available_agents()
+                
+                # FIXED: Add vector index status
+                vector_index_status = "unknown"
+                vector_embeddings_count = 0
+                
+                try:
+                    if "vector_index" in self.agents:
+                        vector_agent = self.agents["vector_index"]
+                        if hasattr(vector_agent, 'faiss_index') and vector_agent.faiss_index:
+                            vector_embeddings_count = vector_agent.faiss_index.ntotal
+                            vector_index_status = "ready" if vector_embeddings_count > 0 else "empty"
+                        else:
+                            vector_index_status = "not_initialized"
+                except Exception as ve:
+                    vector_index_status = f"error: {str(ve)}"
+                
             except Exception as e:
                 agent_status = {"error": str(e)}
                 available_agent_types = {}
+                vector_index_status = "unknown"
+                vector_embeddings_count = 0
             
             return {
                 "status": "healthy" if available_servers > 0 else "unhealthy",
@@ -1563,6 +1649,8 @@ class APIOpulenceCoordinator:
                 "active_agents": len(getattr(self, 'agents', {})),
                 "agent_status": agent_status,
                 "available_agent_types": available_agent_types,
+                "vector_index_status": vector_index_status,
+                "vector_embeddings_count": vector_embeddings_count,
                 "stats": getattr(self, 'stats', {}),
                 "uptime_seconds": time.time() - self.stats.get("start_time", time.time()),
                 "database_available": os.path.exists(self.db_path),
@@ -1575,6 +1663,7 @@ class APIOpulenceCoordinator:
                 "error": str(e),
                 "coordinator_type": "api_based_fixed"
             }
+
     
     async def get_statistics(self) -> Dict[str, Any]:
         """FIXED: Get comprehensive system statistics with error handling"""
