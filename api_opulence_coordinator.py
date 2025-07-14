@@ -538,17 +538,21 @@ class APIOpulenceCoordinator:
         self.logger.info(f"FIXED API Coordinator initialized with servers: {[s.config.name for s in self.load_balancer.servers]}")
     
     async def initialize(self):
-        """FIXED: Initialize the coordinator with proper error handling"""
+        """FIXED: Initialize the coordinator with proper agent handling"""
         try:
             await self.client.initialize()
             
             # Test server connectivity with fixed approach
             await self._test_connectivity_fixed()
             
+            # Initialize task list for tracking
+            self._initialization_tasks = []
+            
             self.logger.info("FIXED API Coordinator initialized successfully")
         except Exception as e:
             self.logger.error(f"FIXED coordinator initialization failed: {e}")
             raise
+
     
     async def _test_connectivity_fixed(self):
         """FIXED: Test connectivity to all servers without timeout conflicts"""
@@ -573,9 +577,19 @@ class APIOpulenceCoordinator:
         self.logger.info(f"Connected to {healthy_count}/{len(self.load_balancer.servers)} servers")
     
     async def shutdown(self):
-        """FIXED: Safe shutdown without hanging"""
+        """FIXED: Safe shutdown with agent initialization cleanup"""
         try:
-            # FIXED: No health check task to cancel
+            # Cancel any pending initialization tasks
+            if hasattr(self, '_initialization_tasks'):
+                for task in self._initialization_tasks:
+                    if not task.done():
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception as e:
+                            self.logger.warning(f"Task cleanup warning: {e}")
             
             # Close client safely
             if self.client:
@@ -730,7 +744,7 @@ class APIOpulenceCoordinator:
         return self.agents[agent_type]
     
     def _create_agent(self, agent_type: str):
-        """Create agent using API-based engine context"""
+        """FIXED: Create agent with proper async initialization handling"""
         self.logger.info(f"🔗 Creating {agent_type} agent (FIXED API-based)")
         
         # Get agent configuration
@@ -743,7 +757,7 @@ class APIOpulenceCoordinator:
             # Import the base agent class
             from agents.base_agent_api import BaseOpulenceAgent
             
-            # Create agents
+            # Create agents with FIXED initialization
             if agent_type == "code_parser" and CodeParserAgent:
                 agent = CodeParserAgent(
                     llm_engine=None,
@@ -758,6 +772,9 @@ class APIOpulenceCoordinator:
                     gpu_id=selected_gpu_id,
                     coordinator=self
                 )
+                # CRITICAL FIX: Initialize vector index agent components properly
+                self._schedule_agent_initialization(agent)
+                
             elif agent_type == "data_loader" and DataLoaderAgent:
                 agent = DataLoaderAgent(
                     llm_engine=None,
@@ -813,11 +830,11 @@ class APIOpulenceCoordinator:
             # Configure agent with FIXED API parameters
             if hasattr(agent, 'update_api_params') and agent_config:
                 fixed_params = {
-                    'max_tokens': min(agent_config.get('max_tokens', 15), 30),  # FIXED: Smaller
-                    'temperature': min(agent_config.get('temperature', 0.1), 0.15),  # FIXED: Lower
+                    'max_tokens': min(agent_config.get('max_tokens', 15), 30),
+                    'temperature': min(agent_config.get('temperature', 0.1), 0.15),
                     'top_p': min(agent_config.get('top_p', 0.9), 0.9),
                     'stream': False,
-                    'stop': ["\n\n", "###"]  # FIXED: Add stop tokens
+                    'stop': ["\n\n", "###"]
                 }
                 agent.update_api_params(**fixed_params)
                 self.logger.info(f"Applied FIXED configuration to {agent_type}: {fixed_params}")
@@ -830,7 +847,46 @@ class APIOpulenceCoordinator:
         except Exception as e:
             self.logger.error(f"Failed to create {agent_type} agent: {str(e)}")
             raise RuntimeError(f"Agent creation failed for {agent_type}: {str(e)}")
-    
+
+    def _schedule_agent_initialization(self, agent):
+        """CRITICAL FIX: Properly schedule async agent initialization"""
+        if hasattr(agent, '_initialize_components'):
+            try:
+                # Create a task to initialize the agent components
+                loop = asyncio.get_event_loop()
+                
+                # Schedule the initialization to run later
+                task = loop.create_task(self._initialize_agent_safely(agent))
+                
+                # Store task reference to prevent garbage collection
+                if not hasattr(self, '_initialization_tasks'):
+                    self._initialization_tasks = []
+                self._initialization_tasks.append(task)
+                
+                self.logger.info(f"✅ Scheduled initialization for {agent.__class__.__name__}")
+                
+            except Exception as e:
+                self.logger.warning(f"⚠️ Could not schedule agent initialization: {e}")
+                # Try to initialize synchronously as fallback
+                try:
+                    if hasattr(agent, '_initialize_components_sync'):
+                        agent._initialize_components_sync()
+                except Exception as sync_error:
+                    self.logger.error(f"❌ Sync initialization also failed: {sync_error}")
+
+
+    async def _initialize_agent_safely(self, agent):
+        """FIXED: Safely initialize agent components"""
+        try:
+            if hasattr(agent, '_initialize_components'):
+                await agent._initialize_components()
+                self.logger.info(f"✅ {agent.__class__.__name__} initialized successfully")
+            else:
+                self.logger.info(f"ℹ️ {agent.__class__.__name__} has no async initialization")
+        except Exception as e:
+            self.logger.error(f"❌ Agent initialization failed: {e}")
+
+
     def _create_engine_context_for_agent(self, agent):
         """FIXED: Create API-based engine context for agent"""
         @asynccontextmanager
@@ -1225,7 +1281,7 @@ class APIOpulenceCoordinator:
             }
     
     async def _ensure_agents_ready(self):
-        """Ensure all required agents are loaded and ready"""
+        """FIXED: Ensure all required agents are loaded and properly initialized"""
         required_agents = ["lineage_analyzer", "logic_analyzer", "vector_index"]
         
         for agent_type in required_agents:
@@ -1238,6 +1294,20 @@ class APIOpulenceCoordinator:
                 except Exception as e:
                     self.logger.error(f"❌ Failed to load {agent_type}: {e}")
                     raise RuntimeError(f"Required agent {agent_type} failed to load: {e}")
+        
+        # CRITICAL FIX: Wait for any pending agent initializations
+        if hasattr(self, '_initialization_tasks'):
+            try:
+                # Wait for all initialization tasks to complete with timeout
+                await asyncio.wait_for(
+                    asyncio.gather(*self._initialization_tasks, return_exceptions=True),
+                    timeout=30  # 30 second timeout
+                )
+                self.logger.info("✅ All agent initializations completed")
+            except asyncio.TimeoutError:
+                self.logger.warning("⚠️ Agent initialization timeout - continuing anyway")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Agent initialization error: {e}")
 
     async def _safe_agent_call(self, agent_method, *args, **kwargs):
             """Safely call agent method with timeout and error handling"""
