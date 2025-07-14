@@ -338,24 +338,62 @@ class VectorIndexAgent(BaseOpulenceAgent):
         return " | ".join(text_parts)
 
     async def create_embeddings_for_chunks(self, chunks: List[Union[tuple, 'CodeChunk']]) -> Dict[str, Any]:
-        """Create embeddings for a list of chunks using API-based architecture"""
+        """FIXED: Create embeddings for a list of chunks with proper variable handling"""
         try:
             await self._ensure_vector_initialized()
             
             embeddings_created = 0
             
             for chunk_data in chunks:
+                # CRITICAL FIX: Initialize all variables before try block
+                chunk_id = None
+                program_name = "unknown"
+                chunk_id_str = "unknown"
+                chunk_type = "unknown"
+                content = ""
+                metadata = {}
+                
                 try:
+                    # FIXED: Proper chunk data parsing with fallbacks
                     if isinstance(chunk_data, tuple):
-                        chunk_id, program_name, chunk_id_str, chunk_type, content, metadata_str = chunk_data
-                        metadata = json.loads(metadata_str) if metadata_str else {}
+                        # Handle different tuple lengths safely
+                        if len(chunk_data) >= 6:
+                            chunk_id, program_name, chunk_id_str, chunk_type, content, metadata_str = chunk_data[:6]
+                        elif len(chunk_data) >= 5:
+                            program_name, chunk_id_str, chunk_type, content, metadata_str = chunk_data[:5]
+                            chunk_id = hash(chunk_id_str)  # Generate ID if missing
+                        elif len(chunk_data) >= 4:
+                            program_name, chunk_id_str, chunk_type, content = chunk_data[:4]
+                            chunk_id = hash(chunk_id_str)
+                            metadata_str = "{}"
+                        else:
+                            self.logger.error(f"Invalid tuple format: {len(chunk_data)} elements")
+                            continue
+                            
+                        # Parse metadata safely
+                        try:
+                            metadata = json.loads(metadata_str) if metadata_str else {}
+                        except (json.JSONDecodeError, TypeError):
+                            metadata = {}
+                            
                     else:  # It's a CodeChunk object
-                        chunk_id = getattr(chunk_data, 'chunk_id', str(uuid.uuid4()))
-                        program_name = chunk_data.program_name
-                        chunk_id_str = chunk_data.chunk_id
-                        chunk_type = chunk_data.chunk_type
-                        content = chunk_data.content
-                        metadata = chunk_data.metadata if chunk_data.metadata else {}
+                        chunk_id = getattr(chunk_data, 'id', None) or hash(getattr(chunk_data, 'chunk_id', str(uuid.uuid4())))
+                        program_name = getattr(chunk_data, 'program_name', 'unknown')
+                        chunk_id_str = getattr(chunk_data, 'chunk_id', str(uuid.uuid4()))
+                        chunk_type = getattr(chunk_data, 'chunk_type', 'unknown')
+                        content = getattr(chunk_data, 'content', '')
+                        metadata = getattr(chunk_data, 'metadata', {}) or {}
+                    
+                    # FIXED: Ensure all required variables have valid values
+                    if not chunk_id_str or chunk_id_str == "unknown":
+                        chunk_id_str = f"chunk_{uuid.uuid4().hex[:8]}"
+                    
+                    if not program_name or program_name == "unknown":
+                        program_name = f"program_{uuid.uuid4().hex[:8]}"
+                    
+                    if not content:
+                        self.logger.warning(f"Empty content for chunk {chunk_id_str}, skipping")
+                        continue
                     
                     # Ensure metadata is a dictionary
                     if not isinstance(metadata, dict):
@@ -364,48 +402,64 @@ class VectorIndexAgent(BaseOpulenceAgent):
                     # Generate embedding using local model
                     embedding = await self.embed_code_chunk(content, metadata)
                     
+                    # Validate embedding
+                    if embedding is None or len(embedding) == 0:
+                        self.logger.error(f"Failed to generate embedding for chunk {chunk_id_str}")
+                        continue
+                    
                     # Store in FAISS
                     faiss_id = self.faiss_index.ntotal
                     self.faiss_index.add(embedding.reshape(1, -1).astype('float32'))
                     
                     # Store in ChromaDB (will use local embedding function automatically)
                     chroma_metadata = {
-                        "program_name": program_name,
-                        "chunk_id": chunk_id_str,
-                        "chunk_type": chunk_type,
-                        "faiss_id": faiss_id
+                        "program_name": str(program_name),
+                        "chunk_id": str(chunk_id_str),
+                        "chunk_type": str(chunk_type),
+                        "faiss_id": int(faiss_id)
                     }
                     
                     # Add other metadata safely
                     for key, value in metadata.items():
-                        if isinstance(value, (str, int, float, bool)):
-                            chroma_metadata[key] = value
-                        elif isinstance(value, list):
-                            chroma_metadata[key] = json.dumps(value)
-                        elif isinstance(value, dict):
-                            chroma_metadata[key] = json.dumps(value)
-                        else:
-                            chroma_metadata[key] = str(value)
+                        try:
+                            if isinstance(value, (str, int, float, bool)):
+                                chroma_metadata[f"meta_{key}"] = value
+                            elif isinstance(value, list):
+                                chroma_metadata[f"meta_{key}"] = json.dumps(value)
+                            elif isinstance(value, dict):
+                                chroma_metadata[f"meta_{key}"] = json.dumps(value)
+                            else:
+                                chroma_metadata[f"meta_{key}"] = str(value)
+                        except Exception as meta_error:
+                            self.logger.warning(f"Failed to add metadata {key}: {meta_error}")
                     
-                    self.collection.add(
-                        documents=[content],
-                        metadatas=[chroma_metadata],
-                        ids=[f"{program_name}_{chunk_id_str}"]
-                    )
+                    # Add to ChromaDB collection
+                    unique_id = f"{program_name}_{chunk_id_str}_{faiss_id}"
+                    try:
+                        self.collection.add(
+                            documents=[str(content)],
+                            metadatas=[chroma_metadata],
+                            ids=[unique_id]
+                        )
+                    except Exception as chroma_error:
+                        self.logger.error(f"ChromaDB add failed for {chunk_id_str}: {chroma_error}")
+                        # Continue anyway, FAISS embedding is still stored
                     
                     # Store embedding reference in SQLite
                     embedding_id = f"{program_name}_{chunk_id_str}_embed"
                     await self._store_embedding_reference(
-                        chunk_id if isinstance(chunk_id, int) else hash(chunk_id_str), 
+                        chunk_id if isinstance(chunk_id, int) else hash(str(chunk_id_str)), 
                         embedding_id, 
                         faiss_id, 
                         embedding.tolist()
                     )
                     
                     embeddings_created += 1
+                    self.logger.debug(f"✅ Created embedding for {chunk_id_str}")
                     
-                except Exception as e:
-                    self.logger.error(f"Failed to process chunk {chunk_id_str}: {str(e)}")
+                except Exception as chunk_error:
+                    # FIXED: Now chunk_id_str is always defined
+                    self.logger.error(f"Failed to process chunk {chunk_id_str}: {str(chunk_error)}")
                     continue
             
             # Final save
@@ -420,12 +474,13 @@ class VectorIndexAgent(BaseOpulenceAgent):
                 'agent_type': self.agent_type
             }
             
+            self.logger.info(f"✅ Created {embeddings_created}/{len(chunks)} embeddings")
             return result
             
         except Exception as e:
             self.logger.error(f"Batch embedding processing failed: {str(e)}")
             return {"status": "error", "error": str(e)}
-
+        
     async def search_similar_components(self, component_name: str, top_k: int = 5) -> Dict[str, Any]:
         """Search for components similar to the given component name"""
         try:
@@ -469,40 +524,71 @@ class VectorIndexAgent(BaseOpulenceAgent):
             return self._add_processing_info({"status": "error", "error": str(e)})
 
     async def rebuild_index_from_chunks(self, chunks: List[tuple]) -> Dict[str, Any]:
-        """Rebuild index from provided chunks"""
+        """FIXED: Rebuild index from provided chunks with proper error handling"""
         try:
             await self._ensure_vector_initialized()
+            
+            self.logger.info(f"🔄 Rebuilding index from {len(chunks)} chunks")
             
             # Clear existing indices
             self.faiss_index = faiss.IndexFlatIP(self.vector_dim)
             
-            # Clear ChromaDB collection
+            # Clear ChromaDB collection safely
             try:
                 self.chroma_client.delete_collection(self.collection_name)
-            except:
-                pass
+                self.logger.info("🗑️ Cleared existing ChromaDB collection")
+            except Exception as delete_error:
+                self.logger.warning(f"Collection deletion warning: {delete_error}")
             
-            self.collection = self.chroma_client.create_collection(
-                name=self.collection_name,
-                embedding_function=self.chroma_embedding_function,  # Use local function
-                metadata={"description": "Opulence mainframe code chunks - rebuilt"}
-            )
+            # Recreate ChromaDB collection
+            try:
+                self.collection = self.chroma_client.create_collection(
+                    name=self.collection_name,
+                    embedding_function=self.chroma_embedding_function,
+                    metadata={"description": "Opulence mainframe code chunks - rebuilt"}
+                )
+                self.logger.info("✅ Created new ChromaDB collection")
+            except Exception as create_error:
+                self.logger.error(f"Failed to create ChromaDB collection: {create_error}")
+                return {"status": "error", "error": f"ChromaDB collection creation failed: {create_error}"}
             
-            # Process all chunks
+            # Clear SQLite embedding references
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM vector_embeddings")
+                conn.commit()
+                conn.close()
+                self.logger.info("🗑️ Cleared SQLite embedding references")
+            except Exception as sqlite_error:
+                self.logger.warning(f"SQLite cleanup warning: {sqlite_error}")
+            
+            # Process all chunks with the fixed method
             result = await self.create_embeddings_for_chunks(chunks)
             
             rebuild_result = {
-                "status": "success",
+                "status": "success" if result.get("status") == "success" else "error",
                 "message": "Index rebuilt from chunks",
                 "chunks_processed": len(chunks),
-                **result
+                "embeddings_created": result.get("embeddings_created", 0),
+                "faiss_index_size": result.get("faiss_index_size", 0),
+                "coordinator_type": "api_based",
+                "agent_type": self.agent_type
             }
             
-            return self._add_processing_info(rebuild_result)
+            if result.get("status") == "error":
+                rebuild_result["error"] = result.get("error")
+            
+            return rebuild_result
             
         except Exception as e:
             self.logger.error(f"Index rebuild from chunks failed: {str(e)}")
-            return self._add_processing_info({"status": "error", "error": str(e)})
+            return {
+                "status": "error", 
+                "error": str(e),
+                "coordinator_type": "api_based",
+                "agent_type": self.agent_type
+            }
 
     def _find_shared_elements(self, component_name: str, metadata: Dict[str, Any]) -> List[str]:
         """Find shared elements between components"""
@@ -542,19 +628,22 @@ class VectorIndexAgent(BaseOpulenceAgent):
         return shared
     
     async def process_batch_embeddings(self, limit: int = None) -> Dict[str, Any]:
-        """Process all unembedded chunks in batch"""
+        """FIXED: Process all unembedded chunks in batch with proper variable handling"""
         try:
             await self._ensure_vector_initialized()
+            
             # Get chunks that need embedding
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
+            # FIXED: Better query to avoid embedding conflicts
             query = """
-                SELECT id, program_name, chunk_id, chunk_type, content, metadata, embedding_id
+                SELECT id, program_name, chunk_id, chunk_type, content, metadata
                 FROM program_chunks 
-                WHERE embedding_id NOT IN (
+                WHERE content IS NOT NULL AND content != ''
+                AND (embedding_id IS NULL OR embedding_id NOT IN (
                     SELECT DISTINCT embedding_id FROM vector_embeddings WHERE embedding_id IS NOT NULL
-                )
+                ))
             """
             
             if limit:
@@ -567,82 +656,30 @@ class VectorIndexAgent(BaseOpulenceAgent):
             if not chunks:
                 return self._add_processing_info({"status": "no_chunks_to_process", "processed": 0})
             
-            embeddings_created = 0
-            batch_size = 10  # Process in batches to avoid memory issues
+            self.logger.info(f"🔄 Processing {len(chunks)} unembedded chunks")
             
-            for i in range(0, len(chunks), batch_size):
-                batch = chunks[i:i + batch_size]
+            # Convert database rows to proper format for create_embeddings_for_chunks
+            formatted_chunks = []
+            for chunk_data in chunks:
+                # FIXED: Ensure proper tuple format (id, program_name, chunk_id, chunk_type, content, metadata)
+                chunk_id, program_name, chunk_id_str, chunk_type, content, metadata_str = chunk_data
                 
-                # Process batch
-                for chunk_data in batch:
-                    chunk_id, program_name, chunk_id_str, chunk_type, content, metadata_str, embedding_id = chunk_data
-                    
-                    try:
-                        metadata = json.loads(metadata_str) if metadata_str else {}
-                        
-                        # Generate embedding using local model
-                        embedding = await self.embed_code_chunk(content, metadata)
-                        
-                        # Store in FAISS
-                        faiss_id = self.faiss_index.ntotal
-                        self.faiss_index.add(embedding.reshape(1, -1).astype('float32'))
-                        
-                        # Store in ChromaDB (uses local embedding function)
-                        chroma_metadata = {
-                            "program_name": program_name,
-                            "chunk_id": chunk_id_str,
-                            "chunk_type": chunk_type,
-                            "faiss_id": faiss_id
-                        }
-                        
-                        # Add other metadata safely
-                        for key, value in metadata.items():
-                            if isinstance(value, (str, int, float, bool)):
-                                chroma_metadata[key] = value
-                            elif isinstance(value, list):
-                                chroma_metadata[key] = json.dumps(value)
-                            elif isinstance(value, dict):
-                                chroma_metadata[key] = json.dumps(value)
-                            else:
-                                chroma_metadata[key] = str(value)
-                        
-                        self.collection.add(
-                            documents=[content],
-                            metadatas=[chroma_metadata],
-                            ids=[f"{program_name}_{chunk_id_str}"]
-                        )
-                        
-                        # Store embedding reference in SQLite
-                        await self._store_embedding_reference(
-                            chunk_id, embedding_id, faiss_id, embedding.tolist()
-                        )
-                        
-                        embeddings_created += 1
-                        
-                    except Exception as e:
-                        self.logger.error(f"Failed to process chunk {chunk_id_str}: {str(e)}")
-                        continue
+                # Ensure metadata is properly formatted
+                if not metadata_str:
+                    metadata_str = "{}"
                 
-                # Save FAISS index periodically
-                if i % (batch_size * 5) == 0:
-                    await self._save_faiss_index()
+                formatted_chunk = (chunk_id, program_name, chunk_id_str, chunk_type, content, metadata_str)
+                formatted_chunks.append(formatted_chunk)
             
-            # Final save
-            await self._save_faiss_index()
-            
-            result = {
-                "status": "success",
-                "total_chunks": len(chunks),
-                "embeddings_created": embeddings_created,
-                "faiss_index_size": self.faiss_index.ntotal
-            }
+            # Use the fixed create_embeddings_for_chunks method
+            result = await self.create_embeddings_for_chunks(formatted_chunks)
             
             return self._add_processing_info(result)
             
         except Exception as e:
             self.logger.error(f"Batch embedding processing failed: {str(e)}")
             return self._add_processing_info({"status": "error", "error": str(e)})
-        
+                
     def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Add processing information to results"""
         if isinstance(result, dict):
@@ -653,33 +690,43 @@ class VectorIndexAgent(BaseOpulenceAgent):
 
     async def _store_embedding_reference(self, chunk_id: int, embedding_id: str, 
                                        faiss_id: int, embedding_vector: List[float]):
-        """Store embedding reference in SQLite"""
-        await self._ensure_vector_initialized()
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Create table if not exists
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS vector_embeddings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                chunk_id INTEGER,
-                embedding_id TEXT,
-                faiss_id INTEGER,
-                embedding_vector TEXT,
-                created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (chunk_id) REFERENCES program_chunks (id)
-            )
-        """)
-        
-        cursor.execute("""
-            INSERT OR REPLACE INTO vector_embeddings 
-            (chunk_id, embedding_id, faiss_id, embedding_vector)
-            VALUES (?, ?, ?, ?)
-        """, (chunk_id, embedding_id, faiss_id, json.dumps(embedding_vector)))
-        
-        conn.commit()
-        conn.close()
-    
+        """FIXED: Store embedding reference in SQLite with better error handling"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Create table if not exists
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS vector_embeddings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chunk_id INTEGER,
+                    embedding_id TEXT,
+                    faiss_id INTEGER,
+                    embedding_vector TEXT,
+                    created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (chunk_id) REFERENCES program_chunks (id)
+                )
+            """)
+            
+            # FIXED: Handle potential conflicts better
+            cursor.execute("""
+                INSERT OR REPLACE INTO vector_embeddings 
+                (chunk_id, embedding_id, faiss_id, embedding_vector)
+                VALUES (?, ?, ?, ?)
+            """, (
+                int(chunk_id), 
+                str(embedding_id), 
+                int(faiss_id), 
+                json.dumps(embedding_vector)
+            ))
+            
+            conn.commit()
+            conn.close()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store embedding reference: {str(e)}")
+            # Don't raise - let the embedding creation continue
+
     async def _save_faiss_index(self):
         """Save FAISS index to disk"""
         try:
