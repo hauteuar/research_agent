@@ -1788,99 +1788,182 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         
         return chunks
 
+    # Replace the _parse_cobol_sections_enhanced method with this safer version:
+
     async def _parse_cobol_sections_enhanced(self, content: str, program_name: str, 
-                                       program_analysis: Dict[str, Any] = None) -> List[CodeChunk]:
-        """Parse COBOL sections with enhanced business context - FIXED SIGNATURE"""
+                                        program_analysis: Dict[str, Any] = None) -> List[CodeChunk]:
+        """Parse COBOL sections with enhanced business context - FULLY SAFE VERSION"""
         chunks = []
         
         # Provide default if program_analysis is None
         if program_analysis is None:
             program_analysis = {'analysis': {}, 'confidence_score': 0.5}
         
-        # Find all sections
-        section_matches = list(self.cobol_patterns['section'].finditer(content))
+        try:
+            # Find all sections - check if pattern exists first
+            if 'section' not in self.cobol_patterns:
+                self.logger.warning("Section pattern not found in cobol_patterns")
+                return chunks
+                
+            section_pattern = self.cobol_patterns['section']
+            if not section_pattern:
+                self.logger.warning("Section pattern is None")
+                return chunks
+                
+            section_matches = list(section_pattern.finditer(content))
+            self.logger.info(f"Found {len(section_matches)} section matches")
+            
+            if not section_matches:
+                self.logger.info("No sections found in content")
+                return chunks
+            
+        except Exception as e:
+            self.logger.error(f"Error finding sections: {e}")
+            return chunks
         
         for i, match in enumerate(section_matches):
-            section_name = match.group(1) if match.groups() else f'SECTION_{i+1}'
-            start_pos = match.start()
-            
-            # Find end of section (next section or division)
-            if i + 1 < len(section_matches):
-                end_pos = section_matches[i + 1].start()
-            else:
-                # Look for next division
-                end_pos = len(content)
-                for div_pattern in [self.cobol_patterns['procedure_division']]:
-                    next_div = div_pattern.search(content, start_pos + 1)
-                    if next_div and next_div.start() < end_pos:
-                        end_pos = next_div.start()
-            
-            section_content = content[start_pos:end_pos].strip()
-            
-            # Only analyze if content is substantial
-            if len(section_content) > 50:
+            try:
+                # Safely extract section name
+                section_name = 'UNKNOWN_SECTION'
+                if match and match.groups():
+                    if len(match.groups()) >= 1 and match.group(1):
+                        section_name = match.group(1).strip()
+                    else:
+                        section_name = f'SECTION_{i+1}'
+                else:
+                    section_name = f'SECTION_{i+1}'
+                
+                start_pos = match.start()
+                
+                # Find end of section (next section or division)
+                end_pos = len(content)  # Default to end of content
+                
+                # Try to find next section
+                if i + 1 < len(section_matches):
+                    end_pos = section_matches[i + 1].start()
+                else:
+                    # Look for next division
+                    try:
+                        if 'procedure_division' in self.cobol_patterns and self.cobol_patterns['procedure_division']:
+                            next_div = self.cobol_patterns['procedure_division'].search(content, start_pos + 1)
+                            if next_div and next_div.start() < end_pos:
+                                end_pos = next_div.start()
+                    except Exception as div_error:
+                        self.logger.debug(f"Error finding next division: {div_error}")
+                
+                # Extract section content safely
                 try:
-                    section_analysis = await self._analyze_with_llm_cached(
-                        section_content, 'cobol_section',
-                        """
-                        Analyze this COBOL section:
-                        
-                        {content}
-                        
-                        Identify:
-                        1. Section purpose and functionality
-                        2. Data definitions or procedures within
-                        3. Business logic complexity
-                        4. Integration points
-                        
-                        Return as JSON:
-                        {{
-                            "purpose": "file control definitions",
-                            "functionality": "defines file access methods",
-                            "complexity": "medium",
-                            "business_impact": "high",
-                            "integration_points": ["database", "files"]
-                        }}
-                        """
-                    )
-                except Exception as e:
-                    self.logger.warning(f"LLM analysis failed for section {section_name}: {e}")
+                    section_content = content[start_pos:end_pos].strip()
+                except Exception as content_error:
+                    self.logger.warning(f"Error extracting section content: {content_error}")
+                    section_content = content[start_pos:start_pos+500]  # Fallback to first 500 chars
+                
+                # Only analyze if content is substantial
+                if len(section_content) > 50:
+                    try:
+                        section_analysis = await self._analyze_with_llm_cached(
+                            section_content, 'cobol_section',
+                            """
+                            Analyze this COBOL section and return ONLY a JSON object:
+
+                            {content}
+
+                            Return exactly this JSON format:
+                            {{
+                                "purpose": "brief description of what this section does",
+                                "functionality": "main function performed",
+                                "complexity": "low",
+                                "business_impact": "medium"
+                            }}
+                            """
+                        )
+                    except Exception as llm_error:
+                        self.logger.warning(f"LLM analysis failed for section {section_name}: {llm_error}")
+                        section_analysis = {
+                            'analysis': {
+                                'purpose': 'section_processing',
+                                'functionality': 'cobol_logic',
+                                'complexity': 'medium',
+                                'business_impact': 'standard'
+                            },
+                            'confidence_score': 0.3
+                        }
+                else:
                     section_analysis = {
-                        'analysis': {'error': str(e), 'purpose': 'unknown'},
-                        'confidence_score': 0.3
+                        'analysis': {
+                            'purpose': 'small_section',
+                            'functionality': 'minimal_processing',
+                            'complexity': 'low',
+                            'business_impact': 'low'
+                        },
+                        'confidence_score': 0.7
                     }
-            else:
-                section_analysis = {
-                    'analysis': {'purpose': 'small_section', 'functionality': 'minimal'},
-                    'confidence_score': 0.7
-                }
-            
-            business_context = {
-                'section_name': section_name,
-                'purpose': section_analysis.get('analysis', {}).get('purpose', ''),
-                'functionality': section_analysis.get('analysis', {}).get('functionality', ''),
-                'business_impact': section_analysis.get('analysis', {}).get('business_impact', 'unknown')
-            }
-            
-            chunk = CodeChunk(
-                program_name=program_name,
-                chunk_id=f"{program_name[:20]}_SEC_{section_name[:20]}",
-                chunk_type="cobol_section",
-                content=section_content,
-                metadata={
+                
+                # Safely extract analysis results
+                analysis_data = section_analysis.get('analysis', {})
+                business_context = {
                     'section_name': section_name,
-                    'llm_analysis': section_analysis.get('analysis', {}),
-                    'section_lines': len(section_content.split('\n'))
-                },
-                business_context=business_context,
-                confidence_score=section_analysis.get('confidence_score', 0.8),
-                line_start=content[:start_pos].count('\n'),
-                line_end=content[:end_pos].count('\n')
-            )
-            chunks.append(chunk)
+                    'purpose': analysis_data.get('purpose', 'unknown'),
+                    'functionality': analysis_data.get('functionality', 'unknown'),
+                    'business_impact': analysis_data.get('business_impact', 'unknown')
+                }
+                
+                # Create chunk safely
+                try:
+                    chunk = CodeChunk(
+                        program_name=program_name,
+                        chunk_id=f"{program_name[:20]}_SEC_{section_name[:20]}_{i}",
+                        chunk_type="cobol_section",
+                        content=section_content,
+                        metadata={
+                            'section_name': section_name,
+                            'llm_analysis': analysis_data,
+                            'section_lines': len(section_content.split('\n')),
+                            'section_index': i
+                        },
+                        business_context=business_context,
+                        confidence_score=section_analysis.get('confidence_score', 0.8),
+                        line_start=content[:start_pos].count('\n'),
+                        line_end=content[:end_pos].count('\n')
+                    )
+                    chunks.append(chunk)
+                    self.logger.debug(f"✅ Created section chunk for {section_name}")
+                    
+                except Exception as chunk_error:
+                    self.logger.error(f"Failed to create chunk for section {section_name}: {chunk_error}")
+                    continue
+                    
+            except Exception as section_error:
+                self.logger.error(f"Error processing section {i}: {section_error}")
+                continue
         
+        self.logger.info(f"✅ Successfully created {len(chunks)} section chunks")
         return chunks
 
+    # Also add this safer pattern checking method to avoid similar issues:
+
+    def _safe_get_pattern(self, pattern_name: str):
+        """Safely get a pattern from cobol_patterns"""
+        try:
+            if hasattr(self, 'cobol_patterns') and self.cobol_patterns:
+                if pattern_name in self.cobol_patterns:
+                    pattern = self.cobol_patterns[pattern_name]
+                    if pattern is not None:
+                        return pattern
+                    else:
+                        self.logger.warning(f"Pattern {pattern_name} is None")
+                        return None
+                else:
+                    self.logger.warning(f"Pattern {pattern_name} not found in cobol_patterns")
+                    return None
+            else:
+                self.logger.error("cobol_patterns not initialized")
+                return None
+        except Exception as e:
+            self.logger.error(f"Error accessing pattern {pattern_name}: {e}")
+            return None
+
+    
     async def _parse_data_items_enhanced(self, content: str, program_name: str,
                                    program_analysis: Dict[str, Any] = None) -> List[CodeChunk]:
         """Parse COBOL data items with enhanced business analysis - FIXED SIGNATURE"""
