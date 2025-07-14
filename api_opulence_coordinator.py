@@ -1113,7 +1113,7 @@ class APIOpulenceCoordinator:
 
 
     async def analyze_component(self, component_name: str, component_type: str = None, **kwargs) -> Dict[str, Any]:
-        """CLEAN: Complete component analysis with proper sequence and error handling"""
+        """ENHANCED: Complete component analysis with documentation summary"""
         start_time = time.time()
         
         try:
@@ -1121,11 +1121,19 @@ class APIOpulenceCoordinator:
             if not component_type or component_type == "auto-detect":
                 component_type = await self._determine_component_type(component_name)
             
+            # CRITICAL FIX: Check for prefixed component names during upload
+            original_component_name = component_name
+            cleaned_component_name = self._clean_component_name(component_name)
+            
+            # Use cleaned name for analysis
+            analysis_component_name = cleaned_component_name
+            
             # Normalize the component type for processing
             normalized_type = self._normalize_component_type(component_type)
             
             analysis_result = {
-                "component_name": component_name,
+                "component_name": original_component_name,
+                "cleaned_component_name": cleaned_component_name,
                 "component_type": component_type,
                 "normalized_type": normalized_type,
                 "analysis_timestamp": dt.now().isoformat(),
@@ -1133,7 +1141,7 @@ class APIOpulenceCoordinator:
                 "analyses": {},
                 "processing_metadata": {
                     "start_time": start_time,
-                    "coordinator_type": "api_based_clean_fix"
+                    "coordinator_type": "api_based_enhanced_with_docs"
                 }
             }
             
@@ -1144,19 +1152,19 @@ class APIOpulenceCoordinator:
             
             # STEP 1: LINEAGE ANALYSIS (FOUNDATIONAL)
             try:
-                self.logger.info(f"🔄 Step 1: Running lineage analysis for {component_name} (type: {normalized_type})")
+                self.logger.info(f"🔄 Step 1: Running lineage analysis for {analysis_component_name} (type: {normalized_type})")
                 lineage_agent = self.get_agent("lineage_analyzer")
                 
                 # Call appropriate lineage method based on type
                 if normalized_type == "field":
                     lineage_result = await self._safe_agent_call(
                         lineage_agent.analyze_field_lineage,
-                        component_name
+                        analysis_component_name
                     )
                 else:
                     lineage_result = await self._safe_agent_call(
                         lineage_agent.analyze_full_lifecycle,
-                        component_name,
+                        analysis_component_name,
                         normalized_type
                     )
                 
@@ -1192,19 +1200,19 @@ class APIOpulenceCoordinator:
             # STEP 2: LOGIC ANALYSIS (FOR COBOL/PROGRAM TYPES)
             if normalized_type in ["cobol", "copybook", "program", "jcl"]:
                 try:
-                    self.logger.info(f"🔄 Step 2: Running logic analysis for {component_name} (type: {normalized_type})")
+                    self.logger.info(f"🔄 Step 2: Running logic analysis for {analysis_component_name} (type: {normalized_type})")
                     logic_agent = self.get_agent("logic_analyzer")
                     
                     # Call appropriate logic method based on type
                     if normalized_type in ["cobol", "program"]:
                         logic_result = await self._safe_agent_call(
                             logic_agent.analyze_program,
-                            component_name
+                            analysis_component_name
                         )
                     else:
                         logic_result = await self._safe_agent_call(
                             logic_agent.find_dependencies,
-                            component_name
+                            analysis_component_name
                         )
                     
                     if logic_result and not logic_result.get('error'):
@@ -1241,7 +1249,7 @@ class APIOpulenceCoordinator:
             
             # STEP 3: SEMANTIC ANALYSIS (VECTOR SEARCH)
             try:
-                self.logger.info(f"🔄 Step 3: Running semantic analysis for {component_name}")
+                self.logger.info(f"🔄 Step 3: Running semantic analysis for {analysis_component_name}")
                 vector_agent = self.get_agent("vector_index")
                 
                 # Ensure vector index is ready
@@ -1258,14 +1266,14 @@ class APIOpulenceCoordinator:
                     # Perform similarity search
                     similarity_result = await self._safe_agent_call(
                         vector_agent.search_similar_components,
-                        component_name,
+                        analysis_component_name,
                         3
                     )
                     
                     # Perform semantic search
                     semantic_result = await self._safe_agent_call(
                         vector_agent.semantic_search,
-                        f"{component_name} similar functionality",
+                        f"{analysis_component_name} similar functionality",
                         2
                     )
                     
@@ -1304,6 +1312,61 @@ class APIOpulenceCoordinator:
                     "step": 3
                 }
             
+            # STEP 4: DOCUMENTATION SUMMARY (NEW!)
+            try:
+                self.logger.info(f"🔄 Step 4: Generating documentation summary for {analysis_component_name}")
+                doc_agent = self.get_agent("documentation")
+                
+                # Prepare analysis summary for documentation agent
+                analysis_summary = self._prepare_analysis_summary(analysis_result)
+                
+                # Generate documentation based on component type
+                if normalized_type == "field":
+                    doc_result = await self._safe_agent_call(
+                        doc_agent.generate_field_lineage_documentation,
+                        analysis_component_name
+                    )
+                elif normalized_type in ["cobol", "program", "copybook", "jcl"]:
+                    doc_result = await self._safe_agent_call(
+                        doc_agent.generate_program_documentation,
+                        analysis_component_name,
+                        "markdown"
+                    )
+                else:
+                    # Generate custom analysis summary
+                    doc_result = await self._generate_analysis_summary_doc(
+                        analysis_component_name, analysis_summary, doc_agent
+                    )
+                
+                if doc_result and not doc_result.get('error'):
+                    analysis_result["analyses"]["documentation_summary"] = {
+                        "status": "success",
+                        "data": doc_result,
+                        "agent_used": "documentation",
+                        "completion_time": time.time() - start_time,
+                        "step": 4
+                    }
+                    completed_count += 1
+                    self.logger.info(f"✅ Step 4: Documentation summary completed successfully")
+                else:
+                    error_msg = doc_result.get('error', 'No documentation generated') if doc_result else 'No documentation generated'
+                    analysis_result["analyses"]["documentation_summary"] = {
+                        "status": "error",
+                        "error": error_msg,
+                        "agent_used": "documentation",
+                        "step": 4
+                    }
+                    self.logger.warning(f"⚠️ Step 4: Documentation summary failed: {error_msg}")
+                    
+            except Exception as e:
+                self.logger.error(f"❌ Step 4: Documentation summary exception: {str(e)}")
+                analysis_result["analyses"]["documentation_summary"] = {
+                    "status": "error",
+                    "error": str(e),
+                    "agent_used": "documentation",
+                    "step": 4
+                }
+            
             # Determine final status
             total_analyses = len(analysis_result["analyses"])
             if completed_count == total_analyses and total_analyses > 0:
@@ -1314,7 +1377,7 @@ class APIOpulenceCoordinator:
                 self.logger.warning(f"⚠️ Partial completion: {completed_count}/{total_analyses} analyses succeeded")
             else:
                 analysis_result["status"] = "failed"
-                self.logger.error(f"❌ All analyses failed for {component_name}")
+                self.logger.error(f"❌ All analyses failed for {analysis_component_name}")
             
             # Add final metadata
             analysis_result["processing_metadata"].update({
@@ -1323,7 +1386,8 @@ class APIOpulenceCoordinator:
                 "analyses_completed": completed_count,
                 "analyses_total": total_analyses,
                 "success_rate": (completed_count / total_analyses) * 100 if total_analyses > 0 else 0,
-                "analysis_sequence": ["lineage_analysis", "logic_analysis", "semantic_analysis"]
+                "analysis_sequence": ["lineage_analysis", "logic_analysis", "semantic_analysis", "documentation_summary"],
+                "component_name_cleaned": cleaned_component_name != original_component_name
             })
             
             return analysis_result
@@ -1335,7 +1399,7 @@ class APIOpulenceCoordinator:
                 "status": "system_error",
                 "error": str(e),
                 "processing_time": time.time() - start_time,
-                "coordinator_type": "api_based_clean_fix"
+                "coordinator_type": "api_based_enhanced_with_docs"
             }
 
 
