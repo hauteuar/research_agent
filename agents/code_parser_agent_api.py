@@ -3,7 +3,7 @@ Enhanced Code Parser Agent - Part 1: Base Configuration and Imports
 API-Compatible Enhanced Code Parser & Chunker with comprehensive business logic
 Now inherits from BaseOpulenceAgent and uses LLM for complex pattern analysis
 """
-
+import tiktoken
 import re
 import asyncio
 import sqlite3
@@ -19,6 +19,7 @@ import logging
 from enum import Enum
 from contextlib import asynccontextmanager
 import copy
+
 
 # Import the base agent
 from agents.base_agent_api import BaseOpulenceAgent, SamplingParams
@@ -479,7 +480,296 @@ class BMSBusinessValidator:
             ))
         
         return violations
+
+class LLMContextManager:
+    """Enhanced LLM context window manager with intelligent chunking"""
     
+    def __init__(self, max_tokens: int = 2048, reserve_tokens: int = 512):
+        self.max_tokens = max_tokens
+        self.reserve_tokens = reserve_tokens
+        self.max_content_tokens = max_tokens - reserve_tokens
+        
+        # Initialize tokenizer (using cl100k_base for GPT-4 family)
+        try:
+            import tiktoken
+            self.tokenizer = tiktoken.get_encoding("cl100k_base")
+        except ImportError:
+            self.tokenizer = None
+            self.logger.warning("tiktoken not available, using character estimation")
+    
+    def estimate_tokens(self, text: str) -> int:
+        """Estimate token count for text"""
+        if self.tokenizer:
+            return len(self.tokenizer.encode(text))
+        else:
+            # Rough estimation: 1 token ≈ 4 characters
+            return len(text) // 4
+    
+    def chunk_content_intelligently(self, content: str, chunk_type: str = 'code', overlap: int = 200) -> List[Dict[str, Any]]:
+        """Intelligently chunk content based on type and structure"""
+        if self.estimate_tokens(content) <= self.max_content_tokens:
+            return [{
+                'content': content,
+                'chunk_index': 0,
+                'total_chunks': 1,
+                'chunk_type': 'complete',
+                'overlap_start': False,
+                'overlap_end': False
+            }]
+        
+        if chunk_type == 'cobol':
+            return self._chunk_cobol_intelligently(content, overlap)
+        elif chunk_type == 'sql':
+            return self._chunk_sql_intelligently(content, overlap)
+        elif chunk_type == 'jcl':
+            return self._chunk_jcl_intelligently(content, overlap)
+        else:
+            return self._chunk_generic_with_context(content, overlap)
+    
+    def _chunk_cobol_intelligently(self, content: str, overlap: int) -> List[Dict[str, Any]]:
+        """Chunk COBOL code preserving logical boundaries"""
+        chunks = []
+        
+        # Split by COBOL divisions and sections first
+        division_patterns = [
+            r'^\s*IDENTIFICATION\s+DIVISION',
+            r'^\s*ENVIRONMENT\s+DIVISION',
+            r'^\s*DATA\s+DIVISION',
+            r'^\s*PROCEDURE\s+DIVISION'
+        ]
+        
+        # Find division boundaries
+        boundaries = []
+        for pattern in division_patterns:
+            matches = list(re.finditer(pattern, content, re.MULTILINE | re.IGNORECASE))
+            for match in matches:
+                boundaries.append({
+                    'position': match.start(),
+                    'type': 'division',
+                    'name': match.group(0).strip()
+                })
+        
+        # Add section boundaries within divisions
+        section_patterns = [
+            r'^\s*WORKING-STORAGE\s+SECTION',
+            r'^\s*FILE\s+SECTION',
+            r'^\s*LINKAGE\s+SECTION',
+            r'^\s*[A-Z][A-Z0-9-]*\s+SECTION'
+        ]
+        
+        for pattern in section_patterns:
+            matches = list(re.finditer(pattern, content, re.MULTILINE | re.IGNORECASE))
+            for match in matches:
+                boundaries.append({
+                    'position': match.start(),
+                    'type': 'section',
+                    'name': match.group(0).strip()
+                })
+        
+        # Sort boundaries by position
+        boundaries.sort(key=lambda x: x['position'])
+        
+        # Create chunks respecting boundaries
+        if not boundaries:
+            return self._chunk_generic_with_context(content, overlap)
+        
+        chunk_index = 0
+        current_start = 0
+        
+        for i, boundary in enumerate(boundaries[1:], 1):  # Skip first boundary
+            chunk_end = boundary['position']
+            potential_chunk = content[current_start:chunk_end]
+            
+            # Check if chunk fits in token limit
+            if self.estimate_tokens(potential_chunk) <= self.max_content_tokens:
+                continue
+            else:
+                # Create chunk from current_start to previous boundary
+                if i > 1:
+                    prev_boundary = boundaries[i-1]
+                    chunk_content = content[current_start:prev_boundary['position']]
+                else:
+                    # Fallback to current position with overlap
+                    chunk_content = content[current_start:chunk_end - overlap]
+                
+                if chunk_content.strip():
+                    chunks.append({
+                        'content': chunk_content,
+                        'chunk_index': chunk_index,
+                        'chunk_type': 'cobol_logical',
+                        'boundary_info': boundaries[i-1] if i > 1 else None,
+                        'overlap_start': chunk_index > 0,
+                        'overlap_end': True
+                    })
+                    chunk_index += 1
+                
+                current_start = max(0, prev_boundary['position'] - overlap if i > 1 else chunk_end - overlap)
+        
+        # Add final chunk
+        if current_start < len(content):
+            final_chunk = content[current_start:]
+            if final_chunk.strip():
+                chunks.append({
+                    'content': final_chunk,
+                    'chunk_index': chunk_index,
+                    'chunk_type': 'cobol_final',
+                    'boundary_info': boundaries[-1] if boundaries else None,
+                    'overlap_start': chunk_index > 0,
+                    'overlap_end': False
+                })
+        
+        # Update total_chunks for all chunks
+        for chunk in chunks:
+            chunk['total_chunks'] = len(chunks)
+        
+        return chunks
+    
+    def _chunk_sql_intelligently(self, content: str, overlap: int) -> List[Dict[str, Any]]:
+        """Chunk SQL code preserving statement boundaries"""
+        chunks = []
+        
+        # Split by SQL statements
+        sql_boundaries = []
+        sql_patterns = [
+            r'CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE',
+            r'BEGIN\s*(?:ATOMIC)?',
+            r'DECLARE\s+\w+\s+CURSOR',
+            r'DECLARE\s+\w+\s+HANDLER',
+            r'IF\s+.*?\s+THEN',
+            r'WHILE\s+.*?\s+DO',
+            r'FOR\s+.*?\s+DO',
+            r'END\s+(?:IF|WHILE|FOR|CASE)'
+        ]
+        
+        for pattern in sql_patterns:
+            matches = list(re.finditer(pattern, content, re.IGNORECASE | re.DOTALL))
+            for match in matches:
+                sql_boundaries.append(match.start())
+        
+        sql_boundaries.sort()
+        return self._create_chunks_from_boundaries(content, sql_boundaries, overlap, 'sql_logical')
+    
+    def _chunk_jcl_intelligently(self, content: str, overlap: int) -> List[Dict[str, Any]]:
+        """Chunk JCL preserving job step boundaries"""
+        chunks = []
+        
+        # Split by JCL job steps and major statements
+        jcl_boundaries = []
+        jcl_patterns = [
+            r'^//\w+\s+JOB\s',
+            r'^//\w+\s+EXEC\s',
+            r'^//\w+\s+PROC\s',
+            r'^//\s+PEND',
+            r'^//\s+IF\s',
+            r'^//\s+ENDIF'
+        ]
+        
+        for pattern in jcl_patterns:
+            matches = list(re.finditer(pattern, content, re.MULTILINE | re.IGNORECASE))
+            for match in matches:
+                jcl_boundaries.append(match.start())
+        
+        jcl_boundaries.sort()
+        return self._create_chunks_from_boundaries(content, jcl_boundaries, overlap, 'jcl_logical')
+    
+    def _create_chunks_from_boundaries(self, content: str, boundaries: List[int], overlap: int, chunk_type: str) -> List[Dict[str, Any]]:
+        """Create chunks from boundary positions"""
+        if not boundaries:
+            return self._chunk_generic_with_context(content, overlap)
+        
+        chunks = []
+        chunk_index = 0
+        current_start = 0
+        
+        for i, boundary_pos in enumerate(boundaries[1:], 1):
+            potential_chunk = content[current_start:boundary_pos]
+            
+            if self.estimate_tokens(potential_chunk) > self.max_content_tokens:
+                # Create chunk up to previous boundary
+                if i > 1:
+                    prev_boundary = boundaries[i-1]
+                    chunk_content = content[current_start:prev_boundary]
+                else:
+                    chunk_content = content[current_start:boundary_pos - overlap]
+                
+                if chunk_content.strip():
+                    chunks.append({
+                        'content': chunk_content,
+                        'chunk_index': chunk_index,
+                        'chunk_type': chunk_type,
+                        'overlap_start': chunk_index > 0,
+                        'overlap_end': True
+                    })
+                    chunk_index += 1
+                
+                current_start = max(0, boundaries[i-1] - overlap if i > 1 else boundary_pos - overlap)
+        
+        # Add final chunk
+        if current_start < len(content):
+            final_chunk = content[current_start:]
+            if final_chunk.strip():
+                chunks.append({
+                    'content': final_chunk,
+                    'chunk_index': chunk_index,
+                    'chunk_type': f'{chunk_type}_final',
+                    'overlap_start': chunk_index > 0,
+                    'overlap_end': False
+                })
+        
+        # Update total_chunks
+        for chunk in chunks:
+            chunk['total_chunks'] = len(chunks)
+        
+        return chunks
+    
+    def _chunk_generic_with_context(self, content: str, overlap: int) -> List[Dict[str, Any]]:
+        """Generic chunking with context preservation"""
+        chunks = []
+        lines = content.split('\n')
+        current_chunk_lines = []
+        current_tokens = 0
+        chunk_index = 0
+        
+        for line in lines:
+            line_tokens = self.estimate_tokens(line + '\n')
+            
+            if current_tokens + line_tokens > self.max_content_tokens and current_chunk_lines:
+                # Create chunk
+                chunk_content = '\n'.join(current_chunk_lines)
+                chunks.append({
+                    'content': chunk_content,
+                    'chunk_index': chunk_index,
+                    'chunk_type': 'generic_lines',
+                    'overlap_start': chunk_index > 0,
+                    'overlap_end': True
+                })
+                chunk_index += 1
+                
+                # Start new chunk with overlap
+                overlap_lines = min(overlap // 10, len(current_chunk_lines))  # Rough line estimate
+                current_chunk_lines = current_chunk_lines[-overlap_lines:] if overlap_lines > 0 else []
+                current_tokens = sum(self.estimate_tokens(l + '\n') for l in current_chunk_lines)
+            
+            current_chunk_lines.append(line)
+            current_tokens += line_tokens
+        
+        # Add final chunk
+        if current_chunk_lines:
+            chunk_content = '\n'.join(current_chunk_lines)
+            chunks.append({
+                'content': chunk_content,
+                'chunk_index': chunk_index,
+                'chunk_type': 'generic_final',
+                'overlap_start': chunk_index > 0,
+                'overlap_end': False
+            })
+        
+        # Update total_chunks
+        for chunk in chunks:
+            chunk['total_chunks'] = len(chunks)
+        
+        return chunks
+
 class EnhancedCodeParserAgent(BaseOpulenceAgent):
     """
     Enhanced Code Parser Agent that inherits from BaseOpulenceAgent
@@ -523,6 +813,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         # Initialize database with enhanced schema
         self._init_enhanced_database()
         
+        self.context_manager = LLMContextManager(max_tokens=2048, reserve_tokens=512)
         self.logger.info(f"🚀 Enhanced Code Parser Agent initialized with API coordinator")
 
     def _init_cobol_patterns(self):
@@ -7708,11 +7999,10 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
     # ==================== LLM INTEGRATION METHODS ====================
 
     async def _analyze_with_llm_cached(self, content: str, analysis_type: str, 
-                                  prompt_template: str, **kwargs) -> Dict[str, Any]:
-        """Analyze content with LLM using caching for performance - ROBUST VERSION"""
+                                          prompt_template: str, **kwargs) -> Dict[str, Any]:
+        """Enhanced LLM analysis with full context utilization and intelligent chunking"""
         
-        # Log the analysis attempt
-        self.logger.info(f"🤖 LLM Analysis requested: {analysis_type} (content length: {len(content)})")
+        self.logger.info(f"🤖 Enhanced LLM Analysis: {analysis_type} (content: {len(content)} chars)")
         
         # Generate cache key
         cache_key_data = f"{content[:500]}:{analysis_type}:{prompt_template[:100]}"
@@ -7731,7 +8021,7 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             
             cached_result = cursor.fetchone()
             if cached_result:
-                self.logger.info(f"📋 LLM Analysis cache HIT for {analysis_type}")
+                self.logger.info(f"📋 Cache HIT for {analysis_type}")
                 cursor.execute("""
                     UPDATE llm_analysis_cache 
                     SET last_accessed = CURRENT_TIMESTAMP 
@@ -7745,100 +8035,321 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                     'confidence_score': cached_result[1],
                     'cached': True
                 }
-            else:
-                self.logger.info(f"📋 LLM Analysis cache MISS for {analysis_type}")
             
             conn.close()
         except Exception as e:
-            self.logger.warning(f"Cache lookup failed for {analysis_type}: {e}")
+            self.logger.warning(f"Cache lookup failed: {e}")
         
-        # Perform LLM analysis
-        try:
-            self.logger.info(f"🚀 Calling LLM for {analysis_type} analysis...")
+        # Determine chunk type from analysis type
+        chunk_type = 'code'
+        if 'cobol' in analysis_type:
+            chunk_type = 'cobol'
+        elif 'sql' in analysis_type or 'db2' in analysis_type:
+            chunk_type = 'sql'
+        elif 'jcl' in analysis_type:
+            chunk_type = 'jcl'
+        
+        # Chunk content intelligently using context manager
+        chunks = self.context_manager.chunk_content_intelligently(content, chunk_type)
+        
+        self.logger.info(f"📊 Content chunked into {len(chunks)} intelligent chunks for {analysis_type}")
+        
+        # Analyze each chunk and aggregate results
+        chunk_analyses = []
+        total_confidence = 0.0
+        
+        for chunk_info in chunks:
+            chunk_content = chunk_info['content']
+            chunk_index = chunk_info['chunk_index']
+            total_chunks = chunk_info['total_chunks']
             
-            # Format prompt with content and any additional parameters
-            formatted_prompt = prompt_template.format(content=content[:2000], **kwargs)
-            
-            # Call LLM via coordinator
-            response = await self.call_api(formatted_prompt, {
-                "temperature": 0.1,
-                "max_tokens": 1000
-            })
-            
-            self.logger.info(f"✅ LLM response received for {analysis_type} (length: {len(response)})")
-            
-            # ENHANCED JSON PARSING with multiple strategies
-            analysis_result = None
-            confidence_score = 0.5
-            
-            # Strategy 1: Look for JSON block
-            if '{' in response and '}' in response:
-                try:
-                    json_start = response.find('{')
-                    json_end = response.rfind('}') + 1
-                    json_text = response[json_start:json_end]
-                    analysis_result = json.loads(json_text)
-                    confidence_score = 0.8
-                    self.logger.info(f"✅ LLM response parsed as JSON for {analysis_type}")
-                except json.JSONDecodeError:
-                    # Strategy 2: Try to find multiple JSON objects
-                    try:
-                        import re
-                        json_blocks = re.findall(r'\{[^{}]*\}', response)
-                        if json_blocks:
-                            analysis_result = json.loads(json_blocks[0])
-                            confidence_score = 0.7
-                            self.logger.info(f"✅ LLM response parsed as simple JSON for {analysis_type}")
-                    except:
-                        pass
-            
-            # Strategy 3: Parse structured text response
-            if analysis_result is None:
-                try:
-                    analysis_result = self._parse_structured_text_response(response, analysis_type)
-                    confidence_score = 0.6
-                    self.logger.info(f"✅ LLM response parsed as structured text for {analysis_type}")
-                except:
-                    pass
-            
-            # Strategy 4: Fallback - create basic analysis from keywords
-            if analysis_result is None:
-                analysis_result = self._create_fallback_analysis(response, analysis_type)
-                confidence_score = 0.4
-                self.logger.warning(f"⚠️ Using fallback analysis for {analysis_type}")
-            
-            # Cache the result
             try:
-                conn = sqlite3.connect(self.db_path)
-                cursor = conn.cursor()
+                # Enhanced prompt with chunk context
+                enhanced_prompt = self._build_enhanced_prompt(
+                    prompt_template, chunk_content, chunk_info, analysis_type, **kwargs
+                )
                 
-                cursor.execute("""
-                    INSERT OR REPLACE INTO llm_analysis_cache 
-                    (content_hash, analysis_type, analysis_result, confidence_score, model_version)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (content_hash, analysis_type, json.dumps(analysis_result), 
-                    confidence_score, "claude-sonnet-4"))
+                self.logger.info(f"🚀 Analyzing chunk {chunk_index + 1}/{total_chunks} for {analysis_type}")
                 
-                conn.commit()
-                conn.close()
-                self.logger.info(f"💾 LLM analysis cached for {analysis_type}")
+                # Call LLM for this chunk
+                response = await self.call_api(enhanced_prompt, {
+                    "temperature": 0.1,
+                    "max_tokens": 1200  # Increased for detailed analysis
+                })
+                
+                # Parse response
+                chunk_analysis = self._parse_llm_response_enhanced(response, analysis_type, chunk_info)
+                chunk_analyses.append(chunk_analysis)
+                total_confidence += chunk_analysis.get('confidence', 0.5)
+                
+                self.logger.info(f"✅ Chunk {chunk_index + 1} analyzed successfully")
+                
             except Exception as e:
-                self.logger.warning(f"Cache storage failed for {analysis_type}: {e}")
+                self.logger.error(f"❌ Chunk {chunk_index + 1} analysis failed: {e}")
+                # Add fallback analysis for failed chunk
+                chunk_analyses.append({
+                    'chunk_index': chunk_index,
+                    'analysis': self._create_fallback_analysis("", analysis_type),
+                    'confidence': 0.3,
+                    'error': str(e)
+                })
+        
+        # Aggregate all chunk analyses
+        aggregated_analysis = self._aggregate_chunk_analyses(chunk_analyses, analysis_type)
+        avg_confidence = total_confidence / len(chunks) if chunks else 0.5
+        
+        # Cache the aggregated result
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
             
-            return {
-                'analysis': analysis_result,
-                'confidence_score': confidence_score,
-                'cached': False
-            }
+            cursor.execute("""
+                INSERT OR REPLACE INTO llm_analysis_cache 
+                (content_hash, analysis_type, analysis_result, confidence_score, model_version)
+                VALUES (?, ?, ?, ?, ?)
+            """, (content_hash, analysis_type, json.dumps(aggregated_analysis), 
+                avg_confidence, "claude-sonnet-4-enhanced"))
             
+            conn.commit()
+            conn.close()
+            self.logger.info(f"💾 Aggregated analysis cached for {analysis_type}")
         except Exception as e:
-            self.logger.error(f"❌ LLM analysis failed for {analysis_type}: {e}")
-            # Return a reasonable fallback
-            return {
-                'analysis': self._create_fallback_analysis("", analysis_type),
-                'confidence_score': 0.3,
-                'cached': False
-            }
+            self.logger.warning(f"Cache storage failed: {e}")
+        
+        return {
+            'analysis': aggregated_analysis,
+            'confidence_score': avg_confidence,
+            'cached': False,
+            'chunks_processed': len(chunks)
+        }
+
+    def _build_enhanced_prompt(self, prompt_template: str, chunk_content: str, 
+                            chunk_info: Dict[str, Any], analysis_type: str, **kwargs) -> str:
+        """Build enhanced prompt with chunk context information"""
+        
+        # Add chunk context to the prompt
+        chunk_context = ""
+        if chunk_info['total_chunks'] > 1:
+            chunk_context = f"""
+            
+            CHUNK CONTEXT:
+            - This is chunk {chunk_info['chunk_index'] + 1} of {chunk_info['total_chunks']} total chunks
+            - Chunk type: {chunk_info['chunk_type']}
+            - Has overlap with previous chunk: {chunk_info.get('overlap_start', False)}
+            - Has overlap with next chunk: {chunk_info.get('overlap_end', False)}
+            
+            Please analyze this chunk considering it's part of a larger codebase.
+            Focus on the complete elements within this chunk and note any incomplete elements at boundaries.
+            """
+        
+        # Enhanced prompt with full content and context
+        enhanced_prompt = prompt_template.format(
+            content=chunk_content,  # Full chunk content, not truncated
+            chunk_context=chunk_context,
+            **kwargs
+        ) + chunk_context
+        
+        return enhanced_prompt
+
+    def _parse_llm_response_enhanced(self, response: str, analysis_type: str, 
+                                chunk_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Enhanced response parsing with chunk-aware logic"""
+        
+        result = {
+            'chunk_index': chunk_info['chunk_index'],
+            'chunk_type': chunk_info['chunk_type'],
+            'analysis': {},
+            'confidence': 0.5
+        }
+        
+        # Try JSON parsing first
+        try:
+            if '{' in response and '}' in response:
+                json_start = response.find('{')
+                json_end = response.rfind('}') + 1
+                json_text = response[json_start:json_end]
+                parsed_analysis = json.loads(json_text)
+                result['analysis'] = parsed_analysis
+                result['confidence'] = 0.8
+                return result
+        except json.JSONDecodeError:
+            pass
+        
+        # Fallback to structured text parsing
+        try:
+            result['analysis'] = self._parse_structured_text_response(response, analysis_type)
+            result['confidence'] = 0.6
+        except Exception:
+            result['analysis'] = self._create_fallback_analysis(response, analysis_type)
+            result['confidence'] = 0.4
+        
+        return result
+
+    def _aggregate_chunk_analyses(self, chunk_analyses: List[Dict[str, Any]], 
+                                analysis_type: str) -> Dict[str, Any]:
+        """Aggregate multiple chunk analyses into a comprehensive result"""
+        
+        if len(chunk_analyses) == 1:
+            return chunk_analyses[0]['analysis']
+        
+        aggregated = {
+            'analysis_type': analysis_type,
+            'total_chunks_analyzed': len(chunk_analyses),
+            'aggregation_method': 'intelligent_merge'
+        }
+        
+        # Type-specific aggregation logic
+        if analysis_type in ['cobol_section', 'cobol_paragraph']:
+            aggregated.update(self._aggregate_cobol_analysis(chunk_analyses))
+        elif 'sql' in analysis_type or 'db2' in analysis_type:
+            aggregated.update(self._aggregate_sql_analysis(chunk_analyses))
+        elif 'mq' in analysis_type:
+            aggregated.update(self._aggregate_mq_analysis(chunk_analyses))
+        elif 'cics' in analysis_type:
+            aggregated.update(self._aggregate_cics_analysis(chunk_analyses))
+        else:
+            aggregated.update(self._aggregate_generic_analysis(chunk_analyses))
+        
+        return aggregated
+
+    def _aggregate_cobol_analysis(self, chunk_analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Aggregate COBOL-specific analyses"""
+        all_purposes = []
+        all_operations = []
+        complexity_scores = []
+        business_functions = []
+        
+        for chunk_analysis in chunk_analyses:
+            analysis = chunk_analysis.get('analysis', {})
+            
+            if 'purpose' in analysis:
+                all_purposes.append(analysis['purpose'])
+            if 'operations' in analysis:
+                if isinstance(analysis['operations'], list):
+                    all_operations.extend(analysis['operations'])
+                else:
+                    all_operations.append(analysis['operations'])
+            if 'complexity' in analysis:
+                complexity_mapping = {'low': 1, 'medium': 2, 'high': 3}
+                complexity_scores.append(complexity_mapping.get(analysis['complexity'], 2))
+            if 'business_function' in analysis:
+                business_functions.append(analysis['business_function'])
+        
+        # Determine overall complexity
+        avg_complexity = sum(complexity_scores) / len(complexity_scores) if complexity_scores else 2
+        overall_complexity = 'low' if avg_complexity < 1.5 else 'high' if avg_complexity > 2.5 else 'medium'
+        
+        return {
+            'consolidated_purpose': ' | '.join(set(all_purposes)) if all_purposes else 'multiple_functions',
+            'all_operations': list(set(all_operations)),
+            'overall_complexity': overall_complexity,
+            'business_functions': list(set(business_functions)),
+            'analysis_coverage': 'comprehensive'
+        }
+
+    def _aggregate_sql_analysis(self, chunk_analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Aggregate SQL-specific analyses"""
+        all_operations = []
+        all_tables = []
+        complexity_indicators = []
+        
+        for chunk_analysis in chunk_analyses:
+            analysis = chunk_analysis.get('analysis', {})
+            
+            if 'operation_type' in analysis:
+                all_operations.append(analysis['operation_type'])
+            if 'tables_accessed' in analysis:
+                if isinstance(analysis['tables_accessed'], list):
+                    all_tables.extend(analysis['tables_accessed'])
+            if 'complexity' in analysis:
+                complexity_indicators.append(analysis['complexity'])
+        
+        return {
+            'sql_operations': list(set(all_operations)),
+            'all_tables_accessed': list(set(all_tables)),
+            'operation_complexity': max(set(complexity_indicators), key=complexity_indicators.count) if complexity_indicators else 'medium',
+            'database_integration': 'comprehensive' if len(set(all_tables)) > 3 else 'standard'
+        }
+
+    def _aggregate_generic_analysis(self, chunk_analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Generic aggregation for other analysis types"""
+        all_keys = set()
+        aggregated_data = {}
+        
+        # Collect all unique keys from all analyses
+        for chunk_analysis in chunk_analyses:
+            analysis = chunk_analysis.get('analysis', {})
+            all_keys.update(analysis.keys())
+        
+        # Aggregate values for each key
+        for key in all_keys:
+            values = []
+            for chunk_analysis in chunk_analyses:
+                analysis = chunk_analysis.get('analysis', {})
+                if key in analysis:
+                    value = analysis[key]
+                    if isinstance(value, list):
+                        values.extend(value)
+                    else:
+                        values.append(value)
+            
+            # Determine aggregated value
+            if values:
+                if all(isinstance(v, str) for v in values):
+                    aggregated_data[key] = list(set(values))
+                elif all(isinstance(v, (int, float)) for v in values):
+                    aggregated_data[key] = sum(values) / len(values)
+                else:
+                    aggregated_data[key] = values[0]  # Take first value as default
+        
+        return aggregated_data
+    
+    def _aggregate_mq_analysis(self, chunk_analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Aggregate MQ-specific analyses"""
+        flow_patterns = []
+        queue_operations = []
+        business_purposes = []
+        
+        for chunk_analysis in chunk_analyses:
+            analysis = chunk_analysis.get('analysis', {})
+            
+            if 'flow_type' in analysis:
+                flow_patterns.append(analysis['flow_type'])
+            if 'business_purpose' in analysis:
+                business_purposes.append(analysis['business_purpose'])
+            if 'queue_operations' in analysis:
+                if isinstance(analysis['queue_operations'], list):
+                    queue_operations.extend(analysis['queue_operations'])
+        
+        return {
+            'message_flow_patterns': list(set(flow_patterns)),
+            'queue_operations': list(set(queue_operations)),
+            'consolidated_business_purpose': max(set(business_purposes), key=business_purposes.count) if business_purposes else 'message_processing',
+            'mq_integration_level': 'comprehensive' if len(set(queue_operations)) > 3 else 'standard'
+        }
+
+    def _aggregate_cics_analysis(self, chunk_analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Aggregate CICS-specific analyses"""
+        transaction_purposes = []
+        resource_types = []
+        business_functions = []
+        
+        for chunk_analysis in chunk_analyses:
+            analysis = chunk_analysis.get('analysis', {})
+            
+            if 'transaction_purpose' in analysis:
+                transaction_purposes.append(analysis['transaction_purpose'])
+            if 'resource_management' in analysis:
+                resource_types.append(analysis['resource_management'])
+            if 'business_function' in analysis:
+                business_functions.append(analysis['business_function'])
+        
+        return {
+            'transaction_patterns': list(set(transaction_purposes)),
+            'resource_management_types': list(set(resource_types)),
+            'business_functions': list(set(business_functions)),
+            'cics_complexity': 'high' if len(set(transaction_purposes)) > 3 else 'medium'
+        }
 
     def _parse_structured_text_response(self, response: str, analysis_type: str) -> Dict[str, Any]:
         """Parse structured text response when JSON parsing fails"""
