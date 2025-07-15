@@ -1404,6 +1404,43 @@ class APIOpulenceCoordinator:
                 "coordinator_type": "api_based_enhanced_with_docs"
             }
 
+    def _clean_component_name(self, component_name: str) -> str:
+        """CRITICAL FIX: Clean component names that may have been prefixed during upload"""
+        import re
+        
+        # Handle common prefixing patterns during file upload
+        # Pattern: tmpewmlf88a_component_name or similar temporary prefixes
+        
+        # Remove temporary file prefixes (tmp + random chars + underscore)
+        cleaned = re.sub(r'^tmp[a-zA-Z0-9]+_', '', component_name)
+        
+        # Remove session/upload ID prefixes (numbers + underscore)
+        cleaned = re.sub(r'^[0-9a-f]{8,}_', '', cleaned)
+        
+        # Remove UUID-like prefixes (hex patterns)
+        cleaned = re.sub(r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}_', '', cleaned)
+        
+        # Remove generic temp prefixes
+        temp_patterns = [
+            r'^temp_[0-9]+_',
+            r'^upload_[0-9]+_', 
+            r'^session_[a-zA-Z0-9]+_',
+            r'^file_[a-zA-Z0-9]+_'
+        ]
+        
+        for pattern in temp_patterns:
+            cleaned = re.sub(pattern, '', cleaned)
+        
+        # Remove file extensions if present
+        cleaned = re.sub(r'\.(cbl|cob|copy|cpy|jcl|job|proc)$', '', cleaned, flags=re.IGNORECASE)
+        
+        # Log if we cleaned the name
+        if cleaned != component_name:
+            self.logger.info(f"🧹 Cleaned component name: '{component_name}' → '{cleaned}'")
+        
+        return cleaned
+
+
     def _prepare_analysis_summary(self, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
         """Prepare a summary of all analyses for documentation generation"""
         summary = {
