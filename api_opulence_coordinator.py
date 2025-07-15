@@ -253,7 +253,7 @@ class LoadBalancer:
 # ==================== API Client for Model Servers ====================
 
 class ModelServerClient:
-    """HTTP client for calling model servers - FIXED VERSION"""
+    """HTTP client for calling model servers - FINAL FIX"""
     
     def __init__(self, config: APIOpulenceConfig):
         self.config = config
@@ -261,54 +261,51 @@ class ModelServerClient:
         self.logger = logging.getLogger(f"{__name__}.ModelServerClient")
         
     async def initialize(self):
-        """ULTRA-CONSERVATIVE: Session initialization without complex timeouts"""
+        """FINAL FIX: Initialize without any timeout configurations"""
         
-        # CRITICAL FIX: Simple connector without timeout conflicts
+        # CRITICAL: Create connector without any timeout settings
         connector = aiohttp.TCPConnector(
-            limit=1,
-            limit_per_host=1,
-            enable_cleanup_closed=False,
+            limit=5,  # Increased from 1
+            limit_per_host=2,  # Increased from 1
+            enable_cleanup_closed=True,  # Changed to True
             force_close=False,
-            keepalive_timeout=30
+            keepalive_timeout=60,  # Increased
+            ttl_dns_cache=300,
+            use_dns_cache=True,
         )
         
-        # CRITICAL FIX: Remove ClientTimeout to avoid "timeout context manager" error
-        # Let the session use default timeouts
+        # CRITICAL: Create session without ANY timeout parameter
         self.session = aiohttp.ClientSession(
             connector=connector,
             headers={'Content-Type': 'application/json'},
-            # NO timeout parameter here - this causes the error
+            # NO timeout parameter at all
         )
         
-        self.logger.info("ULTRA-CONSERVATIVE model server client initialized")    
-    
+        self.logger.info("FINAL FIX: Model server client initialized without timeout configs")
+        
     async def close(self):
-        """FIXED: Safe session cleanup"""
+        """Safe session cleanup"""
         if self.session:
             try:
                 await self.session.close()
-                # FIXED: Give time for cleanup
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.25)  # Increased cleanup time
             except Exception as e:
                 self.logger.warning(f"Session cleanup warning: {e}")
             finally:
                 self.session = None
-    
-
 
     async def call_generate(self, server: ModelServer, prompt: str, 
-                  params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """ULTRA-SIMPLE: API call without timeout context manager issues"""
+                      params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """FINAL FIX: No timeout context manager anywhere"""
         
         if not self.session:
             raise RuntimeError("Client not initialized")
         
         params = params or {}
         
-        # ULTRA-CONSERVATIVE request - minimal parameters
         request_data = {
-            "prompt": prompt[:200],  # Keep it small
-            "max_tokens": min(params.get("max_tokens", 10), 20),
+            "prompt": prompt[:300],  # Slightly larger
+            "max_tokens": min(params.get("max_tokens", 15), 30),
             "temperature": params.get("temperature", 0.1),
             "stream": False
         }
@@ -323,17 +320,13 @@ class ModelServerClient:
             self.logger.info(f"🚀 Making request to: {generate_url}")
             self.logger.info(f"📦 Request data: {json.dumps(request_data, indent=2)}")
             
-            # CRITICAL FIX: Use asyncio.wait_for instead of ClientTimeout
-            response = await asyncio.wait_for(
-                self.session.post(generate_url, json=request_data),
-                timeout=60.0  # 60 second timeout using asyncio instead of aiohttp
-            )
+            # CRITICAL FIX: Use session.post directly without any timeout wrappers
+            response = await self.session.post(generate_url, json=request_data)
             
             self.logger.info(f"📡 Response status: {response.status}")
             
             try:
                 if response.status == 200:
-                    # Read the response
                     response_text = await response.text()
                     self.logger.info(f"📄 Raw response (first 200 chars): {response_text[:200]}")
                     
@@ -342,7 +335,6 @@ class ModelServerClient:
                             result = json.loads(response_text)
                             self.logger.info(f"✅ Successfully parsed JSON response")
                             
-                            # Add metadata
                             latency = time.time() - start_time
                             server.record_success(latency)
                             
@@ -374,14 +366,6 @@ class ModelServerClient:
                 # CRITICAL: Always close the response
                 response.close()
                 
-        except asyncio.TimeoutError:
-            self.logger.error(f"❌ Request timeout after 60 seconds")
-            server.record_failure()
-            return {
-                "error": "Request timeout (60s)",
-                "timeout": True
-            }
-            
         except Exception as e:
             self.logger.error(f"❌ Request failed: {type(e).__name__}: {str(e)}")
             server.record_failure()
@@ -394,18 +378,15 @@ class ModelServerClient:
             server.active_requests = max(0, server.active_requests - 1)
             
     async def health_check(self, server: ModelServer) -> bool:
-        """FIXED: Ultra-simple health check without timeout context manager"""
+        """FINAL FIX: Health check without timeout wrapper"""
         try:
             if not self.session:
                 return False
                 
             health_url = f"{server.config.endpoint.rstrip('/')}/health"
             
-            # FIXED: Use asyncio.wait_for instead of ClientTimeout
-            response = await asyncio.wait_for(
-                self.session.get(health_url),
-                timeout=30.0  # 30 second timeout
-            )
+            # CRITICAL FIX: Direct call without asyncio.wait_for
+            response = await self.session.get(health_url)
             
             try:
                 if response.status == 200:
@@ -419,15 +400,10 @@ class ModelServerClient:
             finally:
                 response.close()
                     
-        except asyncio.TimeoutError:
-            server.status = ModelServerStatus.UNHEALTHY
-            self.logger.debug(f"❌ Health check timeout for {server.config.name}")
-            return False
         except Exception as e:
             server.status = ModelServerStatus.UNHEALTHY
             self.logger.debug(f"❌ Health check error for {server.config.name}: {e}")
             return False
-        
 # ==================== API-Compatible Engine Context ====================
 
 class APIEngineContext:
