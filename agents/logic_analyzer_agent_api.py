@@ -1332,6 +1332,274 @@ Return as JSON array:
         
         return list(set(operations))
     
+    async def analyze_complete_program_flow(self, program_name: str) -> Dict[str, Any]:
+        """🔄 ENHANCED: Complete program flow analysis using new relationship tables"""
+        try:
+            # Get program relationships
+            program_relationships = await self._get_program_relationships(program_name)
+            
+            # Get copybook dependencies
+            copybook_relationships = await self._get_copybook_relationships(program_name)
+            
+            # Get file access patterns
+            file_access_patterns = await self._get_file_access_relationships(program_name)
+            
+            # Get field cross-references
+            field_cross_references = await self._get_field_cross_references(program_name)
+            
+            # Analyze impact relationships
+            impact_analysis = await self._get_impact_analysis(program_name)
+            
+            # Generate comprehensive flow analysis with API
+            flow_analysis = await self._generate_complete_flow_analysis_api(
+                program_name, program_relationships, copybook_relationships,
+                file_access_patterns, field_cross_references, impact_analysis
+            )
+            
+            result = {
+                "program_name": program_name,
+                "program_relationships": program_relationships,
+                "copybook_relationships": copybook_relationships,
+                "file_access_patterns": file_access_patterns,
+                "field_cross_references": field_cross_references,
+                "impact_analysis": impact_analysis,
+                "complete_flow_analysis": flow_analysis,
+                "analysis_type": "complete_program_flow",
+                "analysis_timestamp": datetime.now().isoformat()
+            }
+            
+            return self._add_processing_info(result)
+            
+        except Exception as e:
+            self.logger.error(f"Complete program flow analysis failed: {str(e)}")
+            return self._add_processing_info({"error": str(e)})
+
+    async def _get_program_relationships(self, program_name: str) -> List[Dict[str, Any]]:
+        """Get all program call relationships"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Get programs called by this program
+            cursor.execute("""
+                SELECT calling_program, called_program, call_type, call_location,
+                    parameters, call_statement, conditional_call, line_number
+                FROM program_relationships
+                WHERE calling_program = ?
+                ORDER BY line_number
+            """, (program_name,))
+            
+            outbound_calls = cursor.fetchall()
+            
+            # Get programs that call this program
+            cursor.execute("""
+                SELECT calling_program, called_program, call_type, call_location,
+                    parameters, call_statement, conditional_call, line_number
+                FROM program_relationships
+                WHERE called_program = ?
+                ORDER BY calling_program, line_number
+            """, (program_name,))
+            
+            inbound_calls = cursor.fetchall()
+            conn.close()
+            
+            return {
+                "outbound_calls": [
+                    {
+                        "calling_program": row[0],
+                        "called_program": row[1],
+                        "call_type": row[2],
+                        "call_location": row[3],
+                        "parameters": json.loads(row[4]) if row[4] else [],
+                        "call_statement": row[5],
+                        "conditional_call": bool(row[6]),
+                        "line_number": row[7]
+                    } for row in outbound_calls
+                ],
+                "inbound_calls": [
+                    {
+                        "calling_program": row[0],
+                        "called_program": row[1],
+                        "call_type": row[2],
+                        "call_location": row[3],
+                        "parameters": json.loads(row[4]) if row[4] else [],
+                        "call_statement": row[5],
+                        "conditional_call": bool(row[6]),
+                        "line_number": row[7]
+                    } for row in inbound_calls
+                ]
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get program relationships: {e}")
+            return {"outbound_calls": [], "inbound_calls": []}
+
+    async def _get_copybook_relationships(self, program_name: str) -> List[Dict[str, Any]]:
+        """Get all copybook dependencies for the program"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT program_name, copybook_name, copy_location, replacing_clause,
+                    copy_statement, line_number, usage_context
+                FROM copybook_relationships
+                WHERE program_name = ?
+                ORDER BY line_number
+            """, (program_name,))
+            
+            relationships = cursor.fetchall()
+            conn.close()
+            
+            return [
+                {
+                    "program_name": row[0],
+                    "copybook_name": row[1],
+                    "copy_location": row[2],
+                    "replacing_clause": row[3],
+                    "copy_statement": row[4],
+                    "line_number": row[5],
+                    "usage_context": row[6]
+                } for row in relationships
+            ]
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get copybook relationships: {e}")
+            return []
+
+    async def _get_file_access_relationships(self, program_name: str) -> List[Dict[str, Any]]:
+        """Get all file access patterns for the program"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT program_name, file_name, physical_file, access_type, access_mode,
+                    record_format, access_location, line_number
+                FROM file_access_relationships
+                WHERE program_name = ?
+                ORDER BY line_number
+            """, (program_name,))
+            
+            relationships = cursor.fetchall()
+            conn.close()
+            
+            return [
+                {
+                    "program_name": row[0],
+                    "file_name": row[1],
+                    "physical_file": row[2],
+                    "access_type": row[3],
+                    "access_mode": row[4],
+                    "record_format": row[5],
+                    "access_location": row[6],
+                    "line_number": row[7]
+                } for row in relationships
+            ]
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get file access relationships: {e}")
+            return []
+
+    async def _get_field_cross_references(self, program_name: str) -> List[Dict[str, Any]]:
+        """Get field cross-references for the program"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT field_name, qualified_name, source_type, source_name,
+                    definition_location, data_type, picture_clause, usage_clause,
+                    level_number, parent_field, occurs_info, business_domain
+                FROM field_cross_reference
+                WHERE source_name = ? OR source_name IN (
+                    SELECT copybook_name FROM copybook_relationships WHERE program_name = ?
+                )
+                ORDER BY level_number, field_name
+            """, (program_name, program_name))
+            
+            relationships = cursor.fetchall()
+            conn.close()
+            
+            return [
+                {
+                    "field_name": row[0],
+                    "qualified_name": row[1],
+                    "source_type": row[2],
+                    "source_name": row[3],
+                    "definition_location": row[4],
+                    "data_type": row[5],
+                    "picture_clause": row[6],
+                    "usage_clause": row[7],
+                    "level_number": row[8],
+                    "parent_field": row[9],
+                    "occurs_info": json.loads(row[10]) if row[10] else {},
+                    "business_domain": row[11]
+                } for row in relationships
+            ]
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get field cross-references: {e}")
+            return []
+
+    async def _get_impact_analysis(self, program_name: str) -> Dict[str, Any]:
+        """Get impact analysis for the program"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Get what this program impacts
+            cursor.execute("""
+                SELECT source_artifact, source_type, dependent_artifact, dependent_type,
+                    relationship_type, impact_level, change_propagation
+                FROM impact_analysis
+                WHERE source_artifact = ?
+                ORDER BY impact_level DESC
+            """, (program_name,))
+            
+            impacts = cursor.fetchall()
+            
+            # Get what impacts this program
+            cursor.execute("""
+                SELECT source_artifact, source_type, dependent_artifact, dependent_type,
+                    relationship_type, impact_level, change_propagation
+                FROM impact_analysis
+                WHERE dependent_artifact = ?
+                ORDER BY impact_level DESC
+            """, (program_name,))
+            
+            dependencies = cursor.fetchall()
+            conn.close()
+            
+            return {
+                "program_impacts": [
+                    {
+                        "source_artifact": row[0],
+                        "source_type": row[1],
+                        "dependent_artifact": row[2],
+                        "dependent_type": row[3],
+                        "relationship_type": row[4],
+                        "impact_level": row[5],
+                        "change_propagation": row[6]
+                    } for row in impacts
+                ],
+                "program_dependencies": [
+                    {
+                        "source_artifact": row[0],
+                        "source_type": row[1],
+                        "dependent_artifact": row[2],
+                        "dependent_type": row[3],
+                        "relationship_type": row[4],
+                        "impact_level": row[5],
+                        "change_propagation": row[6]
+                    } for row in dependencies
+                ]
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get impact analysis: {e}")
+            return {"program_impacts": [], "program_dependencies": []}
+
     def _extract_decision_points(self, content: str) -> List[str]:
         """Extract decision points from content"""
         decision_points = []

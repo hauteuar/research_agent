@@ -266,6 +266,975 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 "status": "error"
             })
     
+    # Enhanced Lineage Analyzer Agent - Additional Methods for Data Flow Analysis
+
+    async def analyze_complete_data_flow(self, component_name: str, component_type: str) -> Dict[str, Any]:
+        """🔄 ENHANCED: Complete data flow analysis for files and programs"""
+        try:
+            if component_type == "file":
+                return await self._analyze_file_data_flow(component_name)
+            elif component_type in ["program", "cobol"]:
+                return await self._analyze_program_data_flow(component_name)
+            else:
+                return await self._analyze_field_data_flow(component_name)
+                
+        except Exception as e:
+            self.logger.error(f"Complete data flow analysis failed: {str(e)}")
+            return self._add_processing_info({"error": str(e)})
+
+    async def _analyze_file_data_flow(self, file_name: str) -> Dict[str, Any]:
+        """🔄 ENHANCED: Analyze complete file data flow across programs"""
+        try:
+            # Get file access relationships
+            file_access_data = await self._get_file_access_data(file_name)
+            
+            # Get field definitions for this file
+            field_definitions = await self._get_file_field_definitions(file_name)
+            
+            # Analyze field usage across programs
+            field_usage_analysis = await self._analyze_field_usage_across_programs(file_name, field_definitions)
+            
+            # Generate comprehensive file flow analysis
+            file_flow_analysis = await self._generate_file_flow_analysis_api(
+                file_name, file_access_data, field_definitions, field_usage_analysis
+            )
+            
+            result = {
+                "file_name": file_name,
+                "component_type": "file",
+                "file_access_data": file_access_data,
+                "field_definitions": field_definitions,
+                "field_usage_analysis": field_usage_analysis,
+                "file_flow_analysis": file_flow_analysis,
+                "analysis_type": "complete_file_data_flow",
+                "analysis_timestamp": dt.now().isoformat()
+            }
+            
+            return self._add_processing_info(result)
+            
+        except Exception as e:
+            self.logger.error(f"File data flow analysis failed: {str(e)}")
+            return self._add_processing_info({"error": str(e)})
+
+    async def _get_file_access_data(self, file_name: str) -> Dict[str, Any]:
+        """Get comprehensive file access data"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT program_name, file_name, physical_file, access_type, access_mode,
+                    record_format, access_location, line_number
+                FROM file_access_relationships
+                WHERE file_name = ? OR physical_file = ?
+                ORDER BY program_name, line_number
+            """, (file_name, file_name))
+            
+            access_records = cursor.fetchall()
+            conn.close()
+            
+            # Organize by access type
+            access_patterns = {
+                "creators": [],
+                "readers": [],
+                "updaters": [],
+                "deleters": []
+            }
+            
+            programs_accessing = set()
+            
+            for record in access_records:
+                access_info = {
+                    "program_name": record[0],
+                    "file_name": record[1],
+                    "physical_file": record[2],
+                    "access_type": record[3],
+                    "access_mode": record[4],
+                    "record_format": record[5],
+                    "access_location": record[6],
+                    "line_number": record[7]
+                }
+                
+                programs_accessing.add(record[0])
+                
+                if record[3] in ["WRITE", "FD"] and record[4] in ["OUTPUT", "EXTEND"]:
+                    access_patterns["creators"].append(access_info)
+                elif record[3] in ["READ", "SELECT"] and record[4] == "INPUT":
+                    access_patterns["readers"].append(access_info)
+                elif record[3] in ["REWRITE", "WRITE"] and record[4] == "I-O":
+                    access_patterns["updaters"].append(access_info)
+                elif record[3] == "DELETE":
+                    access_patterns["deleters"].append(access_info)
+            
+            return {
+                "access_patterns": access_patterns,
+                "programs_accessing": list(programs_accessing),
+                "total_access_points": len(access_records),
+                "file_operations": {
+                    "create_operations": len(access_patterns["creators"]),
+                    "read_operations": len(access_patterns["readers"]),
+                    "update_operations": len(access_patterns["updaters"]),
+                    "delete_operations": len(access_patterns["deleters"])
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get file access data: {e}")
+            return {"access_patterns": {}, "programs_accessing": [], "total_access_points": 0}
+
+    async def _get_file_field_definitions(self, file_name: str) -> List[Dict[str, Any]]:
+        """Get field definitions associated with a file"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Get fields from file record definitions (FD sections)
+            cursor.execute("""
+                SELECT field_name, qualified_name, source_type, source_name,
+                    definition_location, data_type, picture_clause, usage_clause,
+                    level_number, parent_field, occurs_info, business_domain
+                FROM field_cross_reference
+                WHERE source_name = ? OR source_name IN (
+                    SELECT DISTINCT program_name FROM file_access_relationships 
+                    WHERE file_name = ? OR physical_file = ?
+                )
+                AND definition_location IN ('FD', 'FILE_SECTION', 'WORKING_STORAGE')
+                ORDER BY source_name, level_number, field_name
+            """, (file_name, file_name, file_name))
+            
+            field_records = cursor.fetchall()
+            conn.close()
+            
+            return [
+                {
+                    "field_name": row[0],
+                    "qualified_name": row[1],
+                    "source_type": row[2],
+                    "source_name": row[3],
+                    "definition_location": row[4],
+                    "data_type": row[5],
+                    "picture_clause": row[6],
+                    "usage_clause": row[7],
+                    "level_number": row[8],
+                    "parent_field": row[9],
+                    "occurs_info": json.loads(row[10]) if row[10] else {},
+                    "business_domain": row[11]
+                } for row in field_records
+            ]
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get file field definitions: {e}")
+            return []
+
+    async def _analyze_field_usage_across_programs(self, file_name: str, field_definitions: List[Dict]) -> Dict[str, Any]:
+        """Analyze how fields are used across different programs"""
+        try:
+            field_usage = {}
+            
+            for field_def in field_definitions:
+                field_name = field_def["field_name"]
+                
+                # Find usage of this field across programs
+                field_usage[field_name] = await self._get_field_usage_pattern(field_name, file_name)
+            
+            # Categorize fields
+            field_categories = await self._categorize_fields_api(field_definitions, field_usage)
+            
+            return {
+                "field_usage_details": field_usage,
+                "field_categories": field_categories,
+                "total_fields_analyzed": len(field_definitions)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Field usage analysis failed: {e}")
+            return {"field_usage_details": {}, "field_categories": {}}
+
+    async def _get_field_usage_pattern(self, field_name: str, file_name: str) -> Dict[str, Any]:
+        """Get detailed usage pattern for a specific field"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Find field usage in program chunks
+            cursor.execute("""
+                SELECT pc.program_name, pc.chunk_type, pc.content, pc.line_start, pc.line_end
+                FROM program_chunks pc
+                JOIN file_access_relationships far ON pc.program_name = far.program_name
+                WHERE (pc.content LIKE ? OR pc.content LIKE ?) 
+                AND (far.file_name = ? OR far.physical_file = ?)
+                ORDER BY pc.program_name, pc.line_start
+            """, (f"%{field_name}%", f"%{field_name.upper()}%", file_name, file_name))
+            
+            usage_records = cursor.fetchall()
+            conn.close()
+            
+            usage_patterns = {
+                "programs_using": set(),
+                "usage_contexts": [],
+                "operations_detected": []
+            }
+            
+            for record in usage_records:
+                program_name, chunk_type, content, line_start, line_end = record
+                usage_patterns["programs_using"].add(program_name)
+                
+                # Analyze field operations in content
+                operations = self._detect_field_operations(field_name, content)
+                usage_patterns["operations_detected"].extend(operations)
+                
+                usage_patterns["usage_contexts"].append({
+                    "program_name": program_name,
+                    "chunk_type": chunk_type,
+                    "line_range": f"{line_start}-{line_end}",
+                    "operations": operations
+                })
+            
+            return {
+                "programs_using": list(usage_patterns["programs_using"]),
+                "usage_contexts": usage_patterns["usage_contexts"],
+                "operations_detected": usage_patterns["operations_detected"],
+                "usage_frequency": len(usage_patterns["usage_contexts"])
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Field usage pattern analysis failed: {e}")
+            return {"programs_using": [], "usage_contexts": [], "operations_detected": []}
+
+    def _detect_field_operations(self, field_name: str, content: str) -> List[str]:
+        """Detect specific operations performed on a field"""
+        operations = []
+        content_upper = content.upper()
+        field_upper = field_name.upper()
+        
+        # Check for different operations
+        if f"MOVE TO {field_upper}" in content_upper:
+            operations.append("WRITE")
+        elif f"MOVE {field_upper}" in content_upper:
+            operations.append("READ")
+        elif f"COMPUTE {field_upper}" in content_upper:
+            operations.append("COMPUTE")
+        elif f"ADD TO {field_upper}" in content_upper:
+            operations.append("ADD")
+        elif f"IF {field_upper}" in content_upper:
+            operations.append("VALIDATE")
+        elif f"DISPLAY {field_upper}" in content_upper:
+            operations.append("DISPLAY")
+        
+        return operations
+
+    async def _categorize_fields_api(self, field_definitions: List[Dict], field_usage: Dict) -> Dict[str, Any]:
+        """Categorize fields based on usage patterns using API"""
+        
+        # Prepare field summary for analysis
+        field_summary = []
+        for field_def in field_definitions[:20]:  # Limit for prompt size
+            field_name = field_def["field_name"]
+            usage = field_usage.get(field_name, {})
+            
+            field_summary.append({
+                "field_name": field_name,
+                "data_type": field_def.get("data_type"),
+                "picture_clause": field_def.get("picture_clause"),
+                "business_domain": field_def.get("business_domain"),
+                "programs_using": len(usage.get("programs_using", [])),
+                "operations": usage.get("operations_detected", [])
+            })
+        
+        prompt = f"""
+        Categorize these file fields based on their usage patterns:
+        
+        Field Analysis Data:
+        {json.dumps(field_summary, indent=2)}
+        
+        Categorize fields into:
+        1. **Input Fields** - Fields that come from external sources
+        2. **Derived Fields** - Fields calculated from other fields
+        3. **Updated Fields** - Fields modified by programs
+        4. **Static Fields** - Fields that rarely change
+        5. **Unused Fields** - Fields with minimal or no usage
+        6. **Key Fields** - Fields used for identification or indexing
+        7. **Business Fields** - Fields with business logic
+        
+        Return as JSON:
+        {{
+            "input_fields": ["field1", "field2"],
+            "derived_fields": ["field3", "field4"],
+            "updated_fields": ["field5", "field6"],
+            "static_fields": ["field7", "field8"],
+            "unused_fields": ["field9", "field10"],
+            "key_fields": ["field11", "field12"],
+            "business_fields": ["field13", "field14"]
+        }}
+        """
+        
+        try:
+            response_text = await self._call_api_for_analysis(prompt, max_tokens=600)
+            
+            if '{' in response_text:
+                json_start = response_text.find('{')
+                json_end = response_text.rfind('}') + 1
+                return json.loads(response_text[json_start:json_end])
+        except Exception as e:
+            self.logger.warning(f"Field categorization failed: {e}")
+        
+        # Fallback categorization
+        return self._fallback_field_categorization(field_definitions, field_usage)
+
+    def _fallback_field_categorization(self, field_definitions: List[Dict], field_usage: Dict) -> Dict[str, Any]:
+        """Fallback field categorization when API fails"""
+        categories = {
+            "input_fields": [],
+            "derived_fields": [],
+            "updated_fields": [],
+            "static_fields": [],
+            "unused_fields": [],
+            "key_fields": [],
+            "business_fields": []
+        }
+        
+        for field_def in field_definitions:
+            field_name = field_def["field_name"]
+            usage = field_usage.get(field_name, {})
+            operations = usage.get("operations_detected", [])
+            programs_count = len(usage.get("programs_using", []))
+            
+            # Simple categorization logic
+            if programs_count == 0:
+                categories["unused_fields"].append(field_name)
+            elif "COMPUTE" in operations or "ADD" in operations:
+                categories["derived_fields"].append(field_name)
+            elif "WRITE" in operations and "READ" in operations:
+                categories["updated_fields"].append(field_name)
+            elif field_name.endswith(("-ID", "-KEY", "-NUM")):
+                categories["key_fields"].append(field_name)
+            elif programs_count == 1 and "READ" not in operations:
+                categories["static_fields"].append(field_name)
+            else:
+                categories["business_fields"].append(field_name)
+        
+        return categories
+
+    async def _generate_file_flow_analysis_api(self, file_name: str, file_access_data: Dict,
+                                            field_definitions: List[Dict], field_usage_analysis: Dict) -> str:
+        """Generate comprehensive file flow analysis using API"""
+        
+        flow_summary = {
+            "file_name": file_name,
+            "programs_accessing": len(file_access_data.get("programs_accessing", [])),
+            "total_fields": len(field_definitions),
+            "create_programs": len(file_access_data.get("access_patterns", {}).get("creators", [])),
+            "read_programs": len(file_access_data.get("access_patterns", {}).get("readers", [])),
+            "update_programs": len(file_access_data.get("access_patterns", {}).get("updaters", []))
+        }
+        
+        prompt = f"""
+        Generate comprehensive file data flow analysis for: {file_name}
+        
+        File Flow Summary:
+        - Accessed by {flow_summary['programs_accessing']} programs
+        - Contains {flow_summary['total_fields']} fields
+        - Created by {flow_summary['create_programs']} programs
+        - Read by {flow_summary['read_programs']} programs
+        - Updated by {flow_summary['update_programs']} programs
+        
+        Programs Creating File: {[p['program_name'] for p in file_access_data.get('access_patterns', {}).get('creators', [])]}
+        Programs Reading File: {[p['program_name'] for p in file_access_data.get('access_patterns', {}).get('readers', [])]}
+        
+        Provide detailed analysis covering:
+        
+        **File Overview:**
+        - Business purpose and role in the system
+        - Data characteristics and format
+        - Critical importance to operations
+        
+        **Data Flow Lifecycle:**
+        - File creation process and sources
+        - Data population and initial load
+        - Regular update patterns and schedules
+        - Data consumption and usage patterns
+        
+        **Field-Level Analysis:**
+        - Key fields and their business meaning
+        - Derived vs source data fields
+        - Data quality and validation points
+        - Field usage frequency and patterns
+        
+        **Program Integration:**
+        - Producer programs and their roles
+        - Consumer programs and their purposes
+        - Data transformation points
+        - Error handling and recovery processes
+        
+        **Data Quality and Governance:**
+        - Data validation rules and checks
+        - Data lineage and traceability
+        - Compliance and audit considerations
+        - Data retention and archival
+        
+        **Performance and Optimization:**
+        - File access patterns and performance
+        - Optimization opportunities
+        - Resource utilization characteristics
+        
+        Write as comprehensive data flow documentation for technical and business stakeholders.
+        """
+        
+        try:
+            return await self._call_api_for_readable_analysis(prompt, max_tokens=1200)
+        except Exception as e:
+            self.logger.error(f"File flow analysis generation failed: {e}")
+            return self._generate_fallback_file_flow_analysis(file_name, flow_summary)
+
+    def _generate_fallback_file_flow_analysis(self, file_name: str, flow_summary: Dict) -> str:
+        """Generate fallback file flow analysis when API fails"""
+        analysis = f"## File Data Flow Analysis: {file_name}\n\n"
+        
+        analysis += "### File Overview\n"
+        analysis += f"File {file_name} is a critical data component that:\n"
+        analysis += f"- Is accessed by {flow_summary['programs_accessing']} different programs\n"
+        analysis += f"- Contains {flow_summary['total_fields']} data fields\n"
+        analysis += f"- Has {flow_summary['create_programs']} producer programs\n"
+        analysis += f"- Has {flow_summary['read_programs']} consumer programs\n\n"
+        
+        analysis += "### Data Flow Characteristics\n"
+        if flow_summary['create_programs'] > 0 and flow_summary['read_programs'] > 0:
+            analysis += "**Full Lifecycle File:** This file has both producer and consumer programs, indicating a complete data lifecycle.\n"
+        elif flow_summary['read_programs'] > 0:
+            analysis += "**Source File:** This file is primarily read by programs, suggesting it's a data source.\n"
+        elif flow_summary['create_programs'] > 0:
+            analysis += "**Output File:** This file is primarily created by programs, suggesting it's a data output.\n"
+        
+        analysis += f"\n### Integration Impact\n"
+        analysis += f"Changes to this file structure could affect {flow_summary['programs_accessing']} programs. "
+        analysis += "Careful coordination is required for any structural modifications.\n"
+        
+        return analysis
+
+    async def _analyze_program_data_flow(self, program_name: str) -> Dict[str, Any]:
+        """🔄 ENHANCED: Analyze data flow within a specific program"""
+        try:
+            # Get file access relationships for this program
+            program_file_access = await self._get_program_file_access(program_name)
+            
+            # Get field cross-references for this program
+            program_field_usage = await self._get_program_field_usage(program_name)
+            
+            # Analyze data transformations
+            data_transformations = await self._analyze_data_transformations_api(program_name)
+            
+            # Generate program data flow analysis
+            program_data_flow_analysis = await self._generate_program_data_flow_analysis_api(
+                program_name, program_file_access, program_field_usage, data_transformations
+            )
+            
+            result = {
+                "program_name": program_name,
+                "component_type": "program",
+                "program_file_access": program_file_access,
+                "program_field_usage": program_field_usage,
+                "data_transformations": data_transformations,
+                "program_data_flow_analysis": program_data_flow_analysis,
+                "analysis_type": "program_data_flow",
+                "analysis_timestamp": dt.now().isoformat()
+            }
+            
+            return self._add_processing_info(result)
+            
+        except Exception as e:
+            self.logger.error(f"Program data flow analysis failed: {str(e)}")
+            return self._add_processing_info({"error": str(e)})
+
+    async def _get_program_file_access(self, program_name: str) -> Dict[str, Any]:
+        """Get file access patterns for a specific program"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT file_name, physical_file, access_type, access_mode,
+                    record_format, access_location, line_number
+                FROM file_access_relationships
+                WHERE program_name = ?
+                ORDER BY line_number
+            """, (program_name,))
+            
+            access_records = cursor.fetchall()
+            conn.close()
+            
+            # Categorize file access
+            file_access = {
+                "input_files": [],
+                "output_files": [],
+                "update_files": [],
+                "temporary_files": []
+            }
+            
+            for record in access_records:
+                file_info = {
+                    "file_name": record[0],
+                    "physical_file": record[1],
+                    "access_type": record[2],
+                    "access_mode": record[3],
+                    "record_format": record[4],
+                    "access_location": record[5],
+                    "line_number": record[6]
+                }
+                
+                if record[3] == "INPUT":
+                    file_access["input_files"].append(file_info)
+                elif record[3] in ["OUTPUT", "EXTEND"]:
+                    file_access["output_files"].append(file_info)
+                elif record[3] == "I-O":
+                    file_access["update_files"].append(file_info)
+                else:
+                    file_access["temporary_files"].append(file_info)
+            
+            return file_access
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get program file access: {e}")
+            return {"input_files": [], "output_files": [], "update_files": [], "temporary_files": []}
+
+    async def _get_program_field_usage(self, program_name: str) -> Dict[str, Any]:
+        """Get field usage patterns within a program"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT field_name, qualified_name, definition_location, data_type,
+                    picture_clause, level_number, parent_field, business_domain
+                FROM field_cross_reference
+                WHERE source_name = ?
+                ORDER BY level_number, field_name
+            """, (program_name,))
+            
+            field_records = cursor.fetchall()
+            conn.close()
+            
+            # Categorize fields by definition location
+            field_usage = {
+                "working_storage_fields": [],
+                "linkage_fields": [],
+                "file_fields": [],
+                "local_storage_fields": []
+            }
+            
+            for record in field_records:
+                field_info = {
+                    "field_name": record[0],
+                    "qualified_name": record[1],
+                    "definition_location": record[2],
+                    "data_type": record[3],
+                    "picture_clause": record[4],
+                    "level_number": record[5],
+                    "parent_field": record[6],
+                    "business_domain": record[7]
+                }
+                
+                location = record[2].upper() if record[2] else ""
+                if "WORKING" in location or "WS" in location:
+                    field_usage["working_storage_fields"].append(field_info)
+                elif "LINKAGE" in location:
+                    field_usage["linkage_fields"].append(field_info)
+                elif "FD" in location or "FILE" in location:
+                    field_usage["file_fields"].append(field_info)
+                elif "LOCAL" in location or "LS" in location:
+                    field_usage["local_storage_fields"].append(field_info)
+            
+            return field_usage
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get program field usage: {e}")
+            return {"working_storage_fields": [], "linkage_fields": [], "file_fields": [], "local_storage_fields": []}
+
+    async def _analyze_data_transformations_api(self, program_name: str) -> Dict[str, Any]:
+        """Analyze data transformations within the program using API"""
+        try:
+            # Get program chunks with data transformation logic
+            chunks = await self._get_program_chunks(program_name)
+            
+            # Extract transformation patterns
+            transformations = []
+            for chunk in chunks:
+                content = chunk[4]
+                
+                # Find MOVE statements
+                moves = re.findall(r'MOVE\s+([^.]+?)\s+TO\s+([^.]+)', content, re.IGNORECASE)
+                transformations.extend([("MOVE", move[0].strip(), move[1].strip()) for move in moves])
+                
+                # Find COMPUTE statements
+                computes = re.findall(r'COMPUTE\s+([^.]+)', content, re.IGNORECASE)
+                transformations.extend([("COMPUTE", compute.strip(), "") for compute in computes])
+                
+                # Find other transformation patterns
+                adds = re.findall(r'ADD\s+([^.]+?)\s+TO\s+([^.]+)', content, re.IGNORECASE)
+                transformations.extend([("ADD", add[0].strip(), add[1].strip()) for add in adds])
+            
+            prompt = f"""
+            Analyze data transformations in program {program_name}:
+            
+            Transformations Found:
+            {transformations[:15]}  # Limit for prompt size
+            
+            Total Transformations: {len(transformations)}
+            
+            Analyze:
+            1. Types of data transformations performed
+            2. Business logic embedded in transformations
+            3. Data validation and conversion patterns
+            4. Complex calculations and derivations
+            5. Data flow between different data structures
+            
+            Provide detailed analysis of the data transformation patterns.
+            """
+            
+            try:
+                api_result = await self._call_api_for_readable_analysis(prompt, max_tokens=800)
+                
+                return {
+                    "total_transformations": len(transformations),
+                    "transformation_types": {
+                        "move_operations": len([t for t in transformations if t[0] == "MOVE"]),
+                        "compute_operations": len([t for t in transformations if t[0] == "COMPUTE"]),
+                        "arithmetic_operations": len([t for t in transformations if t[0] == "ADD"])
+                    },
+                    "transformation_analysis": api_result,
+                    "sample_transformations": transformations[:10]
+                }
+            except Exception as e:
+                self.logger.error(f"Transformation analysis failed: {e}")
+                return {"error": str(e), "total_transformations": len(transformations)}
+                
+        except Exception as e:
+            self.logger.error(f"Data transformation analysis failed: {e}")
+            return {"error": str(e)}
+
+    async def _generate_program_data_flow_analysis_api(self, program_name: str, 
+                                                    program_file_access: Dict,
+                                                    program_field_usage: Dict,
+                                                    data_transformations: Dict) -> str:
+        """Generate comprehensive program data flow analysis using API"""
+        
+        flow_summary = {
+            "program_name": program_name,
+            "input_files": len(program_file_access.get("input_files", [])),
+            "output_files": len(program_file_access.get("output_files", [])),
+            "update_files": len(program_file_access.get("update_files", [])),
+            "working_storage_fields": len(program_field_usage.get("working_storage_fields", [])),
+            "linkage_fields": len(program_field_usage.get("linkage_fields", [])),
+            "transformations": data_transformations.get("total_transformations", 0)
+        }
+        
+        prompt = f"""
+        Generate comprehensive program data flow analysis for: {program_name}
+        
+        Program Data Flow Summary:
+        - Reads from {flow_summary['input_files']} input files
+        - Writes to {flow_summary['output_files']} output files
+        - Updates {flow_summary['update_files']} files
+        - Uses {flow_summary['working_storage_fields']} working storage fields
+        - Has {flow_summary['linkage_fields']} linkage parameters
+        - Performs {flow_summary['transformations']} data transformations
+        
+        Input Files: {[f['file_name'] for f in program_file_access.get('input_files', [])]}
+        Output Files: {[f['file_name'] for f in program_file_access.get('output_files', [])]}
+        
+        Provide detailed analysis covering:
+        
+        **Program Data Flow Overview:**
+        - Business purpose and data processing role
+        - Input-to-output data transformation pipeline
+        - Key business rules implemented
+        
+        **Input Data Analysis:**
+        - Source data characteristics and validation
+        - Data quality checks and error handling
+        - Input data dependencies and requirements
+        
+        **Processing Logic:**
+        - Core data transformation algorithms
+        - Business calculations and derivations
+        - Data validation and business rule enforcement
+        
+        **Output Data Generation:**
+        - Output file structures and formats
+        - Data enrichment and enhancement processes
+        - Quality assurance and validation
+        
+        **Data Integrity and Control:**
+        - Error handling and exception processing
+        - Data consistency checks
+        - Audit trail and logging mechanisms
+        
+        **Performance Considerations:**
+        - Data volume handling capabilities
+        - Processing efficiency and optimization
+        - Resource utilization patterns
+        
+        Write as comprehensive program data flow documentation for development and business teams.
+        """
+        
+        try:
+            return await self._call_api_for_readable_analysis(prompt, max_tokens=1200)
+        except Exception as e:
+            self.logger.error(f"Program data flow analysis generation failed: {e}")
+            return self._generate_fallback_program_data_flow_analysis(program_name, flow_summary)
+
+    def _generate_fallback_program_data_flow_analysis(self, program_name: str, flow_summary: Dict) -> str:
+        """Generate fallback program data flow analysis when API fails"""
+        analysis = f"## Program Data Flow Analysis: {program_name}\n\n"
+        
+        analysis += "### Program Overview\n"
+        analysis += f"Program {program_name} processes data through the following flow:\n"
+        analysis += f"- Reads from {flow_summary['input_files']} input sources\n"
+        analysis += f"- Performs {flow_summary['transformations']} data transformations\n"
+        analysis += f"- Produces {flow_summary['output_files']} output files\n"
+        analysis += f"- Updates {flow_summary['update_files']} existing files\n\n"
+        
+        analysis += "### Data Processing Characteristics\n"
+        if flow_summary['transformations'] > 50:
+            analysis += "**Complex Processing:** This program performs extensive data transformations and business logic.\n"
+        elif flow_summary['transformations'] > 20:
+            analysis += "**Moderate Processing:** This program performs standard data transformations.\n"
+        else:
+            analysis += "**Simple Processing:** This program performs basic data operations.\n"
+        
+        analysis += f"\n### Integration Points\n"
+        total_files = flow_summary['input_files'] + flow_summary['output_files'] + flow_summary['update_files']
+        analysis += f"This program integrates with {total_files} different data sources and targets, "
+        analysis += "indicating its role in the broader data processing ecosystem.\n"
+        
+        return analysis
+
+    async def analyze_cross_program_data_lineage(self, component_name: str) -> Dict[str, Any]:
+        """🔄 NEW: Analyze data lineage across multiple programs"""
+        try:
+            # Get impact analysis data
+            impact_data = await self._get_cross_program_impact_data(component_name)
+            
+            # Build lineage graph across programs
+            lineage_graph = await self._build_cross_program_lineage_graph(component_name, impact_data)
+            
+            # Generate cross-program lineage analysis
+            cross_program_analysis = await self._generate_cross_program_lineage_analysis_api(
+                component_name, impact_data, lineage_graph
+            )
+            
+            result = {
+                "component_name": component_name,
+                "impact_data": impact_data,
+                "lineage_graph": lineage_graph,
+                "cross_program_analysis": cross_program_analysis,
+                "analysis_type": "cross_program_data_lineage",
+                "analysis_timestamp": dt.now().isoformat()
+            }
+            
+            return self._add_processing_info(result)
+            
+        except Exception as e:
+            self.logger.error(f"Cross-program lineage analysis failed: {str(e)}")
+            return self._add_processing_info({"error": str(e)})
+
+    async def _get_cross_program_impact_data(self, component_name: str) -> Dict[str, Any]:
+        """Get impact analysis data across programs"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Get all impact relationships for this component
+            cursor.execute("""
+                SELECT source_artifact, source_type, dependent_artifact, dependent_type,
+                    relationship_type, impact_level, change_propagation
+                FROM impact_analysis
+                WHERE source_artifact = ? OR dependent_artifact = ?
+                ORDER BY impact_level DESC, relationship_type
+            """, (component_name, component_name))
+            
+            impact_records = cursor.fetchall()
+            conn.close()
+            
+            # Organize impact data
+            upstream_dependencies = []
+            downstream_impacts = []
+            
+            for record in impact_records:
+                impact_info = {
+                    "source_artifact": record[0],
+                    "source_type": record[1],
+                    "dependent_artifact": record[2],
+                    "dependent_type": record[3],
+                    "relationship_type": record[4],
+                    "impact_level": record[5],
+                    "change_propagation": record[6]
+                }
+                
+                if record[2] == component_name:  # This component is the dependent
+                    upstream_dependencies.append(impact_info)
+                else:  # This component is the source
+                    downstream_impacts.append(impact_info)
+            
+            return {
+                "upstream_dependencies": upstream_dependencies,
+                "downstream_impacts": downstream_impacts,
+                "total_relationships": len(impact_records)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get cross-program impact data: {e}")
+            return {"upstream_dependencies": [], "downstream_impacts": [], "total_relationships": 0}
+
+    async def _build_cross_program_lineage_graph(self, component_name: str, impact_data: Dict) -> Dict[str, Any]:
+        """Build lineage graph across programs"""
+        try:
+            lineage_nodes = []
+            lineage_edges = []
+            
+            # Add central component node
+            central_node = {
+                "id": f"component_{component_name}",
+                "name": component_name,
+                "type": "central_component",
+                "level": 0
+            }
+            lineage_nodes.append(central_node)
+            
+            # Add upstream nodes and edges
+            for i, upstream in enumerate(impact_data.get("upstream_dependencies", [])):
+                upstream_node = {
+                    "id": f"upstream_{upstream['source_artifact']}",
+                    "name": upstream['source_artifact'],
+                    "type": upstream['source_type'],
+                    "level": -1
+                }
+                lineage_nodes.append(upstream_node)
+                
+                lineage_edges.append({
+                    "source": upstream_node["id"],
+                    "target": central_node["id"],
+                    "relationship": upstream['relationship_type'],
+                    "impact_level": upstream['impact_level']
+                })
+            
+            # Add downstream nodes and edges
+            for i, downstream in enumerate(impact_data.get("downstream_impacts", [])):
+                downstream_node = {
+                    "id": f"downstream_{downstream['dependent_artifact']}",
+                    "name": downstream['dependent_artifact'],
+                    "type": downstream['dependent_type'],
+                    "level": 1
+                }
+                lineage_nodes.append(downstream_node)
+                
+                lineage_edges.append({
+                    "source": central_node["id"],
+                    "target": downstream_node["id"],
+                    "relationship": downstream['relationship_type'],
+                    "impact_level": downstream['impact_level']
+                })
+            
+            return {
+                "nodes": lineage_nodes,
+                "edges": lineage_edges,
+                "total_nodes": len(lineage_nodes),
+                "total_edges": len(lineage_edges),
+                "graph_complexity": "high" if len(lineage_nodes) > 10 else "medium" if len(lineage_nodes) > 5 else "low"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Failed to build lineage graph: {e}")
+            return {"nodes": [], "edges": [], "total_nodes": 0, "total_edges": 0}
+
+    async def _generate_cross_program_lineage_analysis_api(self, component_name: str,
+                                                        impact_data: Dict, lineage_graph: Dict) -> str:
+        """Generate cross-program lineage analysis using API"""
+        
+        lineage_summary = {
+            "component_name": component_name,
+            "upstream_count": len(impact_data.get("upstream_dependencies", [])),
+            "downstream_count": len(impact_data.get("downstream_impacts", [])),
+            "total_nodes": lineage_graph.get("total_nodes", 0),
+            "graph_complexity": lineage_graph.get("graph_complexity", "low")
+        }
+        
+        prompt = f"""
+        Generate cross-program data lineage analysis for: {component_name}
+        
+        Lineage Summary:
+        - {lineage_summary['upstream_count']} upstream dependencies
+        - {lineage_summary['downstream_count']} downstream impacts
+        - {lineage_summary['total_nodes']} total components in lineage
+        - Graph complexity: {lineage_summary['graph_complexity']}
+        
+        Upstream Dependencies: {[dep['source_artifact'] for dep in impact_data.get('upstream_dependencies', [])[:5]]}
+        Downstream Impacts: {[imp['dependent_artifact'] for imp in impact_data.get('downstream_impacts', [])[:5]]}
+        
+        Provide comprehensive analysis covering:
+        
+        **Lineage Overview:**
+        - Component's role in the data ecosystem
+        - Critical dependencies and relationships
+        - Business impact and importance
+        
+        **Upstream Analysis:**
+        - Data sources and origins
+        - Dependency chain analysis
+        - Risk assessment for source changes
+        
+        **Downstream Analysis:**
+        - Impact propagation patterns
+        - Affected systems and processes
+        - Change management considerations
+        
+        **Cross-Program Dependencies:**
+        - Inter-program data flows
+        - Synchronization requirements
+        - Data consistency mechanisms
+        
+        **Impact Assessment:**
+        - Change impact analysis
+        - Risk mitigation strategies
+        - Testing and validation requirements
+        
+        **Optimization Opportunities:**
+        - Simplification possibilities
+        - Performance improvements
+        - Architecture enhancements
+        
+        Write as comprehensive lineage documentation for architecture and governance teams.
+        """
+        
+        try:
+            return await self._call_api_for_readable_analysis(prompt, max_tokens=1200)
+        except Exception as e:
+            self.logger.error(f"Cross-program lineage analysis generation failed: {e}")
+            return self._generate_fallback_cross_program_analysis(component_name, lineage_summary)
+
+    def _generate_fallback_cross_program_analysis(self, component_name: str, lineage_summary: Dict) -> str:
+        """Generate fallback cross-program analysis when API fails"""
+        analysis = f"## Cross-Program Data Lineage: {component_name}\n\n"
+        
+        analysis += "### Lineage Overview\n"
+        analysis += f"Component {component_name} sits at the center of a {lineage_summary['graph_complexity']} complexity data lineage:\n"
+        analysis += f"- Has {lineage_summary['upstream_count']} upstream dependencies\n"
+        analysis += f"- Impacts {lineage_summary['downstream_count']} downstream components\n"
+        analysis += f"- Total lineage network includes {lineage_summary['total_nodes']} components\n\n"
+        
+        analysis += "### Impact Assessment\n"
+        if lineage_summary['upstream_count'] > 5 or lineage_summary['downstream_count'] > 5:
+            analysis += "**High Impact Component:** Changes to this component require extensive coordination and testing.\n"
+        elif lineage_summary['upstream_count'] > 2 or lineage_summary['downstream_count'] > 2:
+            analysis += "**Moderate Impact Component:** Standard change management procedures apply.\n"
+        else:
+            analysis += "**Low Impact Component:** Changes can be managed with minimal coordination.\n"
+        
+        analysis += f"\n### Complexity Characteristics\n"
+        analysis += f"The {lineage_summary['graph_complexity']} complexity rating indicates the level of "
+        analysis += "coordination required for changes and the potential for cascading impacts.\n"
+        
+        return analysis
+
     async def analyze_field_lineage_with_fallback(self, field_name: str) -> Dict[str, Any]:
         """Enhanced field lineage with timeout protection and partial saves"""
         try:

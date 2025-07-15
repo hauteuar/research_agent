@@ -893,6 +893,1256 @@ class DocumentationAgent(BaseOpulenceAgent):
         
         return doc
     
+    async def generate_comprehensive_flow_documentation(self, component_name: str, 
+                                                    component_type: str, 
+                                                    analysis_results: Dict[str, Any]) -> Dict[str, Any]:
+        """🔄 ENHANCED: Generate comprehensive flow documentation combining all analysis results"""
+        try:
+            # Extract data from analysis results
+            lineage_data = analysis_results.get("lineage_analysis", {}).get("data", {})
+            logic_data = analysis_results.get("logic_analysis", {}).get("data", {})
+            
+            # Generate different types of flow documentation based on component type
+            if component_type == "file":
+                documentation = await self._generate_file_flow_documentation_api(
+                    component_name, lineage_data, logic_data
+                )
+            elif component_type in ["program", "cobol"]:
+                documentation = await self._generate_program_flow_documentation_api(
+                    component_name, lineage_data, logic_data
+                )
+            elif component_type == "field":
+                documentation = await self._generate_field_flow_documentation_api(
+                    component_name, lineage_data, logic_data
+                )
+            else:
+                documentation = await self._generate_generic_flow_documentation_api(
+                    component_name, component_type, lineage_data, logic_data
+                )
+            
+            result = {
+                "status": "success",
+                "component_name": component_name,
+                "component_type": component_type,
+                "documentation": documentation,
+                "format": "markdown",
+                "documentation_type": "comprehensive_flow",
+                "generation_timestamp": dt.now().isoformat()
+            }
+            
+            return self._add_processing_info(result)
+            
+        except Exception as e:
+            self.logger.error(f"Comprehensive flow documentation failed: {str(e)}")
+            return self._add_processing_info({"error": str(e)})
+
+    async def _generate_file_flow_documentation_api(self, file_name: str, 
+                                                lineage_data: Dict, logic_data: Dict) -> str:
+        """Generate comprehensive file flow documentation using API"""
+        
+        # Extract key information from analysis data
+        file_info = {
+            "file_name": file_name,
+            "programs_using": len(lineage_data.get("programs_using", [])),
+            "operations": len(lineage_data.get("operations", [])),
+            "access_patterns": lineage_data.get("file_access_data", {}).get("access_patterns", {}),
+            "field_definitions": len(lineage_data.get("field_definitions", [])),
+            "field_categories": lineage_data.get("field_usage_analysis", {}).get("field_categories", {})
+        }
+        
+        prompt = f"""
+        Generate comprehensive file flow documentation for: {file_name}
+        
+        File Analysis Summary:
+        - Used by {file_info['programs_using']} programs
+        - {file_info['operations']} different operations
+        - {file_info['field_definitions']} field definitions
+        - Access patterns: {file_info['access_patterns']}
+        
+        Field Categories Found:
+        - Input Fields: {len(file_info['field_categories'].get('input_fields', []))}
+        - Derived Fields: {len(file_info['field_categories'].get('derived_fields', []))}
+        - Updated Fields: {len(file_info['field_categories'].get('updated_fields', []))}
+        - Static Fields: {len(file_info['field_categories'].get('static_fields', []))}
+        - Unused Fields: {len(file_info['field_categories'].get('unused_fields', []))}
+        
+        Create comprehensive documentation covering:
+        
+        # {file_name} - File Flow Documentation
+        
+        ## Executive Summary
+        - Business purpose and critical importance
+        - Role in data processing ecosystem
+        - Key stakeholders and usage patterns
+        
+        ## File Overview
+        - Data characteristics and structure
+        - Business domain and context
+        - Criticality and compliance requirements
+        
+        ## Data Flow Lifecycle
+        
+        ### Input Phase
+        - Data sources and origins
+        - Data collection processes
+        - Initial validation and quality checks
+        
+        ### Processing Phase
+        - Programs that create the file
+        - Data transformation and enrichment
+        - Business rules and validations applied
+        
+        ### Consumption Phase
+        - Programs that read the file
+        - Downstream processing workflows
+        - Data distribution and usage patterns
+        
+        ### Maintenance Phase
+        - Update and modification processes
+        - Data quality monitoring
+        - Archival and retention policies
+        
+        ## Field-Level Analysis
+        
+        ### Input Fields
+        - Fields populated from external sources
+        - Data validation requirements
+        - Source system mappings
+        
+        ### Derived Fields
+        - Calculated and computed fields
+        - Business logic and formulas
+        - Dependencies and calculations
+        
+        ### Updated Fields
+        - Fields modified during processing
+        - Update patterns and frequencies
+        - Change tracking mechanisms
+        
+        ### Static Fields
+        - Reference and lookup data
+        - Configuration parameters
+        - Rarely changing information
+        
+        ### Unused Fields
+        - Legacy fields no longer used
+        - Potential cleanup opportunities
+        - Impact assessment for removal
+        
+        ## Program Integration
+        
+        ### Producer Programs
+        - Programs that create or populate the file
+        - Data generation processes
+        - Quality assurance measures
+        
+        ### Consumer Programs
+        - Programs that read and process the file
+        - Usage patterns and dependencies
+        - Performance considerations
+        
+        ### Maintenance Programs
+        - Backup and recovery processes
+        - Data quality monitoring
+        - Housekeeping and cleanup
+        
+        ## Data Quality and Governance
+        
+        ### Quality Metrics
+        - Data completeness indicators
+        - Accuracy and consistency measures
+        - Validation rules and checks
+        
+        ### Compliance Considerations
+        - Regulatory requirements
+        - Data privacy and security
+        - Audit trail requirements
+        
+        ### Change Management
+        - Impact assessment procedures
+        - Testing and validation requirements
+        - Deployment coordination
+        
+        ## Performance and Optimization
+        
+        ### Current Performance
+        - File size and growth patterns
+        - Access frequency and patterns
+        - Resource utilization characteristics
+        
+        ### Optimization Opportunities
+        - Structure improvements
+        - Processing efficiency enhancements
+        - Storage optimization options
+        
+        ## Risk Assessment
+        
+        ### Dependencies and Vulnerabilities
+        - Critical dependencies identification
+        - Single points of failure
+        - Risk mitigation strategies
+        
+        ### Business Impact
+        - Consequences of file unavailability
+        - Recovery time objectives
+        - Business continuity planning
+        
+        ## Maintenance and Support
+        
+        ### Operational Procedures
+        - Daily monitoring requirements
+        - Troubleshooting guidelines
+        - Escalation procedures
+        
+        ### Documentation Maintenance
+        - Review and update schedules
+        - Change notification processes
+        - Knowledge transfer requirements
+        
+        Write as professional, comprehensive documentation suitable for technical teams, 
+        business stakeholders, and governance committees.
+        """
+        
+        try:
+            return await self._call_api_for_readable_analysis(prompt, max_tokens=1500)
+        except Exception as e:
+            self.logger.error(f"File flow documentation generation failed: {e}")
+            return self._generate_fallback_file_documentation(file_name, file_info)
+
+    def _generate_fallback_file_documentation(self, file_name: str, file_info: Dict) -> str:
+        """Generate fallback file documentation when API fails"""
+        doc = f"# {file_name} - File Flow Documentation\n\n"
+        
+        doc += "## Executive Summary\n\n"
+        doc += f"File {file_name} is a critical data component in the mainframe system, "
+        doc += f"serving {file_info['programs_using']} programs with {file_info['field_definitions']} data fields. "
+        doc += "This file plays a vital role in the data processing ecosystem.\n\n"
+        
+        doc += "## File Overview\n\n"
+        doc += f"**File Name:** {file_name}\n"
+        doc += f"**Programs Using:** {file_info['programs_using']}\n"
+        doc += f"**Operations Supported:** {file_info['operations']}\n"
+        doc += f"**Field Count:** {file_info['field_definitions']}\n\n"
+        
+        doc += "## Data Flow Summary\n\n"
+        access_patterns = file_info.get('access_patterns', {})
+        if access_patterns:
+            doc += "### Access Patterns\n"
+            for pattern, programs in access_patterns.items():
+                if programs:
+                    doc += f"- **{pattern.title()}:** {len(programs)} programs\n"
+        
+        doc += "\n## Field Analysis\n\n"
+        field_categories = file_info.get('field_categories', {})
+        for category, fields in field_categories.items():
+            if fields:
+                doc += f"- **{category.replace('_', ' ').title()}:** {len(fields)} fields\n"
+        
+        doc += "\n## Recommendations\n\n"
+        doc += "- Regular monitoring of file access patterns\n"
+        doc += "- Periodic review of field usage and cleanup opportunities\n"
+        doc += "- Documentation of business rules and validation logic\n"
+        doc += "- Implementation of data quality monitoring\n"
+        
+        return doc
+
+    async def _generate_program_flow_documentation_api(self, program_name: str, 
+                                                    lineage_data: Dict, logic_data: Dict) -> str:
+        """Generate comprehensive program flow documentation using API"""
+        
+        # Extract key information from analysis data
+        program_info = {
+            "program_name": program_name,
+            "complexity_score": logic_data.get("complexity_score", 0),
+            "business_rules": len(logic_data.get("business_rules", [])),
+            "logic_patterns": len(logic_data.get("logic_patterns", [])),
+            "program_relationships": logic_data.get("program_relationships", {}),
+            "file_access": logic_data.get("file_access_patterns", []),
+            "transformations": logic_data.get("data_transformations", {})
+        }
+        
+        outbound_calls = len(program_info.get("program_relationships", {}).get("outbound_calls", []))
+        inbound_calls = len(program_info.get("program_relationships", {}).get("inbound_calls", []))
+        
+        prompt = f"""
+        Generate comprehensive program flow documentation for: {program_name}
+        
+        Program Analysis Summary:
+        - Complexity Score: {program_info['complexity_score']}/10
+        - Business Rules: {program_info['business_rules']}
+        - Logic Patterns: {program_info['logic_patterns']}
+        - Outbound Calls: {outbound_calls}
+        - Inbound Calls: {inbound_calls}
+        - File Operations: {len(program_info['file_access'])}
+        
+        Create comprehensive documentation covering:
+        
+        # {program_name} - Program Flow Documentation
+        
+        ## Executive Summary
+        - Business purpose and objectives
+        - Critical role in system operations
+        - Key stakeholders and dependencies
+        
+        ## Program Overview
+        - Functional description and scope
+        - Business domain and context
+        - Performance characteristics
+        
+        ## Program Flow Analysis
+        
+        ### Input Processing
+        - Data sources and input validation
+        - Parameter processing and validation
+        - Initial setup and initialization
+        
+        ### Core Processing Logic
+        - Main business algorithms and calculations
+        - Decision points and business rules
+        - Data transformation procedures
+        
+        ### Output Generation
+        - Output file creation and formatting
+        - Result validation and quality checks
+        - Success and error reporting
+        
+        ### Error Handling
+        - Exception processing procedures
+        - Error recovery mechanisms
+        - Logging and audit trail generation
+        
+        ## Program Relationships
+        
+        ### Called Programs
+        - Downstream program invocations
+        - Parameter passing mechanisms
+        - Return value processing
+        
+        ### Calling Programs
+        - Upstream program dependencies
+        - Invocation contexts and triggers
+        - Integration patterns
+        
+        ### Shared Resources
+        - Common copybooks and data structures
+        - Shared files and databases
+        - System resources and utilities
+        
+        ## Data Flow Analysis
+        
+        ### Input Data Flow
+        - File reading and data extraction
+        - Data validation and cleansing
+        - Format conversion and normalization
+        
+        ### Internal Data Processing
+        - Working storage utilization
+        - Data structure manipulation
+        - Temporary file management
+        
+        ### Output Data Flow
+        - Result file generation
+        - Data formatting and validation
+        - Distribution and delivery
+        
+        ## Business Logic Documentation
+        
+        ### Business Rules Implementation
+        - Validation rules and constraints
+        - Calculation formulas and algorithms
+        - Decision logic and branching
+        
+        ### Data Transformations
+        - Field-level transformations
+        - Format conversions
+        - Data enrichment processes
+        
+        ### Quality Assurance
+        - Data quality checks
+        - Business rule validation
+        - Consistency verification
+        
+        ## Performance and Optimization
+        
+        ### Current Performance Profile
+        - Processing time characteristics
+        - Resource utilization patterns
+        - Throughput capabilities
+        
+        ### Optimization Opportunities
+        - Algorithm improvements
+        - Resource utilization optimization
+        - Processing efficiency enhancements
+        
+        ## Integration Architecture
+        
+        ### System Integration Points
+        - External system interfaces
+        - Database connections
+        - File system interactions
+        
+        ### Data Synchronization
+        - Timing and scheduling requirements
+        - Data consistency mechanisms
+        - Error recovery procedures
+        
+        ## Risk Assessment and Impact Analysis
+        
+        ### Critical Dependencies
+        - Essential input data sources
+        - Required system resources
+        - Dependent downstream processes
+        
+        ### Failure Impact Analysis
+        - Business impact of program failure
+        - Recovery time requirements
+        - Mitigation strategies
+        
+        ### Change Impact Assessment
+        - Components affected by modifications
+        - Testing requirements
+        - Deployment considerations
+        
+        ## Maintenance and Support
+        
+        ### Operational Procedures
+        - Monitoring and alerting
+        - Troubleshooting guidelines
+        - Performance tuning recommendations
+        
+        ### Development Guidelines
+        - Coding standards and conventions
+        - Testing and validation procedures
+        - Documentation maintenance
+        
+        ### Knowledge Management
+        - Key personnel and expertise
+        - Training requirements
+        - Knowledge transfer procedures
+        
+        Write as comprehensive technical documentation suitable for development teams, 
+        operations staff, and business analysts.
+        """
+        
+        try:
+            return await self._call_api_for_readable_analysis(prompt, max_tokens=1500)
+        except Exception as e:
+            self.logger.error(f"Program flow documentation generation failed: {e}")
+            return self._generate_fallback_program_documentation(program_name, program_info)
+
+    def _generate_fallback_program_documentation(self, program_name: str, program_info: Dict) -> str:
+        """Generate fallback program documentation when API fails"""
+        doc = f"# {program_name} - Program Flow Documentation\n\n"
+        
+        doc += "## Executive Summary\n\n"
+        doc += f"Program {program_name} is a mainframe component with complexity score "
+        doc += f"{program_info['complexity_score']}/10, implementing {program_info['business_rules']} "
+        doc += f"business rules and {program_info['logic_patterns']} logic patterns.\n\n"
+        
+        doc += "## Program Overview\n\n"
+        doc += f"**Program Name:** {program_name}\n"
+        doc += f"**Complexity Score:** {program_info['complexity_score']}/10\n"
+        doc += f"**Business Rules:** {program_info['business_rules']}\n"
+        doc += f"**Logic Patterns:** {program_info['logic_patterns']}\n\n"
+        
+        doc += "## Integration Analysis\n\n"
+        relationships = program_info.get('program_relationships', {})
+        outbound = len(relationships.get('outbound_calls', []))
+        inbound = len(relationships.get('inbound_calls', []))
+        
+        doc += f"**Program Calls:** {outbound} outbound calls\n"
+        doc += f"**Called By:** {inbound} inbound calls\n"
+        doc += f"**File Operations:** {len(program_info['file_access'])}\n\n"
+        
+        doc += "## Complexity Assessment\n\n"
+        if program_info['complexity_score'] > 7:
+            doc += "**High Complexity:** This program requires careful change management and extensive testing.\n"
+        elif program_info['complexity_score'] > 4:
+            doc += "**Medium Complexity:** Standard development and testing practices apply.\n"
+        else:
+            doc += "**Low Complexity:** Straightforward maintenance and modification procedures.\n"
+        
+        doc += "\n## Recommendations\n\n"
+        doc += "- Regular code review and refactoring opportunities\n"
+        doc += "- Comprehensive testing for any modifications\n"
+        doc += "- Documentation of business rules and logic\n"
+        doc += "- Performance monitoring and optimization\n"
+        
+        return doc
+
+    async def _generate_field_flow_documentation_api(self, field_name: str, 
+                                                    lineage_data: Dict, logic_data: Dict) -> str:
+        """Generate comprehensive field flow documentation using API"""
+        
+        # Extract key information from analysis data
+        field_info = {
+            "field_name": field_name,
+            "programs_using": len(lineage_data.get("programs_using", [])),
+            "operations": lineage_data.get("operations", []),
+            "lifecycle": lineage_data.get("lifecycle", {}),
+            "transformations": len(lineage_data.get("transformations", [])),
+            "impact_analysis": lineage_data.get("impact_analysis", {})
+        }
+        
+        prompt = f"""
+        Generate comprehensive field flow documentation for: {field_name}
+        
+        Field Analysis Summary:
+        - Used in {field_info['programs_using']} programs
+        - Operations: {field_info['operations']}
+        - Transformations: {field_info['transformations']}
+        - Impact Level: {field_info['impact_analysis'].get('risk_level', 'Unknown')}
+        
+        Create comprehensive documentation covering:
+        
+        # {field_name} - Field Flow Documentation
+        
+        ## Executive Summary
+        - Business meaning and purpose
+        - Critical importance to operations
+        - Key usage patterns and dependencies
+        
+        ## Field Overview
+        - Data type and characteristics
+        - Business domain and context
+        - Validation rules and constraints
+        
+        ## Field Lifecycle Analysis
+        
+        ### Creation and Initialization
+        - Where the field is first populated
+        - Source data and derivation rules
+        - Initial validation and processing
+        
+        ### Usage and Processing
+        - Programs that read the field
+        - Business logic and calculations
+        - Validation and verification processes
+        
+        ### Transformation and Updates
+        - Modification patterns and rules
+        - Data transformation logic
+        - Update frequency and triggers
+        
+        ### Output and Distribution
+        - Final usage and consumption
+        - Output formatting and presentation
+        - Distribution to downstream systems
+        
+        ## Cross-Program Usage
+        
+        ### Program Dependencies
+        - Programs that depend on this field
+        - Usage contexts and patterns
+        - Critical dependencies identification
+        
+        ### Data Flow Patterns
+        - Field movement across programs
+        - Transformation chains
+        - Data quality checkpoints
+        
+        ### Integration Points
+        - Inter-program data sharing
+        - Synchronization requirements
+        - Consistency mechanisms
+        
+        ## Business Rules and Logic
+        
+        ### Validation Rules
+        - Data quality constraints
+        - Business rule validation
+        - Error handling procedures
+        
+        ### Calculation Logic
+        - Derivation formulas
+        - Transformation algorithms
+        - Business calculation rules
+        
+        ### Usage Constraints
+        - Access permissions and security
+        - Usage guidelines and standards
+        - Compliance requirements
+        
+        ## Impact Analysis
+        
+        ### Change Impact Assessment
+        - Programs affected by field changes
+        - Downstream impact propagation
+        - Testing and validation requirements
+        
+        ### Risk Assessment
+        - Critical dependencies and vulnerabilities
+        - Business impact of field issues
+        - Mitigation strategies
+        
+        ### Optimization Opportunities
+        - Usage pattern improvements
+        - Performance enhancements
+        - Architecture simplifications
+        
+        ## Data Quality and Governance
+        
+        ### Quality Metrics
+        - Data completeness and accuracy
+        - Consistency across programs
+        - Validation effectiveness
+        
+        ### Governance Framework
+        - Data stewardship responsibilities
+        - Change management procedures
+        - Documentation maintenance
+        
+        ### Compliance Considerations
+        - Regulatory requirements
+        - Privacy and security constraints
+        - Audit trail requirements
+        
+        ## Maintenance and Support
+        
+        ### Monitoring Requirements
+        - Quality monitoring procedures
+        - Usage pattern tracking
+        - Performance indicators
+        
+        ### Support Procedures
+        - Issue identification and resolution
+        - Escalation procedures
+        - Knowledge management
+        
+        ### Documentation Maintenance
+        - Review and update schedules
+        - Change notification processes
+        - Stakeholder communication
+        
+        Write as comprehensive field documentation suitable for data stewards, 
+        developers, and business analysts.
+        """
+        
+        try:
+            return await self._call_api_for_readable_analysis(prompt, max_tokens=1500)
+        except Exception as e:
+            self.logger.error(f"Field flow documentation generation failed: {e}")
+            return self._generate_fallback_field_documentation(field_name, field_info)
+
+    def _generate_fallback_field_documentation(self, field_name: str, field_info: Dict) -> str:
+        """Generate fallback field documentation when API fails"""
+        doc = f"# {field_name} - Field Flow Documentation\n\n"
+        
+        doc += "## Executive Summary\n\n"
+        doc += f"Field {field_name} is used across {field_info['programs_using']} programs "
+        doc += f"with {field_info['transformations']} transformations and "
+        doc += f"{len(field_info['operations'])} different operations.\n\n"
+        
+        doc += "## Field Overview\n\n"
+        doc += f"**Field Name:** {field_name}\n"
+        doc += f"**Programs Using:** {field_info['programs_using']}\n"
+        doc += f"**Operations:** {', '.join(field_info['operations'])}\n"
+        doc += f"**Transformations:** {field_info['transformations']}\n\n"
+        
+        doc += "## Usage Analysis\n\n"
+        impact = field_info.get('impact_analysis', {})
+        risk_level = impact.get('risk_level', 'Unknown')
+        
+        doc += f"**Impact Level:** {risk_level}\n"
+        doc += f"**Programs Affected:** {len(impact.get('affected_programs', []))}\n"
+        doc += f"**Critical Operations:** {len(impact.get('critical_operations', []))}\n\n"
+        
+        doc += "## Lifecycle Summary\n\n"
+        lifecycle = field_info.get('lifecycle', {})
+        for stage, operations in lifecycle.items():
+            if operations:
+                doc += f"- **{stage.title()}:** {len(operations)} operations\n"
+        
+        doc += "\n## Recommendations\n\n"
+        doc += "- Monitor field usage patterns for optimization opportunities\n"
+        doc += "- Validate business rules and transformation logic\n"
+        doc += "- Ensure comprehensive testing for any field modifications\n"
+        doc += "- Document business meaning and validation requirements\n"
+        
+        return doc
+
+    async def generate_impact_assessment_documentation(self, component_name: str, 
+                                                    analysis_results: Dict[str, Any]) -> Dict[str, Any]:
+        """🔄 NEW: Generate impact assessment documentation for change management"""
+        try:
+            # Extract impact data from analysis results
+            impact_data = self._extract_impact_data(analysis_results)
+            
+            # Generate comprehensive impact assessment
+            impact_documentation = await self._generate_impact_assessment_api(component_name, impact_data)
+            
+            result = {
+                "status": "success",
+                "component_name": component_name,
+                "documentation": impact_documentation,
+                "format": "markdown",
+                "documentation_type": "impact_assessment",
+                "impact_summary": impact_data,
+                "generation_timestamp": dt.now().isoformat()
+            }
+            
+            return self._add_processing_info(result)
+            
+        except Exception as e:
+            self.logger.error(f"Impact assessment documentation failed: {str(e)}")
+            return self._add_processing_info({"error": str(e)})
+
+    def _extract_impact_data(self, analysis_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract impact data from analysis results"""
+        impact_data = {
+            "component_name": analysis_results.get("component_name"),
+            "component_type": analysis_results.get("component_type"),
+            "total_analyses": len(analysis_results.get("analyses", {})),
+            "dependencies": [],
+            "impacts": [],
+            "complexity_indicators": {},
+            "risk_factors": []
+        }
+        
+        # Extract lineage impact data
+        lineage_analysis = analysis_results.get("analyses", {}).get("lineage_analysis", {})
+        if lineage_analysis.get("status") == "success":
+            lineage_data = lineage_analysis.get("data", {})
+            
+            # Extract impact analysis
+            if "impact_analysis" in lineage_data:
+                impact_analysis = lineage_data["impact_analysis"]
+                impact_data["dependencies"] = impact_analysis.get("affected_programs", [])
+                impact_data["impacts"] = impact_analysis.get("affected_tables", [])
+                impact_data["risk_factors"].append(f"Risk Level: {impact_analysis.get('risk_level', 'Unknown')}")
+        
+        # Extract logic complexity data
+        logic_analysis = analysis_results.get("analyses", {}).get("logic_analysis", {})
+        if logic_analysis.get("status") == "success":
+            logic_data = logic_analysis.get("data", {})
+            
+            complexity_score = logic_data.get("complexity_score", 0)
+            impact_data["complexity_indicators"]["complexity_score"] = complexity_score
+            
+            if complexity_score > 7:
+                impact_data["risk_factors"].append("High complexity requires extensive testing")
+            
+            business_rules = len(logic_data.get("business_rules", []))
+            impact_data["complexity_indicators"]["business_rules"] = business_rules
+        
+        return impact_data
+
+    async def _generate_impact_assessment_api(self, component_name: str, impact_data: Dict) -> str:
+        """Generate comprehensive impact assessment using API"""
+        
+        prompt = f"""
+        Generate comprehensive change impact assessment documentation for: {component_name}
+        
+        Impact Analysis Data:
+        - Component Type: {impact_data.get('component_type')}
+        - Dependencies: {len(impact_data.get('dependencies', []))} components
+        - Downstream Impacts: {len(impact_data.get('impacts', []))} components
+        - Complexity Score: {impact_data.get('complexity_indicators', {}).get('complexity_score', 'N/A')}
+        - Risk Factors: {impact_data.get('risk_factors', [])}
+        
+        Create comprehensive impact assessment covering:
+        
+        # Change Impact Assessment: {component_name}
+        
+        ## Executive Summary
+        - Change scope and business impact
+        - Risk assessment and mitigation requirements
+        - Resource and timeline implications
+        
+        ## Component Analysis
+        - Current role and importance
+        - Integration complexity
+        - Business criticality assessment
+        
+        ## Impact Scope Analysis
+        
+        ### Direct Impacts
+        - Components directly affected by changes
+        - Immediate functional impacts
+        - System behavior modifications
+        
+        ### Indirect Impacts
+        - Downstream effect propagation
+        - Secondary system impacts
+        - Performance and resource implications
+        
+        ### Data Flow Impacts
+        - Data integrity considerations
+        - Validation and quality impacts
+        - Synchronization requirements
+        
+        ## Risk Assessment
+        
+        ### Technical Risks
+        - System stability risks
+        - Performance degradation risks
+        - Integration failure risks
+        
+        ### Business Risks
+        - Operational disruption risks
+        - Data quality risks
+        - Compliance and regulatory risks
+        
+        ### Mitigation Strategies
+        - Risk reduction approaches
+        - Contingency planning
+        - Rollback procedures
+        
+        ## Testing Requirements
+        
+        ### Unit Testing
+        - Component-level testing scope
+        - Validation criteria
+        - Test case requirements
+        
+        ### Integration Testing
+        - Inter-component testing
+        - End-to-end workflow validation
+        - Performance testing requirements
+        
+        ### User Acceptance Testing
+        - Business scenario validation
+        - User interface testing
+        - Operational readiness verification
+        
+        ## Implementation Planning
+        
+        ### Change Sequence
+        - Recommended implementation order
+        - Dependency management
+        - Coordination requirements
+        
+        ### Resource Requirements
+        - Development effort estimation
+        - Testing resource needs
+        - Deployment resource requirements
+        
+        ### Timeline Considerations
+        - Critical path analysis
+        - Milestone identification
+        - Contingency time allocation
+        
+        ## Deployment Strategy
+        
+        ### Environment Progression
+        - Development to production pathway
+        - Environment-specific considerations
+        - Validation checkpoints
+        
+        ### Rollback Planning
+        - Rollback trigger criteria
+        - Rollback procedures
+        - Recovery time objectives
+        
+        ### Monitoring and Validation
+        - Post-deployment monitoring
+        - Success criteria validation
+        - Issue identification procedures
+        
+        ## Communication Plan
+        
+        ### Stakeholder Notification
+        - Internal team communication
+        - Business stakeholder updates
+        - User community notification
+        
+        ### Documentation Updates
+        - Technical documentation revisions
+        - User guide modifications
+        - Process documentation updates
+        
+        ### Training Requirements
+        - Staff training needs
+        - Knowledge transfer sessions
+        - Support procedure updates
+        
+        ## Success Criteria
+        
+        ### Technical Success Metrics
+        - Functional validation criteria
+        - Performance benchmarks
+        - Quality assurance metrics
+        
+        ### Business Success Metrics
+        - Operational improvement indicators
+        - User satisfaction measures
+        - Business value realization
+        
+        Write as comprehensive change management documentation suitable for project managers, 
+        technical teams, and business stakeholders.
+        """
+        
+        try:
+            return await self._call_api_for_readable_analysis(prompt, max_tokens=1500)
+        except Exception as e:
+            self.logger.error(f"Impact assessment generation failed: {e}")
+            return self._generate_fallback_impact_assessment(component_name, impact_data)
+
+    def _generate_fallback_impact_assessment(self, component_name: str, impact_data: Dict) -> str:
+        """Generate fallback impact assessment when API fails"""
+        doc = f"# Change Impact Assessment: {component_name}\n\n"
+        
+        doc += "## Executive Summary\n\n"
+        doc += f"Changes to {component_name} ({impact_data.get('component_type', 'unknown')}) "
+        doc += f"will affect {len(impact_data.get('dependencies', []))} direct dependencies "
+        doc += f"and {len(impact_data.get('impacts', []))} downstream components.\n\n"
+        
+        doc += "## Impact Scope\n\n"
+        doc += f"**Direct Dependencies:** {len(impact_data.get('dependencies', []))}\n"
+        doc += f"**Downstream Impacts:** {len(impact_data.get('impacts', []))}\n"
+        
+        complexity = impact_data.get('complexity_indicators', {}).get('complexity_score', 0)
+        if complexity > 7:
+            doc += f"**Risk Level:** HIGH (Complexity: {complexity}/10)\n\n"
+            doc += "### High Risk Considerations\n"
+            doc += "- Extensive testing required due to high complexity\n"
+            doc += "- Coordinated deployment across multiple components\n"
+            doc += "- Comprehensive rollback planning essential\n"
+        elif complexity > 4:
+            doc += f"**Risk Level:** MEDIUM (Complexity: {complexity}/10)\n\n"
+            doc += "### Medium Risk Considerations\n"
+            doc += "- Standard testing procedures apply\n"
+            doc += "- Coordinate with dependent components\n"
+            doc += "- Plan for staged deployment\n"
+        else:
+            doc += f"**Risk Level:** LOW (Complexity: {complexity}/10)\n\n"
+            doc += "### Low Risk Considerations\n"
+            doc += "- Minimal coordination required\n"
+            doc += "- Standard change management procedures\n"
+            doc += "- Low impact on system operations\n"
+        
+        doc += "\n## Recommendations\n\n"
+        doc += "1. **Testing Strategy:**\n"
+        doc += "   - Comprehensive unit testing\n"
+        doc += "   - Integration testing with dependent components\n"
+        doc += "   - End-to-end workflow validation\n\n"
+        
+        doc += "2. **Deployment Approach:**\n"
+        doc += "   - Staged deployment to minimize risk\n"
+        doc += "   - Monitoring and validation at each stage\n"
+        doc += "   - Rollback procedures ready for immediate use\n\n"
+        
+        doc += "3. **Communication Plan:**\n"
+        doc += "   - Notify all stakeholders of planned changes\n"
+        doc += "   - Update documentation and procedures\n"
+        doc += "   - Provide training as needed\n"
+        
+        return doc
+
+    async def generate_operational_runbook(self, component_name: str, 
+                                        component_type: str,
+                                        analysis_results: Dict[str, Any]) -> Dict[str, Any]:
+        """🔄 NEW: Generate operational runbook for component maintenance"""
+        try:
+            # Extract operational data from analysis results
+            operational_data = self._extract_operational_data(analysis_results)
+            
+            # Generate runbook documentation
+            runbook_documentation = await self._generate_runbook_api(component_name, component_type, operational_data)
+            
+            result = {
+                "status": "success",
+                "component_name": component_name,
+                "component_type": component_type,
+                "documentation": runbook_documentation,
+                "format": "markdown",
+                "documentation_type": "operational_runbook",
+                "operational_summary": operational_data,
+                "generation_timestamp": dt.now().isoformat()
+            }
+            
+            return self._add_processing_info(result)
+            
+        except Exception as e:
+            self.logger.error(f"Operational runbook generation failed: {str(e)}")
+            return self._add_processing_info({"error": str(e)})
+
+    def _extract_operational_data(self, analysis_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract operational data from analysis results"""
+        operational_data = {
+            "component_name": analysis_results.get("component_name"),
+            "component_type": analysis_results.get("component_type"),
+            "complexity_score": 0,
+            "dependencies": [],
+            "file_operations": [],
+            "error_conditions": [],
+            "performance_indicators": {},
+            "monitoring_points": []
+        }
+        
+        # Extract from logic analysis
+        logic_analysis = analysis_results.get("analyses", {}).get("logic_analysis", {})
+        if logic_analysis.get("status") == "success":
+            logic_data = logic_analysis.get("data", {})
+            operational_data["complexity_score"] = logic_data.get("complexity_score", 0)
+            operational_data["error_conditions"] = logic_data.get("error_handling", [])
+            
+            # Extract file operations
+            if "file_access_patterns" in logic_data:
+                operational_data["file_operations"] = logic_data["file_access_patterns"]
+        
+        # Extract from lineage analysis
+        lineage_analysis = analysis_results.get("analyses", {}).get("lineage_analysis", {})
+        if lineage_analysis.get("status") == "success":
+            lineage_data = lineage_analysis.get("data", {})
+            operational_data["dependencies"] = lineage_data.get("programs_using", [])
+            
+            # Extract performance indicators
+            if "usage_analysis" in lineage_data:
+                usage_stats = lineage_data["usage_analysis"].get("statistics", {})
+                operational_data["performance_indicators"] = {
+                    "total_references": usage_stats.get("total_references", 0),
+                    "programs_count": len(usage_stats.get("programs_using", [])),
+                    "complexity_score": lineage_data.get("usage_analysis", {}).get("complexity_score", 0)
+                }
+        
+        return operational_data
+
+    async def _generate_runbook_api(self, component_name: str, component_type: str, operational_data: Dict) -> str:
+        """Generate operational runbook using API"""
+        
+        prompt = f"""
+        Generate comprehensive operational runbook for: {component_name}
+        
+        Component Information:
+        - Type: {component_type}
+        - Complexity Score: {operational_data.get('complexity_score', 0)}/10
+        - Dependencies: {len(operational_data.get('dependencies', []))} components
+        - File Operations: {len(operational_data.get('file_operations', []))}
+        - Performance Indicators: {operational_data.get('performance_indicators', {})}
+        
+        Create comprehensive operational runbook covering:
+        
+        # Operational Runbook: {component_name}
+        
+        ## Component Overview
+        - Purpose and business function
+        - Operational characteristics
+        - Critical dependencies and requirements
+        
+        ## Daily Operations
+        
+        ### Monitoring Procedures
+        - Key performance indicators to monitor
+        - Normal operating parameters
+        - Alert thresholds and escalation criteria
+        
+        ### Health Checks
+        - Routine health verification procedures
+        - Status validation checkpoints
+        - Performance baseline comparisons
+        
+        ### Maintenance Tasks
+        - Regular maintenance procedures
+        - Housekeeping and cleanup tasks
+        - Preventive maintenance schedule
+        
+        ## Troubleshooting Guide
+        
+        ### Common Issues
+        - Frequently encountered problems
+        - Root cause analysis procedures
+        - Quick resolution steps
+        
+        ### Error Conditions
+        - Known error scenarios and symptoms
+        - Diagnostic procedures
+        - Recovery and resolution steps
+        
+        ### Performance Issues
+        - Performance degradation indicators
+        - Capacity and resource constraints
+        - Optimization and tuning procedures
+        
+        ## Emergency Procedures
+        
+        ### System Failures
+        - Failure detection and assessment
+        - Emergency response procedures
+        - Escalation and notification protocols
+        
+        ### Data Recovery
+        - Backup and recovery procedures
+        - Data integrity verification
+        - Business continuity measures
+        
+        ### Security Incidents
+        - Security breach detection
+        - Incident response procedures
+        - Recovery and hardening steps
+        
+        ## Maintenance Procedures
+        
+        ### Scheduled Maintenance
+        - Planned maintenance windows
+        - Pre-maintenance preparation
+        - Post-maintenance validation
+        
+        ### Configuration Changes
+        - Change approval procedures
+        - Implementation guidelines
+        - Rollback procedures
+        
+        ### Updates and Patches
+        - Update assessment and planning
+        - Testing and validation requirements
+        - Deployment procedures
+        
+        ## Performance Management
+        
+        ### Capacity Planning
+        - Resource utilization monitoring
+        - Growth trend analysis
+        - Capacity expansion planning
+        
+        ### Performance Tuning
+        - Performance optimization techniques
+        - Resource allocation adjustments
+        - Configuration optimization
+        
+        ### Benchmarking
+        - Performance baseline establishment
+        - Benchmark testing procedures
+        - Performance comparison analysis
+        
+        ## Integration Management
+        
+        ### Dependency Management
+        - Critical dependency monitoring
+        - Integration point validation
+        - Coordination procedures
+        
+        ### Data Flow Management
+        - Data flow monitoring procedures
+        - Quality assurance checkpoints
+        - Synchronization verification
+        
+        ### Interface Management
+        - External interface monitoring
+        - Communication protocol validation
+        - Error handling and recovery
+        
+        ## Documentation and Knowledge Management
+        
+        ### Procedure Documentation
+        - Standard operating procedures
+        - Emergency response playbooks
+        - Configuration and setup guides
+        
+        ### Knowledge Base
+        - Common issues and solutions
+        - Best practices and guidelines
+        - Lessons learned documentation
+        
+        ### Training and Certification
+        - Operator training requirements
+        - Certification procedures
+        - Knowledge transfer protocols
+        
+        ## Compliance and Governance
+        
+        ### Audit Requirements
+        - Compliance monitoring procedures
+        - Audit trail maintenance
+        - Reporting requirements
+        
+        ### Security Compliance
+        - Security control verification
+        - Access management procedures
+        - Security monitoring protocols
+        
+        ### Change Management
+        - Change control procedures
+        - Impact assessment requirements
+        - Approval and documentation
+        
+        ## Contact Information
+        
+        ### Support Contacts
+        - Primary support team contacts
+        - Escalation contact hierarchy
+        - Emergency contact procedures
+        
+        ### Vendor Support
+        - Vendor contact information
+        - Support contract details
+        - Escalation procedures
+        
+        ### Subject Matter Experts
+        - Technical expertise contacts
+        - Business domain experts
+        - Specialized support resources
+        
+        Write as practical operational documentation suitable for operations teams, 
+        system administrators, and support staff.
+        """
+        
+        try:
+            return await self._call_api_for_readable_analysis(prompt, max_tokens=1500)
+        except Exception as e:
+            self.logger.error(f"Runbook generation failed: {e}")
+            return self._generate_fallback_runbook(component_name, component_type, operational_data)
+
+    def _generate_fallback_runbook(self, component_name: str, component_type: str, operational_data: Dict) -> str:
+        """Generate fallback runbook when API fails"""
+        doc = f"# Operational Runbook: {component_name}\n\n"
+        
+        doc += "## Component Overview\n\n"
+        doc += f"**Component:** {component_name}\n"
+        doc += f"**Type:** {component_type}\n"
+        doc += f"**Complexity:** {operational_data.get('complexity_score', 0)}/10\n"
+        doc += f"**Dependencies:** {len(operational_data.get('dependencies', []))}\n\n"
+        
+        doc += "## Daily Operations\n\n"
+        doc += "### Monitoring Checklist\n"
+        doc += "- [ ] Verify component is operational\n"
+        doc += "- [ ] Check resource utilization\n"
+        doc += "- [ ] Validate dependencies are available\n"
+        doc += "- [ ] Review error logs for issues\n"
+        doc += "- [ ] Confirm data flow integrity\n\n"
+        
+        doc += "### Health Check Procedures\n"
+        complexity = operational_data.get('complexity_score', 0)
+        if complexity > 7:
+            doc += "**High Complexity Component - Enhanced Monitoring Required**\n"
+            doc += "- Monitor every 15 minutes during business hours\n"
+            doc += "- Detailed performance metrics tracking\n"
+            doc += "- Proactive issue identification\n"
+        elif complexity > 4:
+            doc += "**Medium Complexity Component - Standard Monitoring**\n"
+            doc += "- Monitor every 30 minutes during business hours\n"
+            doc += "- Standard performance metrics\n"
+            doc += "- Regular health checks\n"
+        else:
+            doc += "**Low Complexity Component - Basic Monitoring**\n"
+            doc += "- Monitor every hour during business hours\n"
+            doc += "- Basic availability checks\n"
+            doc += "- Minimal performance tracking\n"
+        
+        doc += "\n## Troubleshooting\n\n"
+        doc += "### Common Issues\n"
+        if operational_data.get('file_operations'):
+            doc += "- **File Access Issues:** Check file permissions and availability\n"
+            doc += "- **Data Processing Errors:** Validate input data format and content\n"
+        
+        doc += "- **Performance Degradation:** Check system resources and dependencies\n"
+        doc += "- **Integration Failures:** Verify dependent component status\n\n"
+        
+        doc += "### Emergency Contacts\n"
+        doc += "- **Primary Support:** [Contact Information]\n"
+        doc += "- **Technical Lead:** [Contact Information]\n"
+        doc += "- **Business Owner:** [Contact Information]\n\n"
+        
+        doc += "## Maintenance Schedule\n\n"
+        doc += "- **Daily:** Health checks and log reviews\n"
+        doc += "- **Weekly:** Performance analysis and capacity review\n"
+        doc += "- **Monthly:** Full system validation and optimization review\n"
+        doc += "- **Quarterly:** Comprehensive audit and documentation update\n"
+        
+        return doc
+        
+
+
     # System documentation methods
     async def _generate_executive_summary_api(self, component_info: Dict[str, Any], system_name: str) -> str:
         """✅ API-BASED: Generate executive summary for system documentation"""

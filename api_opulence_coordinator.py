@@ -1482,7 +1482,7 @@ class APIOpulenceCoordinator:
 
 
     async def analyze_component(self, component_name: str, component_type: str = None, **kwargs) -> Dict[str, Any]:
-        """COMPLETE: Full component analysis including ALL agents"""
+        """🔄 ENHANCED: Complete component analysis with program/data flow analysis"""
         start_time = time.time()
         
         try:
@@ -1503,10 +1503,11 @@ class APIOpulenceCoordinator:
                 "normalized_type": normalized_type,
                 "analysis_timestamp": dt.now().isoformat(),
                 "status": "in_progress",
-                "analyses": {},
+                "enhanced_analyses": {},
                 "processing_metadata": {
                     "start_time": start_time,
-                    "coordinator_type": "api_based_production"
+                    "coordinator_type": "api_based_enhanced",
+                    "analysis_mode": "enhanced_flow_analysis"
                 }
             }
             
@@ -1515,226 +1516,298 @@ class APIOpulenceCoordinator:
             # Ensure all required agents are ready
             await self._ensure_agents_ready()
             
-            # STEP 1: LINEAGE ANALYSIS
-            try:
-                self.logger.info(f"🔄 Step 1: Lineage analysis for {analysis_component_name}")
-                lineage_agent = self.get_agent("lineage_analyzer")
-                
-                if normalized_type == "field":
-                    lineage_result = await self._safe_agent_call(
-                        lineage_agent.analyze_field_lineage,
-                        analysis_component_name
-                    )
-                else:
-                    lineage_result = await self._safe_agent_call(
-                        lineage_agent.analyze_full_lifecycle,
-                        analysis_component_name,
-                        normalized_type
-                    )
-                
-                if lineage_result and not lineage_result.get('error'):
-                    analysis_result["analyses"]["lineage_analysis"] = {
-                        "status": "success",
-                        "data": lineage_result,
-                        "agent_used": "lineage_analyzer",
-                        "completion_time": time.time() - start_time,
-                        "step": 1
-                    }
-                    completed_count += 1
-                    self.logger.info(f"✅ Step 1: Lineage analysis completed")
-                else:
-                    error_msg = lineage_result.get('error', 'No result') if lineage_result else 'No result'
-                    analysis_result["analyses"]["lineage_analysis"] = {
-                        "status": "error",
-                        "error": error_msg,
-                        "agent_used": "lineage_analyzer",
-                        "step": 1
-                    }
-                    self.logger.warning(f"⚠️ Step 1: Lineage analysis failed: {error_msg}")
-                    
-            except Exception as e:
-                self.logger.error(f"❌ Step 1: Lineage analysis exception: {str(e)}")
-                analysis_result["analyses"]["lineage_analysis"] = {
-                    "status": "error",
-                    "error": str(e),
-                    "agent_used": "lineage_analyzer",
-                    "step": 1
-                }
-            
-            # STEP 2: LOGIC ANALYSIS (for program types)
+            # ENHANCED STEP 1: COMPLETE PROGRAM FLOW ANALYSIS (for programs)
             if normalized_type in ["cobol", "copybook", "program", "jcl"]:
                 try:
-                    self.logger.info(f"🔄 Step 2: Logic analysis for {analysis_component_name}")
+                    self.logger.info(f"🔄 Enhanced Step 1: Complete program flow analysis for {analysis_component_name}")
                     logic_agent = self.get_agent("logic_analyzer")
                     
-                    if normalized_type in ["cobol", "program"]:
-                        logic_result = await self._safe_agent_call(
-                            logic_agent.analyze_program,
-                            analysis_component_name
-                        )
-                    else:
-                        logic_result = await self._safe_agent_call(
-                            logic_agent.find_dependencies,
-                            analysis_component_name
-                        )
+                    # Use the new enhanced program flow analysis
+                    program_flow_result = await self._safe_agent_call(
+                        logic_agent.analyze_complete_program_flow,
+                        analysis_component_name
+                    )
                     
-                    if logic_result and not logic_result.get('error'):
-                        analysis_result["analyses"]["logic_analysis"] = {
+                    if program_flow_result and not program_flow_result.get('error'):
+                        analysis_result["enhanced_analyses"]["complete_program_flow"] = {
                             "status": "success",
-                            "data": logic_result,
+                            "data": program_flow_result,
                             "agent_used": "logic_analyzer",
                             "completion_time": time.time() - start_time,
-                            "step": 2
+                            "step": 1
                         }
                         completed_count += 1
-                        self.logger.info(f"✅ Step 2: Logic analysis completed")
+                        self.logger.info(f"✅ Enhanced Step 1: Program flow analysis completed")
                     else:
-                        error_msg = logic_result.get('error', 'No result') if logic_result else 'No result'
-                        analysis_result["analyses"]["logic_analysis"] = {
+                        error_msg = program_flow_result.get('error', 'No result') if program_flow_result else 'No result'
+                        analysis_result["enhanced_analyses"]["complete_program_flow"] = {
                             "status": "error",
                             "error": error_msg,
                             "agent_used": "logic_analyzer",
-                            "step": 2
+                            "step": 1
                         }
                         
                 except Exception as e:
-                    self.logger.error(f"❌ Step 2: Logic analysis exception: {str(e)}")
-                    analysis_result["analyses"]["logic_analysis"] = {
+                    self.logger.error(f"❌ Enhanced Step 1: Program flow analysis exception: {str(e)}")
+                    analysis_result["enhanced_analyses"]["complete_program_flow"] = {
                         "status": "error",
                         "error": str(e),
                         "agent_used": "logic_analyzer",
-                        "step": 2
+                        "step": 1
                     }
             
-            # STEP 3: VECTOR INDEX / SEMANTIC ANALYSIS
+            # ENHANCED STEP 2: COMPLETE DATA FLOW ANALYSIS
             try:
-                self.logger.info(f"🔄 Step 3: Vector/semantic analysis for {analysis_component_name}")
-                vector_agent = self.get_agent("vector_index")
+                self.logger.info(f"🔄 Enhanced Step 2: Complete data flow analysis for {analysis_component_name}")
+                lineage_agent = self.get_agent("lineage_analyzer")
                 
-                # Check if vector index is ready
-                vector_ready = await self._ensure_vector_index_ready()
-                if not vector_ready:
-                    self.logger.warning(f"⚠️ Vector index not ready, skipping semantic analysis")
-                    analysis_result["analyses"]["semantic_analysis"] = {
-                        "status": "skipped",
-                        "error": "Vector index not available",
-                        "agent_used": "vector_index",
-                        "step": 3
+                # Use the new enhanced data flow analysis
+                data_flow_result = await self._safe_agent_call(
+                    lineage_agent.analyze_complete_data_flow,
+                    analysis_component_name,
+                    normalized_type
+                )
+                
+                if data_flow_result and not data_flow_result.get('error'):
+                    analysis_result["enhanced_analyses"]["complete_data_flow"] = {
+                        "status": "success",
+                        "data": data_flow_result,
+                        "agent_used": "lineage_analyzer",
+                        "completion_time": time.time() - start_time,
+                        "step": 2
                     }
+                    completed_count += 1
+                    self.logger.info(f"✅ Enhanced Step 2: Data flow analysis completed")
                 else:
-                    # Perform similarity search
-                    similarity_result = await self._safe_agent_call(
-                        vector_agent.search_similar_components,
-                        analysis_component_name,
-                        5  # Get more results
-                    )
+                    error_msg = data_flow_result.get('error', 'No result') if data_flow_result else 'No result'
+                    analysis_result["enhanced_analyses"]["complete_data_flow"] = {
+                        "status": "error",
+                        "error": error_msg,
+                        "agent_used": "lineage_analyzer",
+                        "step": 2
+                    }
                     
-                    # Perform semantic search
-                    semantic_result = await self._safe_agent_call(
-                        vector_agent.semantic_search,
-                        f"{analysis_component_name} similar functionality patterns",
-                        3
-                    )
-                    
-                    # Validate results
-                    validated_similarity = self._validate_search_result(similarity_result)
-                    validated_semantic = self._validate_search_result(semantic_result)
-                    
-                    if validated_similarity or validated_semantic:
-                        analysis_result["analyses"]["semantic_analysis"] = {
-                            "status": "success",
-                            "data": {
-                                "similar_components": validated_similarity,
-                                "semantic_search": validated_semantic
-                            },
-                            "agent_used": "vector_index",
-                            "completion_time": time.time() - start_time,
-                            "step": 3
-                        }
-                        completed_count += 1
-                        self.logger.info(f"✅ Step 3: Semantic analysis completed")
-                    else:
-                        analysis_result["analyses"]["semantic_analysis"] = {
-                            "status": "error",
-                            "error": "No valid search results returned",
-                            "agent_used": "vector_index",
-                            "step": 3
-                        }
-                        
             except Exception as e:
-                self.logger.error(f"❌ Step 3: Semantic analysis exception: {str(e)}")
-                analysis_result["analyses"]["semantic_analysis"] = {
+                self.logger.error(f"❌ Enhanced Step 2: Data flow analysis exception: {str(e)}")
+                analysis_result["enhanced_analyses"]["complete_data_flow"] = {
                     "status": "error",
                     "error": str(e),
-                    "agent_used": "vector_index",
+                    "agent_used": "lineage_analyzer",
+                    "step": 2
+                }
+            
+            # ENHANCED STEP 3: CROSS-PROGRAM LINEAGE ANALYSIS
+            try:
+                self.logger.info(f"🔄 Enhanced Step 3: Cross-program lineage analysis for {analysis_component_name}")
+                lineage_agent = self.get_agent("lineage_analyzer")
+                
+                # Use the new cross-program lineage analysis
+                cross_program_result = await self._safe_agent_call(
+                    lineage_agent.analyze_cross_program_data_lineage,
+                    analysis_component_name
+                )
+                
+                if cross_program_result and not cross_program_result.get('error'):
+                    analysis_result["enhanced_analyses"]["cross_program_lineage"] = {
+                        "status": "success",
+                        "data": cross_program_result,
+                        "agent_used": "lineage_analyzer",
+                        "completion_time": time.time() - start_time,
+                        "step": 3
+                    }
+                    completed_count += 1
+                    self.logger.info(f"✅ Enhanced Step 3: Cross-program lineage analysis completed")
+                else:
+                    error_msg = cross_program_result.get('error', 'No result') if cross_program_result else 'No result'
+                    analysis_result["enhanced_analyses"]["cross_program_lineage"] = {
+                        "status": "error",
+                        "error": error_msg,
+                        "agent_used": "lineage_analyzer",
+                        "step": 3
+                    }
+                    
+            except Exception as e:
+                self.logger.error(f"❌ Enhanced Step 3: Cross-program lineage analysis exception: {str(e)}")
+                analysis_result["enhanced_analyses"]["cross_program_lineage"] = {
+                    "status": "error",
+                    "error": str(e),
+                    "agent_used": "lineage_analyzer",
                     "step": 3
                 }
             
-            # STEP 4: DOCUMENTATION GENERATION
-            try:
-                self.logger.info(f"🔄 Step 4: Documentation generation for {analysis_component_name}")
-                doc_agent = self.get_agent("documentation")
-                
-                # Prepare analysis summary
-                analysis_summary = self._prepare_analysis_summary(analysis_result)
-                
-                # Generate documentation based on component type
-                if normalized_type == "field":
-                    doc_result = await self._safe_agent_call(
-                        doc_agent.generate_field_lineage_documentation,
+            # ENHANCED STEP 4: PROGRAM CONTROL FLOW ANALYSIS (for programs)
+            if normalized_type in ["cobol", "copybook", "program", "jcl"]:
+                try:
+                    self.logger.info(f"🔄 Enhanced Step 4: Program control flow analysis for {analysis_component_name}")
+                    logic_agent = self.get_agent("logic_analyzer")
+                    
+                    # Use the new program control flow analysis
+                    control_flow_result = await self._safe_agent_call(
+                        logic_agent.analyze_program_control_flow,
                         analysis_component_name
                     )
-                elif normalized_type in ["cobol", "program", "copybook", "jcl"]:
-                    doc_result = await self._safe_agent_call(
-                        doc_agent.generate_program_documentation,
-                        analysis_component_name,
-                        "markdown"
-                    )
-                else:
-                    # Generate custom analysis summary
-                    doc_result = await self._generate_analysis_summary_doc(
-                        analysis_component_name, analysis_summary, doc_agent
-                    )
-                
-                if doc_result and not doc_result.get('error'):
-                    analysis_result["analyses"]["documentation_summary"] = {
-                        "status": "success",
-                        "data": doc_result,
-                        "agent_used": "documentation",
-                        "completion_time": time.time() - start_time,
+                    
+                    if control_flow_result and not control_flow_result.get('error'):
+                        analysis_result["enhanced_analyses"]["program_control_flow"] = {
+                            "status": "success",
+                            "data": control_flow_result,
+                            "agent_used": "logic_analyzer",
+                            "completion_time": time.time() - start_time,
+                            "step": 4
+                        }
+                        completed_count += 1
+                        self.logger.info(f"✅ Enhanced Step 4: Program control flow analysis completed")
+                    else:
+                        error_msg = control_flow_result.get('error', 'No result') if control_flow_result else 'No result'
+                        analysis_result["enhanced_analyses"]["program_control_flow"] = {
+                            "status": "error",
+                            "error": error_msg,
+                            "agent_used": "logic_analyzer",
+                            "step": 4
+                        }
+                        
+                except Exception as e:
+                    self.logger.error(f"❌ Enhanced Step 4: Program control flow analysis exception: {str(e)}")
+                    analysis_result["enhanced_analyses"]["program_control_flow"] = {
+                        "status": "error",
+                        "error": str(e),
+                        "agent_used": "logic_analyzer",
                         "step": 4
                     }
+            
+            # ENHANCED STEP 5: COMPREHENSIVE FLOW DOCUMENTATION
+            try:
+                self.logger.info(f"🔄 Enhanced Step 5: Comprehensive flow documentation for {analysis_component_name}")
+                doc_agent = self.get_agent("documentation")
+                
+                # Use the new comprehensive flow documentation
+                flow_doc_result = await self._safe_agent_call(
+                    doc_agent.generate_comprehensive_flow_documentation,
+                    analysis_component_name,
+                    normalized_type,
+                    analysis_result["enhanced_analyses"]
+                )
+                
+                if flow_doc_result and not flow_doc_result.get('error'):
+                    analysis_result["enhanced_analyses"]["comprehensive_flow_documentation"] = {
+                        "status": "success",
+                        "data": flow_doc_result,
+                        "agent_used": "documentation",
+                        "completion_time": time.time() - start_time,
+                        "step": 5
+                    }
                     completed_count += 1
-                    self.logger.info(f"✅ Step 4: Documentation generation completed")
+                    self.logger.info(f"✅ Enhanced Step 5: Comprehensive flow documentation completed")
                 else:
-                    error_msg = doc_result.get('error', 'No documentation generated') if doc_result else 'No documentation generated'
-                    analysis_result["analyses"]["documentation_summary"] = {
+                    error_msg = flow_doc_result.get('error', 'No documentation generated') if flow_doc_result else 'No documentation generated'
+                    analysis_result["enhanced_analyses"]["comprehensive_flow_documentation"] = {
                         "status": "error",
                         "error": error_msg,
                         "agent_used": "documentation",
-                        "step": 4
+                        "step": 5
                     }
                     
             except Exception as e:
-                self.logger.error(f"❌ Step 4: Documentation generation exception: {str(e)}")
-                analysis_result["analyses"]["documentation_summary"] = {
+                self.logger.error(f"❌ Enhanced Step 5: Comprehensive flow documentation exception: {str(e)}")
+                analysis_result["enhanced_analyses"]["comprehensive_flow_documentation"] = {
                     "status": "error",
                     "error": str(e),
                     "agent_used": "documentation",
-                    "step": 4
+                    "step": 5
+                }
+            
+            # ENHANCED STEP 6: IMPACT ASSESSMENT DOCUMENTATION
+            try:
+                self.logger.info(f"🔄 Enhanced Step 6: Impact assessment documentation for {analysis_component_name}")
+                doc_agent = self.get_agent("documentation")
+                
+                # Use the new impact assessment documentation
+                impact_doc_result = await self._safe_agent_call(
+                    doc_agent.generate_impact_assessment_documentation,
+                    analysis_component_name,
+                    analysis_result["enhanced_analyses"]
+                )
+                
+                if impact_doc_result and not impact_doc_result.get('error'):
+                    analysis_result["enhanced_analyses"]["impact_assessment_documentation"] = {
+                        "status": "success",
+                        "data": impact_doc_result,
+                        "agent_used": "documentation",
+                        "completion_time": time.time() - start_time,
+                        "step": 6
+                    }
+                    completed_count += 1
+                    self.logger.info(f"✅ Enhanced Step 6: Impact assessment documentation completed")
+                else:
+                    error_msg = impact_doc_result.get('error', 'No impact assessment generated') if impact_doc_result else 'No impact assessment generated'
+                    analysis_result["enhanced_analyses"]["impact_assessment_documentation"] = {
+                        "status": "error",
+                        "error": error_msg,
+                        "agent_used": "documentation",
+                        "step": 6
+                    }
+                    
+            except Exception as e:
+                self.logger.error(f"❌ Enhanced Step 6: Impact assessment documentation exception: {str(e)}")
+                analysis_result["enhanced_analyses"]["impact_assessment_documentation"] = {
+                    "status": "error",
+                    "error": str(e),
+                    "agent_used": "documentation",
+                    "step": 6
+                }
+            
+            # ENHANCED STEP 7: OPERATIONAL RUNBOOK GENERATION
+            try:
+                self.logger.info(f"🔄 Enhanced Step 7: Operational runbook generation for {analysis_component_name}")
+                doc_agent = self.get_agent("documentation")
+                
+                # Use the new operational runbook generation
+                runbook_result = await self._safe_agent_call(
+                    doc_agent.generate_operational_runbook,
+                    analysis_component_name,
+                    normalized_type,
+                    analysis_result["enhanced_analyses"]
+                )
+                
+                if runbook_result and not runbook_result.get('error'):
+                    analysis_result["enhanced_analyses"]["operational_runbook"] = {
+                        "status": "success",
+                        "data": runbook_result,
+                        "agent_used": "documentation",
+                        "completion_time": time.time() - start_time,
+                        "step": 7
+                    }
+                    completed_count += 1
+                    self.logger.info(f"✅ Enhanced Step 7: Operational runbook generation completed")
+                else:
+                    error_msg = runbook_result.get('error', 'No runbook generated') if runbook_result else 'No runbook generated'
+                    analysis_result["enhanced_analyses"]["operational_runbook"] = {
+                        "status": "error",
+                        "error": error_msg,
+                        "agent_used": "documentation",
+                        "step": 7
+                    }
+                    
+            except Exception as e:
+                self.logger.error(f"❌ Enhanced Step 7: Operational runbook generation exception: {str(e)}")
+                analysis_result["enhanced_analyses"]["operational_runbook"] = {
+                    "status": "error",
+                    "error": str(e),
+                    "agent_used": "documentation",
+                    "step": 7
                 }
             
             # Final status determination
-            total_analyses = len(analysis_result["analyses"])
+            total_analyses = len(analysis_result["enhanced_analyses"])
             if completed_count == total_analyses and total_analyses > 0:
                 analysis_result["status"] = "completed"
-                self.logger.info(f"🎉 All {completed_count} analyses completed successfully")
+                self.logger.info(f"🎉 All {completed_count} enhanced analyses completed successfully")
             elif completed_count > 0:
                 analysis_result["status"] = "partial"
-                self.logger.warning(f"⚠️ Partial completion: {completed_count}/{total_analyses} analyses succeeded")
+                self.logger.warning(f"⚠️ Partial completion: {completed_count}/{total_analyses} enhanced analyses succeeded")
             else:
                 analysis_result["status"] = "failed"
-                self.logger.error(f"❌ All analyses failed for {analysis_component_name}")
+                self.logger.error(f"❌ All enhanced analyses failed for {analysis_component_name}")
             
             # Add final metadata
             analysis_result["processing_metadata"].update({
@@ -1743,23 +1816,544 @@ class APIOpulenceCoordinator:
                 "analyses_completed": completed_count,
                 "analyses_total": total_analyses,
                 "success_rate": (completed_count / total_analyses) * 100 if total_analyses > 0 else 0,
-                "analysis_sequence": ["lineage_analysis", "logic_analysis", "semantic_analysis", "documentation_summary"],
+                "enhanced_analysis_sequence": [
+                    "complete_program_flow", "complete_data_flow", "cross_program_lineage",
+                    "program_control_flow", "comprehensive_flow_documentation", 
+                    "impact_assessment_documentation", "operational_runbook"
+                ],
                 "component_name_cleaned": cleaned_component_name != original_component_name,
-                "servers_used": [s.config.name for s in self.load_balancer.servers]
+                "servers_used": [s.config.name for s in self.load_balancer.servers],
+                "analysis_features": [
+                    "program_flow_analysis", "data_flow_analysis", "cross_program_lineage",
+                    "control_flow_analysis", "comprehensive_documentation", "impact_assessment",
+                    "operational_runbook"
+                ]
             })
             
             return analysis_result
             
         except Exception as e:
-            self.logger.error(f"❌ Component analysis system error: {str(e)}")
+            self.logger.error(f"❌ Enhanced component analysis system error: {str(e)}")
             return {
                 "component_name": component_name,
                 "status": "system_error",
                 "error": str(e),
                 "processing_time": time.time() - start_time,
-                "coordinator_type": "api_based_production"
+                "coordinator_type": "api_based_enhanced"
             }
+
+    async def generate_comprehensive_component_report(self, component_name: str, 
+                                                component_type: str = None) -> Dict[str, Any]:
+        """🔄 NEW: Generate comprehensive component report with all analyses"""
+        try:
+            # Run enhanced component analysis
+            analysis_result = await self.analyze_enhanced_component(component_name, component_type)
+            
+            if analysis_result.get("status") in ["completed", "partial"]:
+                # Generate executive summary
+                executive_summary = await self._generate_executive_summary_enhanced(analysis_result)
+                
+                # Generate consolidated documentation
+                consolidated_docs = await self._consolidate_analysis_documentation(analysis_result)
+                
+                # Generate recommendations
+                recommendations = await self._generate_enhanced_recommendations(analysis_result)
+                
+                # Create comprehensive report
+                comprehensive_report = {
+                    "component_name": component_name,
+                    "component_type": component_type,
+                    "analysis_timestamp": analysis_result.get("analysis_timestamp"),
+                    "executive_summary": executive_summary,
+                    "detailed_analysis": analysis_result,
+                    "consolidated_documentation": consolidated_docs,
+                    "recommendations": recommendations,
+                    "report_metadata": {
+                        "report_type": "comprehensive_component_analysis",
+                        "analyses_included": list(analysis_result.get("enhanced_analyses", {}).keys()),
+                        "success_rate": analysis_result.get("processing_metadata", {}).get("success_rate", 0),
+                        "generation_timestamp": dt.now().isoformat()
+                    }
+                }
+                
+                return self._add_processing_info(comprehensive_report)
+            else:
+                return {
+                    "status": "error",
+                    "error": "Enhanced analysis failed",
+                    "analysis_result": analysis_result
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Comprehensive report generation failed: {str(e)}")
+            return self._add_processing_info({"error": str(e)})
+
+    async def _generate_executive_summary_enhanced(self, analysis_result: Dict[str, Any]) -> str:
+        """Generate executive summary from enhanced analysis results"""
+        try:
+            # Extract key metrics from all analyses
+            summary_data = self._extract_executive_summary_data(analysis_result)
+            
+            prompt = f"""
+            Generate an executive summary for this comprehensive component analysis:
+            
+            Component: {analysis_result.get('component_name')}
+            Type: {analysis_result.get('normalized_type')}
+            
+            Analysis Results Summary:
+            - Total Analyses: {len(analysis_result.get('enhanced_analyses', {}))}
+            - Success Rate: {analysis_result.get('processing_metadata', {}).get('success_rate', 0):.1f}%
+            - Processing Time: {analysis_result.get('processing_metadata', {}).get('total_duration_seconds', 0):.1f} seconds
+            
+            Key Findings:
+            {summary_data}
+            
+            Create a comprehensive executive summary covering:
+            
+            **Component Overview:**
+            - Business purpose and critical importance
+            - System role and integration complexity
+            - Operational characteristics
+            
+            **Key Findings:**
+            - Most significant discoveries from the analysis
+            - Critical dependencies and relationships
+            - Performance and complexity indicators
+            
+            **Business Impact:**
+            - Operational importance and risk assessment
+            - Dependencies and integration points
+            - Change management considerations
+            
+            **Strategic Recommendations:**
+            - Priority actions for optimization
+            - Risk mitigation strategies
+            - Governance and maintenance guidelines
+            
+            **Next Steps:**
+            - Immediate actions required
+            - Medium-term improvements
+            - Long-term strategic considerations
+            
+            Write as a comprehensive executive briefing suitable for senior management,
+            technical leadership, and business stakeholders.
+            """
+            
+            return await self._call_api_for_readable_analysis(prompt, max_tokens=1000)
+            
+        except Exception as e:
+            self.logger.error(f"Executive summary generation failed: {e}")
+            return self._generate_fallback_executive_summary(analysis_result)
+
+    def _extract_executive_summary_data(self, analysis_result: Dict[str, Any]) -> str:
+        """Extract key data points for executive summary"""
+        findings = []
         
+        enhanced_analyses = analysis_result.get("enhanced_analyses", {})
+        
+        # Program flow findings
+        if "complete_program_flow" in enhanced_analyses:
+            program_flow = enhanced_analyses["complete_program_flow"]
+            if program_flow.get("status") == "success":
+                data = program_flow.get("data", {})
+                outbound_calls = len(data.get("program_relationships", {}).get("outbound_calls", []))
+                inbound_calls = len(data.get("program_relationships", {}).get("inbound_calls", []))
+                findings.append(f"Program Integration: {outbound_calls} outbound calls, {inbound_calls} inbound calls")
+        
+        # Data flow findings
+        if "complete_data_flow" in enhanced_analyses:
+            data_flow = enhanced_analyses["complete_data_flow"]
+            if data_flow.get("status") == "success":
+                data = data_flow.get("data", {})
+                if "file_access_data" in data:
+                    access_data = data["file_access_data"]
+                    total_programs = len(access_data.get("programs_accessing", []))
+                    findings.append(f"Data Flow: Accessed by {total_programs} programs")
+        
+        # Cross-program lineage findings
+        if "cross_program_lineage" in enhanced_analyses:
+            lineage = enhanced_analyses["cross_program_lineage"]
+            if lineage.get("status") == "success":
+                data = lineage.get("data", {})
+                impact_data = data.get("impact_data", {})
+                upstream = len(impact_data.get("upstream_dependencies", []))
+                downstream = len(impact_data.get("downstream_impacts", []))
+                findings.append(f"Lineage Impact: {upstream} upstream dependencies, {downstream} downstream impacts")
+        
+        return "\n".join(findings) if findings else "Analysis completed with comprehensive component assessment"
+
+    def _generate_fallback_executive_summary(self, analysis_result: Dict[str, Any]) -> str:
+        """Generate fallback executive summary when API fails"""
+        component_name = analysis_result.get("component_name", "Unknown")
+        component_type = analysis_result.get("normalized_type", "Unknown")
+        
+        summary = f"# Executive Summary: {component_name}\n\n"
+        summary += f"## Component Overview\n"
+        summary += f"Component {component_name} ({component_type}) has been analyzed using comprehensive "
+        summary += f"flow analysis techniques. The analysis examined program flow, data flow, and cross-program "
+        summary += f"dependencies to provide a complete picture of the component's role in the system.\n\n"
+        
+        enhanced_analyses = analysis_result.get("enhanced_analyses", {})
+        successful_analyses = [name for name, analysis in enhanced_analyses.items() if analysis.get("status") == "success"]
+        
+        summary += f"## Analysis Results\n"
+        summary += f"- Total Analyses Performed: {len(enhanced_analyses)}\n"
+        summary += f"- Successful Analyses: {len(successful_analyses)}\n"
+        summary += f"- Success Rate: {(len(successful_analyses) / len(enhanced_analyses) * 100):.1f}%\n\n"
+        
+        summary += f"## Key Findings\n"
+        summary += f"The comprehensive analysis reveals that {component_name} is an integral part of the "
+        summary += f"system architecture with multiple dependencies and integration points. "
+        summary += f"Detailed findings are available in the complete analysis documentation.\n\n"
+        
+        summary += f"## Recommendations\n"
+        summary += f"- Review all identified dependencies before making changes\n"
+        summary += f"- Implement comprehensive testing for any modifications\n"
+        summary += f"- Monitor performance and integration points regularly\n"
+        summary += f"- Maintain documentation and operational procedures\n"
+        
+        return summary
+
+    async def _consolidate_analysis_documentation(self, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Consolidate all documentation from analyses"""
+        consolidated = {
+            "flow_documentation": "",
+            "impact_assessment": "",
+            "operational_runbook": "",
+            "technical_specifications": "",
+            "consolidation_summary": {}
+        }
+        
+        enhanced_analyses = analysis_result.get("enhanced_analyses", {})
+        
+        # Extract flow documentation
+        if "comprehensive_flow_documentation" in enhanced_analyses:
+            flow_doc = enhanced_analyses["comprehensive_flow_documentation"]
+            if flow_doc.get("status") == "success":
+                consolidated["flow_documentation"] = flow_doc.get("data", {}).get("documentation", "")
+        
+        # Extract impact assessment
+        if "impact_assessment_documentation" in enhanced_analyses:
+            impact_doc = enhanced_analyses["impact_assessment_documentation"]
+            if impact_doc.get("status") == "success":
+                consolidated["impact_assessment"] = impact_doc.get("data", {}).get("documentation", "")
+        
+        # Extract operational runbook
+        if "operational_runbook" in enhanced_analyses:
+            runbook_doc = enhanced_analyses["operational_runbook"]
+            if runbook_doc.get("status") == "success":
+                consolidated["operational_runbook"] = runbook_doc.get("data", {}).get("documentation", "")
+        
+        # Generate technical specifications summary
+        consolidated["technical_specifications"] = await self._generate_technical_specs_summary(enhanced_analyses)
+        
+        # Create consolidation summary
+        consolidated["consolidation_summary"] = {
+            "total_documents": len([doc for doc in consolidated.values() if isinstance(doc, str) and doc]),
+            "documentation_types": list(consolidated.keys()),
+            "generation_timestamp": dt.now().isoformat()
+        }
+        
+        return consolidated
+
+    async def _generate_technical_specs_summary(self, enhanced_analyses: Dict[str, Any]) -> str:
+        """Generate technical specifications summary from all analyses"""
+        try:
+            # Extract technical data from all analyses
+            tech_data = {}
+            
+            # Program flow technical data
+            if "complete_program_flow" in enhanced_analyses:
+                program_flow = enhanced_analyses["complete_program_flow"]
+                if program_flow.get("status") == "success":
+                    data = program_flow.get("data", {})
+                    tech_data["program_relationships"] = data.get("program_relationships", {})
+                    tech_data["file_access_patterns"] = data.get("file_access_patterns", [])
+            
+            # Data flow technical data
+            if "complete_data_flow" in enhanced_analyses:
+                data_flow = enhanced_analyses["complete_data_flow"]
+                if data_flow.get("status") == "success":
+                    data = data_flow.get("data", {})
+                    tech_data["data_flow_analysis"] = data.get("file_flow_analysis", "")
+            
+            # Control flow technical data
+            if "program_control_flow" in enhanced_analyses:
+                control_flow = enhanced_analyses["program_control_flow"]
+                if control_flow.get("status") == "success":
+                    data = control_flow.get("data", {})
+                    tech_data["control_flow_analysis"] = data.get("control_flow_analysis", {})
+            
+            prompt = f"""
+            Generate technical specifications summary from this analysis data:
+            
+            {json.dumps(tech_data, indent=2, default=str)[:1000]}...
+            
+            Create a technical specifications document covering:
+            
+            ## Technical Architecture
+            - Component structure and organization
+            - Integration points and interfaces
+            - Data flow characteristics
+            
+            ## Performance Characteristics
+            - Processing complexity indicators
+            - Resource utilization patterns
+            - Performance optimization opportunities
+            
+            ## Dependencies and Integration
+            - External dependencies
+            - Integration patterns
+            - Synchronization requirements
+            
+            ## Quality Metrics
+            - Code quality indicators
+            - Maintainability factors
+            - Risk assessment metrics
+            
+            Write as technical documentation suitable for architects and senior developers.
+            """
+            
+            return await self._call_api_for_readable_analysis(prompt, max_tokens=800)
+            
+        except Exception as e:
+            self.logger.error(f"Technical specs generation failed: {e}")
+            return f"Technical specifications summary generated from {len(enhanced_analyses)} analysis components."
+
+    async def _generate_enhanced_recommendations(self, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate comprehensive recommendations from all analyses"""
+        try:
+            # Extract recommendation data from all analyses
+            all_recommendations = []
+            priority_actions = []
+            risk_mitigations = []
+            
+            enhanced_analyses = analysis_result.get("enhanced_analyses", {})
+            
+            # Extract from each analysis
+            for analysis_name, analysis_data in enhanced_analyses.items():
+                if analysis_data.get("status") == "success":
+                    data = analysis_data.get("data", {})
+                    
+                    # Extract specific recommendations based on analysis type
+                    if "recommendations" in data:
+                        all_recommendations.extend(data["recommendations"])
+                    
+                    if "program_flow_analysis" in data:
+                        flow_analysis = data["program_flow_analysis"]
+                        if "optimization" in flow_analysis.lower():
+                            priority_actions.append("Optimize program flow patterns")
+                    
+                    if "impact_analysis" in data:
+                        impact_analysis = data["impact_analysis"]
+                        if isinstance(impact_analysis, dict):
+                            risk_level = impact_analysis.get("risk_level", "").upper()
+                            if risk_level == "HIGH":
+                                risk_mitigations.append("Implement comprehensive change management")
+            
+            # Generate consolidated recommendations using API
+            recommendations_text = await self._generate_recommendations_api(
+                analysis_result.get("component_name"), 
+                all_recommendations, 
+                priority_actions, 
+                risk_mitigations
+            )
+            
+            return {
+                "consolidated_recommendations": recommendations_text,
+                "priority_actions": priority_actions,
+                "risk_mitigations": risk_mitigations,
+                "total_recommendations": len(all_recommendations),
+                "recommendation_sources": list(enhanced_analyses.keys())
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Enhanced recommendations generation failed: {e}")
+            return {
+                "consolidated_recommendations": "Comprehensive analysis completed. Review detailed findings for specific recommendations.",
+                "priority_actions": ["Review analysis results", "Plan implementation strategy"],
+                "risk_mitigations": ["Follow standard change management procedures"],
+                "total_recommendations": 0,
+                "error": str(e)
+            }
+
+    async def _generate_recommendations_api(self, component_name: str, 
+                                        all_recommendations: List[str],
+                                        priority_actions: List[str],
+                                        risk_mitigations: List[str]) -> str:
+        """Generate consolidated recommendations using API"""
+        
+        prompt = f"""
+        Generate comprehensive recommendations for component: {component_name}
+        
+        Analysis Recommendations Found:
+        {all_recommendations[:10]}  # First 10 recommendations
+        
+        Priority Actions Identified:
+        {priority_actions}
+        
+        Risk Mitigations Required:
+        {risk_mitigations}
+        
+        Create consolidated recommendations covering:
+        
+        ## Immediate Actions (Next 30 Days)
+        - Critical tasks requiring immediate attention
+        - High-priority fixes and improvements
+        - Risk mitigation measures
+        
+        ## Short-term Improvements (Next 90 Days)
+        - Performance optimizations
+        - Documentation updates
+        - Process improvements
+        
+        ## Medium-term Enhancements (Next 6 Months)
+        - Architectural improvements
+        - Integration optimizations
+        - Capacity planning initiatives
+        
+        ## Long-term Strategic Initiatives (Next 12 Months)
+        - Modernization opportunities
+        - Technology upgrades
+        - Strategic alignment improvements
+        
+        ## Governance and Maintenance
+        - Ongoing monitoring requirements
+        - Regular review schedules
+        - Knowledge management
+        
+        ## Risk Management
+        - Identified risks and mitigation strategies
+        - Contingency planning
+        - Business continuity considerations
+        
+        Write as actionable recommendations suitable for technical and business decision makers.
+        """
+        
+        try:
+            return await self._call_api_for_readable_analysis(prompt, max_tokens=1000)
+        except Exception as e:
+            self.logger.error(f"Recommendations API generation failed: {e}")
+            return f"Comprehensive recommendations generated from analysis of {component_name}. Review detailed analysis results for specific guidance."
+
+    # Add these utility methods to support the new relationship tables
+
+    async def _query_program_relationships(self, program_name: str) -> Dict[str, Any]:
+        """Query program relationships from new table"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT calling_program, called_program, call_type, call_location,
+                    parameters, call_statement, conditional_call, line_number
+                FROM program_relationships
+                WHERE calling_program = ? OR called_program = ?
+                ORDER BY line_number
+            """, (program_name, program_name))
+            
+            relationships = cursor.fetchall()
+            conn.close()
+            
+            return {
+                "relationships": [
+                    {
+                        "calling_program": row[0],
+                        "called_program": row[1],
+                        "call_type": row[2],
+                        "call_location": row[3],
+                        "parameters": json.loads(row[4]) if row[4] else [],
+                        "call_statement": row[5],
+                        "conditional_call": bool(row[6]),
+                        "line_number": row[7]
+                    } for row in relationships
+                ],
+                "total_relationships": len(relationships)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Failed to query program relationships: {e}")
+            return {"relationships": [], "total_relationships": 0}
+
+    async def _query_field_cross_references(self, component_name: str) -> Dict[str, Any]:
+        """Query field cross-references from new table"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT field_name, qualified_name, source_type, source_name,
+                    definition_location, data_type, picture_clause, usage_clause,
+                    level_number, parent_field, occurs_info, business_domain
+                FROM field_cross_reference
+                WHERE field_name = ? OR source_name = ?
+                ORDER BY level_number, field_name
+            """, (component_name, component_name))
+            
+            field_refs = cursor.fetchall()
+            conn.close()
+            
+            return {
+                "field_references": [
+                    {
+                        "field_name": row[0],
+                        "qualified_name": row[1],
+                        "source_type": row[2],
+                        "source_name": row[3],
+                        "definition_location": row[4],
+                        "data_type": row[5],
+                        "picture_clause": row[6],
+                        "usage_clause": row[7],
+                        "level_number": row[8],
+                        "parent_field": row[9],
+                        "occurs_info": json.loads(row[10]) if row[10] else {},
+                        "business_domain": row[11]
+                    } for row in field_refs
+                ],
+                "total_references": len(field_refs)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Failed to query field cross-references: {e}")
+            return {"field_references": [], "total_references": 0}
+
+    async def _query_impact_analysis(self, component_name: str) -> Dict[str, Any]:
+        """Query impact analysis from new table"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT source_artifact, source_type, dependent_artifact, dependent_type,
+                    relationship_type, impact_level, change_propagation
+                FROM impact_analysis
+                WHERE source_artifact = ? OR dependent_artifact = ?
+                ORDER BY impact_level DESC
+            """, (component_name, component_name))
+            
+            impact_data = cursor.fetchall()
+            conn.close()
+            
+            return {
+                "impact_relationships": [
+                    {
+                        "source_artifact": row[0],
+                        "source_type": row[1],
+                        "dependent_artifact": row[2],
+                        "dependent_type": row[3],
+                        "relationship_type": row[4],
+                        "impact_level": row[5],
+                        "change_propagation": row[6]
+                    } for row in impact_data
+                ],
+                "total_impacts": len(impact_data)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Failed to query impact analysis: {e}")
+            return {"impact_relationships": [], "total_impacts": 0}
+
+
     def clean_component_name_enhanced(component_name: str) -> Tuple[str, str]:
         """
         FIXED: Enhanced component name cleaning that returns both original and cleaned names
