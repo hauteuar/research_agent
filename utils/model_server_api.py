@@ -643,7 +643,7 @@ class GPUModelLoader:
 # ==================== Generation Handler ====================
 
 class GenerationHandler:
-    """Handles text generation requests"""
+    """Handles text generation requests - FIXED VERSION"""
     
     def __init__(self, model_loader: GPUModelLoader, config: ModelServerConfig):
         self.model_loader = model_loader
@@ -654,7 +654,7 @@ class GenerationHandler:
         self.error_count = 0
         
     async def generate(self, request: GenerationRequest, request_id: str) -> Union[GenerationResponse, AsyncGenerator]:
-        """Generate text based on the request"""
+        """Generate text based on the request - FIXED VERSION"""
         if not self.model_loader.model_loaded:
             raise HTTPException(status_code=503, detail="Model not loaded")
         
@@ -662,6 +662,14 @@ class GenerationHandler:
             self.active_requests += 1
             self.total_requests += 1
             start_time = time.time()
+            
+            # Log the incoming request for debugging
+            logger.info(f"[{self.config.server_id}] 🔥 GENERATE REQUEST RECEIVED:")
+            logger.info(f"[{self.config.server_id}]   Request ID: {request_id}")
+            logger.info(f"[{self.config.server_id}]   Prompt length: {len(request.prompt)}")
+            logger.info(f"[{self.config.server_id}]   Max tokens: {request.max_tokens}")
+            logger.info(f"[{self.config.server_id}]   Temperature: {request.temperature}")
+            logger.info(f"[{self.config.server_id}]   Stream: {request.stream}")
             
             # Create sampling parameters
             sampling_params = SamplingParams(
@@ -675,54 +683,69 @@ class GenerationHandler:
                 seed=request.seed,
             )
             
+            logger.info(f"[{self.config.server_id}] 🎯 Starting generation with vLLM engine...")
+            
             if request.stream:
                 return self._generate_stream(request, request_id, sampling_params, start_time)
             else:
-                return await self._generate_complete(request, request_id, sampling_params, start_time)
+                return await self._generate_complete_fixed(request, request_id, sampling_params, start_time)
                 
         except Exception as e:
             self.error_count += 1
-            logger.error(f"[{self.config.server_id}] Generation error for request {request_id}: {str(e)}")
+            logger.error(f"[{self.config.server_id}] ❌ Generation error for request {request_id}: {str(e)}")
+            logger.error(f"[{self.config.server_id}] ❌ Error type: {type(e).__name__}")
+            import traceback
+            logger.error(f"[{self.config.server_id}] ❌ Traceback: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
         finally:
             self.active_requests -= 1
     
-    async def _generate_complete(self, request: GenerationRequest, request_id: str, 
-                               sampling_params: SamplingParams, start_time: float) -> GenerationResponse:
-        """Generate complete response"""
+    async def _generate_complete_fixed(self, request: GenerationRequest, request_id: str, 
+                                     sampling_params: SamplingParams, start_time: float) -> GenerationResponse:
+        """FIXED: Generate complete response without timeout context manager issues"""
         try:
-            # Generate text
-            results = self.model_loader.engine.generate(
-                request.prompt,
-                sampling_params,
-                request_id=request_id
-            )
+            logger.info(f"[{self.config.server_id}] 🚀 Calling vLLM engine.generate()...")
             
-            # Get the final result
-            final_output = None
-            async for request_output in results:
-                final_output = request_output
+            # CRITICAL FIX: Use asyncio.wait_for to handle timeouts properly
+            # instead of relying on vLLM's internal timeout handling
+            try:
+                # Call the vLLM engine with a reasonable timeout
+                results = await asyncio.wait_for(
+                    self._call_vllm_generate_safely(request.prompt, sampling_params, request_id),
+                    timeout=300.0  # 5 minute timeout
+                )
+                
+                logger.info(f"[{self.config.server_id}] ✅ vLLM generation completed successfully")
+                
+            except asyncio.TimeoutError:
+                logger.error(f"[{self.config.server_id}] ❌ Generation timed out after 5 minutes")
+                raise HTTPException(status_code=408, detail="Generation request timed out")
             
-            if not final_output:
+            if not results:
+                logger.error(f"[{self.config.server_id}] ❌ No results returned from vLLM")
                 raise RuntimeError("No output generated")
             
             # Extract generated text
-            generated_text = final_output.outputs[0].text
-            finish_reason = final_output.outputs[0].finish_reason
+            generated_text = results.get('text', '')
+            finish_reason = results.get('finish_reason', 'stop')
+            prompt_tokens = results.get('prompt_tokens', 0)
+            completion_tokens = results.get('completion_tokens', 0)
             
-            # Calculate token usage
-            prompt_tokens = len(final_output.prompt_token_ids)
-            completion_tokens = len(final_output.outputs[0].token_ids)
+            logger.info(f"[{self.config.server_id}] 📄 Generated text length: {len(generated_text)}")
+            logger.info(f"[{self.config.server_id}] 📊 Tokens - Prompt: {prompt_tokens}, Completion: {completion_tokens}")
             
             # Record timing
             end_time = time.time()
-            self.request_times.append(end_time - start_time)
+            duration = end_time - start_time
+            self.request_times.append(duration)
+            
+            logger.info(f"[{self.config.server_id}] ⏱️  Generation completed in {duration:.2f} seconds")
             
             # Keep only last 1000 request times for metrics
             if len(self.request_times) > 1000:
                 self.request_times = self.request_times[-1000:]
             
-            return GenerationResponse(
+            response = GenerationResponse(
                 id=request_id,
                 text=generated_text,
                 prompt=request.prompt,
@@ -737,14 +760,75 @@ class GenerationHandler:
                 server_id=self.config.server_id
             )
             
+            logger.info(f"[{self.config.server_id}] 🎉 Response prepared successfully")
+            return response
+            
         except Exception as e:
-            logger.error(f"[{self.config.server_id}] Complete generation error: {str(e)}")
+            logger.error(f"[{self.config.server_id}] ❌ Complete generation error: {str(e)}")
+            logger.error(f"[{self.config.server_id}] ❌ Error occurred at: {time.time() - start_time:.2f}s into request")
+            raise
+    
+    async def _call_vllm_generate_safely(self, prompt: str, sampling_params: SamplingParams, request_id: str) -> Dict[str, Any]:
+        """FIXED: Safely call vLLM generate without timeout context manager conflicts"""
+        try:
+            logger.info(f"[{self.config.server_id}] 🔧 Calling engine.generate with prompt: '{prompt[:50]}...'")
+            
+            # Call vLLM generate - this is where the timeout context manager error was happening
+            results_generator = self.model_loader.engine.generate(
+                prompt,
+                sampling_params,
+                request_id=request_id
+            )
+            
+            logger.info(f"[{self.config.server_id}] 🔄 Generator created, collecting results...")
+            
+            # Collect all results from the async generator
+            final_output = None
+            async for request_output in results_generator:
+                logger.debug(f"[{self.config.server_id}] 📨 Received output chunk")
+                final_output = request_output
+            
+            if not final_output:
+                logger.error(f"[{self.config.server_id}] ❌ No final output received")
+                raise RuntimeError("No output generated from vLLM")
+            
+            # Extract information from the final output
+            if not hasattr(final_output, 'outputs') or not final_output.outputs:
+                logger.error(f"[{self.config.server_id}] ❌ Final output has no outputs attribute")
+                raise RuntimeError("Invalid output format from vLLM")
+            
+            output = final_output.outputs[0]
+            generated_text = output.text
+            finish_reason = getattr(output, 'finish_reason', 'stop')
+            
+            # Calculate token usage
+            prompt_tokens = len(getattr(final_output, 'prompt_token_ids', []))
+            completion_tokens = len(getattr(output, 'token_ids', []))
+            
+            logger.info(f"[{self.config.server_id}] ✅ Successfully extracted: {len(generated_text)} chars, {completion_tokens} tokens")
+            
+            return {
+                'text': generated_text,
+                'finish_reason': finish_reason,
+                'prompt_tokens': prompt_tokens,
+                'completion_tokens': completion_tokens
+            }
+            
+        except Exception as e:
+            logger.error(f"[{self.config.server_id}] ❌ vLLM generation failed: {type(e).__name__}: {str(e)}")
+            
+            # Log more details for debugging
+            logger.error(f"[{self.config.server_id}] ❌ Engine loaded: {self.model_loader.model_loaded}")
+            logger.error(f"[{self.config.server_id}] ❌ Engine object: {type(self.model_loader.engine)}")
+            
             raise
     
     async def _generate_stream(self, request: GenerationRequest, request_id: str, 
                              sampling_params: SamplingParams, start_time: float) -> AsyncGenerator:
-        """Generate streaming response"""
+        """FIXED: Generate streaming response"""
         try:
+            logger.info(f"[{self.config.server_id}] 🌊 Starting streaming generation...")
+            
             # Generate text with streaming
             results = self.model_loader.engine.generate(
                 request.prompt,
@@ -753,7 +837,12 @@ class GenerationHandler:
             )
             
             previous_text = ""
+            chunk_count = 0
+            
             async for request_output in results:
+                chunk_count += 1
+                logger.debug(f"[{self.config.server_id}] 📦 Streaming chunk {chunk_count}")
+                
                 # Extract current generated text
                 current_text = request_output.outputs[0].text
                 
@@ -780,7 +869,10 @@ class GenerationHandler:
                     
                     # Record timing
                     end_time = time.time()
-                    self.request_times.append(end_time - start_time)
+                    duration = end_time - start_time
+                    self.request_times.append(duration)
+                    
+                    logger.info(f"[{self.config.server_id}] 🏁 Streaming completed in {duration:.2f}s with {chunk_count} chunks")
                     
                     # Keep only last 1000 request times for metrics
                     if len(self.request_times) > 1000:
@@ -790,7 +882,7 @@ class GenerationHandler:
                 previous_text = current_text
                 
         except Exception as e:
-            logger.error(f"[{self.config.server_id}] Streaming generation error: {str(e)}")
+            logger.error(f"[{self.config.server_id}] ❌ Streaming generation error: {str(e)}")
             error_chunk = StreamingChunk(
                 id=request_id,
                 text="",
