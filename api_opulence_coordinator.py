@@ -298,21 +298,27 @@ class ModelServerClient:
 
 
     async def call_generate(self, server: ModelServer, prompt: str, 
-                      params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """ULTRA-SIMPLE: API call without complex error handling"""
+                  params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """FIXED: API call with proper response handling and debugging"""
         
         if not self.session:
             raise RuntimeError("Client not initialized")
         
         params = params or {}
         
-        # ULTRA-CONSERVATIVE request - minimal parameters
+        # FIXED: Better request data construction
         request_data = {
-            "prompt": prompt[:100],  # Truncate prompt
-            "max_tokens": min(params.get("max_tokens", 5), 10),  # Very small
-            "temperature": 0.1,
-            "stream": False
+            "prompt": prompt[:500],  # Allow more prompt text
+            "max_tokens": min(params.get("max_tokens", 20), 50),  # Increased limit
+            "temperature": params.get("temperature", 0.1),
+            "stream": False,
+            "stop": params.get("stop", [])
         }
+        
+        # Add optional parameters if present
+        for optional_param in ["top_p", "top_k", "frequency_penalty", "presence_penalty"]:
+            if optional_param in params:
+                request_data[optional_param] = params[optional_param]
         
         server.active_requests += 1
         server.total_requests += 1
@@ -321,27 +327,107 @@ class ModelServerClient:
         try:
             generate_url = f"{server.config.endpoint.rstrip('/')}/generate"
             
-            # ULTRA-SIMPLE: Direct post without complex error handling
-            response = await self.session.post(generate_url, json=request_data)
+            # CRITICAL FIX: Add detailed logging and proper error handling
+            self.logger.info(f"🚀 Making request to: {generate_url}")
+            self.logger.info(f"📦 Request data: {json.dumps(request_data, indent=2)}")
             
-            if response.status == 200:
-                result = await response.json()
-                latency = time.time() - start_time
-                server.record_success(latency)
+            # FIXED: Proper async request with explicit timeout
+            async with self.session.post(
+                generate_url, 
+                json=request_data,
+                headers={'Content-Type': 'application/json'},
+                timeout=aiohttp.ClientTimeout(total=60)  # Explicit 60 second timeout
+            ) as response:
                 
-                result["server_used"] = server.config.name
-                result["gpu_id"] = server.config.gpu_id
-                result["latency"] = latency
+                self.logger.info(f"📡 Response status: {response.status}")
+                self.logger.info(f"📋 Response headers: {dict(response.headers)}")
                 
-                return result
-            else:
-                error_text = f"HTTP {response.status}"
-                server.record_failure()
-                return {"error": error_text}
-                
-        except Exception as e:
+                # CRITICAL FIX: Check response status first
+                if response.status == 200:
+                    try:
+                        # FIXED: Read response text first for debugging
+                        response_text = await response.text()
+                        self.logger.info(f"📄 Raw response text: {response_text[:500]}...")
+                        
+                        # Try to parse as JSON
+                        if response_text.strip():
+                            try:
+                                result = json.loads(response_text)
+                            except json.JSONDecodeError as je:
+                                self.logger.error(f"❌ JSON decode error: {je}")
+                                return {
+                                    "error": f"Invalid JSON response: {je}",
+                                    "raw_response": response_text[:200]
+                                }
+                        else:
+                            self.logger.error("❌ Empty response received")
+                            return {"error": "Empty response from server"}
+                        
+                        # FIXED: Better result validation
+                        if isinstance(result, dict):
+                            latency = time.time() - start_time
+                            server.record_success(latency)
+                            
+                            # Add metadata
+                            result["server_used"] = server.config.name
+                            result["gpu_id"] = server.config.gpu_id
+                            result["latency"] = latency
+                            result["request_data"] = request_data
+                            
+                            self.logger.info(f"✅ Success! Latency: {latency:.2f}s")
+                            return result
+                        else:
+                            self.logger.error(f"❌ Unexpected result type: {type(result)}")
+                            return {"error": f"Unexpected response format: {type(result)}"}
+                            
+                    except Exception as parse_error:
+                        self.logger.error(f"❌ Response parsing error: {parse_error}")
+                        server.record_failure()
+                        return {
+                            "error": f"Response parsing failed: {str(parse_error)}",
+                            "status_code": response.status
+                        }
+                else:
+                    # FIXED: Handle non-200 status codes
+                    try:
+                        error_text = await response.text()
+                        self.logger.error(f"❌ HTTP {response.status}: {error_text[:200]}")
+                    except:
+                        error_text = f"HTTP {response.status}"
+                    
+                    server.record_failure()
+                    return {
+                        "error": f"HTTP {response.status}: {error_text}",
+                        "status_code": response.status,
+                        "url": generate_url
+                    }
+                    
+        except asyncio.TimeoutError:
+            self.logger.error(f"❌ Request timeout after 60 seconds")
             server.record_failure()
-            return {"error": f"Request failed: {str(e)}"}
+            return {
+                "error": "Request timeout (60s)",
+                "url": generate_url,
+                "timeout": True
+            }
+            
+        except aiohttp.ClientError as ce:
+            self.logger.error(f"❌ Client error: {ce}")
+            server.record_failure()
+            return {
+                "error": f"Connection error: {str(ce)}",
+                "url": generate_url,
+                "client_error": True
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Unexpected error: {e}")
+            server.record_failure()
+            return {
+                "error": f"Request failed: {str(e)}",
+                "url": generate_url,
+                "exception_type": type(e).__name__
+            }
             
         finally:
             server.active_requests = max(0, server.active_requests - 1)
@@ -711,36 +797,157 @@ class APIOpulenceCoordinator:
             raise
     
     async def call_model_api(self, prompt: str, params: Dict[str, Any] = None, 
-                            preferred_gpu_id: int = None) -> Dict[str, Any]:
-        """FIXED: API call with simplified error handling"""
+                        preferred_gpu_id: int = None) -> Dict[str, Any]:
+        """FIXED: API call with comprehensive debugging"""
+        
+        self.logger.info(f"🔍 Starting API call with prompt length: {len(prompt)}")
+        self.logger.info(f"🔧 Parameters: {params}")
         
         server = self.load_balancer.select_server()        
         if not server:
+            self.logger.error("❌ No available servers found")
             raise RuntimeError("No available servers found")
         
+        self.logger.info(f"🎯 Selected server: {server.config.name} ({server.config.endpoint})")
+        
         try:
-            self.logger.debug(f"FIXED API call to {server.config.name}")
+            # FIXED: Add pre-call server status check
+            self.logger.info(f"📊 Server status before call:")
+            self.logger.info(f"   - Status: {server.status}")
+            self.logger.info(f"   - Active requests: {server.active_requests}")
+            self.logger.info(f"   - Total requests: {server.total_requests}")
+            self.logger.info(f"   - Available: {server.is_available()}")
             
-            # Direct call with fixed parameters
+            # Make the call
+            self.logger.info(f"🚀 Making generate call to {server.config.name}")
             result = await self.client.call_generate(server, prompt, params)
+            
+            # FIXED: Detailed result analysis
+            self.logger.info(f"📋 Call result type: {type(result)}")
+            
+            if isinstance(result, dict):
+                if "error" in result:
+                    self.logger.error(f"❌ API returned error: {result['error']}")
+                    self.logger.error(f"🔍 Full error result: {json.dumps(result, indent=2)}")
+                else:
+                    self.logger.info(f"✅ API call successful!")
+                    # Log key fields (but not full response to avoid spam)
+                    key_fields = ["server_used", "gpu_id", "latency", "status_code"]
+                    for field in key_fields:
+                        if field in result:
+                            self.logger.info(f"   - {field}: {result[field]}")
+                    
+                    # Check for actual content
+                    content_fields = ["text", "response", "content", "generated_text", "choices"]
+                    found_content = False
+                    for field in content_fields:
+                        if field in result and result[field]:
+                            found_content = True
+                            content_preview = str(result[field])[:100]
+                            self.logger.info(f"   - Found content in '{field}': {content_preview}...")
+                            break
+                    
+                    if not found_content:
+                        self.logger.warning(f"⚠️ No content found in response. Available fields: {list(result.keys())}")
+            else:
+                self.logger.warning(f"⚠️ Unexpected result type: {type(result)}")
+                self.logger.warning(f"   Result: {str(result)[:200]}...")
+            
             self.stats["total_api_calls"] += 1
             return result
             
         except Exception as e:
-            self.logger.warning(f"Request failed on {server.config.name}: {e}")
+            self.logger.error(f"❌ Exception during API call: {type(e).__name__}: {str(e)}")
+            self.logger.error(f"🔍 Server state after error:")
+            self.logger.error(f"   - Active requests: {server.active_requests}")
+            self.logger.error(f"   - Failed requests: {server.failed_requests}")
+            self.logger.error(f"   - Consecutive failures: {server.consecutive_failures}")
             
             # Simple retry with different server if available
             retry_server = self.load_balancer.select_server()
             if retry_server and retry_server != server:
                 try:
-                    self.logger.info(f"Retrying with {retry_server.config.name}")
+                    self.logger.info(f"🔄 Retrying with {retry_server.config.name}")
                     result = await self.client.call_generate(retry_server, prompt, params)
                     self.stats["total_api_calls"] += 1
                     return result
                 except Exception as retry_e:
-                    self.logger.error(f"Retry failed: {retry_e}")
+                    self.logger.error(f"❌ Retry also failed: {retry_e}")
             
             raise RuntimeError(f"All servers failed: {str(e)}")
+
+
+# Additional debugging method to test your server directly
+    async def debug_server_connection(self, test_prompt: str = "Hello") -> Dict[str, Any]:
+        """DEBUGGING: Test server connection with detailed logging"""
+        self.logger.info("🧪 Starting debug server connection test...")
+        
+        debug_results = {}
+        
+        for i, server in enumerate(self.load_balancer.servers):
+            server_debug = {
+                "server_name": server.config.name,
+                "endpoint": server.config.endpoint,
+                "tests": {}
+            }
+            
+            try:
+                # Test 1: Health check
+                self.logger.info(f"🔍 Test 1: Health check for {server.config.name}")
+                health_result = await self.client.health_check(server)
+                server_debug["tests"]["health_check"] = {
+                    "success": health_result,
+                    "server_status": server.status.value if hasattr(server.status, 'value') else str(server.status)
+                }
+                
+                # Test 2: Generate call
+                self.logger.info(f"🔍 Test 2: Generate call for {server.config.name}")
+                generate_result = await self.client.call_generate(
+                    server, 
+                    test_prompt, 
+                    {"max_tokens": 5, "temperature": 0.1}
+                )
+                
+                server_debug["tests"]["generate_call"] = {
+                    "success": not generate_result.get("error"),
+                    "result_type": type(generate_result).__name__,
+                    "has_error": "error" in generate_result if isinstance(generate_result, dict) else False,
+                    "result_keys": list(generate_result.keys()) if isinstance(generate_result, dict) else [],
+                    "error_message": generate_result.get("error") if isinstance(generate_result, dict) else None
+                }
+                
+                # Test 3: Manual aiohttp call for comparison
+                self.logger.info(f"🔍 Test 3: Manual aiohttp call for {server.config.name}")
+                try:
+                    manual_url = f"{server.config.endpoint.rstrip('/')}/generate"
+                    manual_data = {
+                        "prompt": test_prompt,
+                        "max_tokens": 5,
+                        "temperature": 0.1,
+                        "stream": False
+                    }
+                    
+                    async with self.client.session.post(manual_url, json=manual_data) as resp:
+                        manual_text = await resp.text()
+                        
+                    server_debug["tests"]["manual_call"] = {
+                        "status_code": resp.status,
+                        "response_length": len(manual_text),
+                        "response_preview": manual_text[:100],
+                        "content_type": resp.headers.get('content-type', 'unknown')
+                    }
+                    
+                except Exception as manual_error:
+                    server_debug["tests"]["manual_call"] = {
+                        "error": str(manual_error)
+                    }
+                
+            except Exception as e:
+                server_debug["error"] = str(e)
+            
+            debug_results[f"server_{i}"] = server_debug
+        
+        return debug_results
     
     # ==================== Keep all existing methods unchanged ====================
     

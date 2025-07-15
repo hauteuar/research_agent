@@ -997,7 +997,7 @@ Return as JSON:
         
         try:
             response_text = await self._call_api_for_analysis(full_prompt, max_tokens=800)
-            
+            self.logger.info(f"LLM Response received for Logic Analyzer {response_text}")
             if '{' in response_text:
                 json_start = response_text.find('{')
                 json_end = response_text.rfind('}') + 1
