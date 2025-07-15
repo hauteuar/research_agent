@@ -1760,15 +1760,21 @@ class APIOpulenceCoordinator:
                 "coordinator_type": "api_based_production"
             }
         
-    def _clean_component_name(self, component_name: str) -> str:
-        """CRITICAL FIX: Clean component names that may have been prefixed during upload"""
+    def clean_component_name_enhanced(component_name: str) -> Tuple[str, str]:
+        """
+        FIXED: Enhanced component name cleaning that returns both original and cleaned names
+        Returns: (cleaned_name, original_name_pattern)
+        """
         import re
+        
+        original_name = component_name
+        cleaned = component_name
         
         # Handle common prefixing patterns during file upload
         # Pattern: tmpewmlf88a_component_name or similar temporary prefixes
         
         # Remove temporary file prefixes (tmp + random chars + underscore)
-        cleaned = re.sub(r'^tmp[a-zA-Z0-9]+_', '', component_name)
+        cleaned = re.sub(r'^tmp[a-zA-Z0-9]+_', '', cleaned)
         
         # Remove session/upload ID prefixes (numbers + underscore)
         cleaned = re.sub(r'^[0-9a-f]{8,}_', '', cleaned)
@@ -1790,12 +1796,15 @@ class APIOpulenceCoordinator:
         # Remove file extensions if present
         cleaned = re.sub(r'\.(cbl|cob|copy|cpy|jcl|job|proc)$', '', cleaned, flags=re.IGNORECASE)
         
-        # Log if we cleaned the name
-        if cleaned != component_name:
-            self.logger.info(f"🧹 Cleaned component name: '{component_name}' → '{cleaned}'")
+        # Create search pattern for database queries
+        if cleaned != original_name:
+            # If we cleaned the name, create a pattern that can find the original
+            # This will help us search the database for files with temp prefixes
+            search_pattern = f"%{cleaned}%"  # SQL LIKE pattern
+        else:
+            search_pattern = cleaned
         
-        return cleaned
-
+        return cleaned, search_pattern
 
     def _prepare_analysis_summary(self, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
         """Prepare summary for documentation generation"""
