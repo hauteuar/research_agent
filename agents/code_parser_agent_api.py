@@ -3477,6 +3477,16 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                 "file_hash": file_hash
             }
             
+            if result.get("status") == "success":
+                await self._extract_and_store_program_relationships(content, file_path.name, file_type)
+                await self._extract_and_store_copybook_relationships(content, file_path.name)
+                await self._extract_and_store_file_relationships(content, file_path.name)
+                await self._extract_and_store_field_cross_reference(content, file_path.name, file_type)
+                
+                # Generate impact analysis
+                await self._generate_impact_analysis(file_path.name, file_type)
+
+
             return self._add_processing_info(result)
             
         except Exception as e:
@@ -3487,6 +3497,78 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                 "error": str(e)
             })
     
+    async def _generate_impact_analysis(self, artifact_name: str, artifact_type: str):
+        """Generate impact analysis for an artifact"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            impacts = []
+            
+            if artifact_type in ['cobol', 'cics']:
+                # Programs that call this program
+                cursor.execute("""
+                    SELECT DISTINCT calling_program, call_type 
+                    FROM program_relationships 
+                    WHERE called_program = ?
+                """, (artifact_name,))
+                
+                for row in cursor.fetchall():
+                    impacts.append({
+                        'source_artifact': row[0],
+                        'source_type': 'program',
+                        'dependent_artifact': artifact_name,
+                        'dependent_type': artifact_type,
+                        'relationship_type': f'calls_via_{row[1]}',
+                        'impact_level': 'high',
+                        'change_propagation': 'interface_change_required'
+                    })
+                
+                # Programs that use same copybooks
+                cursor.execute("""
+                    SELECT DISTINCT cr2.program_name, cr1.copybook_name
+                    FROM copybook_relationships cr1
+                    JOIN copybook_relationships cr2 ON cr1.copybook_name = cr2.copybook_name
+                    WHERE cr1.program_name = ? AND cr2.program_name != ?
+                """, (artifact_name, artifact_name))
+                
+                for row in cursor.fetchall():
+                    impacts.append({
+                        'source_artifact': artifact_name,
+                        'source_type': artifact_type,
+                        'dependent_artifact': row[0],
+                        'dependent_type': 'program',
+                        'relationship_type': f'shares_copybook_{row[1]}',
+                        'impact_level': 'medium',
+                        'change_propagation': 'data_structure_dependency'
+                    })
+            
+            # Store impact analysis
+            for impact in impacts:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO impact_analysis 
+                    (source_artifact, source_type, dependent_artifact, dependent_type,
+                    relationship_type, impact_level, change_propagation)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    impact['source_artifact'],
+                    impact['source_type'],
+                    impact['dependent_artifact'],
+                    impact['dependent_type'],
+                    impact['relationship_type'],
+                    impact['impact_level'],
+                    impact['change_propagation']
+                ))
+            
+            conn.commit()
+        except Exception as e:
+            self.logger.error(f"Processing failed for {artifact_name}: {str(e)}")
+            return self._add_processing_info({
+                "status": "error",
+                "file_name": artifact_name,
+                "error": str(e)
+            })
+
     # ==================== MISSING ENHANCED PARSING METHODS ====================
 
     async def _parse_cobol_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
@@ -6039,6 +6121,527 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
         
         return chunks
     
+    async def _extract_and_store_program_relationships(self, content: str, program_name: str, file_type: str):
+        """Extract and store all program relationships"""
+        try:
+            relationships = []
+            
+            if file_type in ['cobol', 'cics']:
+                # Extract COBOL CALL statements
+                relationships.extend(self._extract_cobol_calls(content, program_name))
+                
+                # Extract CICS LINK/XCTL calls
+                relationships.extend(self._extract_cics_calls(content, program_name))
+                
+            elif file_type == 'jcl':
+                # Extract JCL EXEC PGM calls
+                relationships.extend(self._extract_jcl_calls(content, program_name))
+            
+            # Store relationships
+            if relationships:
+                await self._store_program_relationships(relationships)
+                
+        except Exception as e:
+            self.logger.error(f"Failed to extract program relationships: {str(e)}")
+
+    def _extract_cobol_calls(self, content: str, calling_program: str) -> List[Dict]:
+        """Extract COBOL CALL statements"""
+        relationships = []
+        
+        # Pattern for CALL statements
+        call_pattern = r'CALL\s+[\'"]([^\'\"]+)[\'"](?:\s+USING\s+([^\.]+))?'
+        call_matches = re.finditer(call_pattern, content, re.IGNORECASE)
+        
+        for match in call_matches:
+            called_program = match.group(1).strip()
+            parameters = match.group(2).strip() if match.group(2) else ""
+            
+            # Find the paragraph/section containing this call
+            call_location = self._find_containing_paragraph(content, match.start())
+            
+            # Check if call is conditional
+            conditional = self._is_conditional_statement(content, match.start())
+            
+            relationships.append({
+                'calling_program': calling_program,
+                'called_program': called_program,
+                'call_type': 'CALL',
+                'call_location': call_location,
+                'parameters': parameters.split() if parameters else [],
+                'call_statement': match.group(0),
+                'conditional_call': conditional,
+                'line_number': content[:match.start()].count('\n') + 1
+            })
+        
+        return relationships
+
+    def _extract_cics_calls(self, content: str, calling_program: str) -> List[Dict]:
+        """Extract CICS LINK and XCTL calls"""
+        relationships = []
+        
+        # CICS LINK pattern
+        link_pattern = r'EXEC\s+CICS\s+LINK\s+[^.]*?PROGRAM\s*\(\s*[\'"]?([^\'\")\s]+)[\'"]?\s*\)[^.]*?END-EXEC'
+        link_matches = re.finditer(link_pattern, content, re.IGNORECASE | re.DOTALL)
+        
+        for match in link_matches:
+            called_program = match.group(1).strip()
+            call_location = self._find_containing_paragraph(content, match.start())
+            
+            # Extract COMMAREA info
+            commarea_match = re.search(r'COMMAREA\s*\(\s*([^)]+)\s*\)', match.group(0), re.IGNORECASE)
+            parameters = [commarea_match.group(1)] if commarea_match else []
+            
+            relationships.append({
+                'calling_program': calling_program,
+                'called_program': called_program,
+                'call_type': 'CICS_LINK',
+                'call_location': call_location,
+                'parameters': parameters,
+                'call_statement': match.group(0),
+                'conditional_call': self._is_conditional_statement(content, match.start()),
+                'line_number': content[:match.start()].count('\n') + 1
+            })
+        
+        # CICS XCTL pattern
+        xctl_pattern = r'EXEC\s+CICS\s+XCTL\s+[^.]*?PROGRAM\s*\(\s*[\'"]?([^\'\")\s]+)[\'"]?\s*\)[^.]*?END-EXEC'
+        xctl_matches = re.finditer(xctl_pattern, content, re.IGNORECASE | re.DOTALL)
+        
+        for match in xctl_matches:
+            called_program = match.group(1).strip()
+            call_location = self._find_containing_paragraph(content, match.start())
+            
+            commarea_match = re.search(r'COMMAREA\s*\(\s*([^)]+)\s*\)', match.group(0), re.IGNORECASE)
+            parameters = [commarea_match.group(1)] if commarea_match else []
+            
+            relationships.append({
+                'calling_program': calling_program,
+                'called_program': called_program,
+                'call_type': 'CICS_XCTL',
+                'call_location': call_location,
+                'parameters': parameters,
+                'call_statement': match.group(0),
+                'conditional_call': self._is_conditional_statement(content, match.start()),
+                'line_number': content[:match.start()].count('\n') + 1
+            })
+        
+        return relationships
+
+    def _extract_jcl_calls(self, content: str, calling_job: str) -> List[Dict]:
+        """Extract JCL EXEC PGM calls"""
+        relationships = []
+        
+        # JCL EXEC PGM pattern
+        exec_pattern = r'^//(\w+)\s+EXEC\s+(?:PGM=([^,\s]+)|PROC=([^,\s]+)|([^,\s]+))'
+        exec_matches = re.finditer(exec_pattern, content, re.IGNORECASE | re.MULTILINE)
+        
+        for match in exec_matches:
+            step_name = match.group(1)
+            program_name = match.group(2) or match.group(3) or match.group(4)
+            
+            if program_name:
+                call_type = 'JCL_EXEC_PGM' if match.group(2) else 'JCL_EXEC_PROC'
+                
+                relationships.append({
+                    'calling_program': calling_job,
+                    'called_program': program_name.strip(),
+                    'call_type': call_type,
+                    'call_location': step_name,
+                    'parameters': [],
+                    'call_statement': match.group(0),
+                    'conditional_call': False,
+                    'line_number': content[:match.start()].count('\n') + 1
+                })
+        
+        return relationships
+
+    async def _extract_and_store_copybook_relationships(self, content: str, program_name: str):
+        """Extract and store copybook relationships"""
+        try:
+            relationships = []
+            
+            # Enhanced COPY statement pattern
+            copy_pattern = r'COPY\s+([A-Z][A-Z0-9-]*)(?:\s+IN\s+([A-Z][A-Z0-9-]*))?(?:\s+REPLACING\s+(.*?))?(?=\s*\.|\s*$)'
+            copy_matches = re.finditer(copy_pattern, content, re.IGNORECASE | re.DOTALL)
+            
+            for match in copy_matches:
+                copybook_name = match.group(1).strip()
+                library_name = match.group(2).strip() if match.group(2) else ""
+                replacing_clause = match.group(3).strip() if match.group(3) else ""
+                
+                # Determine copy location (which section)
+                copy_location = self._determine_copy_location(content, match.start())
+                usage_context = self._determine_usage_context(copy_location)
+                
+                relationships.append({
+                    'program_name': program_name,
+                    'copybook_name': copybook_name,
+                    'copy_location': copy_location,
+                    'replacing_clause': replacing_clause,
+                    'copy_statement': match.group(0),
+                    'line_number': content[:match.start()].count('\n') + 1,
+                    'usage_context': usage_context
+                })
+            
+            if relationships:
+                await self._store_copybook_relationships(relationships)
+                
+        except Exception as e:
+            self.logger.error(f"Failed to extract copybook relationships: {str(e)}")
+
+    async def _extract_and_store_file_relationships(self, content: str, program_name: str):
+        """Extract and store file access relationships"""
+        try:
+            relationships = []
+            
+            # SELECT statements (file assignments)
+            select_pattern = r'SELECT\s+([A-Z][A-Z0-9-]*)\s+ASSIGN\s+TO\s+([^\s\.]+)'
+            select_matches = re.finditer(select_pattern, content, re.IGNORECASE)
+            
+            for match in select_matches:
+                logical_file = match.group(1).strip()
+                physical_file = match.group(2).strip()
+                
+                relationships.append({
+                    'program_name': program_name,
+                    'file_name': logical_file,
+                    'physical_file': physical_file,
+                    'access_type': 'SELECT',
+                    'access_mode': '',
+                    'record_format': '',
+                    'access_location': 'FILE-CONTROL',
+                    'line_number': content[:match.start()].count('\n') + 1
+                })
+            
+            # FD statements
+            fd_pattern = r'FD\s+([A-Z][A-Z0-9-]*)'
+            fd_matches = re.finditer(fd_pattern, content, re.IGNORECASE)
+            
+            for match in fd_matches:
+                file_name = match.group(1).strip()
+                
+                relationships.append({
+                    'program_name': program_name,
+                    'file_name': file_name,
+                    'physical_file': '',
+                    'access_type': 'FD',
+                    'access_mode': '',
+                    'record_format': '',
+                    'access_location': 'FILE-SECTION',
+                    'line_number': content[:match.start()].count('\n') + 1
+                })
+            
+            # File operations (READ, WRITE, etc.)
+            file_ops = ['READ', 'write', 'rewrite', 'delete', 'open', 'close']
+            for op in file_ops:
+                op_pattern = rf'\b{op}\s+([A-Z][A-Z0-9-]*)'
+                op_matches = re.finditer(op_pattern, content, re.IGNORECASE)
+                
+                for match in op_matches:
+                    file_name = match.group(1).strip()
+                    access_location = self._find_containing_paragraph(content, match.start())
+                    
+                    relationships.append({
+                        'program_name': program_name,
+                        'file_name': file_name,
+                        'physical_file': '',
+                        'access_type': op.upper(),
+                        'access_mode': '',
+                        'record_format': '',
+                        'access_location': access_location,
+                        'line_number': content[:match.start()].count('\n') + 1
+                    })
+            
+            if relationships:
+                await self._store_file_relationships(relationships)
+                
+        except Exception as e:
+            self.logger.error(f"Failed to extract file relationships: {str(e)}")
+
+    async def _extract_and_store_field_cross_reference(self, content: str, source_name: str, source_type: str):
+        """Extract and store comprehensive field cross-reference"""
+        try:
+            field_refs = []
+            
+            # Data item pattern for definitions
+            data_pattern = r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*)\s+(.*?)\.?\s*$'
+            data_matches = re.finditer(data_pattern, content, re.MULTILINE | re.IGNORECASE)
+            
+            for match in data_matches:
+                level = int(match.group(1))
+                field_name = match.group(2).strip()
+                definition = match.group(3).strip()
+                
+                # Skip comment lines
+                if match.group(0).strip().startswith('*'):
+                    continue
+                
+                # Determine definition location
+                def_location = self._determine_field_definition_location(content, match.start())
+                
+                # Extract field attributes
+                pic_clause = self._extract_pic_clause(definition)
+                usage_clause = self._extract_usage_clause(definition)
+                data_type = self._determine_data_type_enhanced(definition)
+                
+                # Determine parent field for nested structures
+                parent_field = self._determine_parent_field(content, match.start(), level)
+                
+                # Extract business domain
+                business_domain = self._infer_business_domain(field_name)
+                
+                # Build qualified name for nested fields
+                qualified_name = self._build_qualified_name(field_name, parent_field)
+                
+                field_refs.append({
+                    'field_name': field_name,
+                    'qualified_name': qualified_name,
+                    'source_type': source_type,
+                    'source_name': source_name,
+                    'definition_location': def_location,
+                    'data_type': data_type,
+                    'picture_clause': pic_clause,
+                    'usage_clause': usage_clause,
+                    'level_number': level,
+                    'parent_field': parent_field,
+                    'occurs_info': json.dumps(self._extract_occurs_info(definition)),
+                    'business_domain': business_domain
+                })
+            
+            if field_refs:
+                await self._store_field_cross_reference(field_refs)
+                
+        except Exception as e:
+            self.logger.error(f"Failed to extract field cross-reference: {str(e)}")
+
+    # STORAGE METHODS
+
+    async def _store_program_relationships(self, relationships: List[Dict]):
+        """Store program relationships in database"""
+        if not relationships:
+            return
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            for rel in relationships:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO program_relationships 
+                    (calling_program, called_program, call_type, call_location, 
+                    parameters, call_statement, conditional_call, line_number)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    rel['calling_program'],
+                    rel['called_program'],
+                    rel['call_type'],
+                    rel['call_location'],
+                    json.dumps(rel['parameters']),
+                    rel['call_statement'],
+                    rel['conditional_call'],
+                    rel['line_number']
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"Stored {len(relationships)} program relationships")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store program relationships: {str(e)}")
+
+    async def _store_copybook_relationships(self, relationships: List[Dict]):
+        """Store copybook relationships in database"""
+        if not relationships:
+            return
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            for rel in relationships:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO copybook_relationships 
+                    (program_name, copybook_name, copy_location, replacing_clause,
+                    copy_statement, line_number, usage_context)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    rel['program_name'],
+                    rel['copybook_name'],
+                    rel['copy_location'],
+                    rel['replacing_clause'],
+                    rel['copy_statement'],
+                    rel['line_number'],
+                    rel['usage_context']
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"Stored {len(relationships)} copybook relationships")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store copybook relationships: {str(e)}")
+
+    async def _store_file_relationships(self, relationships: List[Dict]):
+        """Store file access relationships in database"""
+        if not relationships:
+            return
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            for rel in relationships:
+                cursor.execute("""
+                    INSERT OR IGNORE INTO file_access_relationships 
+                    (program_name, file_name, physical_file, access_type,
+                    access_mode, record_format, access_location, line_number)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    rel['program_name'],
+                    rel['file_name'],
+                    rel['physical_file'],
+                    rel['access_type'],
+                    rel['access_mode'],
+                    rel['record_format'],
+                    rel['access_location'],
+                    rel['line_number']
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"Stored {len(relationships)} file relationships")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store file relationships: {str(e)}")
+
+    async def _store_field_cross_reference(self, field_refs: List[Dict]):
+        """Store field cross-reference in database"""
+        if not field_refs:
+            return
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            for ref in field_refs:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO field_cross_reference 
+                    (field_name, qualified_name, source_type, source_name,
+                    definition_location, data_type, picture_clause, usage_clause,
+                    level_number, parent_field, occurs_info, business_domain)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    ref['field_name'],
+                    ref['qualified_name'],
+                    ref['source_type'],
+                    ref['source_name'],
+                    ref['definition_location'],
+                    ref['data_type'],
+                    ref['picture_clause'],
+                    ref['usage_clause'],
+                    ref['level_number'],
+                    ref['parent_field'],
+                    ref['occurs_info'],
+                    ref['business_domain']
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"Stored {len(field_refs)} field cross-references")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store field cross-reference: {str(e)}")
+
+    # HELPER METHODS
+
+    def _find_containing_paragraph(self, content: str, position: int) -> str:
+        """Find the paragraph containing the given position"""
+        # Look backwards for paragraph definition
+        before_content = content[:position]
+        
+        # Find last paragraph before this position
+        paragraph_pattern = r'([A-Z0-9][A-Z0-9-]*)\s*\.\s*$'
+        matches = list(re.finditer(paragraph_pattern, before_content, re.MULTILINE | re.IGNORECASE))
+        
+        if matches:
+            return matches[-1].group(1)
+        
+        return 'UNKNOWN-PARAGRAPH'
+
+    def _is_conditional_statement(self, content: str, position: int) -> bool:
+        """Check if statement at position is within conditional logic"""
+        # Look backward for IF/WHEN/EVALUATE without corresponding END
+        before_content = content[:position]
+        
+        # Count IF and END-IF
+        if_count = len(re.findall(r'\bIF\b', before_content, re.IGNORECASE))
+        end_if_count = len(re.findall(r'\bEND-IF\b', before_content, re.IGNORECASE))
+        
+        # Count WHEN without END-EVALUATE
+        when_count = len(re.findall(r'\bWHEN\b', before_content, re.IGNORECASE))
+        eval_count = len(re.findall(r'\bEVALUATE\b', before_content, re.IGNORECASE))
+        end_eval_count = len(re.findall(r'\bEND-EVALUATE\b', before_content, re.IGNORECASE))
+        
+        return (if_count > end_if_count) or (eval_count > end_eval_count and when_count > 0)
+
+    def _determine_copy_location(self, content: str, position: int) -> str:
+        """Determine which section contains the COPY statement"""
+        before_content = content[:position]
+        
+        sections = [
+            ('WORKING-STORAGE SECTION', 'WORKING-STORAGE'),
+            ('FILE SECTION', 'FILE-SECTION'),
+            ('LINKAGE SECTION', 'LINKAGE-SECTION'),
+            ('LOCAL-STORAGE SECTION', 'LOCAL-STORAGE'),
+            ('PROCEDURE DIVISION', 'PROCEDURE-DIVISION')
+        ]
+        
+        current_section = 'UNKNOWN'
+        for section_pattern, section_name in sections:
+            if section_pattern in before_content.upper():
+                current_section = section_name
+        
+        return current_section
+
+    def _determine_usage_context(self, copy_location: str) -> str:
+        """Determine usage context based on copy location"""
+        context_map = {
+            'WORKING-STORAGE': 'data_definition',
+            'FILE-SECTION': 'file_record_definition',
+            'LINKAGE-SECTION': 'parameter_definition',
+            'LOCAL-STORAGE': 'local_data_definition',
+            'PROCEDURE-DIVISION': 'procedure_logic'
+        }
+        
+        return context_map.get(copy_location, 'unknown')
+
+    def _determine_field_definition_location(self, content: str, position: int) -> str:
+        """Determine where a field is defined"""
+        return self._determine_copy_location(content, position)
+
+    def _determine_parent_field(self, content: str, position: int, current_level: int) -> str:
+        """Determine parent field for nested structures"""
+        before_content = content[:position]
+        lines = before_content.split('\n')
+        
+        # Look backwards for a field with lower level number
+        for line in reversed(lines):
+            level_match = re.match(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*)', line, re.IGNORECASE)
+            if level_match:
+                level = int(level_match.group(1))
+                if level < current_level:
+                    return level_match.group(2)
+        
+        return ''
+
+    def _build_qualified_name(self, field_name: str, parent_field: str) -> str:
+        """Build qualified field name"""
+        if parent_field:
+            return f"{parent_field}.{field_name}"
+        return field_name
 # ==================== DATABASE AND STORAGE METHODS ====================
 
     def _init_enhanced_database(self):
@@ -6191,6 +6794,91 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
                     last_accessed TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS program_relationships (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                calling_program TEXT NOT NULL,
+                called_program TEXT NOT NULL,
+                call_type TEXT NOT NULL, -- LINK, XCTL, CALL, EXEC
+                call_location TEXT, -- paragraph/section where call occurs
+                parameters TEXT, -- JSON array of parameters passed
+                call_statement TEXT, -- actual call statement
+                conditional_call BOOLEAN DEFAULT 0, -- if call is within IF/WHEN
+                line_number INTEGER,
+                created_timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(calling_program, called_program, call_type, call_location)
+                )
+            """)
+            
+            # Copybook relationships
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS copybook_relationships (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    program_name TEXT NOT NULL,
+                    copybook_name TEXT NOT NULL,
+                    copy_location TEXT NOT NULL, -- section where copied (WS, LS, FD, etc)
+                    replacing_clause TEXT, -- REPLACING clause if any
+                    copy_statement TEXT, -- full COPY statement
+                    line_number INTEGER,
+                    usage_context TEXT, -- data_definition, procedure_logic, etc
+                    created_timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(program_name, copybook_name, copy_location)
+                )
+            """)
+            
+            # File access relationships
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS file_access_relationships (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    program_name TEXT NOT NULL,
+                    file_name TEXT NOT NULL, -- logical file name
+                    physical_file TEXT, -- DDname or dataset name
+                    access_type TEXT NOT NULL, -- SELECT, FD, READ, WRITE, REWRITE, DELETE
+                    access_mode TEXT, -- INPUT, OUTPUT, I-O, EXTEND
+                    record_format TEXT, -- from FD
+                    access_location TEXT, -- paragraph where accessed
+                    line_number INTEGER,
+                    created_timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Cross-reference table for fields across programs/copybooks
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS field_cross_reference (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    field_name TEXT NOT NULL,
+                    qualified_name TEXT, -- full qualified name if nested
+                    source_type TEXT NOT NULL, -- program, copybook
+                    source_name TEXT NOT NULL, -- program or copybook name
+                    definition_location TEXT, -- WS, LS, FD, LINKAGE
+                    data_type TEXT,
+                    picture_clause TEXT,
+                    usage_clause TEXT,
+                    level_number INTEGER,
+                    parent_field TEXT, -- for nested structures
+                    occurs_info TEXT, -- JSON for array info
+                    business_domain TEXT, -- financial, temporal, identifier, etc
+                    created_timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(field_name, source_name, definition_location)
+                )
+            """)
+            
+            # Program impact analysis - what affects what
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS impact_analysis (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_artifact TEXT NOT NULL, -- program/copybook/file name
+                    source_type TEXT NOT NULL, -- program, copybook, file
+                    dependent_artifact TEXT NOT NULL,
+                    dependent_type TEXT NOT NULL,
+                    relationship_type TEXT NOT NULL, -- calls, includes, accesses, defines
+                    impact_level TEXT DEFAULT 'medium', -- low, medium, high, critical
+                    change_propagation TEXT, -- how changes propagate
+                    created_timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(source_artifact, dependent_artifact, relationship_type)
+                )
+            """)
             
             # Performance indexes
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_program_name ON program_chunks(program_name)")
@@ -6204,7 +6892,19 @@ class EnhancedCodeParserAgent(BaseOpulenceAgent):
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_db2_procedure ON db2_procedure_analysis(procedure_name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_llm_cache_hash ON llm_analysis_cache(content_hash)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_llm_cache_type ON llm_analysis_cache(analysis_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_prog_rel_calling ON program_relationships(calling_program)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_prog_rel_called ON program_relationships(called_program)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_copy_rel_program ON copybook_relationships(program_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_copy_rel_copybook ON copybook_relationships(copybook_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_rel_program ON file_access_relationships(program_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_rel_file ON file_access_relationships(file_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_field_xref_field ON field_cross_reference(field_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_field_xref_source ON field_cross_reference(source_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_impact_source ON impact_analysis(source_artifact)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_impact_dependent ON impact_analysis(dependent_artifact)")
             
+
+
             conn.commit()
             conn.close()
             
