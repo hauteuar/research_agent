@@ -82,6 +82,87 @@ class SamplingParams:
         self.top_p = top_p
         self.stop = stop
 
+class LLMContextManager:
+    """Manages LLM context window limitations and content chunking"""
+    
+    def __init__(self, max_tokens: int = 2048, reserve_tokens: int = 512):
+        self.max_tokens = max_tokens
+        self.reserve_tokens = reserve_tokens  # Reserve for prompt and response
+        self.max_content_tokens = max_tokens - reserve_tokens
+        
+        # Initialize tokenizer (using cl100k_base for GPT-4 family)
+        try:
+            self.tokenizer = tiktoken.get_encoding("cl100k_base")
+        except:
+            # Fallback to simple character-based estimation
+            self.tokenizer = None
+    
+    def estimate_tokens(self, text: str) -> int:
+        """Estimate token count for text"""
+        if self.tokenizer:
+            return len(self.tokenizer.encode(text))
+        else:
+            # Rough estimation: 1 token ≈ 4 characters
+            return len(text) // 4
+    
+    def chunk_content(self, content: str, overlap: int = 100) -> List[str]:
+        """Split content into chunks that fit within token limits"""
+        if self.estimate_tokens(content) <= self.max_content_tokens:
+            return [content]
+        
+        chunks = []
+        lines = content.split('\n')
+        current_chunk = []
+        current_tokens = 0
+        
+        for line in lines:
+            line_tokens = self.estimate_tokens(line + '\n')
+            
+            # If single line exceeds limit, split it further
+            if line_tokens > self.max_content_tokens:
+                # Split long line by characters
+                if current_chunk:
+                    chunks.append('\n'.join(current_chunk))
+                    current_chunk = []
+                    current_tokens = 0
+                
+                # Split the long line
+                char_chunks = self._split_long_line(line)
+                chunks.extend(char_chunks)
+                continue
+            
+            # Check if adding this line would exceed limit
+            if current_tokens + line_tokens > self.max_content_tokens:
+                if current_chunk:
+                    chunks.append('\n'.join(current_chunk))
+                
+                # Start new chunk with overlap
+                if overlap > 0 and len(current_chunk) > overlap:
+                    current_chunk = current_chunk[-overlap:]
+                    current_tokens = sum(self.estimate_tokens(l + '\n') for l in current_chunk)
+                else:
+                    current_chunk = []
+                    current_tokens = 0
+            
+            current_chunk.append(line)
+            current_tokens += line_tokens
+        
+        # Add remaining chunk
+        if current_chunk:
+            chunks.append('\n'.join(current_chunk))
+        
+        return chunks
+    
+    def _split_long_line(self, line: str) -> List[str]:
+        """Split a very long line into manageable chunks"""
+        max_chars = self.max_content_tokens * 4  # Rough char estimate
+        chunks = []
+        
+        for i in range(0, len(line), max_chars):
+            chunks.append(line[i:i + max_chars])
+        
+        return chunks
+    
 # Business Validator Classes
 class COBOLBusinessValidator:
     """Business rule validator for COBOL programs"""
@@ -156,7 +237,7 @@ class JCLBusinessValidator:
         return violations
 
 class CICSBusinessValidator:
-    """Business rule validator for CICS programs"""
+    """Enhanced Business rule validator for CICS programs with complete operation set"""
     
     async def validate_structure(self, content: str) -> List[BusinessRuleViolation]:
         violations = []
@@ -171,14 +252,201 @@ class CICSBusinessValidator:
                 severity="WARNING"
             ))
         
+        # Enhanced CICS command validation
+        violations.extend(await self._validate_cics_command_patterns(content, cics_commands))
+        
         # Check for transaction termination
         has_return = bool(re.search(r'EXEC\s+CICS\s+RETURN', content, re.IGNORECASE))
-        if not has_return and cics_commands:
+        has_abend = bool(re.search(r'EXEC\s+CICS\s+ABEND', content, re.IGNORECASE))
+        
+        if not has_return and not has_abend and cics_commands:
             violations.append(BusinessRuleViolation(
-                rule="MISSING_RETURN",
-                context="CICS program should have EXEC CICS RETURN",
+                rule="MISSING_TERMINATION",
+                context="CICS program should have EXEC CICS RETURN or ABEND",
                 severity="WARNING"
             ))
+        
+        # Validate file operation sequences
+        violations.extend(await self._validate_file_operation_sequences(content))
+        
+        # Validate browse operation sequences
+        violations.extend(await self._validate_browse_sequences(content))
+        
+        # Validate map operation patterns
+        violations.extend(await self._validate_map_operations(content))
+        
+        return violations
+    
+    async def _validate_cics_command_patterns(self, content: str, commands: List[str]) -> List[BusinessRuleViolation]:
+        """Validate CICS command patterns and sequences"""
+        violations = []
+        
+        # Check for invalid command combinations
+        if 'STARTBR' in commands and 'ENDBR' not in commands:
+            violations.append(BusinessRuleViolation(
+                rule="INCOMPLETE_BROWSE_SEQUENCE",
+                context="STARTBR found without corresponding ENDBR - browse operations must be properly terminated",
+                severity="ERROR"
+            ))
+        
+        if 'READNEXT' in commands and 'STARTBR' not in commands:
+            violations.append(BusinessRuleViolation(
+                rule="READNEXT_WITHOUT_STARTBR",
+                context="READNEXT found without STARTBR - sequential reads require browse initiation",
+                severity="ERROR"
+            ))
+        
+        if 'READPREV' in commands and 'STARTBR' not in commands:
+            violations.append(BusinessRuleViolation(
+                rule="READPREV_WITHOUT_STARTBR",
+                context="READPREV found without STARTBR - backward reads require browse initiation",
+                severity="ERROR"
+            ))
+        
+        # Check for uncommitted transaction patterns
+        has_syncpoint = 'SYNCPOINT' in commands
+        has_rollback = 'SYNCPOINT ROLLBACK' in ' '.join(re.findall(r'EXEC\s+CICS\s+SYNCPOINT[^.]*', content, re.IGNORECASE))
+        
+        file_modify_commands = [cmd for cmd in commands if cmd in ['WRITE', 'REWRITE', 'DELETE']]
+        if file_modify_commands and not has_syncpoint and not has_rollback:
+            violations.append(BusinessRuleViolation(
+                rule="MISSING_TRANSACTION_CONTROL",
+                context="File modification commands found without explicit transaction control (SYNCPOINT)",
+                severity="WARNING"
+            ))
+        
+        return violations
+    
+    async def _validate_file_operation_sequences(self, content: str) -> List[BusinessRuleViolation]:
+        """Validate file operation sequences"""
+        violations = []
+        
+        # Find all file operations in order
+        file_ops_pattern = r'EXEC\s+CICS\s+(READ|WRITE|REWRITE|DELETE|UNLOCK)\s+[^.]*?END-EXEC'
+        file_operations = re.findall(file_ops_pattern, content, re.IGNORECASE | re.DOTALL)
+        
+        # Check for REWRITE without prior READ
+        read_files = set()
+        for i, match in enumerate(re.finditer(file_ops_pattern, content, re.IGNORECASE | re.DOTALL)):
+            operation = match.group(1).upper()
+            
+            # Extract file name from the operation
+            file_match = re.search(r'FILE\s*\(\s*([^)]+)\s*\)', match.group(0), re.IGNORECASE)
+            file_name = file_match.group(1).strip() if file_match else 'UNKNOWN'
+            
+            if operation == 'READ':
+                read_files.add(file_name)
+            elif operation == 'REWRITE':
+                if file_name not in read_files:
+                    violations.append(BusinessRuleViolation(
+                        rule="REWRITE_WITHOUT_READ",
+                        context=f"REWRITE operation on file {file_name} without prior READ - may cause data integrity issues",
+                        severity="ERROR"
+                    ))
+        
+        return violations
+    
+    async def _validate_browse_sequences(self, content: str) -> List[BusinessRuleViolation]:
+        """Validate browse operation sequences"""
+        violations = []
+        
+        # Enhanced browse operation pattern - specifically handle STARTBR/ENDBR
+        browse_pattern = r'EXEC\s+CICS\s+(STARTBR|READNEXT|READPREV|ENDBR|RESETBR)\s+[^.]*?END-EXEC'
+        browse_ops = []
+        
+        for match in re.finditer(browse_pattern, content, re.IGNORECASE | re.DOTALL):
+            operation = match.group(1).upper()
+            
+            # Extract file name
+            file_match = re.search(r'FILE\s*\(\s*([^)]+)\s*\)', match.group(0), re.IGNORECASE)
+            file_name = file_match.group(1).strip() if file_match else 'UNKNOWN'
+            
+            browse_ops.append({
+                'operation': operation,
+                'file': file_name,
+                'position': match.start(),
+                'full_match': match.group(0)
+            })
+        
+        # Group by file and validate sequences
+        file_sequences = {}
+        for op in browse_ops:
+            file_name = op['file']
+            if file_name not in file_sequences:
+                file_sequences[file_name] = []
+            file_sequences[file_name].append(op)
+        
+        for file_name, ops in file_sequences.items():
+            ops.sort(key=lambda x: x['position'])  # Sort by position in file
+            
+            # Validate each file's browse sequence
+            browse_active = False
+            
+            for op in ops:
+                operation = op['operation']
+                
+                if operation == 'STARTBR':
+                    if browse_active:
+                        violations.append(BusinessRuleViolation(
+                            rule="NESTED_BROWSE_OPERATIONS",
+                            context=f"STARTBR issued while browse already active for file {file_name}",
+                            severity="WARNING"
+                        ))
+                    browse_active = True
+                
+                elif operation in ['READNEXT', 'READPREV', 'RESETBR']:
+                    if not browse_active:
+                        violations.append(BusinessRuleViolation(
+                            rule="BROWSE_OP_WITHOUT_STARTBR",
+                            context=f"{operation} operation on file {file_name} without active browse (missing STARTBR)",
+                            severity="ERROR"
+                        ))
+                
+                elif operation == 'ENDBR':
+                    if not browse_active:
+                        violations.append(BusinessRuleViolation(
+                            rule="ENDBR_WITHOUT_STARTBR",
+                            context=f"ENDBR issued without corresponding STARTBR for file {file_name}",
+                            severity="WARNING"
+                        ))
+                    browse_active = False
+            
+            # Check if browse was started but never ended
+            if browse_active:
+                violations.append(BusinessRuleViolation(
+                    rule="UNCLOSED_BROWSE_OPERATION",
+                    context=f"STARTBR issued for file {file_name} but no corresponding ENDBR found",
+                    severity="ERROR"
+                ))
+        
+        return violations
+    
+    async def _validate_map_operations(self, content: str) -> List[BusinessRuleViolation]:
+        """Validate BMS map operations"""
+        violations = []
+        
+        # Check for map operations
+        send_map = bool(re.search(r'EXEC\s+CICS\s+SEND\s+MAP', content, re.IGNORECASE))
+        receive_map = bool(re.search(r'EXEC\s+CICS\s+RECEIVE\s+MAP', content, re.IGNORECASE))
+        
+        # Interactive programs should have both send and receive
+        if send_map and not receive_map:
+            violations.append(BusinessRuleViolation(
+                rule="INCOMPLETE_MAP_INTERACTION",
+                context="SEND MAP found without RECEIVE MAP - interactive programs should handle user input",
+                severity="WARNING"
+            ))
+        
+        # Check for proper map error handling
+        map_operations = re.findall(r'EXEC\s+CICS\s+(SEND|RECEIVE)\s+MAP[^.]*?END-EXEC', content, re.IGNORECASE | re.DOTALL)
+        
+        for map_op in map_operations:
+            if 'RESP(' not in map_op.upper() and 'NOHANDLE' not in map_op.upper():
+                violations.append(BusinessRuleViolation(
+                    rule="MAP_OPERATION_WITHOUT_ERROR_HANDLING",
+                    context="Map operation without RESP or NOHANDLE - should handle potential errors",
+                    severity="WARNING"
+                ))
         
         return violations
 
@@ -218,6 +486,7 @@ class CompleteEnhancedCodeParserAgent:
         # Thread safety
         self._engine_lock = asyncio.Lock()
         self._processed_files = set()  # Duplicate prevention
+        self.context_manager = LLMContextManager(max_tokens=2048, reserve_tokens=512)
         
         # Business Rule Validators
         self.business_validators = {
@@ -385,6 +654,55 @@ class CompleteEnhancedCodeParserAgent:
             'cics_handle_aid': re.compile(r'EXEC\s+CICS\s+HANDLE\s+AID\s+(.*?)\s+END-EXEC', re.IGNORECASE | re.DOTALL),
             'cics_resp': re.compile(r'RESP\(([A-Z][A-Z0-9-]*)\)', re.IGNORECASE),
             'cics_nohandle': re.compile(r'\bNOHANDLE\b', re.IGNORECASE),
+    
+            'cics_startbr': re.compile(r'EXEC\s+CICS\s+STARTBR\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_readnext': re.compile(r'EXEC\s+CICS\s+READNEXT\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_readprev': re.compile(r'EXEC\s+CICS\s+READPREV\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_endbr': re.compile(r'EXEC\s+CICS\s+ENDBR\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_resetbr': re.compile(r'EXEC\s+CICS\s+RESETBR\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            
+            # Transaction control and error handling
+            'cics_abend': re.compile(r'EXEC\s+CICS\s+ABEND\s*(?:\((.*?)\))?\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_syncpoint': re.compile(r'EXEC\s+CICS\s+SYNCPOINT\s*(?:\s+ROLLBACK)?\s*END-EXEC', re.IGNORECASE),
+            'cics_unlock': re.compile(r'EXEC\s+CICS\s+UNLOCK\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            
+            # Queue operations
+            'cics_writeq_td': re.compile(r'EXEC\s+CICS\s+WRITEQ\s+TD\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_readq_td': re.compile(r'EXEC\s+CICS\s+READQ\s+TD\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_writeq_ts': re.compile(r'EXEC\s+CICS\s+WRITEQ\s+TS\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_readq_ts': re.compile(r'EXEC\s+CICS\s+READQ\s+TS\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_deleteq_ts': re.compile(r'EXEC\s+CICS\s+DELETEQ\s+TS\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            
+            # Interval control
+            'cics_delay': re.compile(r'EXEC\s+CICS\s+DELAY\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_post': re.compile(r'EXEC\s+CICS\s+POST\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_wait': re.compile(r'EXEC\s+CICS\s+WAIT\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            
+            # Task control
+            'cics_suspend': re.compile(r'EXEC\s+CICS\s+SUSPEND\s*END-EXEC', re.IGNORECASE),
+            'cics_resume': re.compile(r'EXEC\s+CICS\s+RESUME\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            
+            # Storage management
+            'cics_getmain': re.compile(r'EXEC\s+CICS\s+GETMAIN\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_freemain': re.compile(r'EXEC\s+CICS\s+FREEMAIN\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            
+            # Document and journal operations
+            'cics_journal': re.compile(r'EXEC\s+CICS\s+JOURNAL\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            
+            # Enhanced error handling patterns
+            'cics_push_handle': re.compile(r'EXEC\s+CICS\s+PUSH\s+HANDLE\s*END-EXEC', re.IGNORECASE),
+            'cics_pop_handle': re.compile(r'EXEC\s+CICS\s+POP\s+HANDLE\s*END-EXEC', re.IGNORECASE),
+            'cics_ignore_condition': re.compile(r'EXEC\s+CICS\s+IGNORE\s+CONDITION\s+(.*?)\s*END-EXEC', re.IGNORECASE),
+            
+            # BMS extended operations
+            'cics_build_attach': re.compile(r'EXEC\s+CICS\s+BUILD\s+ATTACH\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_route': re.compile(r'EXEC\s+CICS\s+ROUTE\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            
+            # Web services and channels (modern CICS)
+            'cics_get_channel': re.compile(r'EXEC\s+CICS\s+GET\s+CHANNEL\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_put_channel': re.compile(r'EXEC\s+CICS\s+PUT\s+CHANNEL\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_get_container': re.compile(r'EXEC\s+CICS\s+GET\s+CONTAINER\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
+            'cics_put_container': re.compile(r'EXEC\s+CICS\s+PUT\s+CONTAINER\s*\((.*?)\)\s*END-EXEC', re.IGNORECASE | re.DOTALL),
         }
         
         # Enhanced BMS patterns
@@ -471,7 +789,92 @@ class CompleteEnhancedCodeParserAgent:
                     created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS program_relationships (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                calling_program TEXT NOT NULL,
+                called_program TEXT NOT NULL,
+                call_type TEXT NOT NULL, -- LINK, XCTL, CALL, EXEC
+                call_location TEXT, -- paragraph/section where call occurs
+                parameters TEXT, -- JSON array of parameters passed
+                call_statement TEXT, -- actual call statement
+                conditional_call BOOLEAN DEFAULT 0, -- if call is within IF/WHEN
+                line_number INTEGER,
+                created_timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(calling_program, called_program, call_type, call_location)
+            )
+            """)
+        
+            # Copybook relationships
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS copybook_relationships (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    program_name TEXT NOT NULL,
+                    copybook_name TEXT NOT NULL,
+                    copy_location TEXT NOT NULL, -- section where copied (WS, LS, FD, etc)
+                    replacing_clause TEXT, -- REPLACING clause if any
+                    copy_statement TEXT, -- full COPY statement
+                    line_number INTEGER,
+                    usage_context TEXT, -- data_definition, procedure_logic, etc
+                    created_timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(program_name, copybook_name, copy_location)
+                )
+            """)
             
+            # File access relationships
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS file_access_relationships (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    program_name TEXT NOT NULL,
+                    file_name TEXT NOT NULL, -- logical file name
+                    physical_file TEXT, -- DDname or dataset name
+                    access_type TEXT NOT NULL, -- SELECT, FD, READ, WRITE, REWRITE, DELETE
+                    access_mode TEXT, -- INPUT, OUTPUT, I-O, EXTEND
+                    record_format TEXT, -- from FD
+                    access_location TEXT, -- paragraph where accessed
+                    line_number INTEGER,
+                    created_timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Cross-reference table for fields across programs/copybooks
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS field_cross_reference (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    field_name TEXT NOT NULL,
+                    qualified_name TEXT, -- full qualified name if nested
+                    source_type TEXT NOT NULL, -- program, copybook
+                    source_name TEXT NOT NULL, -- program or copybook name
+                    definition_location TEXT, -- WS, LS, FD, LINKAGE
+                    data_type TEXT,
+                    picture_clause TEXT,
+                    usage_clause TEXT,
+                    level_number INTEGER,
+                    parent_field TEXT, -- for nested structures
+                    occurs_info TEXT, -- JSON for array info
+                    business_domain TEXT, -- financial, temporal, identifier, etc
+                    created_timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(field_name, source_name, definition_location)
+                )
+            """)
+            
+            # Program impact analysis - what affects what
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS impact_analysis (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_artifact TEXT NOT NULL, -- program/copybook/file name
+                    source_type TEXT NOT NULL, -- program, copybook, file
+                    dependent_artifact TEXT NOT NULL,
+                    dependent_type TEXT NOT NULL,
+                    relationship_type TEXT NOT NULL, -- calls, includes, accesses, defines
+                    impact_level TEXT DEFAULT 'medium', -- low, medium, high, critical
+                    change_propagation TEXT, -- how changes propagate
+                    created_timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(source_artifact, dependent_artifact, relationship_type)
+                )
+            """)
+                
             # Indexes for performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_program_name ON program_chunks(program_name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunk_type ON program_chunks(chunk_type)")
@@ -479,7 +882,18 @@ class CompleteEnhancedCodeParserAgent:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_business_rules ON business_rule_violations(program_name, rule_type)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_field_lineage_field ON field_lineage(field_name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_field_lineage_program ON field_lineage(program_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_prog_rel_calling ON program_relationships(calling_program)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_prog_rel_called ON program_relationships(called_program)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_copy_rel_program ON copybook_relationships(program_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_copy_rel_copybook ON copybook_relationships(copybook_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_rel_program ON file_access_relationships(program_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_rel_file ON file_access_relationships(file_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_field_xref_field ON field_cross_reference(field_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_field_xref_source ON field_cross_reference(source_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_impact_source ON impact_analysis(source_artifact)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_impact_dependent ON impact_analysis(dependent_artifact)")
             
+
             conn.commit()
             conn.close()
             
@@ -502,34 +916,110 @@ class CompleteEnhancedCodeParserAgent:
             # Fallback for standalone usage
             yield self
 
-    async def _generate_with_llm(self, prompt: str, sampling_params: SamplingParams) -> str:
-        """Generate text with LLM via API coordinator"""
+    async def _generate_with_llm(self, prompt: str, content: str, 
+                                   sampling_params: SamplingParams,
+                                   merge_strategy: str = "json_merge") -> str:
+        """Generate text with LLM using content chunking for large inputs"""
         try:
-            if self.coordinator:
-                # Convert SamplingParams to API parameters
-                params = {
-                    "max_tokens": sampling_params.max_tokens,
-                    "temperature": sampling_params.temperature,
-                    "top_p": getattr(sampling_params, 'top_p', 0.9),
-                    "stop": getattr(sampling_params, 'stop', None)
-                }
+            # Check if content fits in single call
+            full_prompt = f"{prompt}\n\n{content}"
+            if self.context_manager.estimate_tokens(full_prompt) <= self.context_manager.max_tokens:
+                return await self._generate_with_llm(full_prompt, sampling_params)
+            
+            # Split content into chunks
+            content_chunks = self.context_manager.chunk_content(content)
+            self.logger.info(f"Splitting content into {len(content_chunks)} chunks for LLM processing")
+            
+            results = []
+            
+            for i, chunk in enumerate(content_chunks):
+                chunk_prompt = f"{prompt}\n\nChunk {i+1}/{len(content_chunks)}:\n{chunk}"
                 
-                # Call coordinator's API
-                result = await self.coordinator.call_model_api(prompt, params, self.gpu_id)
+                # Add context about chunking
+                if len(content_chunks) > 1:
+                    chunk_prompt += f"\n\nNote: This is part {i+1} of {len(content_chunks)} chunks. Focus on this section only."
                 
-                # Extract text from API response
-                if isinstance(result, dict):
-                    return result.get('text', '').strip()
-                else:
-                    return str(result).strip()
-            else:
-                # Fallback for standalone usage
-                self.logger.warning("No coordinator available for LLM generation")
-                return ""
-                
+                try:
+                    result = await self._generate_with_llm(chunk_prompt, sampling_params)
+                    if result.strip():
+                        results.append(result)
+                except Exception as e:
+                    self.logger.warning(f"Chunk {i+1} processing failed: {str(e)}")
+                    continue
+            
+            # Merge results based on strategy
+            return self._merge_chunked_results(results, merge_strategy)
+            
         except Exception as e:
-            self.logger.error(f"LLM generation failed: {str(e)}")
+            self.logger.error(f"Chunked LLM generation failed: {str(e)}")
             return ""
+
+    def _merge_chunked_results(self, results: List[str], strategy: str) -> str:
+        """Merge results from multiple LLM chunks"""
+        if not results:
+            return ""
+        
+        if len(results) == 1:
+            return results[0]
+        
+        if strategy == "json_merge":
+            return self._merge_json_results(results)
+        elif strategy == "list_merge":
+            return self._merge_list_results(results)
+        elif strategy == "text_concat":
+            return "\n".join(results)
+        else:
+            return results[0]  # Return first result as fallback
+
+    def _merge_json_results(self, results: List[str]) -> str:
+        """Merge JSON results from multiple chunks"""
+        merged_data = {}
+        
+        for result in results:
+            try:
+                # Extract JSON from result
+                if '{' in result:
+                    json_start = result.find('{')
+                    json_end = result.rfind('}') + 1
+                    json_str = result[json_start:json_end]
+                    data = json.loads(json_str)
+                    
+                    # Merge data
+                    for key, value in data.items():
+                        if key in merged_data:
+                            if isinstance(merged_data[key], list) and isinstance(value, list):
+                                merged_data[key].extend(value)
+                            elif isinstance(merged_data[key], dict) and isinstance(value, dict):
+                                merged_data[key].update(value)
+                            elif isinstance(merged_data[key], (int, float)) and isinstance(value, (int, float)):
+                                merged_data[key] += value
+                            else:
+                                # Keep the first value for conflicting types
+                                pass
+                        else:
+                            merged_data[key] = value
+                            
+            except (json.JSONDecodeError, ValueError):
+                continue
+        
+        return json.dumps(merged_data, indent=2)
+
+    def _merge_list_results(self, results: List[str]) -> str:
+        """Merge list-based results from multiple chunks"""
+        all_items = []
+        
+        for result in results:
+            # Try to extract lists from the result
+            lines = result.strip().split('\n')
+            for line in lines:
+                line = line.strip()
+                if line and not line.startswith('{') and not line.startswith('}'):
+                    # Remove bullet points or numbers
+                    cleaned_line = line.lstrip('- * 1234567890. ')
+                    if cleaned_line:
+                        all_items.append(cleaned_line)
+        
+        return '\n'.join(all_items)
         
     # ==================== CORE PROCESSING METHODS ====================
 
@@ -814,7 +1304,14 @@ class CompleteEnhancedCodeParserAgent:
                 "processing_timestamp": dt.now().isoformat(),
                 "file_hash": file_hash
             }
-            
+            if result.get("status") == "success":
+                await self._extract_and_store_program_relationships(content, file_path.name, file_type)
+                await self._extract_and_store_copybook_relationships(content, file_path.name)
+                await self._extract_and_store_file_relationships(content, file_path.name)
+                await self._extract_and_store_field_cross_reference(content, file_path.name, file_type)
+                
+                # Generate impact analysis
+            await self._generate_impact_analysis(file_path.name, file_type)
             return self._add_processing_info(result)
             
         except Exception as e:
@@ -824,6 +1321,76 @@ class CompleteEnhancedCodeParserAgent:
                 "file_name": file_path.name,
                 "error": str(e)
             })
+
+
+
+    async def _generate_impact_analysis(self, artifact_name: str, artifact_type: str):
+        """Generate impact analysis for an artifact"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            impacts = []
+            
+            if artifact_type in ['cobol', 'cics']:
+                # Programs that call this program
+                cursor.execute("""
+                    SELECT DISTINCT calling_program, call_type 
+                    FROM program_relationships 
+                    WHERE called_program = ?
+                """, (artifact_name,))
+                
+                for row in cursor.fetchall():
+                    impacts.append({
+                        'source_artifact': row[0],
+                        'source_type': 'program',
+                        'dependent_artifact': artifact_name,
+                        'dependent_type': artifact_type,
+                        'relationship_type': f'calls_via_{row[1]}',
+                        'impact_level': 'high',
+                        'change_propagation': 'interface_change_required'
+                    })
+                
+                # Programs that use same copybooks
+                cursor.execute("""
+                    SELECT DISTINCT cr2.program_name, cr1.copybook_name
+                    FROM copybook_relationships cr1
+                    JOIN copybook_relationships cr2 ON cr1.copybook_name = cr2.copybook_name
+                    WHERE cr1.program_name = ? AND cr2.program_name != ?
+                """, (artifact_name, artifact_name))
+                
+                for row in cursor.fetchall():
+                    impacts.append({
+                        'source_artifact': artifact_name,
+                        'source_type': artifact_type,
+                        'dependent_artifact': row[0],
+                        'dependent_type': 'program',
+                        'relationship_type': f'shares_copybook_{row[1]}',
+                        'impact_level': 'medium',
+                        'change_propagation': 'data_structure_dependency'
+                    })
+            
+            # Store impact analysis
+            for impact in impacts:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO impact_analysis 
+                    (source_artifact, source_type, dependent_artifact, dependent_type,
+                    relationship_type, impact_level, change_propagation)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    impact['source_artifact'],
+                    impact['source_type'],
+                    impact['dependent_artifact'],
+                    impact['dependent_type'],
+                    impact['relationship_type'],
+                    impact['impact_level'],
+                    impact['change_propagation']
+                ))
+            
+            conn.commit()
+        except Exception as e:
+            self.logger.error(f"Processing failed for {artifact_name}: {str(e)}")
+            
 
     async def _read_file_with_encoding(self, file_path: Path) -> Optional[str]:
         """Enhanced file reading with multiple encoding attempts"""
@@ -1587,6 +2154,440 @@ class CompleteEnhancedCodeParserAgent:
         
         return chunks
 
+    async def _extract_and_store_program_relationships(self, content: str, program_name: str, file_type: str):
+        """Extract and store all program relationships"""
+        try:
+            relationships = []
+            
+            if file_type in ['cobol', 'cics']:
+                # Extract COBOL CALL statements
+                relationships.extend(self._extract_cobol_calls(content, program_name))
+                
+                # Extract CICS LINK/XCTL calls
+                relationships.extend(self._extract_cics_calls(content, program_name))
+                
+            elif file_type == 'jcl':
+                # Extract JCL EXEC PGM calls
+                relationships.extend(self._extract_jcl_calls(content, program_name))
+            
+            # Store relationships
+            if relationships:
+                await self._store_program_relationships(relationships)
+                
+        except Exception as e:
+            self.logger.error(f"Failed to extract program relationships: {str(e)}")
+
+    def _extract_cobol_calls(self, content: str, calling_program: str) -> List[Dict]:
+        """Extract COBOL CALL statements"""
+        relationships = []
+        
+        # Pattern for CALL statements
+        call_pattern = r'CALL\s+[\'"]([^\'\"]+)[\'"](?:\s+USING\s+([^\.]+))?'
+        call_matches = re.finditer(call_pattern, content, re.IGNORECASE)
+        
+        for match in call_matches:
+            called_program = match.group(1).strip()
+            parameters = match.group(2).strip() if match.group(2) else ""
+            
+            # Find the paragraph/section containing this call
+            call_location = self._find_containing_paragraph(content, match.start())
+            
+            # Check if call is conditional
+            conditional = self._is_conditional_statement(content, match.start())
+            
+            relationships.append({
+                'calling_program': calling_program,
+                'called_program': called_program,
+                'call_type': 'CALL',
+                'call_location': call_location,
+                'parameters': parameters.split() if parameters else [],
+                'call_statement': match.group(0),
+                'conditional_call': conditional,
+                'line_number': content[:match.start()].count('\n') + 1
+            })
+        
+        return relationships
+
+    def _extract_cics_calls(self, content: str, calling_program: str) -> List[Dict]:
+        """Extract CICS LINK and XCTL calls"""
+        relationships = []
+        
+        # CICS LINK pattern
+        link_pattern = r'EXEC\s+CICS\s+LINK\s+[^.]*?PROGRAM\s*\(\s*[\'"]?([^\'\")\s]+)[\'"]?\s*\)[^.]*?END-EXEC'
+        link_matches = re.finditer(link_pattern, content, re.IGNORECASE | re.DOTALL)
+        
+        for match in link_matches:
+            called_program = match.group(1).strip()
+            call_location = self._find_containing_paragraph(content, match.start())
+            
+            # Extract COMMAREA info
+            commarea_match = re.search(r'COMMAREA\s*\(\s*([^)]+)\s*\)', match.group(0), re.IGNORECASE)
+            parameters = [commarea_match.group(1)] if commarea_match else []
+            
+            relationships.append({
+                'calling_program': calling_program,
+                'called_program': called_program,
+                'call_type': 'CICS_LINK',
+                'call_location': call_location,
+                'parameters': parameters,
+                'call_statement': match.group(0),
+                'conditional_call': self._is_conditional_statement(content, match.start()),
+                'line_number': content[:match.start()].count('\n') + 1
+            })
+        
+        # CICS XCTL pattern
+        xctl_pattern = r'EXEC\s+CICS\s+XCTL\s+[^.]*?PROGRAM\s*\(\s*[\'"]?([^\'\")\s]+)[\'"]?\s*\)[^.]*?END-EXEC'
+        xctl_matches = re.finditer(xctl_pattern, content, re.IGNORECASE | re.DOTALL)
+        
+        for match in xctl_matches:
+            called_program = match.group(1).strip()
+            call_location = self._find_containing_paragraph(content, match.start())
+            
+            commarea_match = re.search(r'COMMAREA\s*\(\s*([^)]+)\s*\)', match.group(0), re.IGNORECASE)
+            parameters = [commarea_match.group(1)] if commarea_match else []
+            
+            relationships.append({
+                'calling_program': calling_program,
+                'called_program': called_program,
+                'call_type': 'CICS_XCTL',
+                'call_location': call_location,
+                'parameters': parameters,
+                'call_statement': match.group(0),
+                'conditional_call': self._is_conditional_statement(content, match.start()),
+                'line_number': content[:match.start()].count('\n') + 1
+            })
+        
+        return relationships
+
+    def _extract_jcl_calls(self, content: str, calling_job: str) -> List[Dict]:
+        """Extract JCL EXEC PGM calls"""
+        relationships = []
+        
+        # JCL EXEC PGM pattern
+        exec_pattern = r'^//(\w+)\s+EXEC\s+(?:PGM=([^,\s]+)|PROC=([^,\s]+)|([^,\s]+))'
+        exec_matches = re.finditer(exec_pattern, content, re.IGNORECASE | re.MULTILINE)
+        
+        for match in exec_matches:
+            step_name = match.group(1)
+            program_name = match.group(2) or match.group(3) or match.group(4)
+            
+            if program_name:
+                call_type = 'JCL_EXEC_PGM' if match.group(2) else 'JCL_EXEC_PROC'
+                
+                relationships.append({
+                    'calling_program': calling_job,
+                    'called_program': program_name.strip(),
+                    'call_type': call_type,
+                    'call_location': step_name,
+                    'parameters': [],
+                    'call_statement': match.group(0),
+                    'conditional_call': False,
+                    'line_number': content[:match.start()].count('\n') + 1
+                })
+        
+        return relationships
+
+    async def _extract_and_store_copybook_relationships(self, content: str, program_name: str):
+        """Extract and store copybook relationships"""
+        try:
+            relationships = []
+            
+            # Enhanced COPY statement pattern
+            copy_pattern = r'COPY\s+([A-Z][A-Z0-9-]*)(?:\s+IN\s+([A-Z][A-Z0-9-]*))?(?:\s+REPLACING\s+(.*?))?(?=\s*\.|\s*$)'
+            copy_matches = re.finditer(copy_pattern, content, re.IGNORECASE | re.DOTALL)
+            
+            for match in copy_matches:
+                copybook_name = match.group(1).strip()
+                library_name = match.group(2).strip() if match.group(2) else ""
+                replacing_clause = match.group(3).strip() if match.group(3) else ""
+                
+                # Determine copy location (which section)
+                copy_location = self._determine_copy_location(content, match.start())
+                usage_context = self._determine_usage_context(copy_location)
+                
+                relationships.append({
+                    'program_name': program_name,
+                    'copybook_name': copybook_name,
+                    'copy_location': copy_location,
+                    'replacing_clause': replacing_clause,
+                    'copy_statement': match.group(0),
+                    'line_number': content[:match.start()].count('\n') + 1,
+                    'usage_context': usage_context
+                })
+            
+            if relationships:
+                await self._store_copybook_relationships(relationships)
+                
+        except Exception as e:
+            self.logger.error(f"Failed to extract copybook relationships: {str(e)}")
+
+    async def _extract_and_store_file_relationships(self, content: str, program_name: str):
+        """Extract and store file access relationships"""
+        try:
+            relationships = []
+            
+            # SELECT statements (file assignments)
+            select_pattern = r'SELECT\s+([A-Z][A-Z0-9-]*)\s+ASSIGN\s+TO\s+([^\s\.]+)'
+            select_matches = re.finditer(select_pattern, content, re.IGNORECASE)
+            
+            for match in select_matches:
+                logical_file = match.group(1).strip()
+                physical_file = match.group(2).strip()
+                
+                relationships.append({
+                    'program_name': program_name,
+                    'file_name': logical_file,
+                    'physical_file': physical_file,
+                    'access_type': 'SELECT',
+                    'access_mode': '',
+                    'record_format': '',
+                    'access_location': 'FILE-CONTROL',
+                    'line_number': content[:match.start()].count('\n') + 1
+                })
+            
+            # FD statements
+            fd_pattern = r'FD\s+([A-Z][A-Z0-9-]*)'
+            fd_matches = re.finditer(fd_pattern, content, re.IGNORECASE)
+            
+            for match in fd_matches:
+                file_name = match.group(1).strip()
+                
+                relationships.append({
+                    'program_name': program_name,
+                    'file_name': file_name,
+                    'physical_file': '',
+                    'access_type': 'FD',
+                    'access_mode': '',
+                    'record_format': '',
+                    'access_location': 'FILE-SECTION',
+                    'line_number': content[:match.start()].count('\n') + 1
+                })
+            
+            # File operations (READ, WRITE, etc.)
+            file_ops = ['READ', 'write', 'rewrite', 'delete', 'open', 'close']
+            for op in file_ops:
+                op_pattern = rf'\b{op}\s+([A-Z][A-Z0-9-]*)'
+                op_matches = re.finditer(op_pattern, content, re.IGNORECASE)
+                
+                for match in op_matches:
+                    file_name = match.group(1).strip()
+                    access_location = self._find_containing_paragraph(content, match.start())
+                    
+                    relationships.append({
+                        'program_name': program_name,
+                        'file_name': file_name,
+                        'physical_file': '',
+                        'access_type': op.upper(),
+                        'access_mode': '',
+                        'record_format': '',
+                        'access_location': access_location,
+                        'line_number': content[:match.start()].count('\n') + 1
+                    })
+            
+            if relationships:
+                await self._store_file_relationships(relationships)
+                
+        except Exception as e:
+            self.logger.error(f"Failed to extract file relationships: {str(e)}")
+
+    async def _extract_and_store_field_cross_reference(self, content: str, source_name: str, source_type: str):
+        """Extract and store comprehensive field cross-reference"""
+        try:
+            field_refs = []
+            
+            # Data item pattern for definitions
+            data_pattern = r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*)\s+(.*?)\.?\s*$'
+            data_matches = re.finditer(data_pattern, content, re.MULTILINE | re.IGNORECASE)
+            
+            for match in data_matches:
+                level = int(match.group(1))
+                field_name = match.group(2).strip()
+                definition = match.group(3).strip()
+                
+                # Skip comment lines
+                if match.group(0).strip().startswith('*'):
+                    continue
+                
+                # Determine definition location
+                def_location = self._determine_field_definition_location(content, match.start())
+                
+                # Extract field attributes
+                pic_clause = self._extract_pic_clause(definition)
+                usage_clause = self._extract_usage_clause(definition)
+                data_type = self._determine_data_type_enhanced(definition)
+                
+                # Determine parent field for nested structures
+                parent_field = self._determine_parent_field(content, match.start(), level)
+                
+                # Extract business domain
+                business_domain = self._infer_business_domain(field_name)
+                
+                # Build qualified name for nested fields
+                qualified_name = self._build_qualified_name(field_name, parent_field)
+                
+                field_refs.append({
+                    'field_name': field_name,
+                    'qualified_name': qualified_name,
+                    'source_type': source_type,
+                    'source_name': source_name,
+                    'definition_location': def_location,
+                    'data_type': data_type,
+                    'picture_clause': pic_clause,
+                    'usage_clause': usage_clause,
+                    'level_number': level,
+                    'parent_field': parent_field,
+                    'occurs_info': json.dumps(self._extract_occurs_info(definition)),
+                    'business_domain': business_domain
+                })
+            
+            if field_refs:
+                await self._store_field_cross_reference(field_refs)
+                
+        except Exception as e:
+            self.logger.error(f"Failed to extract field cross-reference: {str(e)}")
+
+    # STORAGE METHODS
+
+    async def _store_program_relationships(self, relationships: List[Dict]):
+        """Store program relationships in database"""
+        if not relationships:
+            return
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            for rel in relationships:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO program_relationships 
+                    (calling_program, called_program, call_type, call_location, 
+                    parameters, call_statement, conditional_call, line_number)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    rel['calling_program'],
+                    rel['called_program'],
+                    rel['call_type'],
+                    rel['call_location'],
+                    json.dumps(rel['parameters']),
+                    rel['call_statement'],
+                    rel['conditional_call'],
+                    rel['line_number']
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"Stored {len(relationships)} program relationships")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store program relationships: {str(e)}")
+
+    async def _store_copybook_relationships(self, relationships: List[Dict]):
+        """Store copybook relationships in database"""
+        if not relationships:
+            return
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            for rel in relationships:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO copybook_relationships 
+                    (program_name, copybook_name, copy_location, replacing_clause,
+                    copy_statement, line_number, usage_context)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    rel['program_name'],
+                    rel['copybook_name'],
+                    rel['copy_location'],
+                    rel['replacing_clause'],
+                    rel['copy_statement'],
+                    rel['line_number'],
+                    rel['usage_context']
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"Stored {len(relationships)} copybook relationships")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store copybook relationships: {str(e)}")
+
+    async def _store_file_relationships(self, relationships: List[Dict]):
+        """Store file access relationships in database"""
+        if not relationships:
+            return
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            for rel in relationships:
+                cursor.execute("""
+                    INSERT OR IGNORE INTO file_access_relationships 
+                    (program_name, file_name, physical_file, access_type,
+                    access_mode, record_format, access_location, line_number)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    rel['program_name'],
+                    rel['file_name'],
+                    rel['physical_file'],
+                    rel['access_type'],
+                    rel['access_mode'],
+                    rel['record_format'],
+                    rel['access_location'],
+                    rel['line_number']
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"Stored {len(relationships)} file relationships")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store file relationships: {str(e)}")
+
+    async def _store_field_cross_reference(self, field_refs: List[Dict]):
+        """Store field cross-reference in database"""
+        if not field_refs:
+            return
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            for ref in field_refs:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO field_cross_reference 
+                    (field_name, qualified_name, source_type, source_name,
+                    definition_location, data_type, picture_clause, usage_clause,
+                    level_number, parent_field, occurs_info, business_domain)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    ref['field_name'],
+                    ref['qualified_name'],
+                    ref['source_type'],
+                    ref['source_name'],
+                    ref['definition_location'],
+                    ref['data_type'],
+                    ref['picture_clause'],
+                    ref['usage_clause'],
+                    ref['level_number'],
+                    ref['parent_field'],
+                    ref['occurs_info'],
+                    ref['business_domain']
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"Stored {len(field_refs)} field cross-references")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store field cross-reference: {str(e)}")
+
     # ==================== COBOL STORED PROCEDURE PARSING METHODS ====================
 
     async def _parse_cobol_stored_procedure_with_business_rules(self, content: str, filename: str) -> List[CodeChunk]:
@@ -2079,11 +3080,9 @@ class CompleteEnhancedCodeParserAgent:
     # ==================== ANALYSIS METHODS USING API ====================
 
     async def _analyze_division_with_llm(self, content: str, division_name: str) -> Dict[str, Any]:
-        """Analyze COBOL division with LLM via API"""
+        """Analyze COBOL division with LLM via API using chunked processing"""
         prompt = f"""
         Analyze this COBOL {division_name}:
-        
-        {content[:800]}...
         
         Extract key information:
         1. Main purpose and functionality
@@ -2103,11 +3102,15 @@ class CompleteEnhancedCodeParserAgent:
         sampling_params = SamplingParams(temperature=0.1, max_tokens=400)
         
         try:
-            response_text = await self._generate_with_llm(prompt, sampling_params)
+            response_text = await self._generate_with_llm(
+                prompt, content, sampling_params, "json_merge"
+            )
+            
             if '{' in response_text:
                 json_start = response_text.find('{')
                 json_end = response_text.rfind('}') + 1
                 return json.loads(response_text[json_start:json_end])
+                
         except Exception as e:
             self.logger.warning(f"Division analysis failed: {str(e)}")
         
@@ -2118,64 +3121,48 @@ class CompleteEnhancedCodeParserAgent:
             "configuration": "Standard COBOL division"
         }
 
-    async def _analyze_data_section_with_llm(self, content: str, section_name: str) -> Dict[str, Any]:
-        """Analyze data section with comprehensive field analysis using API"""
-        
-        # Extract field information first for context
-        field_analysis = await self._analyze_fields_comprehensive(content)
-        
+    async def _analyze_division_with_llm(self, content: str, division_name: str) -> Dict[str, Any]:
+        """Analyze COBOL division with LLM via API using chunked processing"""
         prompt = f"""
-        Analyze this COBOL data section: {section_name}
+        Analyze this COBOL {division_name}:
         
-        {content[:800]}...
-        
-        Provide comprehensive analysis of:
-        1. Record structures and hierarchical layouts
-        2. Key data elements and their business purposes
-        3. Relationships between fields and groups
-        4. Data validation patterns and constraints
-        5. Business domain and entity types represented
+        Extract key information:
+        1. Main purpose and functionality
+        2. Key elements defined
+        3. Dependencies and relationships
+        4. Configuration or setup details
         
         Return as JSON:
         {{
-            "record_structures": [
-                {{"name": "record1", "purpose": "customer data", "fields": 15}}
-            ],
-            "key_elements": [
-                {{"name": "element1", "type": "identifier", "business_purpose": "customer key"}}
-            ],
-            "field_relationships": [
-                {{"parent": "customer-record", "children": ["cust-name", "cust-addr"]}}
-            ],
-            "validation_patterns": [
-                {{"field": "field1", "validation": "required", "constraint": "not null"}}
-            ],
-            "business_domain": "customer management",
-            "entity_types": ["customer", "address", "contact"]
+            "purpose": "main purpose",
+            "key_elements": ["element1", "element2"],
+            "dependencies": ["dep1", "dep2"],
+            "configuration": "setup details"
         }}
         """
         
-        sampling_params = SamplingParams(temperature=0.2, max_tokens=800)
+        sampling_params = SamplingParams(temperature=0.1, max_tokens=400)
         
         try:
-            response_text = await self._generate_with_llm(prompt, sampling_params)
+            response_text = await self._generate_with_llm_chunked(
+                prompt, content, sampling_params, "json_merge"
+            )
+            
             if '{' in response_text:
                 json_start = response_text.find('{')
                 json_end = response_text.rfind('}') + 1
-                llm_analysis = json.loads(response_text[json_start:json_end])
-                
-                # Enhance LLM analysis with field analysis data
-                llm_analysis['field_analysis'] = field_analysis
-                llm_analysis['section_type'] = section_name
-                llm_analysis['analysis_timestamp'] = dt.now().isoformat()
-                
-                return llm_analysis
+                return json.loads(response_text[json_start:json_end])
                 
         except Exception as e:
-            self.logger.warning(f"Data section LLM analysis failed: {str(e)}")
+            self.logger.warning(f"Division analysis failed: {str(e)}")
         
-        # Fallback analysis using extracted field data
-        return self._generate_fallback_data_section_analysis(content, section_name, field_analysis)
+        return {
+            "purpose": f"{division_name} processing",
+            "key_elements": [],
+            "dependencies": [],
+            "configuration": "Standard COBOL division"
+        }
+
 
     def _generate_fallback_data_section_analysis(self, content: str, section_name: str, field_analysis: Dict) -> Dict[str, Any]:
         """Generate fallback analysis when LLM analysis fails"""
@@ -3045,13 +4032,57 @@ class CompleteEnhancedCodeParserAgent:
         }
 
     async def _analyze_sql_comprehensive(self, sql_content: str) -> Dict[str, Any]:
-        """Comprehensive SQL analysis"""
+        """Comprehensive SQL analysis using chunked processing"""
+        prompt = """
+        Analyze this SQL code comprehensively:
+        
+        Extract:
+        1. Operation type (SELECT, INSERT, UPDATE, DELETE, etc.)
+        2. Tables accessed and their roles
+        3. Join types and relationships
+        4. Performance considerations
+        5. Complexity indicators
+        
+        Return as JSON:
+        {
+            "operation_type": "SELECT|INSERT|UPDATE|DELETE|PROCEDURE",
+            "tables_accessed": [
+                {"name": "table1", "role": "main|lookup|target", "alias": "t1"}
+            ],
+            "joins": [
+                {"type": "INNER|LEFT|RIGHT", "tables": ["t1", "t2"], "condition": "join condition"}
+            ],
+            "performance_indicators": {
+                "complexity_score": 5,
+                "index_hints": ["hint1"],
+                "potential_issues": ["issue1"]
+            },
+            "sql_features": ["subqueries", "aggregation", "window_functions"]
+        }
+        """
+        
+        sampling_params = SamplingParams(temperature=0.1, max_tokens=600)
+        
+        try:
+            response_text = await self._generate_with_llm_chunked(
+                prompt, sql_content, sampling_params, "json_merge"
+            )
+            
+            if '{' in response_text:
+                json_start = response_text.find('{')
+                json_end = response_text.rfind('}') + 1
+                return json.loads(response_text[json_start:json_end])
+                
+        except Exception as e:
+            self.logger.warning(f"SQL comprehensive analysis failed: {str(e)}")
+        
+        # Fallback analysis
         return {
             'operation_type': self._extract_sql_operation_type(sql_content),
             'tables_accessed': [],
-            'complexity_score': 5
+            'complexity_score': self._calculate_sql_complexity(sql_content),
+            'performance_indicators': self._analyze_sql_performance(sql_content)
         }
-
     def _extract_sql_operation_type(self, sql_content: str) -> str:
         """Extract SQL operation type"""
         sql_upper = sql_content.upper().strip()
@@ -3109,14 +4140,7 @@ class CompleteEnhancedCodeParserAgent:
             'business_impact': 'medium'
         }
 
-    async def _analyze_cics_command_comprehensive(self, command_type: str, params: str, content: str) -> Dict[str, Any]:
-        """Comprehensive CICS command analysis"""
-        return {
-            'command_type': command_type,
-            'parameters': params,
-            'resource_accessed': 'unknown',
-            'performance_impact': 'standard'
-        }
+   
 
     # ==================== JCL PARSING METHODS ====================
 
@@ -3297,7 +4321,46 @@ class CompleteEnhancedCodeParserAgent:
             return 'business_data'
 
     async def _analyze_db2_procedure_header(self, header_content: str, procedure_name: str) -> Dict[str, Any]:
-        """Analyze DB2 procedure header"""
+        """Analyze DB2 procedure header using chunked processing"""
+        prompt = """
+        Analyze this DB2 stored procedure header:
+        
+        Extract:
+        1. Procedure name and schema
+        2. Parameter definitions and types
+        3. SQL access level and characteristics
+        4. Language and parameter style
+        5. Special attributes (DETERMINISTIC, etc.)
+        
+        Return as JSON:
+        {
+            "procedure_name": "name",
+            "schema": "schema_name",
+            "parameters": [
+                {"name": "param1", "type": "VARCHAR(100)", "mode": "IN|OUT|INOUT"}
+            ],
+            "sql_access": "READS|MODIFIES|CONTAINS|NO SQL DATA",
+            "language": "SQL|JAVA|C",
+            "parameter_style": "SQL|JAVA|GENERAL",
+            "attributes": ["DETERMINISTIC", "EXTERNAL ACTION"]
+        }
+        """
+        
+        sampling_params = SamplingParams(temperature=0.1, max_tokens=500)
+        
+        try:
+            response_text = await self._generate_with_llm_chunked(
+                prompt, header_content, sampling_params, "json_merge"
+            )
+            
+            if '{' in response_text:
+                json_start = response_text.find('{')
+                json_end = response_text.rfind('}') + 1
+                return json.loads(response_text[json_start:json_end])
+                
+        except Exception as e:
+            self.logger.warning(f"DB2 procedure header analysis failed: {str(e)}")
+        
         return {
             "procedure_name": procedure_name,
             "parameter_style": "DB2SQL",
@@ -3400,6 +4463,53 @@ class CompleteEnhancedCodeParserAgent:
         """Parse and analyze MQ message flow patterns"""
         return []  # Implement as needed
 
+    async def _analyze_cics_command_comprehensive(self, command_type: str, params: str, 
+                                                    content: str) -> Dict[str, Any]:
+        """Comprehensive CICS command analysis using chunked processing"""
+        prompt = f"""
+        Analyze this CICS command: {command_type}
+        
+        Parameters: {params}
+        
+        Extract:
+        1. Command category and purpose
+        2. Resource accessed (file, queue, terminal, etc.)
+        3. Transaction flow impact
+        4. Error conditions and handling
+        5. Performance characteristics
+        
+        Return as JSON:
+        {{
+            "command_category": "terminal|file|program|transaction",
+            "resource_accessed": "resource_name",
+            "transaction_impact": "blocking|non_blocking|sync|async",
+            "error_conditions": ["condition1", "condition2"],
+            "performance_impact": "low|medium|high",
+            "business_function": "data_access|user_interface|program_control"
+        }}
+        """
+        
+        sampling_params = SamplingParams(temperature=0.1, max_tokens=400)
+        
+        try:
+            response_text = await self._generate_with_llm_chunked(
+                prompt, content, sampling_params, "json_merge"
+            )
+            
+            if '{' in response_text:
+                json_start = response_text.find('{')
+                json_end = response_text.rfind('}') + 1
+                return json.loads(response_text[json_start:json_end])
+                
+        except Exception as e:
+            self.logger.warning(f"CICS command analysis failed: {str(e)}")
+        
+        return {
+            'command_type': command_type,
+            'parameters': params,
+            'resource_accessed': 'unknown',
+            'performance_impact': 'standard'
+        }
     # ==================== PUBLIC API METHODS ====================
 
     async def analyze_program(self, program_name: str) -> Dict[str, Any]:
