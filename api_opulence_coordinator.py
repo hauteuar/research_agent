@@ -295,6 +295,8 @@ class ModelServerClient:
             finally:
                 self.session = None
     
+
+
     async def call_generate(self, server: ModelServer, prompt: str, 
                       params: Dict[str, Any] = None) -> Dict[str, Any]:
         """ULTRA-SIMPLE: API call without complex error handling"""
@@ -1402,6 +1404,94 @@ class APIOpulenceCoordinator:
                 "coordinator_type": "api_based_enhanced_with_docs"
             }
 
+    def _prepare_analysis_summary(self, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Prepare a summary of all analyses for documentation generation"""
+        summary = {
+            "component_name": analysis_result.get("cleaned_component_name", analysis_result.get("component_name")),
+            "component_type": analysis_result.get("normalized_type"),
+            "analysis_timestamp": analysis_result.get("analysis_timestamp"),
+            "total_analyses": len(analysis_result.get("analyses", {})),
+            "successful_analyses": len([a for a in analysis_result.get("analyses", {}).values() if a.get("status") == "success"]),
+            "findings": {}
+        }
+        
+        # Extract key findings from each analysis
+        analyses = analysis_result.get("analyses", {})
+        
+        # Lineage findings
+        if "lineage_analysis" in analyses and analyses["lineage_analysis"].get("status") == "success":
+            lineage_data = analyses["lineage_analysis"].get("data", {})
+            summary["findings"]["lineage"] = {
+                "programs_found": len(lineage_data.get("programs_using", [])),
+                "operations": lineage_data.get("operations", []),
+                "lifecycle_stages": lineage_data.get("lifecycle_stages", [])
+            }
+        
+        # Logic findings
+        if "logic_analysis" in analyses and analyses["logic_analysis"].get("status") == "success":
+            logic_data = analyses["logic_analysis"].get("data", {})
+            summary["findings"]["logic"] = {
+                "complexity_score": logic_data.get("complexity_score", 0),
+                "dependencies": logic_data.get("dependencies", []),
+                "business_rules": logic_data.get("business_rules", [])
+            }
+        
+        # Semantic findings
+        if "semantic_analysis" in analyses and analyses["semantic_analysis"].get("status") == "success":
+            semantic_data = analyses["semantic_analysis"].get("data", {})
+            summary["findings"]["semantic"] = {
+                "similar_components": len(semantic_data.get("similar_components", [])),
+                "semantic_matches": len(semantic_data.get("semantic_search", []))
+            }
+        
+        return summary
+
+    async def _generate_analysis_summary_doc(self, component_name: str, analysis_summary: Dict[str, Any], 
+                                            doc_agent) -> Dict[str, Any]:
+        """Generate a custom analysis summary document"""
+        try:
+            # Create a structured summary prompt for the documentation agent
+            prompt = f"""
+            Generate a comprehensive analysis summary document for the component: {component_name}
+            
+            Analysis Overview:
+            - Component Type: {analysis_summary.get('component_type', 'Unknown')}
+            - Total Analyses: {analysis_summary.get('total_analyses', 0)}
+            - Successful Analyses: {analysis_summary.get('successful_analyses', 0)}
+            - Analysis Timestamp: {analysis_summary.get('analysis_timestamp', 'Unknown')}
+            
+            Findings Summary:
+            {json.dumps(analysis_summary.get('findings', {}), indent=2)}
+            
+            Create a professional analysis summary that includes:
+            1. Executive Summary
+            2. Key Findings
+            3. Component Characteristics
+            4. Recommendations
+            5. Next Steps
+            
+            Format as clear, professional documentation.
+            """
+            
+            # Use the documentation agent's API call method
+            doc_content = await doc_agent._call_api_for_analysis(prompt, max_tokens=800)
+            
+            return {
+                "status": "success",
+                "component_name": component_name,
+                "documentation": doc_content,
+                "format": "markdown",
+                "analysis_summary": analysis_summary,
+                "generation_timestamp": dt.now().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Failed to generate analysis summary doc: {e}")
+            return {
+                "status": "error",
+                "error": str(e),
+                "component_name": component_name
+            }
 
     def _normalize_component_type(self, component_type: str) -> str:
         """Normalize component type for proper agent handling"""
