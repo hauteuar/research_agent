@@ -203,7 +203,7 @@ class ModelServer:
 # ==================== Load Balancer ====================
 
 class LoadBalancer:
-    """Load balancer for routing requests to available model servers"""
+    """Load balancer with dual GPU support - keeping original name"""
     
     def __init__(self, config: APIOpulenceConfig):
         self.config = config
@@ -220,7 +220,7 @@ class LoadBalancer:
         return [server for server in self.servers if server.is_available()]
     
     def select_server(self) -> Optional[ModelServer]:
-        """Select best server based on load balancing strategy"""
+        """Original method - keeping for compatibility"""
         available_servers = self.get_available_servers()
         
         if not available_servers:
@@ -243,72 +243,281 @@ class LoadBalancer:
         else:
             return available_servers[0]
     
+    def select_server_for_load(self, estimated_tokens: int = 0) -> Optional[ModelServer]:
+        """NEW: Smart server selection based on load and token requirements"""
+        available_servers = self.get_available_servers()
+        
+        if not available_servers:
+            return None
+        
+        # For high token requests, prefer less busy servers
+        if estimated_tokens > 1000:
+            return min(available_servers, key=lambda s: s.active_requests)
+        else:
+            # Use existing round robin for normal requests
+            return self.select_server()
+    
     def get_server_by_gpu_id(self, gpu_id: int) -> Optional[ModelServer]:
-        """Get server by GPU ID - for compatibility only"""
+        """Get server by GPU ID - for compatibility"""
         for server in self.servers:
             if server.config.gpu_id == gpu_id:
                 return server
         return None
+    
+    def get_all_healthy_servers(self) -> List[ModelServer]:
+        """NEW: Get all healthy servers for parallel processing"""
+        return [s for s in self.servers if s.status == ModelServerStatus.HEALTHY]
+
+
+class ChunkedProcessor:
+    """Handles chunked processing for long content analysis"""
+    
+    def __init__(self, coordinator):
+        self.coordinator = coordinator
+        self.logger = logging.getLogger(f"{__name__}.ChunkedProcessor")
+        
+    async def process_long_content(self, content: str, analysis_type: str, 
+                                 chunk_size: int = 1500, overlap: int = 200) -> Dict[str, Any]:
+        """Process long content in chunks with loop-back for completeness"""
+        
+        if len(content.split()) <= chunk_size:
+            # Content is small enough, process normally
+            return await self._process_single_chunk(content, analysis_type)
+        
+        self.logger.info(f"🔄 Processing long content ({len(content.split())} words) in chunks")
+        
+        # Split content into overlapping chunks
+        chunks = self._create_overlapping_chunks(content, chunk_size, overlap)
+        
+        # Process chunks in parallel using multiple GPUs
+        chunk_results = await self._process_chunks_parallel(chunks, analysis_type)
+        
+        # Combine results intelligently
+        combined_result = await self._combine_chunk_results(chunk_results, analysis_type)
+        
+        return combined_result
+    
+    def _create_overlapping_chunks(self, content: str, chunk_size: int, overlap: int) -> List[str]:
+        """Create overlapping chunks for better context continuity"""
+        words = content.split()
+        chunks = []
+        
+        start = 0
+        while start < len(words):
+            end = min(start + chunk_size, len(words))
+            chunk = ' '.join(words[start:end])
+            chunks.append(chunk)
+            
+            if end >= len(words):
+                break
+                
+            start = end - overlap  # Overlap for context
+        
+        self.logger.info(f"📦 Created {len(chunks)} overlapping chunks")
+        return chunks
+    
+    async def _process_chunks_parallel(self, chunks: List[str], analysis_type: str) -> List[Dict[str, Any]]:
+        """Process chunks in parallel using multiple GPUs"""
+        
+        # Get available servers
+        healthy_servers = self.coordinator.load_balancer.get_all_healthy_servers()
+        
+        if len(healthy_servers) > 1:
+            self.logger.info(f"🚀 Using {len(healthy_servers)} GPUs for parallel processing")
+            
+            # Process chunks in parallel
+            tasks = []
+            for i, chunk in enumerate(chunks):
+                server = healthy_servers[i % len(healthy_servers)]
+                task = self._process_chunk_on_server(chunk, analysis_type, server, i)
+                tasks.append(task)
+            
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Filter out exceptions
+            valid_results = []
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    self.logger.warning(f"⚠️ Chunk {i} failed: {result}")
+                else:
+                    valid_results.append(result)
+            
+            return valid_results
+        else:
+            # Sequential processing with single GPU
+            self.logger.info("🔄 Using single GPU for sequential processing")
+            results = []
+            for i, chunk in enumerate(chunks):
+                result = await self._process_single_chunk(chunk, analysis_type)
+                results.append(result)
+                
+                # Small delay to prevent overwhelming
+                await asyncio.sleep(0.5)
+            
+            return results
+    
+    async def _process_chunk_on_server(self, chunk: str, analysis_type: str, 
+                                     server: ModelServer, chunk_index: int) -> Dict[str, Any]:
+        """Process a single chunk on a specific server"""
+        try:
+            self.logger.info(f"📝 Processing chunk {chunk_index} on {server.config.name}")
+            
+            # Create analysis prompt based on type
+            if analysis_type == "lineage":
+                prompt = f"""Analyze the following code for data lineage and field usage patterns:
+
+{chunk}
+
+Focus on:
+1. Field names and their usage
+2. Data transformations
+3. File operations
+4. Database operations
+
+Provide a concise summary of key findings."""
+
+            elif analysis_type == "logic":
+                prompt = f"""Analyze the following code for business logic and program flow:
+
+{chunk}
+
+Focus on:
+1. Business rules
+2. Decision points
+3. Calculations
+4. Process flow
+
+Provide a concise summary of key logic patterns."""
+            
+            else:
+                prompt = f"""Analyze the following code:
+
+{chunk}
+
+Provide a concise analysis focusing on key functionality and patterns."""
+            
+            # Call the server directly using the working pattern
+            result = await self.coordinator.client.call_generate_enhanced(
+                server, 
+                prompt, 
+                {"max_tokens": 800, "temperature": 0.1}
+            )
+            
+            result["chunk_index"] = chunk_index
+            result["analysis_type"] = analysis_type
+            result["server_used"] = server.config.name
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"❌ Chunk {chunk_index} processing failed: {e}")
+            return {
+                "error": str(e),
+                "chunk_index": chunk_index,
+                "analysis_type": analysis_type
+            }
+    
+    async def _process_single_chunk(self, content: str, analysis_type: str) -> Dict[str, Any]:
+        """Process single chunk using normal coordinator flow"""
+        return await self.coordinator.call_model_api(
+            prompt=f"Analyze this {analysis_type}: {content}",
+            params={"max_tokens": 1000, "temperature": 0.1}
+        )
+    
+    async def _combine_chunk_results(self, chunk_results: List[Dict[str, Any]], 
+                                   analysis_type: str) -> Dict[str, Any]:
+        """Intelligently combine chunk results"""
+        
+        valid_results = [r for r in chunk_results if not r.get('error')]
+        
+        if not valid_results:
+            return {"error": "All chunks failed processing"}
+        
+        # Extract text from all valid results
+        all_text = []
+        for result in valid_results:
+            text = (
+                result.get('text') or 
+                result.get('response') or 
+                result.get('content') or 
+                ''
+            )
+            if text:
+                all_text.append(text)
+        
+        # Create summary using one of the GPUs
+        summary_prompt = f"""Combine and summarize the following {analysis_type} analysis results:
+
+{chr(10).join(all_text)}
+
+Create a comprehensive summary that:
+1. Identifies key patterns across all sections
+2. Highlights important findings
+3. Provides actionable insights
+4. Maintains technical accuracy
+
+Limit to 500 words."""
+
+        summary_result = await self.coordinator.call_model_api(
+            prompt=summary_prompt,
+            params={"max_tokens": 600, "temperature": 0.1}
+        )
+        
+        return {
+            "status": "success",
+            "analysis_type": analysis_type,
+            "chunks_processed": len(chunk_results),
+            "chunks_successful": len(valid_results),
+            "individual_results": chunk_results,
+            "combined_summary": summary_result,
+            "processing_metadata": {
+                "total_chunks": len(chunk_results),
+                "successful_chunks": len(valid_results),
+                "failed_chunks": len(chunk_results) - len(valid_results)
+            }
+        }
+
 
 # ==================== API Client for Model Servers ====================
 
 class ModelServerClient:
-    """HTTP client for calling model servers - FINAL FIX"""
+    """HTTP client for calling model servers - PRODUCTION VERSION"""
     
     def __init__(self, config: APIOpulenceConfig):
         self.config = config
-        self.session: Optional[aiohttp.ClientSession] = None
         self.logger = logging.getLogger(f"{__name__}.ModelServerClient")
         
     async def initialize(self):
-        """FINAL FIX: Initialize without any timeout configurations"""
-        
-        # CRITICAL: Create connector without any timeout settings
-        connector = aiohttp.TCPConnector(
-            limit=5,  # Increased from 1
-            limit_per_host=2,  # Increased from 1
-            enable_cleanup_closed=True,  # Changed to True
-            force_close=False,
-            keepalive_timeout=60,  # Increased
-            ttl_dns_cache=300,
-            use_dns_cache=True,
-        )
-        
-        # CRITICAL: Create session without ANY timeout parameter
-        self.session = aiohttp.ClientSession(
-            connector=connector,
-            headers={'Content-Type': 'application/json'},
-            # NO timeout parameter at all
-        )
-        
-        self.logger.info("FINAL FIX: Model server client initialized without timeout configs")
+        """Initialize - keeping for compatibility but not storing session"""
+        self.logger.info("Model server client initialized (using fresh sessions)")
         
     async def close(self):
-        """Safe session cleanup"""
-        if self.session:
-            try:
-                await self.session.close()
-                await asyncio.sleep(0.25)  # Increased cleanup time
-            except Exception as e:
-                self.logger.warning(f"Session cleanup warning: {e}")
-            finally:
-                self.session = None
-
-    async def call_generate(self, server: ModelServer, prompt: str, 
-                      params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """FINAL FIX: No timeout context manager anywhere"""
+        """Close - keeping for compatibility"""
+        self.logger.info("Model server client closed")
         
-        if not self.session:
-            raise RuntimeError("Client not initialized")
+    async def call_generate(self, server: ModelServer, prompt: str, 
+                          params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """PRODUCTION: Use your working session pattern with higher token limits"""
         
         params = params or {}
         
+        # PRODUCTION: Much higher token limits
         request_data = {
-            "prompt": prompt[:300],  # Slightly larger
-            "max_tokens": min(params.get("max_tokens", 15), 30),
+            "prompt": prompt,  # No truncation
+            "max_tokens": min(params.get("max_tokens", 800), 1500),  # High limit
             "temperature": params.get("temperature", 0.1),
-            "stream": False
+            "top_p": params.get("top_p", 0.9),
+            "stream": False,
+            "stop": params.get("stop", [])
         }
+        
+        # Context window management for 2048 tokens
+        estimated_prompt_tokens = len(prompt.split()) * 1.3
+        max_completion_tokens = min(
+            request_data["max_tokens"],
+            max(100, int(2000 - estimated_prompt_tokens))
+        )
+        request_data["max_tokens"] = max_completion_tokens
         
         server.active_requests += 1
         server.total_requests += 1
@@ -317,55 +526,38 @@ class ModelServerClient:
         try:
             generate_url = f"{server.config.endpoint.rstrip('/')}/generate"
             
-            self.logger.info(f"🚀 Making request to: {generate_url}")
-            self.logger.info(f"📦 Request data: {json.dumps(request_data, indent=2)}")
+            self.logger.info(f"🚀 Request to: {generate_url}")
+            self.logger.info(f"📦 Prompt tokens: {estimated_prompt_tokens:.0f}, Max tokens: {max_completion_tokens}")
             
-            # CRITICAL FIX: Use session.post directly without any timeout wrappers
-            response = await self.session.post(generate_url, json=request_data)
-            
-            self.logger.info(f"📡 Response status: {response.status}")
-            
-            try:
-                if response.status == 200:
-                    response_text = await response.text()
-                    self.logger.info(f"📄 Raw response (first 200 chars): {response_text[:200]}")
+            # YOUR WORKING PATTERN: Fresh session for each request
+            async with aiohttp.ClientSession() as session:
+                async with session.post(generate_url, json=request_data) as response:
+                    self.logger.info(f"📡 Response status: {response.status}")
                     
-                    if response_text.strip():
-                        try:
-                            result = json.loads(response_text)
-                            self.logger.info(f"✅ Successfully parsed JSON response")
-                            
-                            latency = time.time() - start_time
-                            server.record_success(latency)
-                            
-                            result["server_used"] = server.config.name
-                            result["gpu_id"] = server.config.gpu_id
-                            result["latency"] = latency
-                            
-                            self.logger.info(f"✅ Success! Latency: {latency:.2f}s")
-                            return result
-                            
-                        except json.JSONDecodeError as je:
-                            self.logger.error(f"❌ JSON decode error: {je}")
-                            return {
-                                "error": f"Invalid JSON response: {je}",
-                                "raw_response": response_text[:200]
-                            }
+                    if response.status == 200:
+                        result = await response.json()
+                        
+                        latency = time.time() - start_time
+                        server.record_success(latency)
+                        
+                        # Add metadata
+                        result["server_used"] = server.config.name
+                        result["gpu_id"] = server.config.gpu_id
+                        result["latency"] = latency
+                        result["estimated_prompt_tokens"] = int(estimated_prompt_tokens)
+                        result["actual_max_tokens"] = max_completion_tokens
+                        
+                        self.logger.info(f"✅ Success! Latency: {latency:.2f}s")
+                        return result
                     else:
-                        self.logger.error("❌ Empty response received")
-                        return {"error": "Empty response from server"}
-                else:
-                    error_text = await response.text()
-                    self.logger.error(f"❌ HTTP {response.status}: {error_text[:200]}")
-                    server.record_failure()
-                    return {
-                        "error": f"HTTP {response.status}: {error_text}",
-                        "status_code": response.status
-                    }
-            finally:
-                # CRITICAL: Always close the response
-                response.close()
-                
+                        error_text = await response.text()
+                        self.logger.error(f"❌ HTTP {response.status}: {error_text[:200]}")
+                        server.record_failure()
+                        return {
+                            "error": f"HTTP {response.status}: {error_text}",
+                            "status_code": response.status
+                        }
+                        
         except Exception as e:
             self.logger.error(f"❌ Request failed: {type(e).__name__}: {str(e)}")
             server.record_failure()
@@ -376,34 +568,28 @@ class ModelServerClient:
             
         finally:
             server.active_requests = max(0, server.active_requests - 1)
-            
+
     async def health_check(self, server: ModelServer) -> bool:
-        """FINAL FIX: Health check without timeout wrapper"""
+        """PRODUCTION: Health check with working pattern"""
         try:
-            if not self.session:
-                return False
-                
             health_url = f"{server.config.endpoint.rstrip('/')}/health"
             
-            # CRITICAL FIX: Direct call without asyncio.wait_for
-            response = await self.session.get(health_url)
-            
-            try:
-                if response.status == 200:
-                    server.status = ModelServerStatus.HEALTHY
-                    self.logger.debug(f"✅ Health check passed for {server.config.name}")
-                    return True
-                else:
-                    server.status = ModelServerStatus.UNHEALTHY
-                    self.logger.debug(f"❌ Health check failed for {server.config.name}: HTTP {response.status}")
-                    return False
-            finally:
-                response.close()
-                    
+            # YOUR WORKING PATTERN
+            async with aiohttp.ClientSession() as session:
+                async with session.get(health_url) as response:
+                    if response.status == 200:
+                        server.status = ModelServerStatus.HEALTHY
+                        return True
+                    else:
+                        server.status = ModelServerStatus.UNHEALTHY
+                        return False
+                        
         except Exception as e:
             server.status = ModelServerStatus.UNHEALTHY
             self.logger.debug(f"❌ Health check error for {server.config.name}: {e}")
             return False
+        
+
 # ==================== API-Compatible Engine Context ====================
 
 # Replace your APIEngineContext class with this FIXED version
@@ -574,6 +760,7 @@ class APIOpulenceCoordinator:
         self.config = config
         self.load_balancer = LoadBalancer(config)
         self.client = ModelServerClient(config)
+        self.chunked_processor = ChunkedProcessor(self)
         self.db_path = config.db_path
         
         # Agent storage - keep existing agents unchanged
@@ -829,84 +1016,26 @@ class APIOpulenceCoordinator:
     
     async def call_model_api(self, prompt: str, params: Dict[str, Any] = None, 
                         preferred_gpu_id: int = None) -> Dict[str, Any]:
-        """FIXED: API call with comprehensive debugging"""
+        """PRODUCTION: Smart API call with automatic server selection"""
         
-        self.logger.info(f"🔍 Starting API call with prompt length: {len(prompt)}")
-        self.logger.info(f"🔧 Parameters: {params}")
+        # Estimate token requirements
+        estimated_tokens = len(prompt.split()) + params.get("max_tokens", 500) if params else 500
         
-        server = self.load_balancer.select_server()        
+        # Use smart server selection if available
+        if hasattr(self.load_balancer, 'select_server_for_load'):
+            server = self.load_balancer.select_server_for_load(estimated_tokens)
+        else:
+            server = self.load_balancer.select_server()
+        
         if not server:
-            self.logger.error("❌ No available servers found")
             raise RuntimeError("No available servers found")
         
-        self.logger.info(f"🎯 Selected server: {server.config.name} ({server.config.endpoint})")
+        self.logger.debug(f"🎯 Selected {server.config.name} for {estimated_tokens} estimated tokens")
         
-        try:
-            # FIXED: Add pre-call server status check
-            self.logger.info(f"📊 Server status before call:")
-            self.logger.info(f"   - Status: {server.status}")
-            self.logger.info(f"   - Active requests: {server.active_requests}")
-            self.logger.info(f"   - Total requests: {server.total_requests}")
-            self.logger.info(f"   - Available: {server.is_available()}")
-            
-            # Make the call
-            self.logger.info(f"🚀 Making generate call to {server.config.name}")
-            result = await self.client.call_generate(server, prompt, params)
-            
-            # FIXED: Detailed result analysis
-            self.logger.info(f"📋 Call result type: {type(result)}")
-            
-            if isinstance(result, dict):
-                if "error" in result:
-                    self.logger.error(f"❌ API returned error: {result['error']}")
-                    self.logger.error(f"🔍 Full error result: {json.dumps(result, indent=2)}")
-                else:
-                    self.logger.info(f"✅ API call successful!")
-                    # Log key fields (but not full response to avoid spam)
-                    key_fields = ["server_used", "gpu_id", "latency", "status_code"]
-                    for field in key_fields:
-                        if field in result:
-                            self.logger.info(f"   - {field}: {result[field]}")
-                    
-                    # Check for actual content
-                    content_fields = ["text", "response", "content", "generated_text", "choices"]
-                    found_content = False
-                    for field in content_fields:
-                        if field in result and result[field]:
-                            found_content = True
-                            content_preview = str(result[field])[:100]
-                            self.logger.info(f"   - Found content in '{field}': {content_preview}...")
-                            break
-                    
-                    if not found_content:
-                        self.logger.warning(f"⚠️ No content found in response. Available fields: {list(result.keys())}")
-            else:
-                self.logger.warning(f"⚠️ Unexpected result type: {type(result)}")
-                self.logger.warning(f"   Result: {str(result)[:200]}...")
-            
-            self.stats["total_api_calls"] += 1
-            return result
-            
-        except Exception as e:
-            self.logger.error(f"❌ Exception during API call: {type(e).__name__}: {str(e)}")
-            self.logger.error(f"🔍 Server state after error:")
-            self.logger.error(f"   - Active requests: {server.active_requests}")
-            self.logger.error(f"   - Failed requests: {server.failed_requests}")
-            self.logger.error(f"   - Consecutive failures: {server.consecutive_failures}")
-            
-            # Simple retry with different server if available
-            retry_server = self.load_balancer.select_server()
-            if retry_server and retry_server != server:
-                try:
-                    self.logger.info(f"🔄 Retrying with {retry_server.config.name}")
-                    result = await self.client.call_generate(retry_server, prompt, params)
-                    self.stats["total_api_calls"] += 1
-                    return result
-                except Exception as retry_e:
-                    self.logger.error(f"❌ Retry also failed: {retry_e}")
-            
-            raise RuntimeError(f"All servers failed: {str(e)}")
-
+        # Use the working call_generate method
+        result = await self.client.call_generate(server, prompt, params)
+        self.stats["total_api_calls"] += 1
+        return result
 
 # Additional debugging method to test your server directly
     async def debug_server_connection(self, test_prompt: str = "Hello") -> Dict[str, Any]:
@@ -1353,7 +1482,7 @@ class APIOpulenceCoordinator:
 
 
     async def analyze_component(self, component_name: str, component_type: str = None, **kwargs) -> Dict[str, Any]:
-        """ENHANCED: Complete component analysis with documentation summary"""
+        """COMPLETE: Full component analysis including ALL agents"""
         start_time = time.time()
         
         try:
@@ -1361,14 +1490,10 @@ class APIOpulenceCoordinator:
             if not component_type or component_type == "auto-detect":
                 component_type = await self._determine_component_type(component_name)
             
-            # CRITICAL FIX: Check for prefixed component names during upload
+            # Clean component name
             original_component_name = component_name
             cleaned_component_name = self._clean_component_name(component_name)
-            
-            # Use cleaned name for analysis
             analysis_component_name = cleaned_component_name
-            
-            # Normalize the component type for processing
             normalized_type = self._normalize_component_type(component_type)
             
             analysis_result = {
@@ -1381,7 +1506,7 @@ class APIOpulenceCoordinator:
                 "analyses": {},
                 "processing_metadata": {
                     "start_time": start_time,
-                    "coordinator_type": "api_based_enhanced_with_docs"
+                    "coordinator_type": "api_based_production"
                 }
             }
             
@@ -1390,12 +1515,11 @@ class APIOpulenceCoordinator:
             # Ensure all required agents are ready
             await self._ensure_agents_ready()
             
-            # STEP 1: LINEAGE ANALYSIS (FOUNDATIONAL)
+            # STEP 1: LINEAGE ANALYSIS
             try:
-                self.logger.info(f"🔄 Step 1: Running lineage analysis for {analysis_component_name} (type: {normalized_type})")
+                self.logger.info(f"🔄 Step 1: Lineage analysis for {analysis_component_name}")
                 lineage_agent = self.get_agent("lineage_analyzer")
                 
-                # Call appropriate lineage method based on type
                 if normalized_type == "field":
                     lineage_result = await self._safe_agent_call(
                         lineage_agent.analyze_field_lineage,
@@ -1417,9 +1541,9 @@ class APIOpulenceCoordinator:
                         "step": 1
                     }
                     completed_count += 1
-                    self.logger.info(f"✅ Step 1: Lineage analysis completed successfully")
+                    self.logger.info(f"✅ Step 1: Lineage analysis completed")
                 else:
-                    error_msg = lineage_result.get('error', 'No result returned') if lineage_result else 'No result returned'
+                    error_msg = lineage_result.get('error', 'No result') if lineage_result else 'No result'
                     analysis_result["analyses"]["lineage_analysis"] = {
                         "status": "error",
                         "error": error_msg,
@@ -1427,7 +1551,7 @@ class APIOpulenceCoordinator:
                         "step": 1
                     }
                     self.logger.warning(f"⚠️ Step 1: Lineage analysis failed: {error_msg}")
-                
+                    
             except Exception as e:
                 self.logger.error(f"❌ Step 1: Lineage analysis exception: {str(e)}")
                 analysis_result["analyses"]["lineage_analysis"] = {
@@ -1437,13 +1561,12 @@ class APIOpulenceCoordinator:
                     "step": 1
                 }
             
-            # STEP 2: LOGIC ANALYSIS (FOR COBOL/PROGRAM TYPES)
+            # STEP 2: LOGIC ANALYSIS (for program types)
             if normalized_type in ["cobol", "copybook", "program", "jcl"]:
                 try:
-                    self.logger.info(f"🔄 Step 2: Running logic analysis for {analysis_component_name} (type: {normalized_type})")
+                    self.logger.info(f"🔄 Step 2: Logic analysis for {analysis_component_name}")
                     logic_agent = self.get_agent("logic_analyzer")
                     
-                    # Call appropriate logic method based on type
                     if normalized_type in ["cobol", "program"]:
                         logic_result = await self._safe_agent_call(
                             logic_agent.analyze_program,
@@ -1461,20 +1584,18 @@ class APIOpulenceCoordinator:
                             "data": logic_result,
                             "agent_used": "logic_analyzer",
                             "completion_time": time.time() - start_time,
-                            "step": 2,
-                            "normalized_type": normalized_type
+                            "step": 2
                         }
                         completed_count += 1
-                        self.logger.info(f"✅ Step 2: Logic analysis completed successfully")
+                        self.logger.info(f"✅ Step 2: Logic analysis completed")
                     else:
-                        error_msg = logic_result.get('error', 'No result returned') if logic_result else 'No result returned'
+                        error_msg = logic_result.get('error', 'No result') if logic_result else 'No result'
                         analysis_result["analyses"]["logic_analysis"] = {
                             "status": "error",
                             "error": error_msg,
                             "agent_used": "logic_analyzer",
                             "step": 2
                         }
-                        self.logger.warning(f"⚠️ Step 2: Logic analysis failed: {error_msg}")
                         
                 except Exception as e:
                     self.logger.error(f"❌ Step 2: Logic analysis exception: {str(e)}")
@@ -1484,15 +1605,13 @@ class APIOpulenceCoordinator:
                         "agent_used": "logic_analyzer",
                         "step": 2
                     }
-            else:
-                self.logger.info(f"ℹ️ Step 2: Skipping logic analysis for type: {normalized_type}")
             
-            # STEP 3: SEMANTIC ANALYSIS (VECTOR SEARCH)
+            # STEP 3: VECTOR INDEX / SEMANTIC ANALYSIS
             try:
-                self.logger.info(f"🔄 Step 3: Running semantic analysis for {analysis_component_name}")
+                self.logger.info(f"🔄 Step 3: Vector/semantic analysis for {analysis_component_name}")
                 vector_agent = self.get_agent("vector_index")
                 
-                # Ensure vector index is ready
+                # Check if vector index is ready
                 vector_ready = await self._ensure_vector_index_ready()
                 if not vector_ready:
                     self.logger.warning(f"⚠️ Vector index not ready, skipping semantic analysis")
@@ -1507,17 +1626,17 @@ class APIOpulenceCoordinator:
                     similarity_result = await self._safe_agent_call(
                         vector_agent.search_similar_components,
                         analysis_component_name,
-                        3
+                        5  # Get more results
                     )
                     
                     # Perform semantic search
                     semantic_result = await self._safe_agent_call(
                         vector_agent.semantic_search,
-                        f"{analysis_component_name} similar functionality",
-                        2
+                        f"{analysis_component_name} similar functionality patterns",
+                        3
                     )
                     
-                    # Validate and normalize results
+                    # Validate results
                     validated_similarity = self._validate_search_result(similarity_result)
                     validated_semantic = self._validate_search_result(semantic_result)
                     
@@ -1533,7 +1652,7 @@ class APIOpulenceCoordinator:
                             "step": 3
                         }
                         completed_count += 1
-                        self.logger.info(f"✅ Step 3: Semantic analysis completed successfully")
+                        self.logger.info(f"✅ Step 3: Semantic analysis completed")
                     else:
                         analysis_result["analyses"]["semantic_analysis"] = {
                             "status": "error",
@@ -1541,8 +1660,7 @@ class APIOpulenceCoordinator:
                             "agent_used": "vector_index",
                             "step": 3
                         }
-                        self.logger.warning(f"⚠️ Step 3: Semantic analysis failed - no valid results")
-                    
+                        
             except Exception as e:
                 self.logger.error(f"❌ Step 3: Semantic analysis exception: {str(e)}")
                 analysis_result["analyses"]["semantic_analysis"] = {
@@ -1552,12 +1670,12 @@ class APIOpulenceCoordinator:
                     "step": 3
                 }
             
-            # STEP 4: DOCUMENTATION SUMMARY (NEW!)
+            # STEP 4: DOCUMENTATION GENERATION
             try:
-                self.logger.info(f"🔄 Step 4: Generating documentation summary for {analysis_component_name}")
+                self.logger.info(f"🔄 Step 4: Documentation generation for {analysis_component_name}")
                 doc_agent = self.get_agent("documentation")
                 
-                # Prepare analysis summary for documentation agent
+                # Prepare analysis summary
                 analysis_summary = self._prepare_analysis_summary(analysis_result)
                 
                 # Generate documentation based on component type
@@ -1587,7 +1705,7 @@ class APIOpulenceCoordinator:
                         "step": 4
                     }
                     completed_count += 1
-                    self.logger.info(f"✅ Step 4: Documentation summary completed successfully")
+                    self.logger.info(f"✅ Step 4: Documentation generation completed")
                 else:
                     error_msg = doc_result.get('error', 'No documentation generated') if doc_result else 'No documentation generated'
                     analysis_result["analyses"]["documentation_summary"] = {
@@ -1596,10 +1714,9 @@ class APIOpulenceCoordinator:
                         "agent_used": "documentation",
                         "step": 4
                     }
-                    self.logger.warning(f"⚠️ Step 4: Documentation summary failed: {error_msg}")
                     
             except Exception as e:
-                self.logger.error(f"❌ Step 4: Documentation summary exception: {str(e)}")
+                self.logger.error(f"❌ Step 4: Documentation generation exception: {str(e)}")
                 analysis_result["analyses"]["documentation_summary"] = {
                     "status": "error",
                     "error": str(e),
@@ -1607,7 +1724,7 @@ class APIOpulenceCoordinator:
                     "step": 4
                 }
             
-            # Determine final status
+            # Final status determination
             total_analyses = len(analysis_result["analyses"])
             if completed_count == total_analyses and total_analyses > 0:
                 analysis_result["status"] = "completed"
@@ -1627,7 +1744,8 @@ class APIOpulenceCoordinator:
                 "analyses_total": total_analyses,
                 "success_rate": (completed_count / total_analyses) * 100 if total_analyses > 0 else 0,
                 "analysis_sequence": ["lineage_analysis", "logic_analysis", "semantic_analysis", "documentation_summary"],
-                "component_name_cleaned": cleaned_component_name != original_component_name
+                "component_name_cleaned": cleaned_component_name != original_component_name,
+                "servers_used": [s.config.name for s in self.load_balancer.servers]
             })
             
             return analysis_result
@@ -1639,9 +1757,9 @@ class APIOpulenceCoordinator:
                 "status": "system_error",
                 "error": str(e),
                 "processing_time": time.time() - start_time,
-                "coordinator_type": "api_based_enhanced_with_docs"
+                "coordinator_type": "api_based_production"
             }
-
+        
     def _clean_component_name(self, component_name: str) -> str:
         """CRITICAL FIX: Clean component names that may have been prefixed during upload"""
         import re
@@ -1680,7 +1798,7 @@ class APIOpulenceCoordinator:
 
 
     def _prepare_analysis_summary(self, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
-        """Prepare a summary of all analyses for documentation generation"""
+        """Prepare summary for documentation generation"""
         summary = {
             "component_name": analysis_result.get("cleaned_component_name", analysis_result.get("component_name")),
             "component_type": analysis_result.get("normalized_type"),
@@ -1690,10 +1808,9 @@ class APIOpulenceCoordinator:
             "findings": {}
         }
         
-        # Extract key findings from each analysis
         analyses = analysis_result.get("analyses", {})
         
-        # Lineage findings
+        # Extract findings from each analysis
         if "lineage_analysis" in analyses and analyses["lineage_analysis"].get("status") == "success":
             lineage_data = analyses["lineage_analysis"].get("data", {})
             summary["findings"]["lineage"] = {
@@ -1702,7 +1819,6 @@ class APIOpulenceCoordinator:
                 "lifecycle_stages": lineage_data.get("lifecycle_stages", [])
             }
         
-        # Logic findings
         if "logic_analysis" in analyses and analyses["logic_analysis"].get("status") == "success":
             logic_data = analyses["logic_analysis"].get("data", {})
             summary["findings"]["logic"] = {
@@ -1711,7 +1827,6 @@ class APIOpulenceCoordinator:
                 "business_rules": logic_data.get("business_rules", [])
             }
         
-        # Semantic findings
         if "semantic_analysis" in analyses and analyses["semantic_analysis"].get("status") == "success":
             semantic_data = analyses["semantic_analysis"].get("data", {})
             summary["findings"]["semantic"] = {
@@ -1722,63 +1837,64 @@ class APIOpulenceCoordinator:
         return summary
 
     async def _generate_analysis_summary_doc(self, component_name: str, analysis_summary: Dict[str, Any], 
-                                        doc_agent) -> Dict[str, Any]:
-        """FIXED: Generate a readable analysis summary document"""
+                                    doc_agent) -> Dict[str, Any]:
+        """Generate readable analysis summary document"""
         try:
-            # Create a structured summary for readable documentation
             findings_text = self._format_findings_as_text(analysis_summary.get('findings', {}))
             
-            prompt = f"""
-            Create a comprehensive business analysis summary for: {component_name}
+            prompt = f"""Create a comprehensive business analysis summary for: {component_name}
+
+    Component Type: {analysis_summary.get('component_type', 'Unknown')}
+    Analysis Timestamp: {analysis_summary.get('analysis_timestamp', 'Unknown')}
+    Total Analyses: {analysis_summary.get('total_analyses', 0)}
+    Successful Analyses: {analysis_summary.get('successful_analyses', 0)}
+
+    Key Findings:
+    {findings_text}
+
+    Write a professional executive summary that includes:
+
+    1. **Executive Summary**
+    - What this component does in business terms
+    - Its importance to the organization
+
+    2. **Key Findings**
+    - Most important discoveries from the analysis
+    - Critical dependencies and relationships
+
+    3. **Component Characteristics**
+    - Technical characteristics that matter to business
+    - Performance and reliability indicators
+
+    4. **Recommendations**
+    - Actions to improve or maintain this component
+    - Risk mitigation strategies
+
+    5. **Next Steps**
+    - Immediate actions required
+    - Long-term considerations
+
+    Write in clear, professional prose suitable for both technical and business audiences.
+    Maximum 800 words."""
             
-            Component Type: {analysis_summary.get('component_type', 'Unknown')}
-            Analysis Timestamp: {analysis_summary.get('analysis_timestamp', 'Unknown')}
-            Total Analyses: {analysis_summary.get('total_analyses', 0)}
-            Successful Analyses: {analysis_summary.get('successful_analyses', 0)}
+            # Call documentation agent
+            doc_content = await self.call_model_api(
+                prompt=prompt,
+                params={"max_tokens": 1000, "temperature": 0.1}
+            )
             
-            Key Findings:
-            {findings_text}
-            
-            Write a professional executive summary that includes:
-            
-            1. **Executive Summary**
-            - What this component does in business terms
-            - Its importance to the organization
-            
-            2. **Key Findings**
-            - Most important discoveries from the analysis
-            - Critical dependencies and relationships
-            
-            3. **Component Characteristics**
-            - Technical characteristics that matter to business
-            - Performance and reliability indicators
-            
-            4. **Recommendations**
-            - Actions to improve or maintain this component
-            - Risk mitigation strategies
-            
-            5. **Next Steps**
-            - Immediate actions required
-            - Long-term considerations
-            
-            Write in clear, professional prose suitable for both technical and business audiences.
-            Do not use JSON format. Use proper headings and paragraphs.
-            Maximum 800 words.
-            """
-            
-            # Use the documentation agent's enhanced API call method
-            if hasattr(doc_agent, '_call_api_for_readable_analysis'):
-                doc_content = await doc_agent._call_api_for_readable_analysis(prompt, max_tokens=1000)
-            else:
-                # Fallback to regular API call with enhanced prompt
-                doc_content = await doc_agent._call_api_for_analysis(prompt, max_tokens=1000)
-                # Clean the response if needed
-                doc_content = self._ensure_readable_output(doc_content, component_name)
+            # Extract text from response
+            text_content = (
+                doc_content.get('text') or 
+                doc_content.get('response') or 
+                doc_content.get('content') or
+                str(doc_content)
+            )
             
             return {
                 "status": "success",
                 "component_name": component_name,
-                "documentation": doc_content,
+                "documentation": text_content,
                 "format": "markdown",
                 "analysis_summary": analysis_summary,
                 "generation_timestamp": dt.now().isoformat(),
@@ -1986,7 +2102,7 @@ class APIOpulenceCoordinator:
 
         
     async def _ensure_vector_index_ready(self) -> bool:
-        """Ensure vector index is ready"""
+        """Ensure vector index is ready for use"""
         try:
             vector_agent = self.get_agent("vector_index")
             
@@ -2018,6 +2134,11 @@ class APIOpulenceCoordinator:
         except Exception as e:
             self.logger.error(f"❌ Vector index preparation failed: {e}")
             return False
+        
+        except Exception as e:
+            self.logger.error(f"❌ Vector index preparation failed: {e}")
+            return False
+        
     async def rebuild_vector_index(self) -> Dict[str, Any]:
         """FIXED: Rebuild vector index using correct method name"""
         try:
@@ -2497,16 +2618,23 @@ def create_dual_gpu_coordinator_api(
     model_servers: List[Dict[str, Any]] = None,
     load_balancing_strategy: str = "round_robin"
 ) -> APIOpulenceCoordinator:
-    """FIXED: Drop-in replacement for create_dual_gpu_coordinator using API"""
+    """PRODUCTION: Create coordinator with BOTH GPU servers by default"""
     if model_servers is None:
-        # FIXED: Default to single working server with conservative settings
+        # DEFAULT: Use BOTH available servers
         model_servers = [
             {
-                "endpoint": "http://171.201.3.165:8100", 
-                "gpu_id": 2, 
-                "name": "gpu_2", 
-                "max_concurrent_requests": 1, 
-                "timeout": 120  # FIXED: Reduced timeout
+                "endpoint": "http://171.201.3.164:8100", 
+                "gpu_id": 0, 
+                "name": "gpu_0_server", 
+                "max_concurrent_requests": 2, 
+                "timeout": 300
+            },
+            {
+                "endpoint": "http://171.201.3.164:8101", 
+                "gpu_id": 1, 
+                "name": "gpu_1_server", 
+                "max_concurrent_requests": 2, 
+                "timeout": 300
             }
         ]
     
