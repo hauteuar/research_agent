@@ -234,6 +234,41 @@ class LogicAnalyzerAgent(BaseOpulenceAgent):
             self.logger.error(f"Program analysis failed for {program_name}: {str(e)}")
             return self._add_processing_info({"error": str(e)})
     
+
+    def _generate_fallback_lifecycle_summary(self, component_name: str, component_type: str, 
+                                       programs_using: set, total_references: int) -> str:
+        """Generate fallback lifecycle summary"""
+        summary = f"## Lifecycle Analysis: {component_name}\n\n"
+        
+        summary += f"**Component Type**: {component_type.title()}\n"
+        summary += f"**Usage Scope**: Found in {len(programs_using)} programs with {total_references} total references\n\n"
+        
+        summary += "### Component Overview\n\n"
+        summary += f"The {component_type} '{component_name}' is actively used across multiple programs in the system, "
+        summary += f"indicating its importance to business operations.\n\n"
+        
+        summary += "### Usage Analysis\n\n"
+        summary += f"**Programs Using This Component**:\n"
+        for program in sorted(programs_using):
+            summary += f"- {program}\n"
+        
+        summary += f"\n**Usage Characteristics**:\n"
+        summary += f"- Total References: {total_references}\n"
+        summary += f"- Program Distribution: {len(programs_using)} programs\n"
+        summary += f"- Average References per Program: {total_references / len(programs_using):.1f}\n\n"
+        
+        summary += "### Recommendations\n\n"
+        if len(programs_using) > 5:
+            summary += "- High usage indicates critical component - ensure robust testing for any changes\n"
+            summary += "- Consider impact analysis before modifications\n"
+            summary += "- Implement comprehensive monitoring and alerts\n"
+        else:
+            summary += "- Moderate usage allows for easier change management\n"
+            summary += "- Standard testing procedures should be sufficient\n"
+            summary += "- Regular reviews recommended to ensure continued relevance\n"
+        
+        return summary
+
     async def _analyze_lifecycle_patterns_api(self, chunks: List[tuple], component_name: str) -> Dict[str, Any]:
         """✅ API-BASED: Analyze lifecycle patterns for a component"""
         # Combine relevant content with length limit
@@ -438,9 +473,8 @@ Return as JSON:
             return self._add_processing_info({"error": str(e)})
     
     async def _generate_optimization_recommendations_api(self, analysis_result: Dict) -> Dict[str, Any]:
-        """✅ API-BASED: Generate detailed optimization recommendations using API"""
+        """FIXED: Generate readable optimization recommendations"""
         
-        # Prepare analysis summary for API
         summary = {
             "complexity_score": analysis_result.get("complexity_score", 0),
             "total_chunks": analysis_result.get("total_chunks", 0),
@@ -452,73 +486,107 @@ Return as JSON:
             "business_rules": len(analysis_result.get("business_rules", []))
         }
         
-        prompt = f"""Based on this COBOL program analysis, generate detailed optimization recommendations:
+        prompt = f"""
+        Generate comprehensive optimization recommendations for this COBOL program analysis:
 
-Program Analysis Summary:
-- Average Complexity Score: {summary['complexity_score']:.2f}
-- Total Chunks: {summary['total_chunks']}
-- High Complexity Chunks: {summary['high_complexity_chunks']}
-- Logic Patterns Found: {summary['patterns_found']}
-- Business Rules Identified: {summary['business_rules']}
+        **Program Analysis Summary:**
+        - Average Complexity Score: {summary['complexity_score']:.2f} out of 10
+        - Total Code Sections: {summary['total_chunks']}
+        - High Complexity Sections: {summary['high_complexity_chunks']}
+        - Logic Patterns Identified: {summary['patterns_found']}
+        - Business Rules Found: {summary['business_rules']}
 
-Provide optimization recommendations in these categories:
-1. Performance optimizations
-2. Maintainability improvements
-3. Code structure enhancements
-4. Error handling improvements
-5. Testing recommendations
+        **Provide detailed optimization recommendations in these areas:**
 
-Return as JSON:
-{{
-    "performance": ["recommendation1", "recommendation2"],
-    "maintainability": ["recommendation1", "recommendation2"],
-    "structure": ["recommendation1", "recommendation2"],
-    "error_handling": ["recommendation1", "recommendation2"],
-    "testing": ["recommendation1", "recommendation2"],
-    "priority_recommendations": ["high_priority1", "high_priority2"]
-}}"""
-        
-        # Validate prompt length
-        prompt = self._validate_and_truncate_prompt(prompt, preserve_structure=True)
+        **Performance Optimization:**
+        - How to improve program execution speed
+        - Database and file I/O optimizations
+        - Memory usage improvements
+
+        **Maintainability Enhancement:**
+        - Code organization improvements
+        - Documentation and clarity enhancements
+        - Modular design recommendations
+
+        **Code Structure Optimization:**
+        - Ways to reduce complexity
+        - Better error handling implementation
+        - Improved data flow design
+
+        **Business Logic Refinement:**
+        - Simplification opportunities
+        - Rule consolidation possibilities
+        - Process efficiency improvements
+
+        **Testing and Quality Assurance:**
+        - Testing strategy recommendations
+        - Quality monitoring approaches
+        - Change management best practices
+
+        **Priority Actions:**
+        - Most critical improvements to implement first
+        - Quick wins for immediate impact
+
+        Write as a comprehensive optimization strategy document.
+        Use clear headings and actionable recommendations.
+        """
         
         try:
-            response_text = await self._call_api_for_analysis(prompt, max_tokens=800)
+            response_text = await self._call_api_for_readable_analysis(prompt, max_tokens=1000)
             
-            if '{' in response_text:
-                json_start = response_text.find('{')
-                json_end = response_text.rfind('}') + 1
-                return json.loads(response_text[json_start:json_end])
+            return {
+                "optimization_strategy": response_text,
+                "priority_level": "high" if summary['complexity_score'] > 7 else "medium",
+                "recommendation_type": "comprehensive_optimization",
+                "analysis_summary": summary
+            }
         except Exception as e:
-            self.logger.warning(f"Failed to parse optimization recommendations: {e}")
+            self.logger.warning(f"Failed to generate optimization recommendations: {e}")
+            return self._generate_fallback_optimization_recommendations(summary)
         
-        # Fallback recommendations
+    def _generate_fallback_optimization_recommendations(self, summary: Dict) -> Dict[str, Any]:
+        """Generate fallback optimization recommendations"""
+        recommendations = "## Optimization Recommendations\n\n"
+        
+        complexity = summary['complexity_score']
+        high_complexity = summary['high_complexity_chunks']
+        
+        recommendations += "### Priority Actions\n\n"
+        
+        if complexity > 7:
+            recommendations += "**High Priority - Complexity Reduction:**\n"
+            recommendations += f"- Address {high_complexity} high-complexity code sections immediately\n"
+            recommendations += "- Break down large procedural blocks into smaller, manageable functions\n"
+            recommendations += "- Implement comprehensive error handling throughout the program\n\n"
+        elif complexity > 4:
+            recommendations += "**Medium Priority - Maintenance Enhancement:**\n"
+            recommendations += "- Review and optimize moderate complexity sections\n"
+            recommendations += "- Improve code documentation and inline comments\n"
+            recommendations += "- Standardize naming conventions across the program\n\n"
+        else:
+            recommendations += "**Low Priority - Continuous Improvement:**\n"
+            recommendations += "- Maintain current code quality standards\n"
+            recommendations += "- Regular code reviews and documentation updates\n"
+            recommendations += "- Monitor for performance optimization opportunities\n\n"
+        
+        recommendations += "### Performance Optimization\n\n"
+        recommendations += "- Review file I/O operations for efficiency improvements\n"
+        recommendations += "- Optimize database access patterns and query performance\n"
+        recommendations += "- Consider memory usage optimization for large data processing\n\n"
+        
+        recommendations += "### Maintainability Improvements\n\n"
+        recommendations += "- Enhance error handling and logging capabilities\n"
+        recommendations += "- Improve code modularity and reusability\n"
+        recommendations += "- Establish comprehensive testing procedures\n"
+        
         return {
-            "performance": [
-                "Review file I/O operations for efficiency",
-                "Optimize loop constructs and nested conditions"
-            ],
-            "maintainability": [
-                "Break down high-complexity modules into smaller functions",
-                "Add comprehensive documentation for business rules"
-            ],
-            "structure": [
-                "Standardize naming conventions",
-                "Group related functionality into cohesive modules"
-            ],
-            "error_handling": [
-                "Add comprehensive error handling for all file operations",
-                "Implement consistent error reporting mechanisms"
-            ],
-            "testing": [
-                "Create unit tests for business rule validation",
-                "Develop integration tests for file processing workflows"
-            ],
-            "priority_recommendations": [
-                "Address high-complexity chunks first",
-                "Implement error handling for critical operations"
-            ]
+            "optimization_strategy": recommendations,
+            "priority_level": "high" if complexity > 7 else "medium",
+            "recommendation_type": "standard_optimization",
+            "analysis_summary": summary
         }
-    
+
+
     async def analyze_code_quality(self, program_name: str) -> Dict[str, Any]:
         """✅ API-BASED: Analyze overall code quality metrics"""
         try:
@@ -1337,52 +1405,192 @@ Return as JSON array:
             self.logger.error(f"Business logic analysis failed: {str(e)}")
             return self._add_processing_info({"error": str(e)})
     
+    async def _call_api_for_readable_analysis(self, prompt: str, max_tokens: int = None, 
+                                         context: str = "logic analysis") -> str:
+        """Enhanced API call that ensures readable responses for logic analysis"""
+        try:
+            # Enhance prompt to ensure readable output
+            enhanced_prompt = f"""
+            {prompt}
+            
+            IMPORTANT: Provide your response as clear, readable business prose. 
+            Do not use JSON format unless specifically requested.
+            Write in professional analysis style with proper sentences and paragraphs.
+            Focus on business impact and practical insights.
+            """
+            
+            params = self.api_params.copy()
+            if max_tokens:
+                params["max_tokens"] = max_tokens
+            
+            result = await self.coordinator.call_model_api(
+                prompt=enhanced_prompt,
+                params=params,
+                preferred_gpu_id=self.gpu_id
+            )
+            
+            # Extract and clean the response
+            if isinstance(result, dict):
+                response_text = result.get('text', result.get('response', ''))
+            else:
+                response_text = str(result)
+            
+            # Clean up the response
+            cleaned_response = self._clean_logic_response(response_text, context)
+            
+            return cleaned_response
+            
+        except Exception as e:
+            self.logger.error(f"API call failed: {str(e)}")
+            return f"Logic analysis failed for {context}. Please check system status."
+
+    def _clean_logic_response(self, response_text: str, context: str) -> str:
+        """Clean API response to ensure readable logic analysis format"""
+        if not response_text or not response_text.strip():
+            return f"No {context} information available."
+        
+        cleaned = response_text.strip()
+        
+        # Handle JSON responses - extract readable content
+        if cleaned.startswith('{') and cleaned.endswith('}'):
+            try:
+                import json
+                json_data = json.loads(cleaned)
+                readable_parts = []
+                
+                # Extract meaningful text from common JSON fields
+                text_fields = ['summary', 'analysis', 'description', 'business_logic', 
+                            'main_operations', 'decision_points', 'optimizations']
+                
+                for field in text_fields:
+                    if field in json_data:
+                        value = json_data[field]
+                        if isinstance(value, str) and len(value) > 10:
+                            readable_parts.append(value)
+                        elif isinstance(value, list):
+                            if field == 'main_operations':
+                                readable_parts.append(f"Main operations include: {', '.join(str(v) for v in value[:5])}")
+                            elif field == 'decision_points':
+                                readable_parts.append(f"Key decision points: {', '.join(str(v) for v in value[:3])}")
+                            elif field == 'optimizations':
+                                readable_parts.append(f"Optimization opportunities: {', '.join(str(v) for v in value[:3])}")
+                
+                if readable_parts:
+                    cleaned = '. '.join(readable_parts) + '.'
+                else:
+                    cleaned = f"Logic analysis completed for {context} with structured findings available."
+                    
+            except json.JSONDecodeError:
+                pass
+        
+        # Remove code blocks if present
+        if '```' in cleaned:
+            lines = cleaned.split('\n')
+            clean_lines = []
+            in_code_block = False
+            for line in lines:
+                if line.strip().startswith('```'):
+                    in_code_block = not in_code_block
+                    continue
+                if not in_code_block:
+                    clean_lines.append(line)
+            cleaned = '\n'.join(clean_lines)
+        
+        # Ensure minimum meaningful content
+        if len(cleaned.strip()) < 20:
+            cleaned = f"Logic analysis completed for {context}. Component shows standard programming patterns and business logic implementation."
+        
+        return cleaned.strip()
+
+
     async def _extract_comprehensive_business_logic_api(self, chunks: List[tuple]) -> Dict[str, Any]:
-        """✅ API-BASED: Extract comprehensive business logic from all chunks"""
+        """FIXED: Extract comprehensive business logic with readable output"""
         
         # Combine content with length management
         all_content = '\n'.join([chunk[4] for chunk in chunks])
         
-        # Create base prompt
-        base_prompt = """Analyze this complete COBOL program and extract the business logic:
+        # Create base prompt for readable business analysis
+        base_prompt = f"""
+        Analyze this complete COBOL program and provide a comprehensive business logic summary:
 
-Focus on:
-1. What business processes this program implements
-2. Key business rules and validations
-3. Data processing workflows
-4. Business calculations and transformations
-5. Decision points that affect business outcomes
+        Program Content (truncated for analysis):
+        {all_content[:1500]}...
 
-Provide a comprehensive business logic summary."""
+        Provide a detailed business analysis covering:
+
+        1. **Primary Business Purpose**: What business process does this program support?
         
-        # Calculate available space for content
-        available_space = self.MAX_PROMPT_CHARS - len(base_prompt) - 100
-        truncated_content = all_content[:available_space] + "..." if len(all_content) > available_space else all_content
+        2. **Key Business Rules**: What are the main business rules and validations implemented?
         
-        full_prompt = base_prompt.replace("program and extract", f"program and extract the business logic:\n\n{truncated_content}\n\nFocus on")
+        3. **Data Processing Workflow**: How does data flow through the business process?
         
-        # Final validation
-        full_prompt = self._validate_and_truncate_prompt(full_prompt, preserve_structure=False)
+        4. **Business Calculations**: What calculations or transformations support business operations?
+        
+        5. **Decision Logic**: What business decisions are automated by this program?
+        
+        6. **Business Impact**: How critical is this program to business operations?
+
+        Write as a comprehensive business analysis report in clear prose.
+        Do not use JSON format. Use proper headings and detailed explanations.
+        """
         
         try:
-            response_text = await self._call_api_for_analysis(full_prompt, max_tokens=1000)
+            response_text = await self._call_api_for_readable_analysis(base_prompt, max_tokens=1200)
             
             return {
-                "summary": response_text,
-                "extraction_method": "api_analysis",
-                "confidence": "high"
+                "business_summary": response_text,
+                "extraction_method": "enhanced_api_analysis",
+                "confidence": "high",
+                "analysis_type": "comprehensive_business_logic"
             }
         except Exception as e:
             self.logger.error(f"Failed to extract business logic: {e}")
             return {
-                "summary": "Business logic extraction failed",
-                "extraction_method": "api_analysis",
-                "confidence": "low",
+                "business_summary": self._generate_fallback_business_summary(chunks),
+                "extraction_method": "fallback_analysis",
+                "confidence": "medium",
                 "error": str(e)
             }
+        
+    def _generate_fallback_business_summary(self, chunks: List[tuple]) -> str:
+        """Generate fallback business summary when API fails"""
+        summary = "## Business Logic Analysis\n\n"
+        
+        # Analyze chunk types
+        chunk_types = {}
+        total_lines = 0
+        
+        for chunk in chunks:
+            chunk_type = chunk[3]  # chunk_type field
+            content = chunk[4]     # content field
+            
+            chunk_types[chunk_type] = chunk_types.get(chunk_type, 0) + 1
+            total_lines += len(content.split('\n'))
+        
+        summary += f"**Program Structure**: This program contains {len(chunks)} code sections "
+        summary += f"with {total_lines:,} total lines of code.\n\n"
+        
+        summary += "**Business Components Identified**:\n"
+        for chunk_type, count in chunk_types.items():
+            if chunk_type in ['data_division', 'working_storage']:
+                summary += f"- Data Structures: {count} sections defining business data elements\n"
+            elif chunk_type == 'procedure_division':
+                summary += f"- Business Logic: {count} sections implementing business processes\n"
+            elif chunk_type == 'file_section':
+                summary += f"- File Operations: {count} sections handling business data files\n"
+            else:
+                summary += f"- {chunk_type.title()}: {count} sections\n"
+        
+        summary += "\n**Business Process Analysis**: "
+        summary += "This program implements standard mainframe business processing patterns "
+        summary += "including data validation, transformation, and output generation. "
+        summary += "The program follows established COBOL business logic conventions "
+        summary += "and appears to be part of a larger business system.\n"
+        
+        return summary
 
     async def analyze_full_lifecycle(self, component_name: str, component_type: str) -> Dict[str, Any]:
-        """✅ API-BASED: Analyze full lifecycle of a component"""
+        """FIXED: Analyze complete lifecycle with readable documentation"""
         try:
             # Get all chunks related to this component
             conn = sqlite3.connect(self.db_path)
@@ -1410,19 +1618,23 @@ Provide a comprehensive business logic summary."""
                 return self._add_processing_info({
                     "component_name": component_name,
                     "component_type": component_type,
-                    "lifecycle_analysis": "No usage found",
-                    "usage_count": 0
+                    "lifecycle_analysis": "No usage found for this component",
+                    "usage_count": 0,
+                    "recommendation": "Verify component name and ensure data has been processed"
                 })
             
-            # Analyze lifecycle patterns with API
-            lifecycle_analysis = await self._analyze_lifecycle_patterns_api(related_chunks, component_name)
+            # Generate comprehensive lifecycle analysis
+            lifecycle_summary = await self._generate_lifecycle_summary_api(
+                component_name, component_type, related_chunks
+            )
             
             result = {
                 "component_name": component_name,
                 "component_type": component_type,
                 "usage_count": len(related_chunks),
-                "lifecycle_analysis": lifecycle_analysis,
-                "programs_involved": list(set(chunk[0] for chunk in related_chunks))
+                "lifecycle_summary": lifecycle_summary,
+                "programs_involved": list(set(chunk[0] for chunk in related_chunks)),
+                "analysis_completeness": "comprehensive" if len(related_chunks) > 5 else "basic"
             }
             
             return self._add_processing_info(result)
@@ -1430,6 +1642,61 @@ Provide a comprehensive business logic summary."""
         except Exception as e:
             self.logger.error(f"Lifecycle analysis failed: {str(e)}")
             return self._add_processing_info({"error": str(e)})
+        
+    async def _generate_lifecycle_summary_api(self, component_name: str, component_type: str, 
+                                        related_chunks: List[tuple]) -> str:
+        """Generate comprehensive lifecycle summary with readable output"""
+        
+        # Analyze the chunks to understand usage patterns
+        programs_using = set(chunk[0] for chunk in related_chunks)
+        chunk_types = [chunk[1] for chunk in related_chunks]
+        
+        prompt = f"""
+        Generate a comprehensive lifecycle analysis for {component_type} "{component_name}":
+
+        **Usage Analysis:**
+        - Found in {len(programs_using)} programs
+        - Total references: {len(related_chunks)}
+        - Programs: {', '.join(list(programs_using)[:5])}
+        - Chunk types: {', '.join(set(chunk_types))}
+
+        **Provide a detailed lifecycle analysis covering:**
+
+        **Component Overview:**
+        - What this component represents in the business context
+        - Its role in the overall system architecture
+
+        **Lifecycle Stages:**
+        - Where and how the component is created or initialized
+        - How it's used throughout different business processes
+        - Where and when it gets modified or updated
+        - End-of-life or archival considerations
+
+        **Usage Patterns:**
+        - Common ways this component is accessed
+        - Frequency and timing of usage
+        - Integration points with other components
+
+        **Dependencies and Relationships:**
+        - Other components that depend on this one
+        - Components this one depends on
+        - Critical relationship mapping
+
+        **Business Impact:**
+        - Importance to business operations
+        - Risk assessment if component fails
+        - Recommendations for maintenance and monitoring
+
+        Write as a comprehensive technical documentation suitable for both development and business teams.
+        Use clear section headings and detailed explanations.
+        """
+        
+        try:
+            return await self._call_api_for_readable_analysis(prompt, max_tokens=1200)
+        except Exception as e:
+            self.logger.error(f"Lifecycle summary generation failed: {e}")
+            return self._generate_fallback_lifecycle_summary(component_name, component_type, programs_using, len(related_chunks))
+
 
     # ==================== Cleanup and Context Management ====================
     

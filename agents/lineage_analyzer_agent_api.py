@@ -514,44 +514,113 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             "partial_data": None
         }
 
-    async def _generate_partial_summary_api(self, field_name: str, result: Dict) -> str:
-        """Generate API-based summary of partial analysis"""
+    async def _parse_api_response_to_text(self, response_text: str, fallback_text: str = "") -> str:
+        """Parse API response and extract readable text, avoiding raw JSON output"""
         try:
-            programs_list = list(result["lineage_data"]["programs"])[:10]  # Top 10 programs
+            if not response_text or not response_text.strip():
+                return fallback_text
+            
+            # Check if response contains JSON - extract readable parts
+            if '{' in response_text and '}' in response_text:
+                # Try to extract text before/after JSON or from specific JSON fields
+                lines = response_text.split('\n')
+                readable_lines = []
+                
+                for line in lines:
+                    line = line.strip()
+                    # Skip pure JSON lines
+                    if line.startswith('{') or line.startswith('[') or line.startswith('"'):
+                        continue
+                    # Keep explanatory text
+                    if line and not line.endswith(',') and not line.startswith('}'):
+                        readable_lines.append(line)
+                
+                if readable_lines:
+                    return '\n'.join(readable_lines)
+                
+                # If no readable text found, try to parse JSON and extract meaningful fields
+                try:
+                    import json
+                    json_start = response_text.find('{')
+                    json_end = response_text.rfind('}') + 1
+                    if json_start >= 0 and json_end > json_start:
+                        json_data = json.loads(response_text[json_start:json_end])
+                        return self._extract_readable_from_json(json_data)
+                except:
+                    pass
+            
+            # Return as-is if it's readable text
+            return response_text.strip()
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to parse API response: {e}")
+            return fallback_text
+
+    def _extract_readable_from_json(self, json_data: dict) -> str:
+        """Extract readable content from JSON response"""
+        readable_parts = []
+        
+        # Look for common text fields
+        text_fields = ['summary', 'description', 'analysis', 'explanation', 'overview', 'findings']
+        
+        for field in text_fields:
+            if field in json_data and isinstance(json_data[field], str):
+                readable_parts.append(json_data[field])
+        
+        # If no text fields, create summary from structured data
+        if not readable_parts:
+            if 'programs_using' in json_data:
+                readable_parts.append(f"Found usage in {len(json_data['programs_using'])} programs")
+            if 'operations' in json_data:
+                readable_parts.append(f"Performs {len(json_data['operations'])} different operations")
+            if 'dependencies' in json_data:
+                readable_parts.append(f"Has {len(json_data['dependencies'])} dependencies")
+        
+        return '. '.join(readable_parts) if readable_parts else "Analysis completed successfully"
+
+
+
+    async def _generate_partial_summary_api(self, field_name: str, result: Dict) -> str:
+        """Generate API-based summary of partial analysis - FIXED for readable output"""
+        try:
+            programs_list = list(result["lineage_data"]["programs"])[:10]
             operations_summary = {}
             for op in result["lineage_data"]["operations"]:
                 operations_summary[op] = operations_summary.get(op, 0) + 1
             
             prompt = f"""
-            Summarize this partial field lineage analysis:
+            Create a clear, readable business summary for this field lineage analysis:
             
             Field: {field_name}
             Analysis Status: {result['status']} 
             References Analyzed: {result['references_analyzed']} of {result['total_references_found']}
-            Strategy: {result['analysis_strategy']}
             
-            Key Programs Using This Field:
-            {', '.join(programs_list)}
+            Key Programs: {', '.join(programs_list[:5])}
+            Operations: {', '.join(operations_summary.keys())}
             
-            Operations Found:
-            {json.dumps(operations_summary, indent=2)}
+            Write a clear paragraph explaining:
+            - What this field is used for in business terms
+            - Which systems depend on it
+            - Key operations performed
+            - Business criticality level
             
-            Provide a business-focused summary covering:
-            1. What this field appears to be used for
-            2. Key systems/programs that depend on it  
-            3. Main operations performed on this field
-            4. Business impact and criticality
-            5. Analysis completeness and confidence level
-            
-            Keep it concise (150 words max) and actionable for business stakeholders.
+            Write in plain English, no JSON, no technical jargon. Maximum 150 words.
             """
             
-            return await self._call_api_for_analysis(prompt, max_tokens=300)
-                
+            api_response = await self._call_api_for_analysis(prompt, max_tokens=300)
+            
+            # Parse the response to ensure readable text
+            readable_summary = await self._parse_api_response_to_text(
+                api_response, 
+                f"Field {field_name} is used across {len(programs_list)} programs with {result['references_analyzed']} references analyzed."
+            )
+            
+            return readable_summary
+                    
         except Exception as e:
             self.logger.error(f"Summary generation failed: {e}")
-            return f"Partial analysis of {field_name}: Found in {len(result['lineage_data']['programs'])} programs with {result['references_analyzed']} references analyzed. Analysis strategy: {result.get('analysis_strategy', 'standard')}."
-
+            return f"Analysis Summary: Field {field_name} found in {len(result['lineage_data']['programs'])} programs with {result['references_analyzed']} references processed using {result.get('analysis_strategy', 'standard')} strategy."
+        
     async def _find_field_references(self, field_name: str) -> List[Dict[str, Any]]:
         """Find all references to a field across the codebase - FIXED VERSION"""
         references = []

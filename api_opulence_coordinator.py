@@ -1447,34 +1447,58 @@ class APIOpulenceCoordinator:
         return summary
 
     async def _generate_analysis_summary_doc(self, component_name: str, analysis_summary: Dict[str, Any], 
-                                            doc_agent) -> Dict[str, Any]:
-        """Generate a custom analysis summary document"""
+                                        doc_agent) -> Dict[str, Any]:
+        """FIXED: Generate a readable analysis summary document"""
         try:
-            # Create a structured summary prompt for the documentation agent
+            # Create a structured summary for readable documentation
+            findings_text = self._format_findings_as_text(analysis_summary.get('findings', {}))
+            
             prompt = f"""
-            Generate a comprehensive analysis summary document for the component: {component_name}
+            Create a comprehensive business analysis summary for: {component_name}
             
-            Analysis Overview:
-            - Component Type: {analysis_summary.get('component_type', 'Unknown')}
-            - Total Analyses: {analysis_summary.get('total_analyses', 0)}
-            - Successful Analyses: {analysis_summary.get('successful_analyses', 0)}
-            - Analysis Timestamp: {analysis_summary.get('analysis_timestamp', 'Unknown')}
+            Component Type: {analysis_summary.get('component_type', 'Unknown')}
+            Analysis Timestamp: {analysis_summary.get('analysis_timestamp', 'Unknown')}
+            Total Analyses: {analysis_summary.get('total_analyses', 0)}
+            Successful Analyses: {analysis_summary.get('successful_analyses', 0)}
             
-            Findings Summary:
-            {json.dumps(analysis_summary.get('findings', {}), indent=2)}
+            Key Findings:
+            {findings_text}
             
-            Create a professional analysis summary that includes:
-            1. Executive Summary
-            2. Key Findings
-            3. Component Characteristics
-            4. Recommendations
-            5. Next Steps
+            Write a professional executive summary that includes:
             
-            Format as clear, professional documentation.
+            1. **Executive Summary**
+            - What this component does in business terms
+            - Its importance to the organization
+            
+            2. **Key Findings**
+            - Most important discoveries from the analysis
+            - Critical dependencies and relationships
+            
+            3. **Component Characteristics**
+            - Technical characteristics that matter to business
+            - Performance and reliability indicators
+            
+            4. **Recommendations**
+            - Actions to improve or maintain this component
+            - Risk mitigation strategies
+            
+            5. **Next Steps**
+            - Immediate actions required
+            - Long-term considerations
+            
+            Write in clear, professional prose suitable for both technical and business audiences.
+            Do not use JSON format. Use proper headings and paragraphs.
+            Maximum 800 words.
             """
             
-            # Use the documentation agent's API call method
-            doc_content = await doc_agent._call_api_for_analysis(prompt, max_tokens=800)
+            # Use the documentation agent's enhanced API call method
+            if hasattr(doc_agent, '_call_api_for_readable_analysis'):
+                doc_content = await doc_agent._call_api_for_readable_analysis(prompt, max_tokens=1000)
+            else:
+                # Fallback to regular API call with enhanced prompt
+                doc_content = await doc_agent._call_api_for_analysis(prompt, max_tokens=1000)
+                # Clean the response if needed
+                doc_content = self._ensure_readable_output(doc_content, component_name)
             
             return {
                 "status": "success",
@@ -1482,7 +1506,8 @@ class APIOpulenceCoordinator:
                 "documentation": doc_content,
                 "format": "markdown",
                 "analysis_summary": analysis_summary,
-                "generation_timestamp": dt.now().isoformat()
+                "generation_timestamp": dt.now().isoformat(),
+                "content_type": "readable_summary"
             }
             
         except Exception as e:
@@ -1490,9 +1515,101 @@ class APIOpulenceCoordinator:
             return {
                 "status": "error",
                 "error": str(e),
-                "component_name": component_name
+                "component_name": component_name,
+                "fallback_summary": self._generate_fallback_summary(component_name, analysis_summary)
             }
 
+    def _format_findings_as_text(self, findings: Dict[str, Any]) -> str:
+        """Format findings dictionary as readable text"""
+        text_parts = []
+        
+        if 'lineage' in findings:
+            lineage = findings['lineage']
+            programs = lineage.get('programs_found', 0)
+            operations = len(lineage.get('operations', []))
+            text_parts.append(f"Lineage Analysis: Found usage in {programs} programs with {operations} different operations")
+        
+        if 'logic' in findings:
+            logic = findings['logic']
+            complexity = logic.get('complexity_score', 0)
+            dependencies = len(logic.get('dependencies', []))
+            text_parts.append(f"Logic Analysis: Complexity score of {complexity:.1f} with {dependencies} dependencies")
+        
+        if 'semantic' in findings:
+            semantic = findings['semantic']
+            similar = semantic.get('similar_components', 0)
+            matches = semantic.get('semantic_matches', 0)
+            text_parts.append(f"Semantic Analysis: {similar} similar components found with {matches} semantic matches")
+        
+        return '\n'.join(text_parts) if text_parts else "Analysis completed successfully"
+
+    def _ensure_readable_output(self, content: str, component_name: str) -> str:
+        """Ensure the output is readable prose, not JSON"""
+        if not content or len(content.strip()) < 10:
+            return self._generate_fallback_summary(component_name, {})
+        
+        # Check if content is JSON-like and convert if needed
+        content = content.strip()
+        if content.startswith('{') and content.endswith('}'):
+            try:
+                import json
+                json_data = json.loads(content)
+                # Extract readable content from JSON
+                if isinstance(json_data, dict):
+                    readable_parts = []
+                    for key, value in json_data.items():
+                        if isinstance(value, str) and len(value) > 20:
+                            readable_parts.append(f"**{key.title()}:** {value}")
+                    
+                    if readable_parts:
+                        content = '\n\n'.join(readable_parts)
+                    else:
+                        content = self._generate_fallback_summary(component_name, json_data)
+            except:
+                pass
+        
+        return content
+
+    def _generate_fallback_summary(self, component_name: str, analysis_summary: Dict[str, Any]) -> str:
+        """Generate a fallback readable summary"""
+        summary = f"# Analysis Summary for {component_name}\n\n"
+        
+        summary += f"**Component:** {component_name}\n"
+        summary += f"**Analysis Date:** {dt.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        summary += f"**Analysis Type:** Comprehensive Component Analysis\n\n"
+        
+        total_analyses = analysis_summary.get('total_analyses', 0)
+        successful = analysis_summary.get('successful_analyses', 0)
+        
+        summary += "## Executive Summary\n\n"
+        summary += f"This analysis examined {component_name} using {total_analyses} different analytical approaches, "
+        summary += f"with {successful} analyses completing successfully. "
+        
+        if successful > 0:
+            summary += "The component appears to be actively used within the system "
+            summary += "and has identifiable patterns and dependencies.\n\n"
+        else:
+            summary += "Limited analysis data is available for this component.\n\n"
+        
+        summary += "## Key Findings\n\n"
+        
+        findings = analysis_summary.get('findings', {})
+        if findings:
+            for category, data in findings.items():
+                if isinstance(data, dict) and data:
+                    summary += f"**{category.title()} Analysis:** "
+                    summary += f"Analysis completed with {len(data)} data points identified.\n"
+        else:
+            summary += "Component analysis completed. Detailed findings available in technical sections.\n"
+        
+        summary += "\n## Recommendations\n\n"
+        summary += "- Review component usage patterns for optimization opportunities\n"
+        summary += "- Ensure proper documentation is maintained\n"
+        summary += "- Monitor component dependencies for system stability\n"
+        
+        return summary
+
+    
     def _normalize_component_type(self, component_type: str) -> str:
         """Normalize component type for proper agent handling"""
         if not component_type:

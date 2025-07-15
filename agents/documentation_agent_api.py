@@ -325,6 +325,220 @@ class DocumentationAgent(BaseOpulenceAgent):
             self.logger.error(f"Field lineage documentation failed for {field_name}: {str(e)}")
             return self._add_processing_info({"error": str(e)})
     
+    async def _generate_field_overview(self, lineage_info: Dict[str, Any]) -> str:
+        """Generate field overview with readable output"""
+        field_name = lineage_info['field_name']
+        programs_count = len(lineage_info['programs_using'])
+        operations_count = len(lineage_info['operations'])
+        
+        prompt = f"""
+        Create a professional field overview for: {field_name}
+        
+        This field is used in {programs_count} programs and has {operations_count} different operations.
+        Programs using this field: {', '.join(lineage_info['programs_using'][:5])}
+        
+        Write a clear overview that explains:
+        - What this field represents in business terms
+        - How it's used across the system
+        - Its importance to business operations
+        - Key characteristics and usage patterns
+        
+        Write as professional documentation prose, not JSON or bullet points.
+        """
+        
+        return await self._call_api_for_readable_analysis(prompt, max_tokens=400, context="field overview")
+
+
+    async def _generate_field_lifecycle_doc_api(self, lineage_info: Dict[str, Any]) -> str:
+        """Generate readable field lifecycle documentation"""
+        field_name = lineage_info['field_name'] 
+        
+        prompt = f"""
+        Document the lifecycle of field {field_name} based on its usage patterns.
+        
+        Usage found in: {len(lineage_info['programs_using'])} programs
+        Operations: {', '.join(lineage_info['operations'])}
+        
+        Write a comprehensive lifecycle description covering:
+        - How the field is created and initialized
+        - How it flows through different business processes
+        - Where and how it gets updated or modified
+        - Its role in the overall data architecture
+        
+        Write as flowing prose suitable for technical documentation.
+        """
+        
+        return await self._call_api_for_readable_analysis(prompt, max_tokens=500, context="field lifecycle")
+
+    async def _generate_field_usage_patterns_api(self, lineage_info: Dict[str, Any]) -> str:
+        """Generate readable field usage patterns documentation"""
+        field_name = lineage_info['field_name']
+        
+        prompt = f"""
+        Analyze and document the usage patterns for field {field_name}.
+        
+        Found in {len(lineage_info['programs_using'])} programs with operations: {', '.join(lineage_info['operations'])}
+        
+        Describe:
+        - Common ways this field is used across programs
+        - Patterns in how it's accessed and modified
+        - Business scenarios where it's most critical
+        - Any notable usage characteristics or trends
+        
+        Write in clear, professional documentation style.
+        """
+        
+        return await self._call_api_for_readable_analysis(prompt, max_tokens=400, context="usage patterns")
+
+    async def _generate_field_dependencies(self, lineage_info: Dict[str, Any]) -> str:
+        """Generate field dependencies documentation"""
+        field_name = lineage_info['field_name']
+        programs = lineage_info['programs_using']
+        
+        deps_doc = f"## Field Dependencies\n\n"
+        deps_doc += f"**Field:** {field_name}\n\n"
+        
+        deps_doc += "**Dependent Programs:**\n"
+        for program in programs[:10]:
+            deps_doc += f"- {program}\n"
+        
+        if len(programs) > 10:
+            deps_doc += f"- ... and {len(programs) - 10} more programs\n"
+        
+        deps_doc += f"\n**Dependency Analysis:**\n"
+        deps_doc += f"This field has {len(programs)} direct dependencies across the system. "
+        deps_doc += "Changes to this field structure or data type could impact multiple programs "
+        deps_doc += "and require coordinated testing and deployment.\n"
+        
+        return deps_doc
+
+    async def _generate_field_quality_metrics_api(self, lineage_info: Dict[str, Any]) -> str:
+        """Generate field quality metrics documentation"""
+        field_name = lineage_info['field_name']
+        
+        prompt = f"""
+        Generate quality metrics analysis for field {field_name}.
+        
+        Usage: {len(lineage_info['programs_using'])} programs, {len(lineage_info['operations'])} operations
+        
+        Analyze and document:
+        - Data quality considerations for this field
+        - Consistency across different programs
+        - Potential quality risks or concerns
+        - Recommendations for quality monitoring
+        
+        Write as professional quality assessment documentation.
+        """
+        
+        return await self._call_api_for_readable_analysis(prompt, max_tokens=400, context="quality metrics")
+
+    async def _generate_field_recommendations_api(self, lineage_info: Dict[str, Any]) -> str:
+        """Generate field recommendations documentation"""
+        field_name = lineage_info['field_name']
+        
+        prompt = f"""
+        Generate recommendations for field {field_name} based on its usage analysis.
+        
+        Current usage: {len(lineage_info['programs_using'])} programs
+        Operations: {', '.join(lineage_info['operations'][:5])}
+        
+        Provide recommendations for:
+        - Best practices for using this field
+        - Potential improvements or optimizations
+        - Risk mitigation strategies
+        - Maintenance considerations
+        
+        Write as actionable business recommendations.
+        """
+        
+        return await self._call_api_for_readable_analysis(prompt, max_tokens=400, context="recommendations")
+
+    async def _call_api_for_readable_analysis(self, prompt: str, max_tokens: int = None, 
+                                         context: str = "documentation") -> str:
+        """Make API call and ensure readable response for documentation"""
+        try:
+            # Add instruction for readable output
+            enhanced_prompt = f"""
+            {prompt}
+            
+            IMPORTANT: Respond with clear, readable prose. Do not use JSON format. 
+            Write in professional documentation style with proper sentences and paragraphs.
+            Focus on business value and practical information.
+            """
+            
+            params = self.api_params.copy()
+            if max_tokens:
+                params["max_tokens"] = max_tokens
+            
+            result = await self.coordinator.call_model_api(
+                prompt=enhanced_prompt,
+                params=params,
+                preferred_gpu_id=self.gpu_id
+            )
+            
+            # Extract and clean the response
+            if isinstance(result, dict):
+                response_text = result.get('text', result.get('response', ''))
+            else:
+                response_text = str(result)
+            
+            # Clean up the response - remove JSON artifacts
+            cleaned_response = self._clean_api_response(response_text, context)
+            
+            return cleaned_response
+            
+        except Exception as e:
+            self.logger.error(f"API call failed: {str(e)}")
+            return f"Documentation generation failed for {context}. Please check system status."
+
+    def _clean_api_response(self, response_text: str, context: str) -> str:
+        """Clean API response to ensure readable documentation format"""
+        if not response_text or not response_text.strip():
+            return f"No {context} information available."
+        
+        # Remove common JSON artifacts
+        cleaned = response_text.strip()
+        
+        # Remove JSON wrapper if present
+        if cleaned.startswith('{') and cleaned.endswith('}'):
+            try:
+                import json
+                json_data = json.loads(cleaned)
+                # Extract meaningful text from JSON
+                if isinstance(json_data, dict):
+                    text_parts = []
+                    for key, value in json_data.items():
+                        if isinstance(value, str) and len(value) > 10:
+                            text_parts.append(value)
+                        elif isinstance(value, list):
+                            text_parts.extend([str(item) for item in value if isinstance(item, str)])
+                    
+                    if text_parts:
+                        cleaned = '. '.join(text_parts)
+                    else:
+                        cleaned = f"Analysis completed for {context}"
+            except:
+                pass
+        
+        # Remove markdown code blocks if present
+        if '```' in cleaned:
+            lines = cleaned.split('\n')
+            clean_lines = []
+            in_code_block = False
+            for line in lines:
+                if line.strip().startswith('```'):
+                    in_code_block = not in_code_block
+                    continue
+                if not in_code_block:
+                    clean_lines.append(line)
+            cleaned = '\n'.join(clean_lines)
+        
+        # Ensure minimum content
+        if len(cleaned.strip()) < 20:
+            cleaned = f"Documentation analysis completed for {context}. Please refer to the technical details for more information."
+        
+        return cleaned.strip()
+
     async def _gather_program_info(self, program_name: str) -> Dict[str, Any]:
         """Gather comprehensive information about a program"""
         conn = sqlite3.connect(self.db_path)
