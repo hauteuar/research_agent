@@ -18,7 +18,7 @@ import logging
 from datetime import datetime
 import hashlib
 
-from agents.base_agent import BaseOpulenceAgent
+from agents.base_agent_api import BaseOpulenceAgent
 
 @dataclass
 class LogicPattern:

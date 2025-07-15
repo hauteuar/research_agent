@@ -1541,6 +1541,8 @@ def process_single_file_enhanced_complete(uploaded_file, file_info):
                 if result and not result.get('error'):
                     with st.expander(f"📋 Processing Results for {file_info['name']}", expanded=False):
                         st.json(result)
+
+                process_single_file_with_debug()
                 
             finally:
                 # Clean up temp file
@@ -1560,6 +1562,85 @@ def process_single_file_enhanced_complete(uploaded_file, file_info):
             error_message=str(e),
             file_type=file_info['type']
         )
+
+def process_single_file_with_debug(uploaded_file, file_info):
+    """Enhanced file processing with comprehensive debug output"""
+    
+    coordinator = st.session_state.get('coordinator')
+    if not coordinator:
+        st.error("❌ No coordinator available")
+        return
+    
+    try:
+        with st.spinner(f"Processing {file_info['name']}..."):
+            start_time = time.time()
+            
+            # Save file temporarily
+            with tempfile.NamedTemporaryFile(mode='wb', delete=False, 
+                                           suffix=f"_{file_info['name']}") as temp_file:
+                temp_file.write(uploaded_file.getvalue())
+                temp_file_path = temp_file.name
+            
+            try:
+                # Process file with enhanced tracking
+                result = safe_async_call(
+                    coordinator,
+                    coordinator.process_batch_files,
+                    [Path(temp_file_path)],
+                    file_info['type']
+                )
+                
+                processing_time = time.time() - start_time
+                
+                # ADDED: Comprehensive debug output for code parser
+                if file_info['agent'] == 'code_parser':
+                    st.markdown("---")
+                    add_codeparser_debug_output(result, file_info['name'])
+                
+                # Standard result processing
+                if result and not result.get('error'):
+                    st.success(f"✅ {file_info['name']} processed successfully in {processing_time:.2f}s")
+                    
+                    # Show processing results with debug
+                    with st.expander(f"📋 Processing Results for {file_info['name']}", expanded=True):
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("**📊 Processing Summary:**")
+                            if isinstance(result, dict) and "results" in result:
+                                for i, file_result in enumerate(result["results"]):
+                                    st.markdown(f"**File {i+1}:**")
+                                    st.markdown(f"- Status: {file_result.get('status', 'Unknown')}")
+                                    st.markdown(f"- Chunks: {file_result.get('chunks_created', 0)}")
+                                    st.markdown(f"- Processing Time: {processing_time:.2f}s")
+                        
+                        with col2:
+                            st.markdown("**🔍 Technical Details:**")
+                            st.markdown(f"- Agent Used: {file_info['agent']}")
+                            st.markdown(f"- File Type: {file_info['type']}")
+                            st.markdown(f"- File Size: {file_info['size']:,} bytes")
+                            st.markdown(f"- Vector Index Updated: {result.get('vector_index_updated', False)}")
+                else:
+                    error_msg = result.get('error', 'Processing failed') if result else 'No result returned'
+                    st.error(f"❌ {file_info['name']} failed: {error_msg}")
+                    
+                    # Show error debug information
+                    with st.expander(f"🐛 Error Debug for {file_info['name']}", expanded=True):
+                        st.json(result if result else {"error": "No result returned"})
+            
+            finally:
+                # Clean up temp file
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+    
+    except Exception as e:
+        st.error(f"❌ Processing exception for {file_info['name']}: {str(e)}")
+        
+        # Exception debug output
+        with st.expander(f"🚨 Exception Debug for {file_info['name']}", expanded=True):
+            st.code(str(e))
+            st.code(traceback.format_exc())
+
 
 def show_vector_index_status():
     """Show vector index status in sidebar"""
@@ -2688,85 +2769,922 @@ def export_analysis_results_json(result: Dict[str, Any], analysis_id: str, compo
     except Exception as e:
         st.error(f"❌ Export failed: {str(e)}")
 
-def display_component_analysis_results(result: Dict[str, Any], analysis_id: str):
-    """Display comprehensive component analysis results"""
+def display_component_analysis_results(result: Dict[str, Any], analysis_id: str, component_name: str):
+    """FIXED: Display component analysis results with proper formatting and debug output"""
     
     if not result:
         st.warning("No analysis results to display")
         return
     
-    # Analysis summary
+    # Debug output section - ALWAYS show for verification
+    with st.expander("🐛 Debug Output - Raw Analysis Result", expanded=False):
+        st.markdown("**Raw Coordinator Response:**")
+        st.json(result)
+        
+        # Additional debug info
+        st.markdown("**Debug Information:**")
+        debug_info = {
+            "analysis_id": analysis_id,
+            "component_name": component_name,
+            "result_type": type(result).__name__,
+            "result_keys": list(result.keys()) if isinstance(result, dict) else "Not a dict",
+            "status": result.get('status') if isinstance(result, dict) else "No status",
+            "analyses_count": len(result.get('analyses', {})) if isinstance(result, dict) else 0,
+            "timestamp": dt.now().isoformat()
+        }
+        st.json(debug_info)
+    
+    # Main analysis summary
     st.markdown("#### 📊 Analysis Summary")
     
-    status = result.get('status', 'unknown')
-    analyses = result.get('analyses', {})
+    col1, col2, col3, col4 = st.columns(4)
     
+    with col1:
+        status = result.get('status', 'unknown')
+        if status == 'completed':
+            st.success(f"**Status:** ✅ {status.title()}")
+        elif status == 'partial':
+            st.warning(f"**Status:** ⚠️ {status.title()}")
+        elif status == 'failed':
+            st.error(f"**Status:** ❌ {status.title()}")
+        else:
+            st.info(f"**Status:** {status.title()}")
+    
+    with col2:
+        analyses = result.get('analyses', {})
+        successful_analyses = len([a for a in analyses.values() if a.get('status') == 'success'])
+        st.info(f"**Analyses:** {successful_analyses}/{len(analyses)} successful")
+    
+    with col3:
+        total_duration = result.get('processing_metadata', {}).get('total_duration_seconds', 0)
+        st.info(f"**Duration:** {total_duration:.2f}s")
+    
+    with col4:
+        component_type = result.get('normalized_type', result.get('component_type', 'Unknown'))
+        st.info(f"**Type:** {component_type}")
+    
+    # FIXED: Display individual analysis results with proper formatting
+    if analyses:
+        st.markdown("#### 📋 Detailed Analysis Results")
+        
+        # Process each analysis type
+        for analysis_type, analysis_data in analyses.items():
+            display_single_analysis_result_fixed(analysis_type, analysis_data, analysis_id)
+    
+    # Show documentation summary if available
+    if 'documentation_summary' in analyses:
+        doc_analysis = analyses['documentation_summary']
+        if doc_analysis.get('status') == 'success':
+            show_documentation_summary_formatted(doc_analysis.get('data', {}))
+    
+    # Export and action buttons
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.metric("Status", status.title())
-    with col2:
-        st.metric("Analyses Completed", len(analyses))
-    with col3:
-        total_duration = result.get('processing_metadata', {}).get('total_duration_seconds', 0)
-        st.metric("Total Duration", f"{total_duration:.2f}s")
+        if st.button(f"💾 Export Results", key=f"export_{analysis_id}"):
+            export_analysis_results_enhanced(result, analysis_id, component_name)
     
-    # Individual analysis results
-    if analyses:
-        for analysis_type, analysis_data in analyses.items():
-            analysis_status = analysis_data.get('status', 'unknown')
-            
-            # Determine status icon and color
+    with col2:
+        if st.button(f"🔄 Re-analyze", key=f"reanalyze_{analysis_id}"):
+            st.info("Use the Component Analysis page to re-analyze this component")
+    
+    with col3:
+        if st.button(f"📋 Copy Summary", key=f"copy_summary_{analysis_id}"):
+            copy_analysis_summary_to_clipboard(result, component_name)
+
+def display_single_analysis_result_fixed(analysis_type: str, analysis_data: Dict[str, Any], analysis_id: str):
+    """FIXED: Display individual analysis result with proper formatting"""
+    
+    analysis_status = analysis_data.get('status', 'unknown')
+    step = analysis_data.get('step', 0)
+    
+    # Create expandable section for each analysis
+    expanded_by_default = analysis_status == 'success'
+    
+    with st.expander(f"Step {step}: {analysis_type.replace('_', ' ').title()}", expanded=expanded_by_default):
+        
+        # Status and metadata
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
             if analysis_status == 'success':
-                status_icon = "✅"
-                status_color = "success"
+                st.success(f"✅ Status: Success")
             elif analysis_status == 'error':
-                status_icon = "❌"
-                status_color = "error"
+                st.error(f"❌ Status: Failed")
+                error_msg = analysis_data.get('error', 'Unknown error')
+                st.error(f"**Error:** {error_msg}")
+                return  # Don't show data if failed
             else:
-                status_icon = "⚠️"
-                status_color = "warning"
+                st.warning(f"⚠️ Status: {analysis_status}")
+                return
+        
+        with col2:
+            agent_used = analysis_data.get('agent_used', 'Unknown')
+            st.markdown(f"**Agent:** {agent_used}")
+        
+        with col3:
+            completion_time = analysis_data.get('completion_time', 0)
+            st.markdown(f"**Time:** {completion_time:.2f}s")
+        
+        # Display analysis data with proper formatting
+        analysis_result = analysis_data.get('data', {})
+        
+        if isinstance(analysis_result, dict) and analysis_result:
+            # Format specific analysis types
+            if analysis_type == 'lineage_analysis':
+                display_lineage_analysis_formatted(analysis_result)
+            elif analysis_type == 'logic_analysis':
+                display_logic_analysis_formatted(analysis_result)
+            elif analysis_type == 'semantic_analysis':
+                display_semantic_analysis_formatted(analysis_result)
+            elif analysis_type == 'documentation_summary':
+                display_documentation_analysis_formatted(analysis_result)
+            else:
+                # Generic display with better formatting
+                display_generic_analysis_formatted(analysis_result, analysis_type)
+        else:
+            st.info("No detailed analysis data available")
+        
+        # Debug output for each analysis
+        with st.expander(f"🐛 Debug: {analysis_type} Raw Data", expanded=False):
+            st.json(analysis_data)
+
+def display_lineage_analysis_formatted(lineage_data: Dict[str, Any]):
+    """FIXED: Display lineage analysis with enhanced formatting"""
+    
+    st.markdown("**📊 Data Lineage Analysis**")
+    
+    if not lineage_data:
+        st.info("No lineage data available")
+        return
+    
+    # Handle different possible data structures from coordinator
+    if isinstance(lineage_data, dict):
+        
+        # Field lineage information
+        if 'field_lineage' in lineage_data:
+            field_lineage = lineage_data['field_lineage']
+            if field_lineage and isinstance(field_lineage, list):
+                st.markdown("**📋 Field Lineage Details:**")
+                df = pd.DataFrame(field_lineage)
+                st.dataframe(df, use_container_width=True)
+            else:
+                st.info("No field lineage records found")
+        
+        # Programs using this component
+        if 'programs_using' in lineage_data:
+            programs = lineage_data['programs_using']
+            if programs:
+                st.markdown("**🏗️ Programs Using This Component:**")
+                for program in programs:
+                    if isinstance(program, dict):
+                        prog_name = program.get('program_name', 'Unknown')
+                        operations = program.get('operations', [])
+                        st.markdown(f"- **{prog_name}** ({len(operations)} operations)")
+                        if operations:
+                            for op in operations[:3]:  # Show first 3 operations
+                                st.markdown(f"  - {op}")
+                            if len(operations) > 3:
+                                st.markdown(f"  - ... and {len(operations) - 3} more")
+                    else:
+                        st.markdown(f"- {program}")
+            else:
+                st.info("No programs found using this component")
+        
+        # Lifecycle information
+        if 'lifecycle_stages' in lineage_data:
+            lifecycle = lineage_data['lifecycle_stages']
+            if lifecycle:
+                st.markdown("**🔄 Component Lifecycle:**")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    if 'created_in' in lifecycle:
+                        st.markdown(f"**Created in:** {lifecycle['created_in']}")
+                
+                with col2:
+                    if 'updated_in' in lifecycle:
+                        st.markdown(f"**Updated in:** {lifecycle['updated_in']}")
+                
+                with col3:
+                    if 'used_in' in lifecycle:
+                        st.markdown(f"**Used in:** {lifecycle['used_in']}")
+        
+        # Operations summary
+        if 'operations' in lineage_data:
+            operations = lineage_data['operations']
+            if operations:
+                st.markdown("**⚙️ Operations Summary:**")
+                op_types = {}
+                for op in operations:
+                    op_type = op.get('operation', 'Unknown') if isinstance(op, dict) else str(op)
+                    op_types[op_type] = op_types.get(op_type, 0) + 1
+                
+                for op_type, count in op_types.items():
+                    st.markdown(f"- {op_type}: {count} occurrences")
+        
+        # Show any other lineage information
+        other_keys = [k for k in lineage_data.keys() 
+                     if k not in ['field_lineage', 'programs_using', 'lifecycle_stages', 'operations']]
+        
+        for key in other_keys:
+            value = lineage_data[key]
+            if value:
+                st.markdown(f"**{key.replace('_', ' ').title()}:**")
+                if isinstance(value, (list, dict)):
+                    if isinstance(value, list) and len(value) > 0:
+                        for item in value[:5]:  # Show first 5 items
+                            st.markdown(f"- {item}")
+                        if len(value) > 5:
+                            st.markdown(f"- ... and {len(value) - 5} more items")
+                    elif isinstance(value, dict):
+                        for k, v in list(value.items())[:3]:  # Show first 3 items
+                            st.markdown(f"- {k}: {v}")
+                        if len(value) > 3:
+                            st.markdown(f"- ... and {len(value) - 3} more items")
+                else:
+                    st.markdown(f"{value}")
+    else:
+        # Fallback for unexpected data structure
+        st.json(lineage_data)
+
+def display_logic_analysis_formatted(logic_data: Dict[str, Any]):
+    """FIXED: Display logic analysis with enhanced formatting"""
+    
+    st.markdown("**🏗️ Program Logic Analysis**")
+    
+    if not logic_data:
+        st.info("No logic analysis data available")
+        return
+    
+    if isinstance(logic_data, dict):
+        
+        # Program structure
+        if 'program_structure' in logic_data:
+            structure = logic_data['program_structure']
+            if structure:
+                st.markdown("**📂 Program Structure:**")
+                if isinstance(structure, dict):
+                    for section, content in structure.items():
+                        with st.expander(f"📁 {section.replace('_', ' ').title()}", expanded=False):
+                            if isinstance(content, list):
+                                for item in content:
+                                    st.markdown(f"• {item}")
+                            elif isinstance(content, dict):
+                                for key, value in content.items():
+                                    st.markdown(f"**{key}:** {value}")
+                            else:
+                                st.markdown(str(content))
+                else:
+                    st.write(structure)
+        
+        # Dependencies
+        if 'dependencies' in logic_data:
+            deps = logic_data['dependencies']
+            if deps:
+                st.markdown("**🔗 Dependencies:**")
+                if isinstance(deps, list):
+                    for dep in deps:
+                        if isinstance(dep, dict):
+                            dep_name = dep.get('name', dep.get('component', 'Unknown'))
+                            dep_type = dep.get('type', 'Unknown')
+                            st.markdown(f"- **{dep_name}** ({dep_type})")
+                        else:
+                            st.markdown(f"- {dep}")
+                else:
+                    st.write(deps)
+        
+        # Business rules
+        if 'business_rules' in logic_data:
+            rules = logic_data['business_rules']
+            if rules:
+                st.markdown("**📋 Business Rules:**")
+                if isinstance(rules, list):
+                    for i, rule in enumerate(rules, 1):
+                        st.markdown(f"{i}. {rule}")
+                else:
+                    st.write(rules)
+        
+        # Complexity metrics
+        if 'complexity_score' in logic_data or 'complexity' in logic_data:
+            complexity = logic_data.get('complexity_score', logic_data.get('complexity', {}))
+            if complexity:
+                st.markdown("**📊 Complexity Metrics:**")
+                if isinstance(complexity, (int, float)):
+                    # Simple complexity score
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Complexity Score", f"{complexity:.1f}")
+                    with col2:
+                        if complexity < 5:
+                            st.success("Low Complexity")
+                        elif complexity < 10:
+                            st.warning("Medium Complexity")
+                        else:
+                            st.error("High Complexity")
+                elif isinstance(complexity, dict):
+                    # Detailed complexity metrics
+                    col1, col2, col3 = st.columns(3)
+                    
+                    metrics = list(complexity.items())
+                    for i, (metric, value) in enumerate(metrics):
+                        if i % 3 == 0:
+                            with col1:
+                                st.metric(metric.replace('_', ' ').title(), str(value))
+                        elif i % 3 == 1:
+                            with col2:
+                                st.metric(metric.replace('_', ' ').title(), str(value))
+                        else:
+                            with col3:
+                                st.metric(metric.replace('_', ' ').title(), str(value))
+        
+        # Control flow
+        if 'control_flow' in logic_data:
+            flow = logic_data['control_flow']
+            if flow:
+                st.markdown("**🔄 Control Flow:**")
+                st.write(flow)
+        
+        # Show any other logic information
+        other_keys = [k for k in logic_data.keys() 
+                     if k not in ['program_structure', 'dependencies', 'business_rules', 'complexity_score', 'complexity', 'control_flow']]
+        
+        for key in other_keys:
+            value = logic_data[key]
+            if value:
+                st.markdown(f"**{key.replace('_', ' ').title()}:**")
+                if isinstance(value, (list, dict)):
+                    st.json(value)
+                else:
+                    st.write(value)
+    else:
+        # Fallback for unexpected data structure
+        st.json(logic_data)
+
+def display_semantic_analysis_formatted(semantic_data: Dict[str, Any]):
+    """FIXED: Display semantic analysis with enhanced formatting"""
+    
+    st.markdown("**🔍 Semantic Analysis Results**")
+    
+    if not semantic_data:
+        st.info("No semantic analysis data available")
+        return
+    
+    if isinstance(semantic_data, dict):
+        
+        # Similar components
+        if 'similar_components' in semantic_data:
+            similar = semantic_data['similar_components']
+            if similar and isinstance(similar, list):
+                st.markdown("**🎯 Similar Components:**")
+                
+                for i, component in enumerate(similar):
+                    if isinstance(component, dict):
+                        name = component.get('name', component.get('component_name', f'Component {i+1}'))
+                        similarity = component.get('similarity', component.get('score', 0))
+                        content = component.get('content', component.get('description', ''))
+                        
+                        with st.expander(f"📄 {name} (Similarity: {similarity:.3f})", expanded=False):
+                            if content:
+                                st.code(content[:300] + '...' if len(str(content)) > 300 else content)
+                            
+                            # Show other component metadata
+                            other_info = {k: v for k, v in component.items() 
+                                        if k not in ['name', 'component_name', 'similarity', 'score', 'content', 'description']}
+                            if other_info:
+                                st.json(other_info)
+                    else:
+                        st.markdown(f"- {component}")
+            else:
+                st.info("No similar components found")
+        
+        # Semantic search results
+        if 'semantic_search' in semantic_data:
+            search_results = semantic_data['semantic_search']
+            if search_results and isinstance(search_results, list):
+                st.markdown("**🔍 Semantic Search Results:**")
+                
+                for i, result in enumerate(search_results):
+                    if isinstance(result, dict):
+                        content = result.get('content', result.get('text', f'Result {i+1}'))
+                        score = result.get('score', result.get('similarity', 0))
+                        chunk_type = result.get('chunk_type', 'Unknown')
+                        program_name = result.get('program_name', 'Unknown')
+                        
+                        with st.expander(f"📄 {program_name} - {chunk_type} (Score: {score:.3f})", expanded=False):
+                            st.code(content[:500] + '...' if len(str(content)) > 500 else content)
+                            
+                            # Show other result metadata
+                            other_info = {k: v for k, v in result.items() 
+                                        if k not in ['content', 'text', 'score', 'similarity', 'chunk_type', 'program_name']}
+                            if other_info:
+                                st.json(other_info)
+                    else:
+                        st.write(result)
+            else:
+                st.info("No semantic search results found")
+        
+        # Show any other semantic data
+        other_keys = [k for k in semantic_data.keys() 
+                     if k not in ['similar_components', 'semantic_search']]
+        
+        for key in other_keys:
+            value = semantic_data[key]
+            if value:
+                st.markdown(f"**{key.replace('_', ' ').title()}:**")
+                if isinstance(value, (list, dict)):
+                    st.json(value)
+                else:
+                    st.write(value)
+    else:
+        # Fallback for unexpected data structure
+        st.json(semantic_data)
+
+def display_documentation_analysis_formatted(doc_data: Dict[str, Any]):
+    """FIXED: Display documentation analysis with enhanced formatting"""
+    
+    st.markdown("**📚 Documentation Summary**")
+    
+    if not doc_data:
+        st.info("No documentation available")
+        return
+    
+    # Main documentation content
+    if 'documentation' in doc_data:
+        documentation = doc_data['documentation']
+        if documentation:
+            st.markdown("**📖 Generated Documentation:**")
             
-            with st.expander(f"{status_icon} {analysis_type.replace('_', ' ').title()}", 
-                           expanded=(analysis_status == 'success')):
+            # Check if it's formatted markdown or plain text
+            if isinstance(documentation, str):
+                if '**' in documentation or '#' in documentation:
+                    # Looks like markdown
+                    st.markdown(documentation)
+                else:
+                    # Plain text - format it nicely
+                    lines = documentation.split('\n')
+                    for line in lines:
+                        if line.strip():
+                            if line.strip().endswith(':'):
+                                st.markdown(f"**{line.strip()}**")
+                            else:
+                                st.markdown(line.strip())
+            else:
+                st.write(documentation)
+    
+    # Analysis summary if available
+    if 'analysis_summary' in doc_data:
+        summary = doc_data['analysis_summary']
+        if summary and isinstance(summary, dict):
+            st.markdown("**📊 Analysis Summary:**")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                if 'total_analyses' in summary:
+                    st.metric("Total Analyses", summary['total_analyses'])
+            
+            with col2:
+                if 'successful_analyses' in summary:
+                    st.metric("Successful", summary['successful_analyses'])
+            
+            with col3:
+                if 'component_type' in summary:
+                    st.info(f"Type: {summary['component_type']}")
+            
+            # Findings summary
+            if 'findings' in summary:
+                findings = summary['findings']
+                if findings:
+                    st.markdown("**🔍 Key Findings:**")
+                    for category, data in findings.items():
+                        if data:
+                            st.markdown(f"- **{category.title()}:** {data}")
+    
+    # Show metadata
+    metadata_keys = [k for k in doc_data.keys() 
+                    if k not in ['documentation', 'analysis_summary']]
+    
+    if metadata_keys:
+        with st.expander("📋 Documentation Metadata", expanded=False):
+            for key in metadata_keys:
+                value = doc_data[key]
+                if value:
+                    st.markdown(f"**{key.replace('_', ' ').title()}:** {value}")
+
+def display_generic_analysis_formatted(analysis_result: Dict[str, Any], analysis_type: str):
+    """Display generic analysis result with better formatting"""
+    
+    st.markdown(f"**{analysis_type.replace('_', ' ').title()} Results:**")
+    
+    if isinstance(analysis_result, dict):
+        for key, value in analysis_result.items():
+            st.markdown(f"**{key.replace('_', ' ').title()}:**")
+            
+            if isinstance(value, list):
+                if value:
+                    for item in value[:10]:  # Show first 10 items
+                        st.markdown(f"- {item}")
+                    if len(value) > 10:
+                        st.markdown(f"- ... and {len(value) - 10} more items")
+                else:
+                    st.info("No items found")
+            elif isinstance(value, dict):
+                if value:
+                    st.json(value)
+                else:
+                    st.info("No data available")
+            else:
+                st.write(value)
+    else:
+        st.json(analysis_result)
+
+def show_documentation_summary_formatted(doc_data: Dict[str, Any]):
+    """Show documentation summary in a separate formatted section"""
+    
+    st.markdown("#### 📚 Executive Summary")
+    
+    if not doc_data:
+        st.info("No documentation summary available")
+        return
+    
+    # Main documentation content
+    documentation = doc_data.get('documentation', '')
+    if documentation:
+        if isinstance(documentation, str):
+            # Parse and format the documentation
+            sections = documentation.split('\n\n')
+            for section in sections:
+                if section.strip():
+                    lines = section.strip().split('\n')
+                    if lines[0].startswith('#'):
+                        # Markdown header
+                        st.markdown(lines[0])
+                        for line in lines[1:]:
+                            if line.strip():
+                                st.markdown(line)
+                    elif lines[0].endswith(':'):
+                        # Section header
+                        st.markdown(f"**{lines[0]}**")
+                        for line in lines[1:]:
+                            if line.strip():
+                                st.markdown(line)
+                    else:
+                        # Regular content
+                        st.markdown(section)
+        else:
+            st.write(documentation)
+
+def export_analysis_results_enhanced(result: Dict[str, Any], analysis_id: str, component_name: str):
+    """Enhanced export with multiple format options"""
+    
+    st.markdown("#### 💾 Export Analysis Results")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        export_format = st.selectbox(
+            "Export Format",
+            ["JSON (Complete)", "JSON (Summary)", "Markdown Report", "CSV (Tabular)"],
+            key=f"export_format_{analysis_id}"
+        )
+    
+    with col2:
+        include_debug = st.checkbox(
+            "Include Debug Data",
+            value=False,
+            key=f"include_debug_{analysis_id}"
+        )
+    
+    try:
+        if export_format == "JSON (Complete)":
+            export_data = result.copy()
+            if include_debug:
+                export_data['debug_info'] = {
+                    'export_timestamp': dt.now().isoformat(),
+                    'analysis_id': analysis_id,
+                    'component_name': component_name,
+                    'export_format': export_format
+                }
+            
+            file_data = json.dumps(export_data, indent=2)
+            file_name = f"analysis_complete_{component_name}_{analysis_id}.json"
+            mime_type = "application/json"
+            
+        elif export_format == "JSON (Summary)":
+            # Create summary version
+            summary_data = {
+                'component_name': component_name,
+                'analysis_summary': {
+                    'status': result.get('status'),
+                    'component_type': result.get('normalized_type'),
+                    'total_duration': result.get('processing_metadata', {}).get('total_duration_seconds'),
+                    'analyses_completed': len([a for a in result.get('analyses', {}).values() if a.get('status') == 'success']),
+                    'total_analyses': len(result.get('analyses', {}))
+                },
+                'key_findings': {}
+            }
+            
+            # Extract key findings
+            analyses = result.get('analyses', {})
+            for analysis_type, analysis_data in analyses.items():
+                if analysis_data.get('status') == 'success':
+                    summary_data['key_findings'][analysis_type] = {
+                        'status': 'success',
+                        'completion_time': analysis_data.get('completion_time'),
+                        'agent_used': analysis_data.get('agent_used')
+                    }
+            
+            if include_debug:
+                summary_data['debug_info'] = {
+                    'export_timestamp': dt.now().isoformat(),
+                    'analysis_id': analysis_id,
+                    'export_format': export_format
+                }
+            
+            file_data = json.dumps(summary_data, indent=2)
+            file_name = f"analysis_summary_{component_name}_{analysis_id}.json"
+            mime_type = "application/json"
+            
+        elif export_format == "Markdown Report":
+            # Generate markdown report
+            report_lines = []
+            report_lines.append(f"# Component Analysis Report")
+            report_lines.append(f"**Component:** {component_name}")
+            report_lines.append(f"**Analysis ID:** {analysis_id}")
+            report_lines.append(f"**Generated:** {dt.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            report_lines.append("")
+            
+            # Status summary
+            status = result.get('status', 'unknown')
+            report_lines.append(f"## Analysis Summary")
+            report_lines.append(f"- **Status:** {status.title()}")
+            report_lines.append(f"- **Component Type:** {result.get('normalized_type', 'Unknown')}")
+            
+            total_duration = result.get('processing_metadata', {}).get('total_duration_seconds', 0)
+            report_lines.append(f"- **Total Duration:** {total_duration:.2f} seconds")
+            
+            analyses = result.get('analyses', {})
+            successful = len([a for a in analyses.values() if a.get('status') == 'success'])
+            report_lines.append(f"- **Analyses Completed:** {successful}/{len(analyses)}")
+            report_lines.append("")
+            
+            # Individual analysis results
+            for analysis_type, analysis_data in analyses.items():
+                report_lines.append(f"## {analysis_type.replace('_', ' ').title()}")
+                
+                analysis_status = analysis_data.get('status', 'unknown')
+                report_lines.append(f"**Status:** {analysis_status}")
                 
                 if analysis_status == 'success':
-                    analysis_result = analysis_data.get('data', {})
+                    agent_used = analysis_data.get('agent_used', 'Unknown')
                     completion_time = analysis_data.get('completion_time', 0)
-                    agent_used = analysis_data.get('agent_used', 'unknown')
+                    report_lines.append(f"**Agent Used:** {agent_used}")
+                    report_lines.append(f"**Completion Time:** {completion_time:.2f} seconds")
                     
-                    # Show analysis metadata
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown(f"**Agent Used:** {agent_used}")
-                    with col2:
-                        st.markdown(f"**Completion Time:** {completion_time:.2f}s")
-                    
-                    # Display analysis data
-                    if isinstance(analysis_result, dict):
-                        # Format specific analysis types
-                        if analysis_type == 'lineage_analysis':
-                            display_lineage_analysis(analysis_result)
-                        elif analysis_type == 'logic_analysis':
-                            display_logic_analysis(analysis_result)
-                        elif analysis_type == 'semantic_analysis':
-                            display_semantic_analysis(analysis_result)
-                        else:
-                            st.json(analysis_result)
-                    else:
-                        st.write(analysis_result)
-                
+                    # Add key findings
+                    data = analysis_data.get('data', {})
+                    if isinstance(data, dict):
+                        for key, value in list(data.items())[:3]:  # First 3 items
+                            if isinstance(value, (str, int, float)):
+                                report_lines.append(f"- **{key.replace('_', ' ').title()}:** {value}")
                 elif analysis_status == 'error':
                     error_msg = analysis_data.get('error', 'Unknown error')
-                    st.error(f"Analysis failed: {error_msg}")
-                    
-                    # Show error details if available
-                    if st.button(f"Show Error Details - {analysis_type}", key=f"error_details_{analysis_id}_{analysis_type}"):
-                        st.code(str(analysis_data))
+                    report_lines.append(f"**Error:** {error_msg}")
+                
+                report_lines.append("")
+            
+            if include_debug:
+                report_lines.append("## Debug Information")
+                report_lines.append(f"- Export Timestamp: {dt.now().isoformat()}")
+                report_lines.append(f"- Analysis ID: {analysis_id}")
+                report_lines.append(f"- Export Format: {export_format}")
+            
+            file_data = '\n'.join(report_lines)
+            file_name = f"analysis_report_{component_name}_{analysis_id}.md"
+            mime_type = "text/markdown"
+            
+        else:  # CSV format
+            # Create tabular data
+            csv_data = []
+            analyses = result.get('analyses', {})
+            
+            for analysis_type, analysis_data in analyses.items():
+                row = {
+                    'component_name': component_name,
+                    'analysis_type': analysis_type,
+                    'status': analysis_data.get('status'),
+                    'agent_used': analysis_data.get('agent_used'),
+                    'completion_time': analysis_data.get('completion_time', 0),
+                    'step': analysis_data.get('step', 0),
+                    'error': analysis_data.get('error', '') if analysis_data.get('status') == 'error' else '',
+                    'analysis_timestamp': dt.now().isoformat()
+                }
+                
+                # Add key data points
+                data = analysis_data.get('data', {})
+                if isinstance(data, dict):
+                    # Extract some key metrics
+                    if analysis_type == 'lineage_analysis':
+                        programs_count = len(data.get('programs_using', []))
+                        operations_count = len(data.get('operations', []))
+                        row['programs_using_count'] = programs_count
+                        row['operations_count'] = operations_count
+                    elif analysis_type == 'semantic_analysis':
+                        similar_count = len(data.get('similar_components', []))
+                        search_count = len(data.get('semantic_search', []))
+                        row['similar_components_count'] = similar_count
+                        row['search_results_count'] = search_count
+                    elif analysis_type == 'logic_analysis':
+                        complexity = data.get('complexity_score', data.get('complexity', 0))
+                        deps_count = len(data.get('dependencies', []))
+                        row['complexity_score'] = complexity
+                        row['dependencies_count'] = deps_count
+                
+                csv_data.append(row)
+            
+            if include_debug:
+                # Add debug row
+                debug_row = {
+                    'component_name': f"DEBUG_{component_name}",
+                    'analysis_type': 'debug_info',
+                    'status': 'info',
+                    'agent_used': 'system',
+                    'completion_time': 0,
+                    'step': 0,
+                    'error': '',
+                    'analysis_timestamp': dt.now().isoformat(),
+                    'analysis_id': analysis_id,
+                    'export_format': export_format
+                }
+                csv_data.append(debug_row)
+            
+            df = pd.DataFrame(csv_data)
+            file_data = df.to_csv(index=False)
+            file_name = f"analysis_data_{component_name}_{analysis_id}.csv"
+            mime_type = "text/csv"
+        
+        # Provide download button
+        st.download_button(
+            label=f"💾 Download {export_format}",
+            data=file_data,
+            file_name=file_name,
+            mime=mime_type,
+            key=f"download_btn_{analysis_id}"
+        )
+        
+        st.success(f"✅ Export prepared: {file_name}")
+        
+    except Exception as e:
+        st.error(f"❌ Export failed: {str(e)}")
+
+def copy_analysis_summary_to_clipboard(result: Dict[str, Any], component_name: str):
+    """Create a text summary for clipboard"""
     
-    # Export analysis results
-    if st.button("💾 Export Analysis Results", key=f"export_analysis_{analysis_id}"):
-        export_analysis_results(result, analysis_id)
+    try:
+        summary_lines = []
+        summary_lines.append(f"Component Analysis Summary: {component_name}")
+        summary_lines.append("=" * 50)
+        
+        status = result.get('status', 'unknown')
+        summary_lines.append(f"Status: {status.title()}")
+        
+        component_type = result.get('normalized_type', result.get('component_type', 'Unknown'))
+        summary_lines.append(f"Type: {component_type}")
+        
+        total_duration = result.get('processing_metadata', {}).get('total_duration_seconds', 0)
+        summary_lines.append(f"Duration: {total_duration:.2f} seconds")
+        
+        analyses = result.get('analyses', {})
+        successful = len([a for a in analyses.values() if a.get('status') == 'success'])
+        summary_lines.append(f"Analyses: {successful}/{len(analyses)} successful")
+        summary_lines.append("")
+        
+        # Add key findings
+        summary_lines.append("Key Findings:")
+        for analysis_type, analysis_data in analyses.items():
+            if analysis_data.get('status') == 'success':
+                summary_lines.append(f"✅ {analysis_type.replace('_', ' ').title()}: Success")
+            elif analysis_data.get('status') == 'error':
+                summary_lines.append(f"❌ {analysis_type.replace('_', ' ').title()}: Failed")
+            else:
+                summary_lines.append(f"⚠️ {analysis_type.replace('_', ' ').title()}: {analysis_data.get('status', 'Unknown')}")
+        
+        summary_lines.append("")
+        summary_lines.append(f"Generated: {dt.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        summary_text = '\n'.join(summary_lines)
+        
+        # Display the summary for copying
+        st.markdown("#### 📋 Analysis Summary (Copy to Clipboard)")
+        st.code(summary_text)
+        st.info("💡 Select all text above and copy to clipboard")
+        
+    except Exception as e:
+        st.error(f"❌ Summary generation failed: {str(e)}")
+
+def add_codeparser_debug_output(file_processing_result: Dict[str, Any], file_name: str):
+    """ADDED: Debug output specifically for code parser completion results"""
+    
+    st.markdown("#### 🐛 Code Parser Debug Output")
+    
+    with st.expander(f"🔍 Code Parser Raw Result for {file_name}", expanded=False):
+        st.markdown("**Complete Code Parser Response:**")
+        st.json(file_processing_result)
+        
+        # Extract and display key code parser metrics
+        if isinstance(file_processing_result, dict):
+            debug_metrics = {
+                "file_name": file_name,
+                "result_type": type(file_processing_result).__name__,
+                "has_error": "error" in file_processing_result,
+                "status": file_processing_result.get("status", "unknown"),
+                "processing_timestamp": dt.now().isoformat()
+            }
+            
+            # Check for results structure
+            if "results" in file_processing_result:
+                results = file_processing_result["results"]
+                if isinstance(results, list) and results:
+                    result_item = results[0]
+                    debug_metrics.update({
+                        "chunks_created": result_item.get("chunks_created", 0),
+                        "embedding_created": result_item.get("embedding_created", False),
+                        "database_stored": result_item.get("database_stored", False),
+                        "analysis_completed": result_item.get("analysis_completed", False)
+                    })
+                    
+                    # Check for specific code parser outputs
+                    if "parsing_results" in result_item:
+                        parsing = result_item["parsing_results"]
+                        debug_metrics.update({
+                            "divisions_found": len(parsing.get("divisions", [])),
+                            "sections_found": len(parsing.get("sections", [])),
+                            "data_items_found": len(parsing.get("data_items", [])),
+                            "procedures_found": len(parsing.get("procedures", []))
+                        })
+            
+            st.markdown("**Code Parser Debug Metrics:**")
+            st.json(debug_metrics)
+            
+            # Verification checklist
+            st.markdown("**✅ Verification Checklist:**")
+            
+            checklist = [
+                ("File processed successfully", file_processing_result.get("status") == "success"),
+                ("No errors reported", "error" not in file_processing_result),
+                ("Results structure present", "results" in file_processing_result),
+                ("Chunks created", debug_metrics.get("chunks_created", 0) > 0),
+                ("Database storage completed", debug_metrics.get("database_stored", False)),
+                ("Analysis completed", debug_metrics.get("analysis_completed", False))
+            ]
+            
+            for check_name, check_result in checklist:
+                if check_result:
+                    st.success(f"✅ {check_name}")
+                else:
+                    st.error(f"❌ {check_name}")
+        
+        # Code structure analysis if available
+        if "results" in file_processing_result and file_processing_result["results"]:
+            result_item = file_processing_result["results"][0]
+            if "parsing_results" in result_item:
+                parsing_results = result_item["parsing_results"]
+                
+                st.markdown("**📊 Code Structure Analysis:**")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    divisions = len(parsing_results.get("divisions", []))
+                    st.metric("COBOL Divisions", divisions)
+                
+                with col2:
+                    sections = len(parsing_results.get("sections", []))
+                    st.metric("Sections", sections)
+                
+                with col3:
+                    data_items = len(parsing_results.get("data_items", []))
+                    st.metric("Data Items", data_items)
+                
+                with col4:
+                    procedures = len(parsing_results.get("procedures", []))
+                    st.metric("Procedures", procedures)
+                
+                # Show sample parsing results
+                if parsing_results.get("divisions"):
+                    st.markdown("**Sample COBOL Divisions Found:**")
+                    for division in parsing_results["divisions"][:3]:
+                        st.markdown(f"- {division}")
+                
+                if parsing_results.get("data_items"):
+                    st.markdown("**Sample Data Items Found:**")
+                    for item in parsing_results["data_items"][:5]:
+                        if isinstance(item, dict):
+                            st.markdown(f"- {item.get('name', 'Unknown')} ({item.get('type', 'Unknown type')})")
+                        else:
+                            st.markdown(f"- {item}")
+
 
 def display_lineage_analysis(lineage_data: Dict[str, Any]):
     """Display lineage analysis results in a formatted way"""

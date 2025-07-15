@@ -18,7 +18,7 @@ from dataclasses import dataclass
 import networkx as nx
 from collections import defaultdict
 
-from agents.base_agent import BaseOpulenceAgent
+from agents.base_agent_api import BaseOpulenceAgent
 
 @dataclass
 class LineageNode:

@@ -18,7 +18,7 @@ from datetime import datetime as dt
 import markdown
 from jinja2 import Template
 
-from agents.base_agent import BaseOpulenceAgent
+from agents.base_agent_api import BaseOpulenceAgent
 
 @dataclass
 class DocumentSection:
