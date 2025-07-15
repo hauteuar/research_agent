@@ -4695,13 +4695,13 @@ def show_recent_activity_complete():
 # ============================================================================
 
 def show_enhanced_sidebar():
-    """Enhanced sidebar with complete navigation and controls"""
+    """Enhanced sidebar that includes the Component Browser option"""
     
     # System initialization section
     with st.expander("🚀 System Control", expanded=not st.session_state.get('coordinator')):
         show_initialization_interface()
     
-    # Navigation
+    # Navigation - UPDATED to include Component Browser
     st.markdown("### 📋 Navigation")
     
     page = st.selectbox(
@@ -4710,7 +4710,8 @@ def show_enhanced_sidebar():
             "🏠 Dashboard", 
             "💬 Chat Analysis", 
             "🔍 Component Analysis",
-            "📂 File Upload & Processing", 
+            "📂 File Upload & Processing",
+            "📋 Component Browser",  # NEW OPTION
             "🤖 Agent Status",
             "⚙️ System Health",
             "📊 Performance Metrics",
@@ -4721,6 +4722,10 @@ def show_enhanced_sidebar():
     
     st.session_state.current_page = page
     
+    # Quick Component Stats in Sidebar
+    show_quick_component_stats_sidebar()
+    
+    # Rest of existing sidebar content...
     # Quick actions
     st.markdown("### ⚡ Quick Actions")
     
@@ -4733,23 +4738,41 @@ def show_enhanced_sidebar():
     with col2:
         if st.button("🧹 Clear", use_container_width=True):
             show_clear_options_fixed()
-    
-    # System information
-    show_sidebar_system_info_complete()
 
-    show_vector_index_status()
+def show_quick_component_stats_sidebar():
+    """Show quick component statistics in sidebar"""
+    coordinator = st.session_state.get('coordinator')
+    if not coordinator:
+        return
     
-    # Notifications panel
-    if st.session_state.get('notification_messages'):
-        with st.expander("📢 Notifications", expanded=False):
-            show_notifications()
-            if st.button("🧹 Clear Notifications"):
-                clear_notifications()
-                st.rerun()
+    try:
+        # Get quick stats
+        stats = get_component_stats_quick(coordinator.db_path)
+        
+        if stats['total_components'] > 0:
+            st.markdown("### 📊 Components")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.metric("Total", stats['total_components'])
+            
+            with col2:
+                st.metric("Types", len(stats['types']))
+            
+            # Show top 3 types
+            if stats['types']:
+                st.markdown("**Top Types:**")
+                for chunk_type, count in list(stats['types'].items())[:3]:
+                    st.markdown(f"• {chunk_type}: {count}")
+                
+                if len(stats['types']) > 3:
+                    st.markdown(f"• ... +{len(stats['types']) - 3} more")
+        else:
+            st.info("📄 No components yet")
     
-    # Advanced options
-    with st.expander("🔧 Advanced Options", expanded=False):
-        show_advanced_options_complete()
+    except Exception as e:
+        st.error(f"Stats error: {str(e)}")
 
 def show_sidebar_system_info_complete():
     """Complete system information in sidebar"""
@@ -4796,6 +4819,551 @@ def show_sidebar_system_info_complete():
     except Exception as e:
         st.error(f"Info error: {str(e)}")
         add_system_error(f"Sidebar info error: {str(e)}", "system")
+
+def get_components_from_database(db_path: str, search_term: str = "", 
+                                filter_type: str = "All") -> Dict[str, Any]:
+    """
+    Get all components from database with search and filtering
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # Base query to get unique components
+        base_query = """
+        SELECT 
+            program_name,
+            chunk_type,
+            COUNT(*) as chunk_count,
+            MIN(created_timestamp) as first_created,
+            MAX(updated_timestamp) as last_updated,
+            metadata
+        FROM program_chunks 
+        WHERE 1=1
+        """
+        
+        params = []
+        
+        # Add search filter
+        if search_term:
+            base_query += " AND (program_name LIKE ? OR chunk_type LIKE ?)"
+            search_pattern = f"%{search_term}%"
+            params.extend([search_pattern, search_pattern])
+        
+        # Add type filter
+        if filter_type != "All":
+            base_query += " AND chunk_type = ?"
+            params.append(filter_type)
+        
+        base_query += " GROUP BY program_name, chunk_type ORDER BY program_name, chunk_type"
+        
+        cursor.execute(base_query, params)
+        rows = cursor.fetchall()
+        
+        components = []
+        for row in rows:
+            program_name, chunk_type, chunk_count, first_created, last_updated, metadata = row
+            
+            # Extract cleaned name from metadata if available
+            cleaned_name = program_name
+            original_name = program_name
+            
+            try:
+                if metadata:
+                    meta_dict = json.loads(metadata)
+                    cleaned_name = meta_dict.get('cleaned_name', program_name)
+                    original_name = meta_dict.get('original_name', program_name)
+            except:
+                pass
+            
+            components.append({
+                'program_name': program_name,
+                'cleaned_name': cleaned_name,
+                'original_name': original_name,
+                'chunk_type': chunk_type,
+                'chunk_count': chunk_count,
+                'first_created': first_created,
+                'last_updated': last_updated,
+                'has_temp_prefix': program_name != cleaned_name
+            })
+        
+        # Get summary statistics
+        cursor.execute("SELECT COUNT(DISTINCT program_name) FROM program_chunks")
+        total_programs = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT chunk_type, COUNT(DISTINCT program_name) FROM program_chunks GROUP BY chunk_type")
+        type_stats = dict(cursor.fetchall())
+        
+        cursor.execute("SELECT COUNT(DISTINCT chunk_type) FROM program_chunks")
+        total_types = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        return {
+            'components': components,
+            'total_programs': total_programs,
+            'total_types': total_types,
+            'type_statistics': type_stats,
+            'search_term': search_term,
+            'filter_type': filter_type
+        }
+        
+    except Exception as e:
+        return {
+            'components': [],
+            'total_programs': 0,
+            'total_types': 0,
+            'type_statistics': {},
+            'error': str(e)
+        }
+
+def get_component_stats_quick(db_path: str) -> Dict[str, Any]:
+    """Get quick component statistics for sidebar"""
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # Total components
+        cursor.execute("SELECT COUNT(DISTINCT program_name) FROM program_chunks")
+        total_components = cursor.fetchone()[0]
+        
+        # Types with counts
+        cursor.execute("""
+            SELECT chunk_type, COUNT(DISTINCT program_name) 
+            FROM program_chunks 
+            GROUP BY chunk_type 
+            ORDER BY COUNT(DISTINCT program_name) DESC
+        """)
+        types = dict(cursor.fetchall())
+        
+        conn.close()
+        
+        return {
+            'total_components': total_components,
+            'types': types
+        }
+        
+    except Exception as e:
+        return {
+            'total_components': 0,
+            'types': {},
+            'error': str(e)
+        }
+
+def get_component_details(db_path: str, program_name: str) -> Dict[str, Any]:
+    """Get detailed information about a specific component"""
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # Get all chunks for this component
+        cursor.execute("""
+            SELECT chunk_id, chunk_type, content, metadata, 
+                   created_timestamp, line_start, line_end
+            FROM program_chunks 
+            WHERE program_name = ?
+            ORDER BY chunk_type, line_start
+        """, [program_name])
+        
+        chunks = []
+        for row in cursor.fetchall():
+            chunk_id, chunk_type, content, metadata, created_ts, line_start, line_end = row
+            
+            chunks.append({
+                'chunk_id': chunk_id,
+                'chunk_type': chunk_type,
+                'content_preview': content[:200] if content else '',
+                'content_length': len(content) if content else 0,
+                'metadata': metadata,
+                'created_timestamp': created_ts,
+                'line_start': line_start,
+                'line_end': line_end
+            })
+        
+        # Get file metadata
+        cursor.execute("""
+            SELECT file_type, fields, source_type, last_modified, processing_status
+            FROM file_metadata 
+            WHERE file_name = ? OR file_name LIKE ?
+        """, [program_name, f"%{program_name}%"])
+        
+        file_metadata = cursor.fetchone()
+        
+        # Get lineage information
+        cursor.execute("""
+            SELECT field_name, operation, transformation_logic
+            FROM field_lineage 
+            WHERE program_name = ?
+        """, [program_name])
+        
+        lineage_data = cursor.fetchall()
+        
+        conn.close()
+        
+        return {
+            'program_name': program_name,
+            'chunks': chunks,
+            'total_chunks': len(chunks),
+            'chunk_types': list(set(chunk['chunk_type'] for chunk in chunks)),
+            'file_metadata': {
+                'file_type': file_metadata[0] if file_metadata else None,
+                'fields': file_metadata[1] if file_metadata else None,
+                'source_type': file_metadata[2] if file_metadata else None,
+                'last_modified': file_metadata[3] if file_metadata else None,
+                'processing_status': file_metadata[4] if file_metadata else None
+            } if file_metadata else None,
+            'lineage_entries': len(lineage_data),
+            'lineage_data': [
+                {'field_name': field, 'operation': op, 'transformation_logic': logic}
+                for field, op, logic in lineage_data
+            ]
+        }
+        
+    except Exception as e:
+        return {
+            'program_name': program_name,
+            'error': str(e),
+            'chunks': [],
+            'total_chunks': 0
+        }
+
+def show_component_browser_page():
+    """Main Component Browser page showing all uploaded components"""
+    
+    st.markdown('<div class="sub-header">📋 Component Browser</div>', unsafe_allow_html=True)
+    
+    coordinator = st.session_state.get('coordinator')
+    if not coordinator:
+        st.error("🔴 System not initialized. Please initialize in the sidebar.")
+        return
+    
+    # Page description
+    st.markdown("""
+    Browse all components that have been uploaded and processed. This page shows the actual 
+    component names as stored in the database, including any temporary prefixes from file uploads.
+    """)
+    
+    # Search and filter controls
+    show_component_browser_controls()
+    
+    # Get search and filter values
+    search_term = st.session_state.get('component_search', '')
+    filter_type = st.session_state.get('component_filter', 'All')
+    
+    # Load components data
+    with st.spinner("Loading components..."):
+        data = get_components_from_database(coordinator.db_path, search_term, filter_type)
+    
+    if data.get('error'):
+        st.error(f"❌ Error loading components: {data['error']}")
+        return
+    
+    # Display summary statistics
+    show_component_summary_stats(data)
+    
+    # Display components
+    show_component_list(data, coordinator.db_path)
+
+def show_component_browser_controls():
+    """Show search and filter controls for component browser"""
+    
+    st.markdown("#### 🔍 Search & Filter")
+    
+    col1, col2, col3 = st.columns([2, 1, 1])
+    
+    with col1:
+        search_term = st.text_input(
+            "Search Components",
+            placeholder="Enter component name or type...",
+            key="component_search",
+            help="Search by component name or chunk type"
+        )
+    
+    with col2:
+        # Get available types for filter
+        coordinator = st.session_state.get('coordinator')
+        if coordinator:
+            try:
+                conn = sqlite3.connect(coordinator.db_path)
+                cursor = conn.cursor()
+                cursor.execute("SELECT DISTINCT chunk_type FROM program_chunks ORDER BY chunk_type")
+                available_types = ["All"] + [row[0] for row in cursor.fetchall()]
+                conn.close()
+            except:
+                available_types = ["All"]
+        else:
+            available_types = ["All"]
+        
+        filter_type = st.selectbox(
+            "Filter by Type",
+            available_types,
+            key="component_filter"
+        )
+    
+    with col3:
+        col3a, col3b = st.columns(2)
+        
+        with col3a:
+            if st.button("🔄 Refresh", use_container_width=True):
+                st.rerun()
+        
+        with col3b:
+            if st.button("🧹 Clear", use_container_width=True):
+                st.session_state.component_search = ""
+                st.session_state.component_filter = "All"
+                st.rerun()
+
+def show_component_summary_stats(data: Dict[str, Any]):
+    """Show summary statistics for components"""
+    
+    st.markdown("#### 📊 Component Statistics")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Programs", data['total_programs'])
+    
+    with col2:
+        st.metric("Component Types", data['total_types'])
+    
+    with col3:
+        filtered_count = len(data['components'])
+        st.metric("Filtered Results", filtered_count)
+    
+    with col4:
+        temp_prefix_count = sum(1 for comp in data['components'] if comp['has_temp_prefix'])
+        st.metric("With Temp Prefix", temp_prefix_count)
+    
+    # Type distribution chart
+    if data['type_statistics']:
+        st.markdown("#### 📈 Component Types Distribution")
+        
+        # Create chart data
+        chart_data = pd.DataFrame(
+            list(data['type_statistics'].items()),
+            columns=['Type', 'Count']
+        ).sort_values('Count', ascending=False)
+        
+        # Display as bar chart
+        st.bar_chart(chart_data.set_index('Type'))
+
+def show_component_list(data: Dict[str, Any], db_path: str):
+    """Display the list of components with detailed information"""
+    
+    components = data['components']
+    
+    if not components:
+        st.info("No components found matching your criteria.")
+        return
+    
+    st.markdown(f"#### 📋 Components ({len(components)} found)")
+    
+    # Group components by program for better display
+    programs = {}
+    for comp in components:
+        prog_name = comp['program_name']
+        if prog_name not in programs:
+            programs[prog_name] = {
+                'program_name': prog_name,
+                'cleaned_name': comp['cleaned_name'],
+                'original_name': comp['original_name'],
+                'has_temp_prefix': comp['has_temp_prefix'],
+                'chunks': [],
+                'total_chunks': 0,
+                'first_created': comp['first_created'],
+                'last_updated': comp['last_updated']
+            }
+        
+        programs[prog_name]['chunks'].append({
+            'chunk_type': comp['chunk_type'],
+            'chunk_count': comp['chunk_count']
+        })
+        programs[prog_name]['total_chunks'] += comp['chunk_count']
+    
+    # Display each program
+    for prog_name, prog_data in programs.items():
+        
+        # Program header with status indicators
+        status_indicators = []
+        
+        if prog_data['has_temp_prefix']:
+            status_indicators.append("🏷️ Temp Prefix")
+        
+        chunk_types = len(prog_data['chunks'])
+        status_indicators.append(f"📦 {chunk_types} Types")
+        
+        total_chunks = prog_data['total_chunks']
+        status_indicators.append(f"🔢 {total_chunks} Chunks")
+        
+        status_text = " | ".join(status_indicators)
+        
+        with st.expander(f"📄 {prog_name} ({status_text})", expanded=False):
+            
+            # Component information
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**📋 Component Information:**")
+                st.markdown(f"**Program Name:** `{prog_data['program_name']}`")
+                
+                if prog_data['has_temp_prefix']:
+                    st.markdown(f"**Cleaned Name:** `{prog_data['cleaned_name']}`")
+                    st.markdown(f"**Original Name:** `{prog_data['original_name']}`")
+                
+                st.markdown(f"**Total Chunks:** {prog_data['total_chunks']}")
+                st.markdown(f"**Chunk Types:** {len(prog_data['chunks'])}")
+            
+            with col2:
+                st.markdown("**📅 Timestamps:**")
+                if prog_data['first_created']:
+                    st.markdown(f"**First Created:** {prog_data['first_created'][:19]}")
+                if prog_data['last_updated']:
+                    st.markdown(f"**Last Updated:** {prog_data['last_updated'][:19]}")
+            
+            # Chunk types breakdown
+            st.markdown("**🔍 Chunk Types Breakdown:**")
+            
+            chunk_df = pd.DataFrame(prog_data['chunks'])
+            
+            # Display as table
+            st.dataframe(
+                chunk_df.rename(columns={
+                    'chunk_type': 'Type',
+                    'chunk_count': 'Count'
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            # Action buttons
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                if st.button(f"🔍 Analyze", key=f"analyze_{prog_name}"):
+                    # Set component for analysis and switch page
+                    st.session_state.current_page = "🔍 Component Analysis"
+                    st.session_state.component_to_analyze = prog_data['cleaned_name']
+                    st.rerun()
+            
+            with col2:
+                if st.button(f"📋 Details", key=f"details_{prog_name}"):
+                    show_component_detailed_info(prog_name, db_path)
+            
+            with col3:
+                if st.button(f"💬 Chat About", key=f"chat_{prog_name}"):
+                    # Switch to chat with pre-filled query
+                    st.session_state.current_page = "💬 Chat Analysis"
+                    st.session_state.chat_prefill = f"Tell me about the component {prog_data['cleaned_name']}"
+                    st.rerun()
+            
+            with col4:
+                if st.button(f"📊 Export", key=f"export_{prog_name}"):
+                    export_component_data(prog_name, db_path)
+
+def show_component_detailed_info(program_name: str, db_path: str):
+    """Show detailed information about a specific component"""
+    
+    with st.spinner(f"Loading details for {program_name}..."):
+        details = get_component_details(db_path, program_name)
+    
+    if details.get('error'):
+        st.error(f"❌ Error loading details: {details['error']}")
+        return
+    
+    st.markdown(f"#### 🔍 Detailed Information: {program_name}")
+    
+    # Summary metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Chunks", details['total_chunks'])
+    
+    with col2:
+        st.metric("Chunk Types", len(details['chunk_types']))
+    
+    with col3:
+        st.metric("Lineage Entries", details['lineage_entries'])
+    
+    with col4:
+        file_status = "Available" if details['file_metadata'] else "No Metadata"
+        st.info(f"File Info: {file_status}")
+    
+    # File metadata
+    if details['file_metadata'] and details['file_metadata']['file_type']:
+        st.markdown("**📄 File Metadata:**")
+        meta = details['file_metadata']
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f"**Type:** {meta['file_type']}")
+            st.markdown(f"**Source:** {meta['source_type'] or 'Unknown'}")
+        with col2:
+            st.markdown(f"**Status:** {meta['processing_status'] or 'Unknown'}")
+            st.markdown(f"**Modified:** {meta['last_modified'][:19] if meta['last_modified'] else 'Unknown'}")
+    
+    # Chunks breakdown
+    if details['chunks']:
+        st.markdown("**📦 Chunks Breakdown:**")
+        
+        chunks_df = pd.DataFrame([
+            {
+                'Chunk Type': chunk['chunk_type'],
+                'Lines': f"{chunk['line_start']}-{chunk['line_end']}" if chunk['line_start'] else 'N/A',
+                'Content Length': chunk['content_length'],
+                'Created': chunk['created_timestamp'][:19] if chunk['created_timestamp'] else 'N/A'
+            }
+            for chunk in details['chunks']
+        ])
+        
+        st.dataframe(chunks_df, use_container_width=True, hide_index=True)
+    
+    # Lineage data
+    if details['lineage_data']:
+        st.markdown("**🔗 Lineage Information:**")
+        
+        lineage_df = pd.DataFrame(details['lineage_data'])
+        st.dataframe(lineage_df, use_container_width=True, hide_index=True)
+
+def export_component_data(program_name: str, db_path: str):
+    """Export component data as JSON"""
+    
+    try:
+        details = get_component_details(db_path, program_name)
+        
+        if details.get('error'):
+            st.error(f"❌ Export failed: {details['error']}")
+            return
+        
+        # Prepare export data
+        export_data = {
+            'component_name': program_name,
+            'export_timestamp': dt.now().isoformat(),
+            'summary': {
+                'total_chunks': details['total_chunks'],
+                'chunk_types': details['chunk_types'],
+                'lineage_entries': details['lineage_entries']
+            },
+            'file_metadata': details['file_metadata'],
+            'chunks': details['chunks'],
+            'lineage_data': details['lineage_data']
+        }
+        
+        # Create download
+        import json
+        json_data = json.dumps(export_data, indent=2)
+        
+        st.download_button(
+            label=f"💾 Download {program_name} Data",
+            data=json_data,
+            file_name=f"component_{program_name}_{dt.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json",
+            key=f"download_{program_name}"
+        )
+        
+        st.success(f"✅ Export prepared for {program_name}")
+        
+    except Exception as e:
+        st.error(f"❌ Export failed: {str(e)}")
 
 def show_advanced_options_complete():
     """Complete advanced options with all settings"""
@@ -4961,25 +5529,26 @@ def show_main_content():
     page = st.session_state.get('current_page', '🏠 Dashboard')
     
     try:
-        if page == "🏠 Dashboard":
-            show_enhanced_dashboard()
-        elif page == "💬 Chat Analysis":
-            show_enhanced_chat()
-        elif page == "🔍 Component Analysis":
-            show_enhanced_component_analysis()
-        elif page == "📂 File Upload & Processing":
-            show_enhanced_file_upload()
-        elif page == "🤖 Agent Status":
-            show_comprehensive_agent_status_complete()
-        elif page == "⚙️ System Health":
-            show_enhanced_system_health_complete()
-        elif page == "📊 Performance Metrics":
-            show_standalone_performance_metrics()
-        elif page == "🔍 Advanced Search":
-            show_standalone_advanced_search()
-        else:
-            st.error(f"Unknown page: {page}")
-            add_system_error(f"Unknown page requested: {page}", "navigation")
+            if page == "🏠 Dashboard":
+                show_enhanced_dashboard()
+            elif page == "💬 Chat Analysis":
+                show_enhanced_chat()
+            elif page == "🔍 Component Analysis":
+                show_enhanced_component_analysis()
+            elif page == "📂 File Upload & Processing":
+                show_enhanced_file_upload()
+            elif page == "📋 Component Browser":  # NEW PAGE
+                show_component_browser_page()
+            elif page == "🤖 Agent Status":
+                show_comprehensive_agent_status_complete()
+            elif page == "⚙️ System Health":
+                show_enhanced_system_health_complete()
+            elif page == "📊 Performance Metrics":
+                show_standalone_performance_metrics()
+            elif page == "🔍 Advanced Search":
+                show_standalone_advanced_search()
+            else:
+                st.error(f"Unknown page: {page}")
             
     except Exception as e:
         st.error(f"Error loading page '{page}': {str(e)}")
