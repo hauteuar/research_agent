@@ -255,70 +255,45 @@ class LoadBalancer:
 class ModelServerClient:
     """HTTP client for calling model servers - FIXED VERSION"""
     
-    def __init__(self, config: APIOpulenceConfig):
-        self.config = config
-        self.session: Optional[aiohttp.ClientSession] = None
-        self.logger = logging.getLogger(f"{__name__}.ModelServerClient")
-        
     async def initialize(self):
         """ULTRA-CONSERVATIVE: Session initialization without complex timeouts"""
         
-        # ULTRA-SIMPLE connector - no fancy settings
+        # CRITICAL FIX: Simple connector without timeout conflicts
         connector = aiohttp.TCPConnector(
             limit=1,
             limit_per_host=1,
-            enable_cleanup_closed=False,  # CRITICAL: Don't auto-cleanup
-            force_close=False  # CRITICAL: Don't force close connections
+            enable_cleanup_closed=False,
+            force_close=False,
+            keepalive_timeout=30
         )
         
-        # CRITICAL: Very simple timeout - only total timeout
-        timeout = aiohttp.ClientTimeout(total=60)  # 1 minute total, that's it
-        
+        # CRITICAL FIX: Remove ClientTimeout to avoid "timeout context manager" error
+        # Let the session use default timeouts
         self.session = aiohttp.ClientSession(
             connector=connector,
-            timeout=timeout,
-            headers={'Content-Type': 'application/json'}
+            headers={'Content-Type': 'application/json'},
+            # NO timeout parameter here - this causes the error
         )
         
         self.logger.info("ULTRA-CONSERVATIVE model server client initialized")
-        
-    
-    async def close(self):
-        """FIXED: Safe session cleanup"""
-        if self.session:
-            try:
-                await self.session.close()
-                # FIXED: Give time for cleanup
-                await asyncio.sleep(0.1)
-            except Exception as e:
-                self.logger.warning(f"Session cleanup warning: {e}")
-            finally:
-                self.session = None
-    
 
 
     async def call_generate(self, server: ModelServer, prompt: str, 
-                  params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """FIXED: API call with proper response handling and debugging"""
+                    params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """ULTRA-SIMPLE: API call without timeout context manager issues"""
         
         if not self.session:
             raise RuntimeError("Client not initialized")
         
         params = params or {}
         
-        # FIXED: Better request data construction
+        # ULTRA-CONSERVATIVE request - minimal parameters
         request_data = {
-            "prompt": prompt[:500],  # Allow more prompt text
-            "max_tokens": min(params.get("max_tokens", 20), 50),  # Increased limit
+            "prompt": prompt[:200],  # Keep it small
+            "max_tokens": min(params.get("max_tokens", 10), 20),
             "temperature": params.get("temperature", 0.1),
-            "stream": False,
-            "stop": params.get("stop", [])
+            "stream": False
         }
-        
-        # Add optional parameters if present
-        for optional_param in ["top_p", "top_k", "frequency_penalty", "presence_penalty"]:
-            if optional_param in params:
-                request_data[optional_param] = params[optional_param]
         
         server.active_requests += 1
         server.total_requests += 1
@@ -327,135 +302,113 @@ class ModelServerClient:
         try:
             generate_url = f"{server.config.endpoint.rstrip('/')}/generate"
             
-            # CRITICAL FIX: Add detailed logging and proper error handling
             self.logger.info(f"🚀 Making request to: {generate_url}")
             self.logger.info(f"📦 Request data: {json.dumps(request_data, indent=2)}")
             
-            # FIXED: Proper async request with explicit timeout
-            async with self.session.post(
-                generate_url, 
-                json=request_data,
-                headers={'Content-Type': 'application/json'},
-                timeout=aiohttp.ClientTimeout(total=60)  # Explicit 60 second timeout
-            ) as response:
-                
-                self.logger.info(f"📡 Response status: {response.status}")
-                self.logger.info(f"📋 Response headers: {dict(response.headers)}")
-                
-                # CRITICAL FIX: Check response status first
+            # CRITICAL FIX: Use asyncio.wait_for instead of ClientTimeout
+            response = await asyncio.wait_for(
+                self.session.post(generate_url, json=request_data),
+                timeout=60.0  # 60 second timeout using asyncio instead of aiohttp
+            )
+            
+            self.logger.info(f"📡 Response status: {response.status}")
+            
+            try:
                 if response.status == 200:
-                    try:
-                        # FIXED: Read response text first for debugging
-                        response_text = await response.text()
-                        self.logger.info(f"📄 Raw response text: {response_text[:500]}...")
-                        
-                        # Try to parse as JSON
-                        if response_text.strip():
-                            try:
-                                result = json.loads(response_text)
-                            except json.JSONDecodeError as je:
-                                self.logger.error(f"❌ JSON decode error: {je}")
-                                return {
-                                    "error": f"Invalid JSON response: {je}",
-                                    "raw_response": response_text[:200]
-                                }
-                        else:
-                            self.logger.error("❌ Empty response received")
-                            return {"error": "Empty response from server"}
-                        
-                        # FIXED: Better result validation
-                        if isinstance(result, dict):
+                    # Read the response
+                    response_text = await response.text()
+                    self.logger.info(f"📄 Raw response (first 200 chars): {response_text[:200]}")
+                    
+                    if response_text.strip():
+                        try:
+                            result = json.loads(response_text)
+                            self.logger.info(f"✅ Successfully parsed JSON response")
+                            
+                            # Add metadata
                             latency = time.time() - start_time
                             server.record_success(latency)
                             
-                            # Add metadata
                             result["server_used"] = server.config.name
                             result["gpu_id"] = server.config.gpu_id
                             result["latency"] = latency
-                            result["request_data"] = request_data
                             
                             self.logger.info(f"✅ Success! Latency: {latency:.2f}s")
                             return result
-                        else:
-                            self.logger.error(f"❌ Unexpected result type: {type(result)}")
-                            return {"error": f"Unexpected response format: {type(result)}"}
                             
-                    except Exception as parse_error:
-                        self.logger.error(f"❌ Response parsing error: {parse_error}")
-                        server.record_failure()
-                        return {
-                            "error": f"Response parsing failed: {str(parse_error)}",
-                            "status_code": response.status
-                        }
+                        except json.JSONDecodeError as je:
+                            self.logger.error(f"❌ JSON decode error: {je}")
+                            return {
+                                "error": f"Invalid JSON response: {je}",
+                                "raw_response": response_text[:200]
+                            }
+                    else:
+                        self.logger.error("❌ Empty response received")
+                        return {"error": "Empty response from server"}
                 else:
-                    # FIXED: Handle non-200 status codes
-                    try:
-                        error_text = await response.text()
-                        self.logger.error(f"❌ HTTP {response.status}: {error_text[:200]}")
-                    except:
-                        error_text = f"HTTP {response.status}"
-                    
+                    error_text = await response.text()
+                    self.logger.error(f"❌ HTTP {response.status}: {error_text[:200]}")
                     server.record_failure()
                     return {
                         "error": f"HTTP {response.status}: {error_text}",
-                        "status_code": response.status,
-                        "url": generate_url
+                        "status_code": response.status
                     }
-                    
+            finally:
+                # CRITICAL: Always close the response
+                response.close()
+                
         except asyncio.TimeoutError:
             self.logger.error(f"❌ Request timeout after 60 seconds")
             server.record_failure()
             return {
                 "error": "Request timeout (60s)",
-                "url": generate_url,
                 "timeout": True
             }
             
-        except aiohttp.ClientError as ce:
-            self.logger.error(f"❌ Client error: {ce}")
-            server.record_failure()
-            return {
-                "error": f"Connection error: {str(ce)}",
-                "url": generate_url,
-                "client_error": True
-            }
-            
         except Exception as e:
-            self.logger.error(f"❌ Unexpected error: {e}")
+            self.logger.error(f"❌ Request failed: {type(e).__name__}: {str(e)}")
             server.record_failure()
             return {
                 "error": f"Request failed: {str(e)}",
-                "url": generate_url,
                 "exception_type": type(e).__name__
             }
             
         finally:
             server.active_requests = max(0, server.active_requests - 1)
-            
+
+
     async def health_check(self, server: ModelServer) -> bool:
-        """FIXED: Ultra-simple health check"""
+        """FIXED: Ultra-simple health check without timeout context manager"""
         try:
             if not self.session:
                 return False
                 
             health_url = f"{server.config.endpoint.rstrip('/')}/health"
             
-            # FIXED: Direct call with session's timeout only
-            response = await self.session.get(health_url)
+            # FIXED: Use asyncio.wait_for instead of ClientTimeout
+            response = await asyncio.wait_for(
+                self.session.get(health_url),
+                timeout=30.0  # 30 second timeout
+            )
             
             try:
                 if response.status == 200:
                     server.status = ModelServerStatus.HEALTHY
+                    self.logger.debug(f"✅ Health check passed for {server.config.name}")
                     return True
                 else:
                     server.status = ModelServerStatus.UNHEALTHY
+                    self.logger.debug(f"❌ Health check failed for {server.config.name}: HTTP {response.status}")
                     return False
             finally:
                 response.close()
                     
+        except asyncio.TimeoutError:
+            server.status = ModelServerStatus.UNHEALTHY
+            self.logger.debug(f"❌ Health check timeout for {server.config.name}")
+            return False
         except Exception as e:
             server.status = ModelServerStatus.UNHEALTHY
-            self.logger.debug(f"Health check failed for {server.config.name}: {e}")
+            self.logger.debug(f"❌ Health check error for {server.config.name}: {e}")
             return False
         
 # ==================== API-Compatible Engine Context ====================
