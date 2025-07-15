@@ -339,7 +339,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
         
         # 4. Generate summary with API
         result["llm_summary"] = await self._generate_partial_summary_api(field_name, result)
-        
+        self.logger.info(f"llm_partial summary {result["llm_summary"]}")
         # 5. Convert sets to lists for JSON serialization
         result["lineage_data"]["programs"] = list(result["lineage_data"]["programs"])
         
@@ -609,6 +609,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             
             api_response = await self._call_api_for_analysis(prompt, max_tokens=300)
             
+            self.logger.info(f"llm_partial from api call summary {api_response}")
             # Parse the response to ensure readable text
             readable_summary = await self._parse_api_response_to_text(
                 api_response, 
