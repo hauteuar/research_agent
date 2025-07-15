@@ -255,6 +255,11 @@ class LoadBalancer:
 class ModelServerClient:
     """HTTP client for calling model servers - FIXED VERSION"""
     
+    def __init__(self, config: APIOpulenceConfig):
+        self.config = config
+        self.session: Optional[aiohttp.ClientSession] = None
+        self.logger = logging.getLogger(f"{__name__}.ModelServerClient")
+        
     async def initialize(self):
         """ULTRA-CONSERVATIVE: Session initialization without complex timeouts"""
         
@@ -275,11 +280,24 @@ class ModelServerClient:
             # NO timeout parameter here - this causes the error
         )
         
-        self.logger.info("ULTRA-CONSERVATIVE model server client initialized")
+        self.logger.info("ULTRA-CONSERVATIVE model server client initialized")    
+    
+    async def close(self):
+        """FIXED: Safe session cleanup"""
+        if self.session:
+            try:
+                await self.session.close()
+                # FIXED: Give time for cleanup
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                self.logger.warning(f"Session cleanup warning: {e}")
+            finally:
+                self.session = None
+    
 
 
     async def call_generate(self, server: ModelServer, prompt: str, 
-                    params: Dict[str, Any] = None) -> Dict[str, Any]:
+                  params: Dict[str, Any] = None) -> Dict[str, Any]:
         """ULTRA-SIMPLE: API call without timeout context manager issues"""
         
         if not self.session:
@@ -374,8 +392,7 @@ class ModelServerClient:
             
         finally:
             server.active_requests = max(0, server.active_requests - 1)
-
-
+            
     async def health_check(self, server: ModelServer) -> bool:
         """FIXED: Ultra-simple health check without timeout context manager"""
         try:
