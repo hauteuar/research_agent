@@ -203,7 +203,7 @@ class ModelServer:
 # ==================== Load Balancer ====================
 
 class LoadBalancer:
-    """Load balancer with dual GPU support - keeping original name"""
+    """Load balancer with dual GPU support - FIXED VERSION"""
     
     def __init__(self, config: APIOpulenceConfig):
         self.config = config
@@ -220,42 +220,105 @@ class LoadBalancer:
         return [server for server in self.servers if server.is_available()]
     
     def select_server(self) -> Optional[ModelServer]:
-        """Original method - keeping for compatibility"""
+        """FIXED: Proper round-robin implementation"""
         available_servers = self.get_available_servers()
         
         if not available_servers:
+            self.logger.warning("❌ No available servers found!")
             return None
+        
+        if len(available_servers) == 1:
+            self.logger.debug(f"🎯 Only one server available: {available_servers[0].config.name}")
+            return available_servers[0]
         
         if self.config.load_balancing_strategy == LoadBalancingStrategy.ROUND_ROBIN:
-            server = available_servers[self.current_index % len(available_servers)]
-            self.current_index += 1
-            return server
+            # CRITICAL FIX: Use global server index, not available server index
+            selected_server = available_servers[self.current_index % len(available_servers)]
+            self.current_index = (self.current_index + 1) % len(available_servers)
+            
+            self.logger.info(f"🔄 Round-robin selected: {selected_server.config.name} (index: {self.current_index-1})")
+            return selected_server
         
         elif self.config.load_balancing_strategy == LoadBalancingStrategy.LEAST_BUSY:
-            return min(available_servers, key=lambda s: s.active_requests)
+            selected = min(available_servers, key=lambda s: s.active_requests)
+            self.logger.info(f"📊 Least busy selected: {selected.config.name} (active: {selected.active_requests})")
+            return selected
         
         elif self.config.load_balancing_strategy == LoadBalancingStrategy.LEAST_LATENCY:
-            return min(available_servers, key=lambda s: s.average_latency)
+            selected = min(available_servers, key=lambda s: s.average_latency)
+            self.logger.info(f"⚡ Least latency selected: {selected.config.name} (latency: {selected.average_latency:.2f}s)")
+            return selected
         
         elif self.config.load_balancing_strategy == LoadBalancingStrategy.RANDOM:
-            return random.choice(available_servers)
+            selected = random.choice(available_servers)
+            self.logger.info(f"🎲 Random selected: {selected.config.name}")
+            return selected
         
         else:
-            return available_servers[0]
+            # Default to first available
+            selected = available_servers[0]
+            self.logger.info(f"🔧 Default selected: {selected.config.name}")
+            return selected
     
     def select_server_for_load(self, estimated_tokens: int = 0) -> Optional[ModelServer]:
-        """NEW: Smart server selection based on load and token requirements"""
+        """ENHANCED: Smart server selection with load balancing"""
         available_servers = self.get_available_servers()
         
         if not available_servers:
+            self.logger.warning("❌ No available servers for load-based selection!")
             return None
+        
+        if len(available_servers) == 1:
+            return available_servers[0]
         
         # For high token requests, prefer less busy servers
         if estimated_tokens > 1000:
-            return min(available_servers, key=lambda s: s.active_requests)
+            selected = min(available_servers, key=lambda s: s.active_requests)
+            self.logger.info(f"🔥 High load ({estimated_tokens} tokens) -> least busy: {selected.config.name}")
+            return selected
         else:
-            # Use existing round robin for normal requests
+            # Use round-robin for normal requests
             return self.select_server()
+    
+    def get_load_balancing_stats(self) -> Dict[str, Any]:
+        """NEW: Get detailed load balancing statistics"""
+        available_servers = self.get_available_servers()
+        
+        stats = {
+            "strategy": self.config.load_balancing_strategy.value,
+            "total_servers": len(self.servers),
+            "available_servers": len(available_servers),
+            "current_round_robin_index": self.current_index,
+            "server_details": []
+        }
+        
+        for i, server in enumerate(self.servers):
+            server_stats = {
+                "index": i,
+                "name": server.config.name,
+                "endpoint": server.config.endpoint,
+                "gpu_id": server.config.gpu_id,
+                "status": server.status.value if hasattr(server.status, 'value') else str(server.status),
+                "available": server.is_available(),
+                "active_requests": server.active_requests,
+                "total_requests": server.total_requests,
+                "successful_requests": server.successful_requests,
+                "failed_requests": server.failed_requests,
+                "success_rate": (
+                    (server.successful_requests / server.total_requests * 100) 
+                    if server.total_requests > 0 else 0
+                ),
+                "average_latency": server.average_latency,
+                "consecutive_failures": server.consecutive_failures
+            }
+            stats["server_details"].append(server_stats)
+        
+        return stats
+    
+    def force_balance_reset(self):
+        """NEW: Force reset of load balancing state"""
+        self.current_index = 0
+        self.logger.info("🔄 Load balancer index reset to 0")
     
     def get_server_by_gpu_id(self, gpu_id: int) -> Optional[ModelServer]:
         """Get server by GPU ID - for compatibility"""
@@ -265,9 +328,28 @@ class LoadBalancer:
         return None
     
     def get_all_healthy_servers(self) -> List[ModelServer]:
-        """NEW: Get all healthy servers for parallel processing"""
+        """Get all healthy servers for parallel processing"""
         return [s for s in self.servers if s.status == ModelServerStatus.HEALTHY]
-
+    
+    def distribute_requests_evenly(self, num_requests: int) -> List[ModelServer]:
+        """NEW: Distribute multiple requests evenly across available servers"""
+        available_servers = self.get_available_servers()
+        
+        if not available_servers:
+            return []
+        
+        # Distribute requests round-robin style
+        distribution = []
+        for i in range(num_requests):
+            server_index = (self.current_index + i) % len(available_servers)
+            distribution.append(available_servers[server_index])
+        
+        # Update current index for next call
+        self.current_index = (self.current_index + num_requests) % len(available_servers)
+        
+        self.logger.info(f"📦 Distributed {num_requests} requests across {len(set(distribution))} servers")
+        return distribution
+# ==================== Chunked Processing ====================
 
 class ChunkedProcessor:
     """Handles chunked processing for long content analysis"""
@@ -1016,10 +1098,18 @@ class APIOpulenceCoordinator:
     
     async def call_model_api(self, prompt: str, params: Dict[str, Any] = None, 
                         preferred_gpu_id: int = None) -> Dict[str, Any]:
-        """PRODUCTION: Smart API call with automatic server selection"""
+        """ENHANCED: Smart API call with detailed load balancing logging"""
         
         # Estimate token requirements
         estimated_tokens = len(prompt.split()) + params.get("max_tokens", 500) if params else 500
+        
+        # Log the selection process
+        self.logger.info(f"🎯 API Call Request - Estimated tokens: {estimated_tokens}")
+        
+        # Get load balancing stats before selection
+        lb_stats = self.load_balancer.get_load_balancing_stats()
+        self.logger.info(f"📊 Load Balancer State: {lb_stats['available_servers']}/{lb_stats['total_servers']} servers available, "
+                        f"round-robin index: {lb_stats['current_round_robin_index']}")
         
         # Use smart server selection if available
         if hasattr(self.load_balancer, 'select_server_for_load'):
@@ -1028,15 +1118,33 @@ class APIOpulenceCoordinator:
             server = self.load_balancer.select_server()
         
         if not server:
-            raise RuntimeError("No available servers found")
+            error_msg = "No available servers found"
+            self.logger.error(f"❌ {error_msg}")
+            
+            # Log server status for debugging
+            for s in self.load_balancer.servers:
+                self.logger.error(f"   Server {s.config.name}: status={s.status}, active_requests={s.active_requests}")
+            
+            raise RuntimeError(error_msg)
         
-        self.logger.debug(f"🎯 Selected {server.config.name} for {estimated_tokens} estimated tokens")
+        self.logger.info(f"✅ Selected server: {server.config.name} (GPU {server.config.gpu_id}) "
+                        f"at {server.config.endpoint}")
+        self.logger.info(f"   Server stats: active={server.active_requests}, "
+                        f"total={server.total_requests}, "
+                        f"success_rate={server.successful_requests/max(1,server.total_requests)*100:.1f}%")
         
         # Use the working call_generate method
         result = await self.client.call_generate(server, prompt, params)
         self.stats["total_api_calls"] += 1
+        
+        # Log the result
+        if result.get("error"):
+            self.logger.warning(f"⚠️ API call failed on {server.config.name}: {result.get('error')}")
+        else:
+            self.logger.info(f"✅ API call succeeded on {server.config.name}, "
+                           f"latency: {result.get('latency', 0):.2f}s")
+        
         return result
-
 # Additional debugging method to test your server directly
     async def debug_server_connection(self, test_prompt: str = "Hello") -> Dict[str, Any]:
         """DEBUGGING: Test server connection with detailed logging"""

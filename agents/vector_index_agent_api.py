@@ -258,7 +258,7 @@ class VectorIndexAgent(BaseOpulenceAgent):
             return {}
 
     async def _initialize_components(self):
-        """FIXED: Initialize embedding model and vector databases with proper error handling"""
+        """FIXED: Initialize embedding model and vector databases with improved ChromaDB handling"""
         try:
             # Check if required dependencies are available
             if not self.torch_available:
@@ -320,26 +320,34 @@ class VectorIndexAgent(BaseOpulenceAgent):
                     self.faiss_index = faiss.IndexFlatIP(self.vector_dim)
                     self.logger.info("✅ Created new FAISS index")
             
-            # Initialize ChromaDB collection
+            # Initialize ChromaDB collection - IMPROVED LOGIC
             if self.chromadb_available and self.chroma_embedding_function:
                 try:
                     self.chroma_client = chromadb.PersistentClient(path="./chroma_db")
                     
+                    # Try to get existing collection first
                     try:
                         self.collection = self.chroma_client.get_collection(
                             name=self.collection_name,
                             embedding_function=self.chroma_embedding_function
                         )
-                        self.logger.info(f"✅ Loaded existing ChromaDB collection")
-                    except:
-                        self.collection = self.chroma_client.create_collection(
-                            name=self.collection_name,
-                            embedding_function=self.chroma_embedding_function,
-                            metadata={"description": "Opulence mainframe code chunks - local embeddings"}
-                        )
-                        self.logger.info("✅ Created new ChromaDB collection")
+                        self.logger.info(f"✅ Loaded existing ChromaDB collection: {self.collection_name}")
+                    except Exception:
+                        # Collection doesn't exist, create it
+                        try:
+                            self.collection = self.chroma_client.create_collection(
+                                name=self.collection_name,
+                                embedding_function=self.chroma_embedding_function,
+                                metadata={"description": "Opulence mainframe code chunks - local embeddings"}
+                            )
+                            self.logger.info(f"✅ Created new ChromaDB collection: {self.collection_name}")
+                        except Exception as create_error:
+                            self.logger.error(f"❌ Failed to create ChromaDB collection: {create_error}")
+                            self.collection = None
+                            
                 except Exception as e:
                     self.logger.warning(f"⚠️ ChromaDB initialization failed: {e}")
+                    self.collection = None
             
             self._vector_initialized = True
             self.logger.info("✅ Vector components initialized successfully")
@@ -756,28 +764,20 @@ class VectorIndexAgent(BaseOpulenceAgent):
             return {"status": "error", "error": str(e)}
 
     async def rebuild_index_from_chunks(self, chunks: List[tuple]) -> Dict[str, Any]:
-        """Rebuild index from provided chunks"""
+        """Rebuild index from provided chunks - FIXED ChromaDB handling"""
         try:
             await self._ensure_vector_initialized()
             
             self.logger.info(f"🔄 Rebuilding index from {len(chunks)} chunks")
             
-            # Clear existing indices
+            # Clear existing FAISS index
             if self.faiss_available:
                 self.faiss_index = faiss.IndexFlatIP(self.vector_dim)
+                self.logger.info("✅ Cleared FAISS index")
             
+            # Clear ChromaDB collection - FIXED LOGIC
             if self.chromadb_available and self.chroma_client:
-                try:
-                    self.chroma_client.delete_collection(self.collection_name)
-                except:
-                    pass
-                
-                if self.chroma_embedding_function:
-                    self.collection = self.chroma_client.create_collection(
-                        name=self.collection_name,
-                        embedding_function=self.chroma_embedding_function,
-                        metadata={"description": "Opulence mainframe code chunks - rebuilt"}
-                    )
+                await self._safely_recreate_chroma_collection()
             
             # Clear SQLite embedding references
             try:
@@ -786,6 +786,7 @@ class VectorIndexAgent(BaseOpulenceAgent):
                 cursor.execute("DELETE FROM vector_embeddings")
                 conn.commit()
                 conn.close()
+                self.logger.info("✅ Cleared SQLite embedding references")
             except Exception as e:
                 self.logger.warning(f"⚠️ SQLite cleanup failed: {e}")
             
@@ -810,6 +811,50 @@ class VectorIndexAgent(BaseOpulenceAgent):
                 "coordinator_type": "api_based",
                 "agent_type": self.agent_type
             }
+
+    async def _safely_recreate_chroma_collection(self):
+        """Safely delete and recreate ChromaDB collection"""
+        try:
+            # First, try to delete the existing collection
+            try:
+                existing_collection = self.chroma_client.get_collection(self.collection_name)
+                if existing_collection:
+                    self.chroma_client.delete_collection(self.collection_name)
+                    self.logger.info(f"✅ Deleted existing ChromaDB collection: {self.collection_name}")
+            except Exception as delete_error:
+                # Collection might not exist, which is fine
+                self.logger.info(f"💡 Collection {self.collection_name} doesn't exist or couldn't be deleted: {delete_error}")
+            
+            # Wait a moment for the deletion to complete
+            await asyncio.sleep(0.5)
+            
+            # Now create a new collection
+            if self.chroma_embedding_function:
+                try:
+                    self.collection = self.chroma_client.create_collection(
+                        name=self.collection_name,
+                        embedding_function=self.chroma_embedding_function,
+                        metadata={"description": "Opulence mainframe code chunks - rebuilt", "rebuild_timestamp": dt.now().isoformat()}
+                    )
+                    self.logger.info(f"✅ Created new ChromaDB collection: {self.collection_name}")
+                except Exception as create_error:
+                    self.logger.error(f"❌ Failed to create ChromaDB collection: {create_error}")
+                    # Try to get existing collection instead
+                    try:
+                        self.collection = self.chroma_client.get_collection(
+                            name=self.collection_name,
+                            embedding_function=self.chroma_embedding_function
+                        )
+                        self.logger.info(f"✅ Retrieved existing ChromaDB collection: {self.collection_name}")
+                    except Exception as get_error:
+                        self.logger.error(f"❌ Failed to get ChromaDB collection: {get_error}")
+                        self.collection = None
+            else:
+                self.logger.warning("⚠️ No embedding function available for ChromaDB collection creation")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Failed to recreate ChromaDB collection: {e}")
+            self.collection = None
 
     async def process_batch_embeddings(self, limit: int = None) -> Dict[str, Any]:
         """Process all unembedded chunks in batch"""
@@ -934,37 +979,29 @@ class VectorIndexAgent(BaseOpulenceAgent):
             }
 
     async def rebuild_index(self) -> Dict[str, Any]:
-        """Rebuild the entire vector index from scratch"""
+        """Rebuild the entire vector index from scratch - FIXED ChromaDB handling"""
         try:
             await self._ensure_vector_initialized()
             
-            # Clear existing indices
+            # Clear existing FAISS index
             if self.faiss_available:
                 self.faiss_index = faiss.IndexFlatIP(self.vector_dim)
+                self.logger.info("✅ Cleared FAISS index")
             
-            # Clear ChromaDB collection
+            # Clear ChromaDB collection - FIXED LOGIC
             if self.chromadb_available and self.chroma_client:
-                try:
-                    self.chroma_client.delete_collection(self.collection_name)
-                except:
-                    pass
-                
-                if self.chroma_embedding_function:
-                    self.collection = self.chroma_client.create_collection(
-                        name=self.collection_name,
-                        embedding_function=self.chroma_embedding_function,
-                        metadata={"description": "Opulence mainframe code chunks - rebuilt"}
-                    )
+                await self._safely_recreate_chroma_collection()
             
-            # Clear embedding references
+            # Clear embedding references from SQLite
             try:
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM vector_embeddings")
                 conn.commit()
                 conn.close()
-            except:
-                pass
+                self.logger.info("✅ Cleared SQLite embedding references")
+            except Exception as e:
+                self.logger.warning(f"⚠️ SQLite cleanup failed: {e}")
             
             # Rebuild embeddings
             result = await self.process_batch_embeddings()
@@ -981,7 +1018,7 @@ class VectorIndexAgent(BaseOpulenceAgent):
         except Exception as e:
             self.logger.error(f"❌ Index rebuild failed: {str(e)}")
             return {"status": "error", "error": str(e)}
-
+        
     async def advanced_semantic_search(self, query: str, top_k: int = 10, 
                                      use_reranking: bool = True,
                                      enhance_query: bool = True) -> List[Dict[str, Any]]:
