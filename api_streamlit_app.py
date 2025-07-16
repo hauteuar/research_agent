@@ -882,33 +882,47 @@ def show_system_diagnostics():
 # ============================================================================
 
 def initialize_system_enhanced():
-    """WORKING: Enhanced system initialization based on ultra-simple success"""
+    """WORKING: Enhanced system initialization with BOTH GPU servers"""
     
     try:
-        st.info("🔄 Initializing enhanced system...")
+        st.info("🔄 Initializing enhanced system with dual GPU servers...")
         
-        # STEP 1: Test server health (working approach)
-        try:
-            response = requests.get("http://171.201.3.165:8100/health", timeout=15)
-            if response.status_code != 200:
-                st.error(f"❌ Server health check failed: {response.status_code}")
-                add_system_error(f"Server health check failed: {response.status_code}", "coordinator")
-                return False
-            st.success("✅ Server health check passed")
-            add_notification("Server connectivity verified", "success")
-        except Exception as e:
-            st.error(f"❌ Server connectivity test failed: {e}")
-            add_system_error(f"Server connectivity failed: {str(e)}", "coordinator")
+        # STEP 1: Test both server health (working approach)
+        server_endpoints = [
+            "http://171.201.3.164:8100",
+            "http://171.201.3.164:8101"
+        ]
+        
+        healthy_servers = []
+        for endpoint in server_endpoints:
+            try:
+                response = requests.get(f"{endpoint}/health", timeout=15)
+                if response.status_code == 200:
+                    healthy_servers.append(endpoint)
+                    st.success(f"✅ Server {endpoint} health check passed")
+                else:
+                    st.warning(f"⚠️ Server {endpoint} health check failed: {response.status_code}")
+            except Exception as e:
+                st.warning(f"⚠️ Server {endpoint} connectivity failed: {e}")
+        
+        if not healthy_servers:
+            st.error("❌ No servers are available")
+            add_system_error("No healthy servers found", "coordinator")
             return False
         
-        # STEP 2: Create coordinator (working approach)
-        model_servers = [{
-            "name": "main_gpu_server",
-            "endpoint": "http://171.201.3.165:8100",
-            "gpu_id": 2,
-            "max_concurrent_requests": 1,
-            "timeout": 60  # Working timeout
-        }]
+        st.success(f"✅ {len(healthy_servers)} out of {len(server_endpoints)} servers available")
+        add_notification(f"Server connectivity verified: {len(healthy_servers)} servers", "success")
+        
+        # STEP 2: Create coordinator with ALL available servers (working approach)
+        model_servers = []
+        for i, endpoint in enumerate(healthy_servers):
+            model_servers.append({
+                "name": f"gpu_{i}_server",
+                "endpoint": endpoint,
+                "gpu_id": i,
+                "max_concurrent_requests": 1,  # Conservative
+                "timeout": 60  # Working timeout
+            })
         
         # STEP 3: Initialize using working event loop approach
         loop = asyncio.new_event_loop()
@@ -917,7 +931,7 @@ def initialize_system_enhanced():
         try:
             coordinator = create_api_coordinator_from_config(
                 model_servers=model_servers,
-                load_balancing_strategy="round_robin",
+                load_balancing_strategy="round_robin",  # Use both servers in rotation
                 max_retries=0,  # Working: No retries
                 connection_pool_size=1,
                 request_timeout=30,  # Working timeout
@@ -945,8 +959,8 @@ def initialize_system_enhanced():
                     'error_message': None
                 }
             
-            st.success("✅ Enhanced system initialization complete!")
-            add_notification("System initialized successfully", "success")
+            st.success(f"✅ Enhanced system initialization complete with {len(model_servers)} servers!")
+            add_notification(f"System initialized successfully with {len(model_servers)} GPU servers", "success")
             return True
             
         except Exception as e:
@@ -958,7 +972,7 @@ def initialize_system_enhanced():
         st.error(f"❌ System initialization failed: {e}")
         add_system_error(f"System initialization failed: {str(e)}", "system")
         return False
-
+    
 def show_initialization_interface():
     """Enhanced initialization interface with sidebar integration"""
     
@@ -6224,7 +6238,7 @@ def show_application_header_complete():
                 st.rerun()
 
 def show_header_status_bar_complete():
-    """Complete condensed status bar in header with all metrics"""
+    """Complete condensed status bar in header with dual GPU support"""
     try:
         coordinator = st.session_state.get('coordinator')
         if not coordinator:
@@ -6238,10 +6252,14 @@ def show_header_status_bar_complete():
         
         with col1:
             if available_servers > 0:
-                st.success(f"🟢 {available_servers}/{total_servers} GPU Servers")
+                if available_servers == 2:
+                    st.success(f"🟢 Dual GPU ({available_servers}/{total_servers})")
+                elif available_servers == 1:
+                    st.warning(f"🟡 Single GPU ({available_servers}/{total_servers})")
+                else:
+                    st.success(f"🟢 {available_servers}/{total_servers} GPU Servers")
             else:
-                st.error(f"🔴 {available_servers}/{total_servers} GPU Servers")
-        
+                st.error(f"🔴 {available_servers}/{total_servers} GPU Servers")        
         with col2:
             ready_agents = sum(1 for status in st.session_state.agent_status.values() 
                              if status.get('status') in ['ready', 'available'])
