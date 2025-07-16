@@ -1516,6 +1516,7 @@ class APIOpulenceCoordinator:
             # Ensure all required agents are ready
             await self._ensure_agents_ready()
             
+            
             # ENHANCED STEP 1: COMPLETE PROGRAM FLOW ANALYSIS (for programs)
             if normalized_type in ["cobol", "copybook", "program", "jcl"]:
                 try:
@@ -1674,10 +1675,88 @@ class APIOpulenceCoordinator:
                         "agent_used": "logic_analyzer",
                         "step": 4
                     }
-            
-            # ENHANCED STEP 5: COMPREHENSIVE FLOW DOCUMENTATION
             try:
-                self.logger.info(f"🔄 Enhanced Step 5: Comprehensive flow documentation for {analysis_component_name}")
+                self.logger.info(f"🔄 Enhanced Step 5: Semantic vector analysis for {analysis_component_name}")
+                vector_agent = self.get_agent("vector_index")
+                
+                # Use semantic search to find similar components
+                semantic_result = await self._safe_agent_call(
+                    vector_agent.semantic_search_similar_components,
+                    analysis_component_name,
+                    limit=5  # Find top 5 similar components
+                )
+                
+                if semantic_result and not semantic_result.get('error'):
+                    analysis_result["enhanced_analyses"]["semantic_analysis"] = {
+                        "status": "success",
+                        "data": semantic_result,
+                        "agent_used": "vector_index",
+                        "completion_time": time.time() - start_time,
+                        "step": 5
+                    }
+                    completed_count += 1
+                    self.logger.info(f"✅ Enhanced Step 5: Semantic analysis completed")
+                else:
+                    error_msg = semantic_result.get('error', 'No result') if semantic_result else 'No result'
+                    analysis_result["enhanced_analyses"]["semantic_analysis"] = {
+                        "status": "error",
+                        "error": error_msg,
+                        "agent_used": "vector_index",
+                        "step": 5
+                    }
+                    
+            except Exception as e:
+                self.logger.error(f"❌ Enhanced Step 5: Semantic analysis exception: {str(e)}")
+                analysis_result["enhanced_analyses"]["semantic_analysis"] = {
+                    "status": "error",
+                    "error": str(e),
+                    "agent_used": "vector_index",
+                    "step": 5
+                }
+            
+            # ENHANCED STEP 6: SEMANTIC CONTEXT SEARCH (NEW)
+            try:
+                self.logger.info(f"🔄 Enhanced Step 6: Semantic context search for {analysis_component_name}")
+                vector_agent = self.get_agent("vector_index")
+                
+                # Search for code context containing this component
+                context_result = await self._safe_agent_call(
+                    vector_agent.advanced_semantic_search,
+                    f"component {analysis_component_name} usage context code",
+                    limit=3
+                )
+                
+                if context_result and not context_result.get('error'):
+                    analysis_result["enhanced_analyses"]["semantic_context"] = {
+                        "status": "success",
+                        "data": context_result,
+                        "agent_used": "vector_index",
+                        "completion_time": time.time() - start_time,
+                        "step": 6
+                    }
+                    completed_count += 1
+                    self.logger.info(f"✅ Enhanced Step 6: Semantic context search completed")
+                else:
+                    error_msg = context_result.get('error', 'No result') if context_result else 'No result'
+                    analysis_result["enhanced_analyses"]["semantic_context"] = {
+                        "status": "error",
+                        "error": error_msg,
+                        "agent_used": "vector_index",
+                        "step": 6
+                    }
+                    
+            except Exception as e:
+                self.logger.error(f"❌ Enhanced Step 6: Semantic context search exception: {str(e)}")
+                analysis_result["enhanced_analyses"]["semantic_context"] = {
+                    "status": "error",
+                    "error": str(e),
+                    "agent_used": "vector_index",
+                    "step": 6
+                }
+
+            # ENHANCED STEP 7: COMPREHENSIVE FLOW DOCUMENTATION
+            try:
+                self.logger.info(f"🔄 Enhanced Step 7: Comprehensive flow documentation for {analysis_component_name}")
                 doc_agent = self.get_agent("documentation")
                 
                 # Use the new comprehensive flow documentation
@@ -1694,31 +1773,31 @@ class APIOpulenceCoordinator:
                         "data": flow_doc_result,
                         "agent_used": "documentation",
                         "completion_time": time.time() - start_time,
-                        "step": 5
+                        "step": 7
                     }
                     completed_count += 1
-                    self.logger.info(f"✅ Enhanced Step 5: Comprehensive flow documentation completed")
+                    self.logger.info(f"✅ Enhanced Step 7: Comprehensive flow documentation completed")
                 else:
                     error_msg = flow_doc_result.get('error', 'No documentation generated') if flow_doc_result else 'No documentation generated'
                     analysis_result["enhanced_analyses"]["comprehensive_flow_documentation"] = {
                         "status": "error",
                         "error": error_msg,
                         "agent_used": "documentation",
-                        "step": 5
+                        "step": 7
                     }
                     
             except Exception as e:
-                self.logger.error(f"❌ Enhanced Step 5: Comprehensive flow documentation exception: {str(e)}")
+                self.logger.error(f"❌ Enhanced Step 7: Comprehensive flow documentation exception: {str(e)}")
                 analysis_result["enhanced_analyses"]["comprehensive_flow_documentation"] = {
                     "status": "error",
                     "error": str(e),
                     "agent_used": "documentation",
-                    "step": 5
+                    "step": 7
                 }
             
-            # ENHANCED STEP 6: IMPACT ASSESSMENT DOCUMENTATION
+            # ENHANCED STEP 8: IMPACT ASSESSMENT DOCUMENTATION
             try:
-                self.logger.info(f"🔄 Enhanced Step 6: Impact assessment documentation for {analysis_component_name}")
+                self.logger.info(f"🔄 Enhanced Step 8: Impact assessment documentation for {analysis_component_name}")
                 doc_agent = self.get_agent("documentation")
                 
                 # Use the new impact assessment documentation
@@ -1734,31 +1813,31 @@ class APIOpulenceCoordinator:
                         "data": impact_doc_result,
                         "agent_used": "documentation",
                         "completion_time": time.time() - start_time,
-                        "step": 6
+                        "step": 8
                     }
                     completed_count += 1
-                    self.logger.info(f"✅ Enhanced Step 6: Impact assessment documentation completed")
+                    self.logger.info(f"✅ Enhanced Step 8: Impact assessment documentation completed")
                 else:
                     error_msg = impact_doc_result.get('error', 'No impact assessment generated') if impact_doc_result else 'No impact assessment generated'
                     analysis_result["enhanced_analyses"]["impact_assessment_documentation"] = {
                         "status": "error",
                         "error": error_msg,
                         "agent_used": "documentation",
-                        "step": 6
+                        "step": 8
                     }
                     
             except Exception as e:
-                self.logger.error(f"❌ Enhanced Step 6: Impact assessment documentation exception: {str(e)}")
+                self.logger.error(f"❌ Enhanced Step 8: Impact assessment documentation exception: {str(e)}")
                 analysis_result["enhanced_analyses"]["impact_assessment_documentation"] = {
                     "status": "error",
                     "error": str(e),
                     "agent_used": "documentation",
-                    "step": 6
+                    "step": 8
                 }
             
-            # ENHANCED STEP 7: OPERATIONAL RUNBOOK GENERATION
+            # ENHANCED STEP 9: OPERATIONAL RUNBOOK GENERATION
             try:
-                self.logger.info(f"🔄 Enhanced Step 7: Operational runbook generation for {analysis_component_name}")
+                self.logger.info(f"🔄 Enhanced Step 9: Operational runbook generation for {analysis_component_name}")
                 doc_agent = self.get_agent("documentation")
                 
                 # Use the new operational runbook generation
@@ -1775,17 +1854,17 @@ class APIOpulenceCoordinator:
                         "data": runbook_result,
                         "agent_used": "documentation",
                         "completion_time": time.time() - start_time,
-                        "step": 7
+                        "step": 9
                     }
                     completed_count += 1
-                    self.logger.info(f"✅ Enhanced Step 7: Operational runbook generation completed")
+                    self.logger.info(f"✅ Enhanced Step 9: Operational runbook generation completed")
                 else:
                     error_msg = runbook_result.get('error', 'No runbook generated') if runbook_result else 'No runbook generated'
                     analysis_result["enhanced_analyses"]["operational_runbook"] = {
                         "status": "error",
                         "error": error_msg,
                         "agent_used": "documentation",
-                        "step": 7
+                        "step": 9
                     }
                     
             except Exception as e:
@@ -1794,7 +1873,7 @@ class APIOpulenceCoordinator:
                     "status": "error",
                     "error": str(e),
                     "agent_used": "documentation",
-                    "step": 7
+                    "step": 9
                 }
             
             # Final status determination
@@ -1818,14 +1897,16 @@ class APIOpulenceCoordinator:
                 "success_rate": (completed_count / total_analyses) * 100 if total_analyses > 0 else 0,
                 "enhanced_analysis_sequence": [
                     "complete_program_flow", "complete_data_flow", "cross_program_lineage",
-                    "program_control_flow", "comprehensive_flow_documentation", 
+                    "program_control_flow", "semantic_analysis", "semantic_context", 
+                    "comprehensive_flow_documentation", 
                     "impact_assessment_documentation", "operational_runbook"
                 ],
                 "component_name_cleaned": cleaned_component_name != original_component_name,
                 "servers_used": [s.config.name for s in self.load_balancer.servers],
                 "analysis_features": [
                     "program_flow_analysis", "data_flow_analysis", "cross_program_lineage",
-                    "control_flow_analysis", "comprehensive_documentation", "impact_assessment",
+                    "control_flow_analysis", "semantic_analysis", "semantic_context",
+                    "comprehensive_documentation", "impact_assessment",
                     "operational_runbook"
                 ]
             })
@@ -1847,7 +1928,7 @@ class APIOpulenceCoordinator:
         """🔄 NEW: Generate comprehensive component report with all analyses"""
         try:
             # Run enhanced component analysis
-            analysis_result = await self.analyze_enhanced_component(component_name, component_type)
+            analysis_result = await self.analyze_component(component_name, component_type)
             
             if analysis_result.get("status") in ["completed", "partial"]:
                 # Generate executive summary

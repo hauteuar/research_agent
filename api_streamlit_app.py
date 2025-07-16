@@ -2526,123 +2526,219 @@ def start_component_analysis_enhanced_complete(name: str, component_type: str, s
 
 
 def display_component_analysis_results_fixed(result: Dict[str, Any], analysis_id: str, component_name: str):
-    """FIXED: Display component analysis results with proper handling of the new structure"""
+    """FIXED: Display component analysis results with correct structure handling"""
     
     if not result:
         st.warning("No analysis results to display")
         return
     
+    # Debug output section - ALWAYS show for verification
+    with st.expander("🐛 Debug Output - Raw Analysis Result", expanded=False):
+        st.markdown("**Raw Coordinator Response:**")
+        st.json(result)
+    
+    # FIXED: Handle both enhanced and regular analysis results
+    status = result.get('status', 'unknown')
+    
+    # Check if this is an enhanced analysis result
+    enhanced_analyses = result.get('enhanced_analyses', {})
+    regular_analyses = result.get('analyses', {})
+    
+    # Use enhanced if available, otherwise regular
+    analyses_to_display = enhanced_analyses if enhanced_analyses else regular_analyses
+    
     # Analysis summary
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        status = result.get('status', 'unknown')
         if status == 'completed':
-            st.success(f"**Status:** {status.title()}")
+            st.success(f"**Status:** ✅ {status.title()}")
         elif status == 'partial':
-            st.warning(f"**Status:** {status.title()}")
+            st.warning(f"**Status:** ⚠️ {status.title()}")
+        elif status == 'failed':
+            st.error(f"**Status:** ❌ {status.title()}")
         else:
-            st.error(f"**Status:** {status.title()}")
+            st.info(f"**Status:** {status.title()}")
     
     with col2:
-        analyses = result.get('analyses', {})
-        st.info(f"**Analyses:** {len(analyses)}")
+        successful_analyses = len([a for a in analyses_to_display.values() if a.get('status') == 'success'])
+        st.info(f"**Analyses:** {successful_analyses}/{len(analyses_to_display)} successful")
     
     with col3:
-        total_duration = result.get('processing_metadata', {}).get('total_duration_seconds', 0)
+        # Get duration from processing_metadata or fallback
+        total_duration = (
+            result.get('processing_metadata', {}).get('total_duration_seconds', 0) or
+            result.get('total_duration_seconds', 0) or
+            0
+        )
         st.info(f"**Duration:** {total_duration:.2f}s")
     
     with col4:
-        component_type = result.get('component_type', 'Unknown')
-        normalized_type = result.get('normalized_type', component_type)
-        st.info(f"**Type:** {normalized_type}")
+        component_type = (
+            result.get('normalized_type') or 
+            result.get('component_type') or 
+            'Unknown'
+        )
+        st.info(f"**Type:** {component_type}")
     
-    # CRITICAL FIX: Display individual analysis results with proper expansion
-    if analyses:
-        st.markdown("#### 📋 Analysis Details")
+    # FIXED: Display individual analysis results
+    if analyses_to_display:
+        st.markdown("#### 📋 Detailed Analysis Results")
         
         # Create tabs for each analysis type for better organization
-        analysis_types = list(analyses.keys())
+        analysis_types = list(analyses_to_display.keys())
         
         if len(analysis_types) == 1:
             # Single analysis - show directly
             analysis_type = analysis_types[0]
-            analysis_data = analyses[analysis_type]
-            display_single_analysis_result(analysis_type, analysis_data)
+            analysis_data = analyses_to_display[analysis_type]
+            display_single_analysis_result_enhanced(analysis_type, analysis_data, analysis_id)
         else:
             # Multiple analyses - use tabs
-            tabs = st.tabs([analysis_type.replace('_', ' ').title() for analysis_type in analysis_types])
+            tab_names = [analysis_type.replace('_', ' ').title() for analysis_type in analysis_types]
+            tabs = st.tabs(tab_names)
             
             for tab, analysis_type in zip(tabs, analysis_types):
                 with tab:
-                    analysis_data = analyses[analysis_type]
-                    display_single_analysis_result(analysis_type, analysis_data)
+                    analysis_data = analyses_to_display[analysis_type]
+                    display_single_analysis_result_enhanced(analysis_type, analysis_data, analysis_id)
+    else:
+        st.info("No detailed analysis results available")
     
-    # Export option
+    # Export and action buttons
     col1, col2, col3 = st.columns(3)
     
     with col1:
         if st.button(f"💾 Export Results", key=f"export_{analysis_id}"):
-            export_analysis_results_json(result, analysis_id, component_name)
+            export_analysis_results_enhanced(result, analysis_id, component_name)
     
     with col2:
         if st.button(f"🔄 Re-analyze", key=f"reanalyze_{analysis_id}"):
-            st.info("Click 'Start Analysis' button above to re-analyze")
+            st.info("Use the Component Analysis page to re-analyze this component")
     
     with col3:
-        if st.button(f"📋 Copy to Clipboard", key=f"copy_{analysis_id}"):
-            st.code(json.dumps(result, indent=2))
+        if st.button(f"📋 Copy Summary", key=f"copy_summary_{analysis_id}"):
+            copy_analysis_summary_to_clipboard(result, component_name)
 
-def display_single_analysis_result(analysis_type: str, analysis_data: Dict[str, Any]):
-    """Display individual analysis result with proper formatting"""
+def display_single_analysis_result_enhanced(analysis_type: str, analysis_data: Dict[str, Any], analysis_id: str):
+    """FIXED: Display individual analysis result with enhanced structure support"""
     
     analysis_status = analysis_data.get('status', 'unknown')
     step = analysis_data.get('step', 0)
     
-    # Status indicator
-    if analysis_status == 'success':
-        st.success(f"✅ Step {step}: {analysis_type.replace('_', ' ').title()} - Success")
-    elif analysis_status == 'error':
-        st.error(f"❌ Step {step}: {analysis_type.replace('_', ' ').title()} - Failed")
-        error_msg = analysis_data.get('error', 'Unknown error')
-        st.error(f"**Error:** {error_msg}")
-        return
-    else:
-        st.warning(f"⚠️ Step {step}: {analysis_type.replace('_', ' ').title()} - {analysis_status}")
-        return
+    # Create expandable section for each analysis
+    expanded_by_default = analysis_status == 'success'
     
-    # Show metadata
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        agent_used = analysis_data.get('agent_used', 'Unknown')
-        st.markdown(f"**Agent Used:** {agent_used}")
-    
-    with col2:
-        completion_time = analysis_data.get('completion_time', 0)
-        st.markdown(f"**Completion Time:** {completion_time:.2f}s")
-    
-    with col3:
-        normalized_type = analysis_data.get('normalized_type', '')
-        if normalized_type:
-            st.markdown(f"**Normalized Type:** {normalized_type}")
-    
-    # Display analysis data
-    analysis_result = analysis_data.get('data', {})
-    
-    if isinstance(analysis_result, dict) and analysis_result:
-        # Format specific analysis types
-        if analysis_type == 'lineage_analysis':
-            display_lineage_analysis_fixed(analysis_result)
-        elif analysis_type == 'logic_analysis':
-            display_logic_analysis_fixed(analysis_result)
-        elif analysis_type == 'semantic_analysis':
-            display_semantic_analysis_fixed(analysis_result)
+    with st.expander(f"Step {step}: {analysis_type.replace('_', ' ').title()}", expanded=expanded_by_default):
+        
+        # Status and metadata
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if analysis_status == 'success':
+                st.success(f"✅ Status: Success")
+            elif analysis_status == 'error':
+                st.error(f"❌ Status: Failed")
+                error_msg = analysis_data.get('error', 'Unknown error')
+                st.error(f"**Error:** {error_msg}")
+                return  # Don't show data if failed
+            else:
+                st.warning(f"⚠️ Status: {analysis_status}")
+                return
+        
+        with col2:
+            agent_used = analysis_data.get('agent_used', 'Unknown')
+            st.markdown(f"**Agent:** {agent_used}")
+        
+        with col3:
+            completion_time = analysis_data.get('completion_time', 0)
+            st.markdown(f"**Time:** {completion_time:.2f}s")
+        
+        # Display analysis data with proper formatting
+        analysis_result = analysis_data.get('data', {})
+        
+        if isinstance(analysis_result, dict) and analysis_result:
+            # FIXED: Handle enhanced analysis structure
+            if analysis_type.startswith('complete_'):
+                # Enhanced analysis types
+                display_enhanced_analysis_result(analysis_type, analysis_result)
+            elif analysis_type == 'lineage_analysis':
+                display_lineage_analysis_formatted(analysis_result)
+            elif analysis_type == 'logic_analysis':
+                display_logic_analysis_formatted(analysis_result)
+            elif analysis_type == 'semantic_analysis':
+                display_semantic_analysis_formatted(analysis_result)
+            elif analysis_type == 'documentation_summary':
+                display_documentation_analysis_formatted(analysis_result)
+            else:
+                # Generic display with better formatting
+                display_generic_analysis_formatted(analysis_result, analysis_type)
         else:
-            # Generic display
-            st.json(analysis_result)
+            st.info("No detailed analysis data available")
+        
+        # Debug output for each analysis
+        with st.expander(f"🐛 Debug: {analysis_type} Raw Data", expanded=False):
+            st.json(analysis_data)
+
+def display_enhanced_analysis_result(analysis_type: str, analysis_result: Dict[str, Any]):
+    """Display enhanced analysis results with proper structure"""
+    
+    st.markdown(f"**{analysis_type.replace('_', ' ').title()}:**")
+    
+    # Handle different enhanced analysis types
+    if analysis_type == 'complete_program_flow':
+        if 'program_relationships' in analysis_result:
+            relationships = analysis_result['program_relationships']
+            st.markdown("**📊 Program Relationships:**")
+            
+            if isinstance(relationships, dict):
+                for key, value in relationships.items():
+                    if isinstance(value, list) and value:
+                        st.markdown(f"**{key.replace('_', ' ').title()}:**")
+                        for item in value[:5]:  # Show first 5
+                            st.markdown(f"- {item}")
+                        if len(value) > 5:
+                            st.markdown(f"- ... and {len(value) - 5} more")
+            
+        if 'file_access_patterns' in analysis_result:
+            patterns = analysis_result['file_access_patterns']
+            if patterns:
+                st.markdown("**📁 File Access Patterns:**")
+                for pattern in patterns[:3]:  # Show first 3
+                    st.markdown(f"- {pattern}")
+    
+    elif analysis_type == 'complete_data_flow':
+        if 'file_access_data' in analysis_result:
+            access_data = analysis_result['file_access_data']
+            st.markdown("**📊 File Access Data:**")
+            
+            if isinstance(access_data, dict):
+                for key, value in access_data.items():
+                    if isinstance(value, list):
+                        st.markdown(f"**{key.replace('_', ' ').title()}:** {len(value)} items")
+                        for item in value[:3]:  # Show first 3
+                            st.markdown(f"- {item}")
+                    else:
+                        st.markdown(f"**{key.replace('_', ' ').title()}:** {value}")
+    
+    elif analysis_type == 'cross_program_lineage':
+        if 'impact_data' in analysis_result:
+            impact_data = analysis_result['impact_data']
+            st.markdown("**🔗 Cross-Program Impact:**")
+            
+            if isinstance(impact_data, dict):
+                for key, value in impact_data.items():
+                    if isinstance(value, list):
+                        st.markdown(f"**{key.replace('_', ' ').title()}:** {len(value)} dependencies")
+    
     else:
-        st.info("No detailed analysis data available")
+        # Generic enhanced display
+        for key, value in analysis_result.items():
+            st.markdown(f"**{key.replace('_', ' ').title()}:**")
+            if isinstance(value, (list, dict)):
+                st.json(value)
+            else:
+                st.write(value)
 
 def display_lineage_analysis_fixed(lineage_data: Dict[str, Any]):
     """FIXED: Display lineage analysis with proper data handling"""
