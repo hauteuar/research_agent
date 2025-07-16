@@ -1940,15 +1940,16 @@ class APIOpulenceCoordinator:
                 "success_rate": (completed_count / total_analyses) * 100 if total_analyses > 0 else 0,
                 "enhanced_analysis_sequence": [
                     "complete_program_flow", "complete_data_flow", "cross_program_lineage",
-                    "program_control_flow", "semantic_analysis", "semantic_context", 
-                    "comprehensive_flow_documentation", 
+                    "program_control_flow", "semantic_similar_components", "semantic_functionality", 
+                    "semantic_dependencies", "comprehensive_flow_documentation", 
                     "impact_assessment_documentation", "operational_runbook"
                 ],
                 "component_name_cleaned": cleaned_component_name != original_component_name,
                 "servers_used": [s.config.name for s in self.load_balancer.servers],
                 "analysis_features": [
                     "program_flow_analysis", "data_flow_analysis", "cross_program_lineage",
-                    "control_flow_analysis", "semantic_analysis", "semantic_context",
+                    "control_flow_analysis", "search_similar_components", 
+                    "search_by_functionality", "find_code_dependencies",
                     "comprehensive_documentation", "impact_assessment",
                     "operational_runbook"
                 ]
