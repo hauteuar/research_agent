@@ -2209,7 +2209,7 @@ def display_chat_conversation_fixed():
         display_chat_message(message, i)
 
 def display_chat_message(message: Dict[str, Any], index: int):
-    """Display individual chat message with enhanced formatting"""
+    """UPDATED: Display individual chat message with content validation"""
     role = message.get('role', 'unknown')
     content = message.get('content', '')
     timestamp = message.get('timestamp', '')
@@ -2218,7 +2218,7 @@ def display_chat_message(message: Dict[str, Any], index: int):
     time_str = timestamp[:19].replace('T', ' ') if timestamp else 'Unknown time'
     
     if role == 'user':
-        # User message
+        # User message - display as-is
         st.markdown(f"""
         <div style="text-align: right; margin: 10px 0;">
             <div style="background-color: #007bff; color: white; padding: 10px; border-radius: 15px; display: inline-block; max-width: 80%;">
@@ -2230,7 +2230,17 @@ def display_chat_message(message: Dict[str, Any], index: int):
         """, unsafe_allow_html=True)
     
     elif role == 'assistant':
-        # Assistant message
+        # CRITICAL: Validate assistant response for display
+        if content:
+            validated_content = validate_and_format_for_display(
+                content, 
+                "chat", 
+                message.get('component_name')
+            )
+        else:
+            validated_content = "No response available."
+        
+        # Assistant message with validated content
         response_type = message.get('response_type', 'general')
         processing_time = message.get('processing_time', 0)
         suggestions = message.get('suggestions', [])
@@ -2255,7 +2265,7 @@ def display_chat_message(message: Dict[str, Any], index: int):
         <div style="margin: 10px 0;">
             <div style="background-color: {bg_color}; padding: 15px; border-radius: 15px; border-left: 4px solid {border_color}; max-width: 90%;">
                 <strong>{icon} Assistant</strong><br><br>
-                {content}
+                {validated_content}
             </div>
             <small style="color: #666;">
                 🕒 {time_str} | ⏱️ {processing_time:.2f}s
@@ -2621,7 +2631,7 @@ def display_component_analysis_results_fixed(result: Dict[str, Any], analysis_id
             copy_analysis_summary_to_clipboard(result, component_name)
 
 def display_single_analysis_result_enhanced(analysis_type: str, analysis_data: Dict[str, Any], analysis_id: str):
-    """FIXED: Display individual analysis result with enhanced structure support"""
+    """UPDATED: Display individual analysis result with content validation"""
     
     analysis_status = analysis_data.get('status', 'unknown')
     step = analysis_data.get('step', 0)
@@ -2654,13 +2664,36 @@ def display_single_analysis_result_enhanced(analysis_type: str, analysis_data: D
             completion_time = analysis_data.get('completion_time', 0)
             st.markdown(f"**Time:** {completion_time:.2f}s")
         
-        # Display analysis data with proper formatting
+        # CRITICAL: Display analysis data with content validation
         analysis_result = analysis_data.get('data', {})
         
         if isinstance(analysis_result, dict) and analysis_result:
-            # FIXED: Handle enhanced analysis structure
+            # CRITICAL: Check for text content first
+            text_fields = ['analysis', 'text', 'response', 'content', 'documentation', 'summary']
+            
+            for field in text_fields:
+                if field in analysis_result and analysis_result[field]:
+                    text_content = str(analysis_result[field])
+                    
+                    if len(text_content.strip()) > 20:  # Has meaningful content
+                        # CRITICAL: Validate content for display
+                        validated_content = validate_and_format_for_display(
+                            text_content, 
+                            analysis_type, 
+                            analysis_result.get('component_name')
+                        )
+                        st.markdown(validated_content)
+                        
+                        # Show structured data in expander if available
+                        other_data = {k: v for k, v in analysis_result.items() if k not in text_fields and v}
+                        if other_data:
+                            with st.expander("📊 Additional Structured Data", expanded=False):
+                                st.json(other_data)
+                        
+                        return  # Content displayed successfully
+            
+            # No text content found - use your existing format logic
             if analysis_type.startswith('complete_'):
-                # Enhanced analysis types
                 display_enhanced_analysis_result(analysis_type, analysis_result)
             elif analysis_type == 'lineage_analysis':
                 display_lineage_analysis_formatted(analysis_result)
@@ -2671,7 +2704,6 @@ def display_single_analysis_result_enhanced(analysis_type: str, analysis_data: D
             elif analysis_type == 'documentation_summary':
                 display_documentation_analysis_formatted(analysis_result)
             else:
-                # Generic display with better formatting
                 display_generic_analysis_formatted(analysis_result, analysis_type)
         else:
             st.info("No detailed analysis data available")
@@ -2679,14 +2711,254 @@ def display_single_analysis_result_enhanced(analysis_type: str, analysis_data: D
         # Debug output for each analysis
         with st.expander(f"🐛 Debug: {analysis_type} Raw Data", expanded=False):
             st.json(analysis_data)
+            
+def validate_and_format_for_display(content: str, analysis_type: str = "general", 
+                                   component_name: str = None) -> str:
+    """
+    CRITICAL: Validate and format content for user display in Streamlit
+    This is called ONLY when showing results to users, not when storing in DB
+    """
+    
+    if not content or len(content.strip()) < 20:
+        return get_insufficient_data_message(analysis_type, component_name)
+    
+    # Check for common LLM failure patterns
+    if is_prompt_echo(content):
+        return get_insufficient_data_message(analysis_type, component_name)
+    
+    if is_json_response(content):
+        return convert_json_to_readable_prose(content, analysis_type, component_name)
+    
+    if is_generic_response(content):
+        return get_insufficient_data_message(analysis_type, component_name)
+    
+    if contains_error_indicators(content):
+        return get_processing_error_message(analysis_type, component_name)
+    
+    # Content is valid - ensure it's readable prose
+    return ensure_readable_prose(content, analysis_type, component_name)
+
+def is_prompt_echo(content: str) -> bool:
+    """Detect if content is just echoing the prompt"""
+    content_lower = content.lower().strip()
+    
+    # Common prompt echo patterns
+    echo_patterns = [
+        "analyze the following",
+        "analyze this code",
+        "provide analysis for",
+        "examine the component",
+        "focus on:",
+        "provide a concise",
+        "create a comprehensive"
+    ]
+    
+    echo_count = sum(1 for pattern in echo_patterns if pattern in content_lower)
+    
+    # If content has multiple prompt-like phrases and is short, it's likely an echo
+    if echo_count >= 2 and len(content.split()) < 50:
+        return True
+    
+    return False
+
+def is_json_response(content: str) -> bool:
+    """Detect if content is JSON format"""
+    content = content.strip()
+    
+    if (content.startswith('{') and content.endswith('}')) or \
+       (content.startswith('[') and content.endswith(']')):
+        try:
+            import json
+            json.loads(content)
+            return True
+        except:
+            pass
+    
+    # Check for JSON-like patterns
+    json_indicators = ['"error":', '"status":', '"result":', '"data":', '"message":']
+    return sum(1 for indicator in json_indicators if indicator in content) >= 2
+
+def is_generic_response(content: str) -> bool:
+    """Detect generic or meaningless responses"""
+    content_lower = content.lower()
+    
+    generic_phrases = [
+        "i don't have enough information",
+        "cannot provide specific details",
+        "would need more context",
+        "unable to analyze",
+        "no data available",
+        "analysis completed successfully",
+        "processing completed",
+        "here is the analysis",
+        "based on the analysis"
+    ]
+    
+    generic_count = sum(1 for phrase in generic_phrases if phrase in content_lower)
+    
+    # If content is mostly generic phrases and short
+    if generic_count >= 2 and len(content.split()) < 50:
+        return True
+    
+    return False
+
+def contains_error_indicators(content: str) -> bool:
+    """Detect error messages disguised as content"""
+    content_lower = content.lower()
+    
+    error_indicators = [
+        "error", "exception", "failed", "timeout", "connection",
+        "invalid", "not found", "missing", "unavailable"
+    ]
+    
+    error_count = sum(1 for indicator in error_indicators if indicator in content_lower)
+    
+    # If content is short and has error indicators
+    if error_count >= 2 and len(content.split()) < 30:
+        return True
+    
+    return False
+
+def convert_json_to_readable_prose(json_content: str, analysis_type: str, component_name: str = None) -> str:
+    """Convert JSON response to readable prose for user display"""
+    try:
+        import json
+        data = json.loads(json_content)
+        
+        header = get_analysis_header(analysis_type, component_name)
+        
+        if isinstance(data, dict):
+            return f"{header}\n\n{dict_to_prose(data)}"
+        elif isinstance(data, list):
+            return f"{header}\n\n{list_to_prose(data)}"
+        else:
+            return f"{header}\n\nAnalysis completed with result: {str(data)}"
+            
+    except:
+        # If JSON parsing fails, treat as regular text
+        return ensure_readable_prose(json_content, analysis_type, component_name)
+
+def dict_to_prose(data: dict) -> str:
+    """Convert dictionary to readable prose"""
+    sentences = []
+    
+    for key, value in data.items():
+        if value and key not in ['error', 'status', 'timestamp']:
+            key_readable = key.replace('_', ' ').title()
+            
+            if isinstance(value, list):
+                if value:
+                    if len(value) == 1:
+                        sentences.append(f"{key_readable}: {value[0]}")
+                    else:
+                        sentences.append(f"{key_readable} includes {len(value)} items: {', '.join(str(v) for v in value[:3])}")
+                        if len(value) > 3:
+                            sentences.append(f"Additional {len(value) - 3} items are also included.")
+            
+            elif isinstance(value, dict):
+                if value:
+                    sentences.append(f"{key_readable} contains detailed information with {len(value)} components.")
+            
+            else:
+                sentences.append(f"{key_readable}: {str(value)}")
+    
+    return " ".join(sentences) if sentences else "Analysis completed successfully."
+
+def list_to_prose(data: list) -> str:
+    """Convert list to readable prose"""
+    if not data:
+        return "No items found in the analysis."
+    
+    if len(data) == 1:
+        return f"Analysis found: {str(data[0])}"
+    else:
+        return f"Analysis identified {len(data)} items: {', '.join(str(item) for item in data[:5])}{'...' if len(data) > 5 else ''}"
+
+def ensure_readable_prose(content: str, analysis_type: str, component_name: str = None) -> str:
+    """Ensure content is readable prose with proper header"""
+    content = content.strip()
+    
+    # Add header if not present
+    header = get_analysis_header(analysis_type, component_name)
+    if not content.startswith(header.split('\n')[0]):
+        content = f"{header}\n\n{content}"
+    
+    # Ensure proper sentence structure
+    if not content.endswith('.'):
+        content += '.'
+    
+    return content
+
+def get_analysis_header(analysis_type: str, component_name: str = None) -> str:
+    """Get appropriate header for analysis type"""
+    component_part = f" for {component_name}" if component_name else ""
+    
+    headers = {
+        "lineage": f"Data Lineage Analysis{component_part}",
+        "logic": f"Program Logic Analysis{component_part}",
+        "semantic": f"Semantic Analysis{component_part}",
+        "documentation": f"Component Documentation{component_part}",
+        "impact": f"Impact Analysis{component_part}",
+        "flow": f"Flow Analysis{component_part}",
+        "cross_program": f"Cross-Program Analysis{component_part}"
+    }
+    
+    return headers.get(analysis_type, f"Analysis Results{component_part}")
+
+def get_insufficient_data_message(analysis_type: str, component_name: str = None) -> str:
+    """Get user-friendly message for insufficient data"""
+    component_part = f" for '{component_name}'" if component_name else ""
+    
+    messages = {
+        "lineage": f"Data lineage analysis{component_part} could not be completed. The component may not be actively used in data processing, or additional source files may need to be processed.",
+        
+        "logic": f"Program logic analysis{component_part} could not be completed. The component may be a data definition or require additional program files for complete analysis.",
+        
+        "semantic": f"Semantic analysis{component_part} could not find related components. The component may be unique in the system, or the search index may need updates.",
+        
+        "documentation": f"Documentation generation{component_part} could not be completed due to insufficient analysis data. Additional source processing may be required.",
+        
+        "impact": f"Impact analysis{component_part} could not identify significant relationships. The component may be independent or require additional context.",
+        
+        "flow": f"Flow analysis{component_part} could not be completed. The component may not have identifiable flow patterns in the current data.",
+        
+        "cross_program": f"Cross-program analysis{component_part} could not establish relationships. Additional program files may need to be processed."
+    }
+    
+    return messages.get(analysis_type, f"Analysis{component_part} could not be completed due to insufficient data available in the system.")
+
+def get_processing_error_message(analysis_type: str, component_name: str = None) -> str:
+    """Get user-friendly message for processing errors"""
+    component_part = f" for '{component_name}'" if component_name else ""
+    
+    return f"Analysis{component_part} encountered processing limitations. The system may need additional time to process recent changes, or the component may require specialized analysis."
+
+# CRITICAL: Update your existing display functions to use validation
+
 
 def display_enhanced_analysis_result(analysis_type: str, analysis_result: Dict[str, Any]):
-    """Display enhanced analysis results with proper structure"""
+    """UPDATED: Display enhanced analysis results with content validation"""
     
     st.markdown(f"**{analysis_type.replace('_', ' ').title()}:**")
     
-    # Handle different enhanced analysis types
-    if analysis_type == 'complete_program_flow':
+    # CRITICAL: Check for text response from enhanced analyses
+    if isinstance(analysis_result, dict):
+        # Check for various text fields that enhanced analyses might return
+        text_fields = ['analysis', 'text', 'response', 'content', 'documentation', 'summary']
+        
+        for field in text_fields:
+            if field in analysis_result and analysis_result[field]:
+                text_content = str(analysis_result[field])
+                
+                if len(text_content.strip()) > 20:  # Has meaningful content
+                    # CRITICAL: Validate content for display
+                    validated_content = validate_and_format_for_display(
+                        text_content, 
+                        analysis_type, 
+                        analysis_result.get('component_name')
+                    )
+                    st.markdown(validated_content)
+                    return
         if 'program_relationships' in analysis_result:
             relationships = analysis_result['program_relationships']
             st.markdown("**📊 Program Relationships:**")
@@ -2849,17 +3121,35 @@ def display_semantic_analysis_results_enhanced(semantic_data: Dict[str, Any], an
         # Generic semantic display
         st.json(semantic_data)
 
-def display_lineage_analysis_fixed(lineage_data: Dict[str, Any]):
-    """FIXED: Display lineage analysis with proper data handling"""
+def display_lineage_analysis_formatted(lineage_data: Dict[str, Any]):
+    """UPDATED: Display lineage analysis with content validation"""
+    
+    st.markdown("**📊 Data Lineage Analysis**")
+    
     if not lineage_data:
         st.info("No lineage data available")
         return
     
-    st.markdown("**📊 Field Lineage Analysis:**")
-    
-    # Handle different possible data structures
+    # Handle different possible data structures from coordinator
     if isinstance(lineage_data, dict):
-        # If it's a structured result
+        
+        # If there's a text response, validate and display it
+        if 'analysis' in lineage_data or 'text' in lineage_data or 'response' in lineage_data:
+            text_content = (
+                lineage_data.get('analysis') or 
+                lineage_data.get('text') or 
+                lineage_data.get('response') or ''
+            )
+            
+            if text_content:
+                # CRITICAL: Validate content for display
+                validated_content = validate_and_format_for_display(
+                    str(text_content), 
+                    "lineage", 
+                    lineage_data.get('component_name')
+                )
+                st.markdown(validated_content)
+                return    
         if 'field_lineage' in lineage_data:
             field_lineage = lineage_data['field_lineage']
             if isinstance(field_lineage, list) and field_lineage:
@@ -2880,15 +3170,33 @@ def display_lineage_analysis_fixed(lineage_data: Dict[str, Any]):
         st.json(lineage_data)
 
 
-def display_logic_analysis_fixed(logic_data: Dict[str, Any]):
-    """FIXED: Display logic analysis with proper data handling"""
+def display_logic_analysis_formatted(logic_data: Dict[str, Any]):
+    """UPDATED: Display logic analysis with content validation"""
+    
+    st.markdown("**🏗️ Program Logic Analysis**")
+    
     if not logic_data:
         st.info("No logic analysis data available")
         return
     
-    st.markdown("**🏗️ Program Logic Analysis:**")
-    
+    # CRITICAL: Check for text response first
     if isinstance(logic_data, dict):
+        if 'analysis' in logic_data or 'text' in logic_data or 'response' in logic_data:
+            text_content = (
+                logic_data.get('analysis') or 
+                logic_data.get('text') or 
+                logic_data.get('response') or ''
+            )
+            
+            if text_content:
+                # CRITICAL: Validate content for display
+                validated_content = validate_and_format_for_display(
+                    str(text_content), 
+                    "logic", 
+                    logic_data.get('component_name')
+                )
+                st.markdown(validated_content)
+                return
         # Program structure
         if 'program_structure' in logic_data:
             st.markdown("**Program Structure:**")
@@ -2914,16 +3222,34 @@ def display_logic_analysis_fixed(logic_data: Dict[str, Any]):
         st.json(logic_data)
 
 
-def display_semantic_analysis_fixed(semantic_data: Dict[str, Any]):
-    """FIXED: Display semantic analysis with proper data handling"""
+def display_semantic_analysis_formatted(semantic_data: Dict[str, Any]):
+    """UPDATED: Display semantic analysis with content validation"""
+    
+    st.markdown("**🔍 Semantic Analysis Results**")
+    
     if not semantic_data:
         st.info("No semantic analysis data available")
         return
     
-    st.markdown("**🔍 Semantic Analysis Results:**")
-    
+    # CRITICAL: Check for text response first
     if isinstance(semantic_data, dict):
-        # Similar components
+        if 'analysis' in semantic_data or 'text' in semantic_data or 'response' in semantic_data:
+            text_content = (
+                semantic_data.get('analysis') or 
+                semantic_data.get('text') or 
+                semantic_data.get('response') or ''
+            )
+            
+            if text_content:
+                # CRITICAL: Validate content for display
+                validated_content = validate_and_format_for_display(
+                    str(text_content), 
+                    "semantic", 
+                    semantic_data.get('component_name')
+                )
+                st.markdown(validated_content)
+                return
+                    # Similar components
         if 'similar_components' in semantic_data:
             similar = semantic_data['similar_components']
             if similar:
@@ -3420,7 +3746,7 @@ def display_semantic_analysis_formatted(semantic_data: Dict[str, Any]):
         st.json(semantic_data)
 
 def display_documentation_analysis_formatted(doc_data: Dict[str, Any]):
-    """FIXED: Display documentation analysis with enhanced formatting"""
+    """UPDATED: Display documentation analysis with content validation"""
     
     st.markdown("**📚 Documentation Summary**")
     
@@ -3428,8 +3754,24 @@ def display_documentation_analysis_formatted(doc_data: Dict[str, Any]):
         st.info("No documentation available")
         return
     
-    # Main documentation content
-    if 'documentation' in doc_data:
+    # CRITICAL: Check for text response first
+    if isinstance(doc_data, dict):
+        if 'documentation' in doc_data or 'analysis' in doc_data or 'text' in doc_data:
+            text_content = (
+                doc_data.get('documentation') or 
+                doc_data.get('analysis') or 
+                doc_data.get('text') or ''
+            )
+            
+            if text_content:
+                # CRITICAL: Validate content for display
+                validated_content = validate_and_format_for_display(
+                    str(text_content), 
+                    "documentation", 
+                    doc_data.get('component_name')
+                )
+                st.markdown(validated_content)
+                return
         documentation = doc_data['documentation']
         if documentation:
             st.markdown("**📖 Generated Documentation:**")
@@ -3492,11 +3834,28 @@ def display_documentation_analysis_formatted(doc_data: Dict[str, Any]):
                     st.markdown(f"**{key.replace('_', ' ').title()}:** {value}")
 
 def display_generic_analysis_formatted(analysis_result: Dict[str, Any], analysis_type: str):
-    """Display generic analysis result with better formatting"""
+    """UPDATED: Display generic analysis result with content validation"""
     
     st.markdown(f"**{analysis_type.replace('_', ' ').title()} Results:**")
     
+    # CRITICAL: Check for text response first
     if isinstance(analysis_result, dict):
+        if 'analysis' in analysis_result or 'text' in analysis_result or 'response' in analysis_result:
+            text_content = (
+                analysis_result.get('analysis') or 
+                analysis_result.get('text') or 
+                analysis_result.get('response') or ''
+            )
+            
+            if text_content:
+                # CRITICAL: Validate content for display
+                validated_content = validate_and_format_for_display(
+                    str(text_content), 
+                    analysis_type, 
+                    analysis_result.get('component_name')
+                )
+                st.markdown(validated_content)
+                return
         for key, value in analysis_result.items():
             st.markdown(f"**{key.replace('_', ' ').title()}:**")
             
