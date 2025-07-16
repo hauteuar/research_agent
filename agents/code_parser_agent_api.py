@@ -8149,10 +8149,10 @@ class CodeParserAgent(BaseOpulenceAgent):
     # ==================== LLM INTEGRATION METHODS ====================
 
     async def _analyze_with_llm_cached(self, content: str, analysis_type: str, 
-                                      prompt_template: str, **kwargs) -> Dict[str, Any]:
-        """Enhanced LLM analysis with PROPER chunking and size validation"""
+                                  prompt_template: str, **kwargs) -> Dict[str, Any]:
+        """Enhanced LLM analysis with PROPER chunking and comprehensive analysis"""
         
-        # SAFETY CHECK: Validate content size BEFORE any processing
+        # SAFETY CHECK: Validate content
         if not content or not content.strip():
             return {
                 'analysis': {'error': 'Empty content provided'},
@@ -8160,23 +8160,27 @@ class CodeParserAgent(BaseOpulenceAgent):
                 'cached': False
             }
         
-        # CRITICAL: Check estimated token count BEFORE chunking
+        # Check estimated token count
         estimated_tokens = self.context_manager.estimate_tokens(content)
-        
         self.logger.info(f"🤖 LLM Analysis: {analysis_type} (content: {len(content)} chars, ~{estimated_tokens} tokens)")
         
-        # If content is small enough, truncate instead of chunking to avoid complexity
-        if estimated_tokens > 1800:  # Conservative limit
-            self.logger.warning(f"⚠️  Content too large ({estimated_tokens} tokens), truncating for safety")
-            content = self._safe_truncate_content(content, max_chars=3000)
-            estimated_tokens = self.context_manager.estimate_tokens(content)
-            self.logger.info(f"📏 After truncation: {len(content)} chars, ~{estimated_tokens} tokens")
-        
-        # Generate cache key
+        # Generate cache key for the FULL content (not truncated)
         cache_key_data = f"{content[:500]}:{analysis_type}:{prompt_template[:100]}"
         content_hash = hashlib.sha256(cache_key_data.encode()).hexdigest()
         
         # Check cache first
+        cached_result = await self._check_llm_cache(content_hash, analysis_type)
+        if cached_result:
+            return cached_result
+        
+        # Determine processing strategy based on content size
+        if estimated_tokens <= 1500:  # Small content - direct analysis
+            return await self._analyze_direct(content, analysis_type, prompt_template, content_hash, **kwargs)
+        else:  # Large content - chunking analysis
+            return await self._analyze_with_chunking(content, analysis_type, prompt_template, content_hash, **kwargs)
+
+    async def _check_llm_cache(self, content_hash: str, analysis_type: str) -> Optional[Dict[str, Any]]:
+        """Check LLM analysis cache"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -8205,103 +8209,270 @@ class CodeParserAgent(BaseOpulenceAgent):
                 }
             
             conn.close()
+            return None
         except Exception as e:
             self.logger.warning(f"Cache lookup failed: {e}")
+            return None
+
+    async def _analyze_direct(self, content: str, analysis_type: str, prompt_template: str, 
+                        content_hash: str, **kwargs) -> Dict[str, Any]:
+        """Direct LLM analysis for small content"""
+        try:
+            # Build prompt
+            final_prompt = prompt_template.format(content=content, **kwargs)
+            
+            # Final safety check on prompt size
+            prompt_tokens = self.context_manager.estimate_tokens(final_prompt)
+            if prompt_tokens > 1800:
+                self.logger.warning(f"⚠️ Prompt too large for direct analysis: {prompt_tokens} tokens, falling back to chunking")
+                return await self._analyze_with_chunking(content, analysis_type, prompt_template, content_hash, **kwargs)
+            
+            self.logger.info(f"🚀 Direct analysis: ~{prompt_tokens} tokens")
+            
+            # Call LLM API
+            response = await self.call_api(final_prompt, {
+                "temperature": 0.1,
+                "max_tokens": 1000
+            })
+            
+            # Parse response
+            analysis_result = self._parse_llm_response_enhanced(response, analysis_type)
+            analysis_result['processing_method'] = 'direct'
+            analysis_result['content_size'] = len(content)
+            
+            # Cache result
+            await self._cache_llm_result(content_hash, analysis_type, analysis_result)
+            
+            return analysis_result
+            
+        except Exception as e:
+            self.logger.error(f"❌ Direct LLM analysis failed: {e}")
+            return {
+                'analysis': self._create_fallback_analysis("", analysis_type),
+                'confidence_score': 0.3,
+                'error': str(e),
+                'processing_method': 'fallback'
+            }
+
+    async def _analyze_with_chunking(self, content: str, analysis_type: str, prompt_template: str, 
+                                content_hash: str, **kwargs) -> Dict[str, Any]:
+        """Comprehensive chunked analysis for large content"""
         
-        # SAFETY: For small content, send directly (no chunking overhead)
-        if estimated_tokens <= 1500:  # Conservative direct send limit
-            try:
-                # Build simple prompt
-                final_prompt = prompt_template.format(content=content, **kwargs)
-                
-                # FINAL SAFETY CHECK: Validate prompt size
-                prompt_tokens = self.context_manager.estimate_tokens(final_prompt)
-                if prompt_tokens > 1800:
-                    self.logger.error(f"❌ Prompt too large even after truncation: {prompt_tokens} tokens")
-                    return {
-                        'analysis': self._create_fallback_analysis("", analysis_type),
-                        'confidence_score': 0.3,
-                        'error': 'Content too large for analysis'
-                    }
-                
-                self.logger.info(f"🚀 Direct analysis (no chunking): ~{prompt_tokens} tokens")
-                
-                # Call LLM directly
-                response = await self.call_api(final_prompt, {
-                    "temperature": 0.1,
-                    "max_tokens": 1000
-                })
-                
-                # Parse response
-                analysis_result = self._parse_llm_response_enhanced(response, analysis_type)
-                
-                # Cache result
+        self.logger.info(f"📊 Starting chunked analysis for {analysis_type}")
+        
+        try:
+            # Determine chunk type based on analysis type
+            chunk_type = self._determine_chunk_type(analysis_type, content)
+            
+            # Create intelligent chunks using the context manager
+            chunks = self.context_manager.chunk_content_intelligently(
+                content, 
+                chunk_type=chunk_type, 
+                overlap=200
+            )
+            
+            if not chunks:
+                self.logger.warning("No chunks created, falling back to truncated analysis")
+                truncated_content = self._safe_truncate_content(content, max_chars=3000)
+                return await self._analyze_direct(truncated_content, analysis_type, prompt_template, content_hash, **kwargs)
+            
+            self.logger.info(f"🔍 Analyzing {len(chunks)} chunks for {analysis_type}")
+            
+            # Analyze each chunk
+            chunk_analyses = []
+            successful_analyses = 0
+            
+            for i, chunk_info in enumerate(chunks):
                 try:
-                    conn = sqlite3.connect(self.db_path)
-                    cursor = conn.cursor()
+                    chunk_analysis = await self._analyze_single_chunk(
+                        chunk_info, analysis_type, prompt_template, i, len(chunks), **kwargs
+                    )
                     
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO llm_analysis_cache 
-                        (content_hash, analysis_type, analysis_result, confidence_score, model_version)
-                        VALUES (?, ?, ?, ?, ?)
-                    """, (content_hash, analysis_type, json.dumps(analysis_result['analysis']), 
-                        analysis_result['confidence_score'], "claude-sonnet-4-safe"))
+                    if chunk_analysis and 'analysis' in chunk_analysis:
+                        chunk_analyses.append(chunk_analysis)
+                        successful_analyses += 1
+                        self.logger.debug(f"✅ Chunk {i+1}/{len(chunks)} analyzed successfully")
+                    else:
+                        self.logger.warning(f"⚠️ Chunk {i+1}/{len(chunks)} analysis failed")
                     
-                    conn.commit()
-                    conn.close()
-                except Exception as cache_error:
-                    self.logger.warning(f"Cache storage failed: {cache_error}")
-                
-                return analysis_result
-                
-            except Exception as e:
-                self.logger.error(f"❌ Direct LLM analysis failed: {e}")
+                    # Add small delay to prevent API rate limiting
+                    await asyncio.sleep(0.1)
+                    
+                except Exception as e:
+                    self.logger.warning(f"Chunk {i+1} analysis failed: {e}")
+                    continue
+            
+            # Check if we have enough successful analyses
+            if successful_analyses == 0:
+                self.logger.error("❌ All chunk analyses failed")
                 return {
                     'analysis': self._create_fallback_analysis("", analysis_type),
-                    'confidence_score': 0.3,
-                    'error': str(e)
+                    'confidence_score': 0.2,
+                    'error': 'All chunk analyses failed',
+                    'processing_method': 'failed_chunking'
                 }
+            
+            # Aggregate results from all chunks
+            aggregated_analysis = self._aggregate_chunk_analyses(chunk_analyses, analysis_type)
+            
+            # Calculate overall confidence based on successful chunk ratio
+            chunk_success_ratio = successful_analyses / len(chunks)
+            base_confidence = sum(ca.get('confidence_score', 0.5) for ca in chunk_analyses) / len(chunk_analyses)
+            overall_confidence = base_confidence * chunk_success_ratio
+            
+            final_result = {
+                'analysis': aggregated_analysis,
+                'confidence_score': overall_confidence,
+                'processing_method': 'intelligent_chunking',
+                'chunks_processed': len(chunks),
+                'chunks_successful': successful_analyses,
+                'chunk_success_ratio': chunk_success_ratio,
+                'original_content_size': len(content),
+                'cached': False
+            }
+            
+            # Cache the aggregated result
+            await self._cache_llm_result(content_hash, analysis_type, final_result)
+            
+            self.logger.info(f"✅ Chunked analysis complete: {successful_analyses}/{len(chunks)} chunks successful")
+            
+            return final_result
+            
+        except Exception as e:
+            self.logger.error(f"❌ Chunked analysis failed: {e}")
+            return {
+                'analysis': self._create_fallback_analysis("", analysis_type),
+                'confidence_score': 0.3,
+                'error': str(e),
+                'processing_method': 'failed_chunking'
+            }
+
+    def _determine_chunk_type(self, analysis_type: str, content: str) -> str:
+        """Determine the best chunk type based on analysis type and content"""
+    
+        content_upper = content.upper()
         
-        # If we get here, use the original chunking logic (but this should be rare now)
-        self.logger.warning(f"⚠️  Falling back to chunking for large content")
+        # Map analysis types to chunk types
+        if 'cobol' in analysis_type:
+            if 'IDENTIFICATION DIVISION' in content_upper:
+                return 'cobol'
+            else:
+                return 'code'
+        elif 'sql' in analysis_type or 'db2' in analysis_type:
+            return 'sql'
+        elif 'jcl' in analysis_type:
+            return 'jcl'
+        elif 'cics' in analysis_type:
+            return 'cobol'  # CICS is COBOL-based
+        elif 'mq' in analysis_type:
+            return 'cobol'  # MQ programs are typically COBOL
+        else:
+            return 'code'
+
+    async def _analyze_single_chunk(self, chunk_info: Dict[str, Any], analysis_type: str, 
+                                prompt_template: str, chunk_index: int, total_chunks: int, 
+                                **kwargs) -> Dict[str, Any]:
+        """Analyze a single chunk with enhanced context"""
         
-        # ... rest of original chunking code stays the same ...
-        # But this path should rarely be used now due to truncation above
+        chunk_content = chunk_info['content']
         
-        return {
-            'analysis': self._create_fallback_analysis("", analysis_type),
-            'confidence_score': 0.4,
-            'note': 'Used simplified analysis due to size constraints'
+        # Build enhanced prompt with chunk context
+        enhanced_prompt = self._build_enhanced_prompt(
+            prompt_template, chunk_content, chunk_info, analysis_type, **kwargs
+        )
+        
+        # Check prompt size
+        prompt_tokens = self.context_manager.estimate_tokens(enhanced_prompt)
+        if prompt_tokens > 1800:
+            # If still too large, truncate the chunk content but keep context
+            self.logger.warning(f"Chunk {chunk_index+1} still too large, truncating")
+            truncated_content = self._safe_truncate_content(chunk_content, max_chars=2000)
+            enhanced_prompt = self._build_enhanced_prompt(
+                prompt_template, truncated_content, chunk_info, analysis_type, **kwargs
+            )
+        
+        try:
+            # Call LLM API for this chunk
+            response = await self.call_api(enhanced_prompt, {
+                "temperature": 0.1,
+                "max_tokens": 800  # Smaller response for chunks
+            })
+            
+            # Parse response
+            chunk_analysis = self._parse_llm_response_enhanced(response, analysis_type)
+            
+            # Add chunk metadata
+            chunk_analysis['chunk_info'] = {
+                'chunk_index': chunk_index,
+                'total_chunks': total_chunks,
+                'chunk_type': chunk_info.get('chunk_type', 'unknown'),
+                'estimated_tokens': chunk_info.get('estimated_tokens', 0)
+            }
+            
+            return chunk_analysis
+            
+        except Exception as e:
+            self.logger.warning(f"Single chunk analysis failed: {e}")
+            return {
+                'analysis': self._create_fallback_analysis(chunk_content[:100], analysis_type),
+                'confidence_score': 0.3,
+                'error': str(e),
+                'chunk_info': {'chunk_index': chunk_index, 'failed': True}
         }
 
+
     def _build_enhanced_prompt(self, prompt_template: str, chunk_content: str, 
-                            chunk_info: Dict[str, Any], analysis_type: str, **kwargs) -> str:
+                         chunk_info: Dict[str, Any], analysis_type: str, **kwargs) -> str:
         """Build enhanced prompt with chunk context information"""
         
-        # Add chunk context to the prompt
+        # Add chunk context information
         chunk_context = ""
-        if chunk_info['total_chunks'] > 1:
+        if chunk_info.get('total_chunks', 1) > 1:
             chunk_context = f"""
             
-            CHUNK CONTEXT:
-            - This is chunk {chunk_info['chunk_index'] + 1} of {chunk_info['total_chunks']} total chunks
-            - Chunk type: {chunk_info['chunk_type']}
-            - Has overlap with previous chunk: {chunk_info.get('overlap_start', False)}
-            - Has overlap with next chunk: {chunk_info.get('overlap_end', False)}
-            
-            Please analyze this chunk considering it's part of a larger codebase.
-            Focus on the complete elements within this chunk and note any incomplete elements at boundaries.
+    CHUNK CONTEXT:
+    - This is chunk {chunk_info['chunk_index'] + 1} of {chunk_info['total_chunks']} total chunks
+    - Chunk type: {chunk_info.get('chunk_type', 'unknown')}
+    - Estimated tokens in this chunk: {chunk_info.get('estimated_tokens', 'unknown')}
+    - Overlap with adjacent chunks: {chunk_info.get('overlap_start', False)} / {chunk_info.get('overlap_end', False)}
+
+    Please analyze this chunk as part of a larger codebase. Focus on complete elements within this chunk and note any incomplete elements at boundaries.
             """
         
-        # Enhanced prompt with full content and context
+        # Build the enhanced prompt
         enhanced_prompt = prompt_template.format(
-            content=chunk_content,  # Full chunk content, not truncated
-            chunk_context=chunk_context,
+            content=chunk_content,
             **kwargs
         ) + chunk_context
         
         return enhanced_prompt
 
+    async def _cache_llm_result(self, content_hash: str, analysis_type: str, result: Dict[str, Any]):
+        """Cache LLM analysis result"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT OR REPLACE INTO llm_analysis_cache 
+                (content_hash, analysis_type, analysis_result, confidence_score, model_version)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                content_hash, 
+                analysis_type, 
+                json.dumps(result['analysis']), 
+                result['confidence_score'], 
+                "claude-sonnet-4-chunked"
+            ))
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.debug(f"📋 Cached analysis result for {analysis_type}")
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to cache LLM result: {e}")
+            
     def _parse_llm_response_enhanced(self, response: str, analysis_type: str) -> Dict[str, Any]:
         """Simple response parsing for direct (non-chunked) analysis"""
         
