@@ -1333,7 +1333,7 @@ Return as JSON array:
         return list(set(operations))
     
     async def analyze_complete_program_flow(self, program_name: str) -> Dict[str, Any]:
-        """🔄 ENHANCED: Complete program flow analysis using new relationship tables"""
+        """✅ ENHANCED: Complete program flow analysis using new relationship tables"""
         try:
             # Get program relationships
             program_relationships = await self._get_program_relationships(program_name)
@@ -1373,7 +1373,7 @@ Return as JSON array:
         except Exception as e:
             self.logger.error(f"Complete program flow analysis failed: {str(e)}")
             return self._add_processing_info({"error": str(e)})
-
+        
     async def _generate_complete_flow_analysis_api(self, program_name: str, 
                                              program_relationships: Dict,
                                              copybook_relationships: List,
@@ -1452,7 +1452,7 @@ Return as JSON array:
 
 
     async def _get_program_relationships(self, program_name: str) -> List[Dict[str, Any]]:
-        """Get all program call relationships"""
+        """Get all program call relationships for the program"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -1510,7 +1510,7 @@ Return as JSON array:
         except Exception as e:
             self.logger.error(f"Failed to get program relationships: {e}")
             return {"outbound_calls": [], "inbound_calls": []}
-
+        
     async def _get_copybook_relationships(self, program_name: str) -> List[Dict[str, Any]]:
         """Get all copybook dependencies for the program"""
         try:
@@ -1543,7 +1543,7 @@ Return as JSON array:
         except Exception as e:
             self.logger.error(f"Failed to get copybook relationships: {e}")
             return []
-
+        
     async def _get_file_access_relationships(self, program_name: str) -> List[Dict[str, Any]]:
         """Get all file access patterns for the program"""
         try:
@@ -1551,8 +1551,8 @@ Return as JSON array:
             cursor = conn.cursor()
             
             cursor.execute("""
-                SELECT program_name, file_name, physical_file, access_type, access_mode,
-                    record_format, access_location, line_number
+                SELECT program_name, logical_file_name, physical_file_name, 
+                    access_type, access_mode, line_number, access_statement
                 FROM file_access_relationships
                 WHERE program_name = ?
                 ORDER BY line_number
@@ -1564,20 +1564,19 @@ Return as JSON array:
             return [
                 {
                     "program_name": row[0],
-                    "file_name": row[1],
-                    "physical_file": row[2],
+                    "logical_file_name": row[1],
+                    "physical_file_name": row[2],
                     "access_type": row[3],
                     "access_mode": row[4],
-                    "record_format": row[5],
-                    "access_location": row[6],
-                    "line_number": row[7]
+                    "line_number": row[5],
+                    "access_statement": row[6]
                 } for row in relationships
             ]
             
         except Exception as e:
             self.logger.error(f"Failed to get file access relationships: {e}")
             return []
-
+        
     async def _get_field_cross_references(self, program_name: str) -> List[Dict[str, Any]]:
         """Get field cross-references for the program"""
         try:

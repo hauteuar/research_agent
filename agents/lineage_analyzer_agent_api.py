@@ -65,10 +65,10 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
         
         # API-specific settings - FIXED: Reduced token limits
         self.api_params = {
-            "max_tokens": 500,  # FIXED: Reduced from 1000
-            "temperature": 0.1,  # FIXED: Reduced from 0.2
-            "top_p": 0.9
-        }
+        "max_tokens": 1024,  # INCREASED from 500 for more complete responses
+        "temperature": 0.1,  # Keep low for consistency
+        "top_p": 0.9
+    }
     
     def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Add processing information to results"""
@@ -329,99 +329,149 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             return []
         
     async def analyze_field_lineage(self, field_name: str) -> Dict[str, Any]:
-        """✅ FIXED: Analyze complete lineage for a specific field using API calls"""
+        """✅ FIXED: Field lineage analysis with comprehensive logging"""
         try:
-            await self._load_existing_lineage()  # Load lineage data
+            await self._load_existing_lineage()
             
-            # FIXED: Ensure field_name is string
+            # FIXED: Ensure field_name is string and log start
             field_name = str(field_name)
+            self.logger.info(f"🎯 Starting field lineage analysis for: {field_name}")
             
             # Find all references to this field
             field_references = await self._find_field_references(field_name)
             
+            # FIXED: Better logging of what was found
+            self.logger.info(f"📋 Found {len(field_references)} references for {field_name}")
+            
             if not field_references:
+                self.logger.warning(f"⚠️ No references found for field: {field_name}")
                 return self._add_processing_info({
                     "field_name": field_name,
                     "error": "No references found for this field",
-                    "suggestions": "Check if field name is correct or if data has been processed"
+                    "suggestions": ["Check if field name is correct", "Verify data has been processed", "Try alternative field names"],
+                    "total_references": 0,
+                    "status": "no_data"
                 })
             
-            # Build lineage graph for this field
+            # Log progress through analysis steps
+            self.logger.info(f"🔄 Step 1/5: Building lineage graph for {field_name}")
             field_lineage = await self._build_field_lineage_graph(field_name, field_references)
             
-            # Analyze usage patterns with API
+            self.logger.info(f"🔄 Step 2/5: Analyzing usage patterns for {field_name}")
             usage_analysis = await self._analyze_field_usage_patterns_api(field_name, field_references)
             
-            # Find data transformations with API
+            self.logger.info(f"🔄 Step 3/5: Finding transformations for {field_name}")
             transformations = await self._find_field_transformations_api(field_name, field_references)
             
-            # Identify lifecycle stages with API
+            self.logger.info(f"🔄 Step 4/5: Analyzing lifecycle for {field_name}")
             lifecycle = await self._analyze_field_lifecycle_api(field_name, field_references)
             
-            # Generate comprehensive report with API
+            self.logger.info(f"🔄 Step 5/5: Generating comprehensive report for {field_name}")
             lineage_report = await self._generate_field_lineage_report_api(
                 field_name, field_lineage, usage_analysis, transformations, lifecycle
             )
             
+            # FIXED: Build comprehensive result with all data
             result = {
                 "field_name": field_name,
+                "total_references": len(field_references),
                 "lineage_graph": field_lineage,
                 "usage_analysis": usage_analysis,
                 "transformations": transformations,
                 "lifecycle": lifecycle,
                 "comprehensive_report": lineage_report,
                 "impact_analysis": await self._analyze_field_impact_api(field_name, field_references),
+                "analysis_timestamp": dt.now().isoformat(),
                 "status": "success"
             }
             
+            self.logger.info(f"✅ Field lineage analysis completed successfully for {field_name}")
             return self._add_processing_info(result)
             
         except Exception as e:
-            self.logger.error(f"Field lineage analysis failed for {field_name}: {str(e)}")
+            self.logger.error(f"❌ Field lineage analysis failed for {field_name}: {str(e)}")
             return self._add_processing_info({
                 "field_name": field_name,
                 "error": str(e),
-                "status": "error"
+                "status": "error",
+                "analysis_timestamp": dt.now().isoformat()
             })
+
     
     async def analyze_complete_data_flow(self, component_name: str, component_type: str) -> Dict[str, Any]:
-        """🔄 FIXED: Complete data flow analysis for files and programs"""
+        """🔄 FIXED: Complete data flow analysis with proper result building"""
         try:
             # FIXED: Ensure parameters are strings
             component_name = str(component_name)
             component_type = str(component_type)
             
+            self.logger.info(f"🔄 Starting complete data flow analysis for {component_name} ({component_type})")
+            
             if component_type == "file":
-                return await self._analyze_file_data_flow(component_name)
+                analysis_result = await self._analyze_file_data_flow(component_name)
             elif component_type in ["program", "cobol"]:
-                return await self._analyze_program_data_flow(component_name)
+                analysis_result = await self._analyze_program_data_flow(component_name)
             else:
-                return await self._analyze_field_data_flow(component_name)
+                analysis_result = await self._analyze_field_data_flow(component_name)
+            
+            # FIXED: Ensure proper result structure
+            if not analysis_result or analysis_result.get('error'):
+                self.logger.warning(f"⚠️ Analysis failed for {component_name}: {analysis_result.get('error', 'Unknown error')}")
+                return self._add_processing_info({
+                    "component_name": component_name,
+                    "component_type": component_type,
+                    "error": analysis_result.get('error', 'Analysis failed'),
+                    "status": "error"
+                })
+            
+            # FIXED: Add metadata and return properly formatted result
+            final_result = {
+                "component_name": component_name,
+                "component_type": component_type,
+                "analysis_result": analysis_result,
+                "analysis_type": "complete_data_flow",
+                "analysis_timestamp": dt.now().isoformat(),
+                "status": "success"
+            }
+            
+            self.logger.info(f"✅ Complete data flow analysis completed for {component_name}")
+            return self._add_processing_info(final_result)
                 
         except Exception as e:
-            self.logger.error(f"Complete data flow analysis failed: {str(e)}")
-            return self._add_processing_info({"error": str(e)})
-
+            self.logger.error(f"❌ Complete data flow analysis failed: {str(e)}")
+            return self._add_processing_info({
+                "component_name": component_name,
+                "component_type": component_type,
+                "error": str(e),
+                "status": "error"
+            })
+        
     async def _analyze_file_data_flow(self, file_name: str) -> Dict[str, Any]:
-        """🔄 FIXED: Analyze complete file data flow across programs"""
+        """🔄 FIXED: Analyze file data flow with proper result building"""
         try:
             # FIXED: Ensure file_name is string
             file_name = str(file_name)
             
+            self.logger.info(f"📁 Analyzing file data flow for: {file_name}")
+            
             # Get file access relationships
             file_access_data = await self._get_file_access_data(file_name)
+            self.logger.info(f"Found {file_access_data.get('total_access_points', 0)} file access points")
             
             # Get field definitions for this file
             field_definitions = await self._get_file_field_definitions(file_name)
+            self.logger.info(f"Found {len(field_definitions)} field definitions")
             
             # Analyze field usage across programs
             field_usage_analysis = await self._analyze_field_usage_across_programs(file_name, field_definitions)
+            self.logger.info(f"Analyzed field usage across programs")
             
             # Generate comprehensive file flow analysis
             file_flow_analysis = await self._generate_file_flow_analysis_api(
                 file_name, file_access_data, field_definitions, field_usage_analysis
             )
             
+            # FIXED: Build complete result object
             result = {
                 "file_name": file_name,
                 "component_type": "file",
@@ -430,20 +480,29 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 "field_usage_analysis": field_usage_analysis,
                 "file_flow_analysis": file_flow_analysis,
                 "analysis_type": "complete_file_data_flow",
-                "analysis_timestamp": dt.now().isoformat()
+                "analysis_timestamp": dt.now().isoformat(),
+                "status": "success"
             }
             
-            return self._add_processing_info(result)
+            self.logger.info(f"✅ File data flow analysis completed for {file_name}")
+            return result
             
         except Exception as e:
-            self.logger.error(f"File data flow analysis failed: {str(e)}")
-            return self._add_processing_info({"error": str(e)})
+            self.logger.error(f"❌ File data flow analysis failed for {file_name}: {str(e)}")
+            return {
+                "file_name": file_name,
+                "error": str(e),
+                "status": "error"
+            }
 
     async def _get_file_access_data(self, file_name: str) -> Dict[str, Any]:
-        """FIXED: Get comprehensive file access data"""
+        """FIXED: Get file access data with comprehensive logging"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
+            
+            # FIXED: Log the query being executed
+            self.logger.info(f"🔍 Searching for file access data for: {file_name}")
             
             # FIXED: Proper parameter binding with string conversion
             cursor.execute("""
@@ -452,10 +511,23 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 FROM file_access_relationships
                 WHERE file_name = ? OR physical_file = ?
                 ORDER BY program_name, line_number
-            """, (str(file_name), str(file_name)))  # FIXED: Ensure string parameters
+            """, (str(file_name), str(file_name)))
             
             access_records = cursor.fetchall()
             conn.close()
+            
+            # FIXED: Log what was found
+            self.logger.info(f"📊 Found {len(access_records)} file access records for {file_name}")
+            
+            if not access_records:
+                self.logger.warning(f"⚠️ No file access relationships found for {file_name}")
+                return {
+                    "access_patterns": {"creators": [], "readers": [], "updaters": [], "deleters": []},
+                    "programs_accessing": [],
+                    "total_access_points": 0,
+                    "file_operations": {"create_operations": 0, "read_operations": 0, "update_operations": 0, "delete_operations": 0},
+                    "warning": f"No access relationships found for {file_name}"
+                }
             
             # Organize by access type
             access_patterns = {
@@ -481,16 +553,23 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 
                 programs_accessing.add(record[0])
                 
-                if record[3] in ["WRITE", "FD"] and record[4] in ["OUTPUT", "EXTEND"]:
+                # FIXED: More comprehensive categorization
+                access_type = record[3].upper() if record[3] else ""
+                access_mode = record[4].upper() if record[4] else ""
+                
+                if access_type in ["WRITE", "FD"] and access_mode in ["OUTPUT", "EXTEND"]:
                     access_patterns["creators"].append(access_info)
-                elif record[3] in ["READ", "SELECT"] and record[4] == "INPUT":
+                elif access_type in ["READ", "SELECT"] and access_mode == "INPUT":
                     access_patterns["readers"].append(access_info)
-                elif record[3] in ["REWRITE", "WRITE"] and record[4] == "I-O":
+                elif access_type in ["REWRITE", "WRITE"] and access_mode == "I-O":
                     access_patterns["updaters"].append(access_info)
-                elif record[3] == "DELETE":
+                elif access_type == "DELETE":
                     access_patterns["deleters"].append(access_info)
+                else:
+                    # Default to readers if unclear
+                    access_patterns["readers"].append(access_info)
             
-            return {
+            result = {
                 "access_patterns": access_patterns,
                 "programs_accessing": list(programs_accessing),
                 "total_access_points": len(access_records),
@@ -502,9 +581,25 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 }
             }
             
+            # FIXED: Log the results summary
+            self.logger.info(f"📈 File access summary for {file_name}: "
+                            f"{len(programs_accessing)} programs, "
+                            f"{result['file_operations']['create_operations']} creators, "
+                            f"{result['file_operations']['read_operations']} readers, "
+                            f"{result['file_operations']['update_operations']} updaters")
+            
+            return result
+            
         except Exception as e:
-            self.logger.error(f"Failed to get file access data: {e}")
-            return {"access_patterns": {}, "programs_accessing": [], "total_access_points": 0}
+            self.logger.error(f"❌ Failed to get file access data for {file_name}: {e}")
+            return {
+                "access_patterns": {"creators": [], "readers": [], "updaters": [], "deleters": []},
+                "programs_accessing": [],
+                "total_access_points": 0,
+                "file_operations": {"create_operations": 0, "read_operations": 0, "update_operations": 0, "delete_operations": 0},
+                "error": str(e)
+            }
+
 
     async def _get_file_field_definitions(self, file_name: str) -> List[Dict[str, Any]]:
         """FIXED: Get field definitions associated with a file"""
@@ -551,25 +646,33 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             return []
 
     async def _analyze_program_data_flow(self, program_name: str) -> Dict[str, Any]:
-        """🔄 FIXED: Analyze data flow within a specific program"""
+        """🔄 FIXED: Analyze program data flow with proper result building"""
         try:
             # FIXED: Ensure program_name is string
             program_name = str(program_name)
             
+            self.logger.info(f"📄 Analyzing program data flow for: {program_name}")
+            
             # Get file access relationships for this program
             program_file_access = await self._get_program_file_access(program_name)
+            total_files = sum(len(files) for files in program_file_access.values())
+            self.logger.info(f"Found {total_files} file access relationships")
             
             # Get field cross-references for this program
             program_field_usage = await self._get_program_field_usage(program_name)
+            total_fields = sum(len(fields) for fields in program_field_usage.values())
+            self.logger.info(f"Found {total_fields} field usage relationships")
             
             # Analyze data transformations
             data_transformations = await self._analyze_data_transformations_api(program_name)
+            self.logger.info(f"Found {data_transformations.get('total_transformations', 0)} data transformations")
             
             # Generate program data flow analysis
             program_data_flow_analysis = await self._generate_program_data_flow_analysis_api(
                 program_name, program_file_access, program_field_usage, data_transformations
             )
             
+            # FIXED: Build complete result object
             result = {
                 "program_name": program_name,
                 "component_type": "program",
@@ -578,14 +681,21 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 "data_transformations": data_transformations,
                 "program_data_flow_analysis": program_data_flow_analysis,
                 "analysis_type": "program_data_flow",
-                "analysis_timestamp": dt.now().isoformat()
+                "analysis_timestamp": dt.now().isoformat(),
+                "status": "success"
             }
             
-            return self._add_processing_info(result)
+            self.logger.info(f"✅ Program data flow analysis completed for {program_name}")
+            return result
             
         except Exception as e:
-            self.logger.error(f"Program data flow analysis failed: {str(e)}")
-            return self._add_processing_info({"error": str(e)})
+            self.logger.error(f"❌ Program data flow analysis failed for {program_name}: {str(e)}")
+            return {
+                "program_name": program_name,
+                "error": str(e),
+                "status": "error"
+            }
+        
 
     async def _get_program_file_access(self, program_name: str) -> Dict[str, Any]:
         """FIXED: Get file access patterns for a specific program"""
@@ -1343,11 +1453,11 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
         }
 
     async def _analyze_field_reference_with_api(self, field_name: str, content: str, 
-                                           chunk_type: str, program_name: str) -> Dict[str, Any]:
-        """✅ FIXED: Analyze how a field is referenced using API"""
+                                       chunk_type: str, program_name: str) -> Dict[str, Any]:
+        """✅ FIXED: Analyze field reference with better content preservation"""
         
-        # Truncate content to avoid token limits
-        content_preview = content[:600] if len(content) > 600 else content
+        # FIXED: Increase truncation size to preserve context
+        content_preview = content[:1200] if len(content) > 1200 else content  # INCREASED from 600
         
         prompt = f"""
         Analyze how the field "{field_name}" is used in this {chunk_type} from program {program_name}:
@@ -1373,24 +1483,31 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
         """
         
         try:
-            response_text = await self._call_api_for_analysis(prompt, max_tokens=200)
+            response_text = await self._call_api_for_analysis(prompt, max_tokens=300)  # INCREASED tokens
             
             if '{' in response_text:
                 json_start = response_text.find('{')
                 json_end = response_text.rfind('}') + 1
-                return json.loads(response_text[json_start:json_end])
+                parsed_response = json.loads(response_text[json_start:json_end])
+                
+                self.logger.debug(f"✅ Successfully analyzed field reference for {field_name}")
+                return parsed_response
+                
         except Exception as e:
-            self.logger.warning(f"Failed to parse API field reference analysis: {str(e)}")
+            self.logger.warning(f"⚠️ Failed to parse API field reference analysis: {str(e)}")
         
-        # Fallback analysis
-        return {
+        # Fallback analysis with logging
+        fallback_result = {
             "operation_type": self._infer_operation_type(field_name, content),
             "usage_context": "Field usage detected",
             "transformations": [],
-            "business_logic": "Analysis not available",
+            "business_logic": "Analysis not available via API",
             "data_flow": "unknown",
             "confidence": 0.5
         }
+        
+        self.logger.info(f"🔄 Using fallback analysis for {field_name}")
+        return fallback_result
 
     def _infer_operation_type(self, field_name: str, content: str) -> str:
         """Infer operation type using regex patterns"""
@@ -1450,6 +1567,48 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
         except Exception as e:
             self.logger.warning(f"Failed to generate pattern analysis: {str(e)}")
             return f"Field {field_name} is used across {len(usage_stats['programs_using'])} programs with {usage_stats['total_references']} total references."
+
+    async def _call_api_for_readable_analysis(self, prompt: str, max_tokens: int = None) -> str:
+        """FIXED: API call with better empty response handling"""
+        try:
+            params = self.api_params.copy()
+            if max_tokens:
+                params["max_tokens"] = max_tokens
+            
+            self.logger.debug(f"🔄 Making API call with {len(prompt)} character prompt")
+            
+            # Use coordinator's API call method
+            result = await self.coordinator.call_model_api(
+                prompt=prompt,
+                params=params,
+                preferred_gpu_id=self.gpu_id
+            )
+            
+            # FIXED: Better response extraction and validation
+            if isinstance(result, dict):
+                text = result.get('text') or result.get('response') or result.get('content') or ''
+                
+                # FIXED: Check for empty or very short responses
+                if not text or len(text.strip()) < 10:
+                    self.logger.warning(f"⚠️ API returned empty or very short response: '{text}'")
+                    return "Analysis completed but detailed results not available from API"
+                
+                # Clean up the text to ensure it's readable
+                cleaned_text = self._ensure_readable_text(text)
+                
+                self.logger.debug(f"✅ API call successful, returned {len(cleaned_text)} characters")
+                return cleaned_text
+            else:
+                text_result = str(result)
+                if len(text_result.strip()) < 10:
+                    self.logger.warning(f"⚠️ API returned short string response: '{text_result}'")
+                    return "Analysis completed with limited API response"
+                return text_result
+            
+        except Exception as e:
+            self.logger.error(f"❌ API call for readable analysis failed: {str(e)}")
+            return f"Analysis completed but API call failed: {str(e)}"
+
 
     def _calculate_usage_complexity(self, usage_stats: Dict) -> float:
         """Calculate complexity score based on usage patterns"""
