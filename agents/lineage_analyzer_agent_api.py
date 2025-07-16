@@ -190,6 +190,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
         except Exception as e:
             self.logger.error(f"Failed to load existing lineage: {str(e)}")
     
+
     async def _call_api_for_analysis(self, prompt: str, max_tokens: int = None) -> str:
         """Make API call for LLM analysis"""
         try:
@@ -686,6 +687,93 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             self.logger.error(f"File flow analysis generation failed: {e}")
             return self._generate_fallback_file_flow_analysis(file_name, flow_summary)
 
+    async def _call_api_for_readable_analysis(self, prompt: str, max_tokens: int = None) -> str:
+        """FIXED: Call API for readable analysis with proper error handling"""
+        try:
+            params = self.api_params.copy()
+            if max_tokens:
+                params["max_tokens"] = max_tokens
+            
+            result = await self.coordinator.call_model_api(
+                prompt=prompt,
+                params=params,
+                preferred_gpu_id=self.gpu_id
+            )
+            
+            # Extract readable text from API response
+            if isinstance(result, dict):
+                text = (
+                    result.get('text') or 
+                    result.get('response') or 
+                    result.get('content') or
+                    result.get('generated_text') or
+                    str(result)
+                )
+                
+                # Clean up JSON artifacts if present
+                if text.startswith('{') and text.endswith('}'):
+                    try:
+                        import json
+                        json_data = json.loads(text)
+                        if isinstance(json_data, dict):
+                            # Extract readable fields from JSON
+                            readable_parts = []
+                            for key, value in json_data.items():
+                                if isinstance(value, str) and len(value) > 10:
+                                    readable_parts.append(f"{key}: {value}")
+                            text = "\n".join(readable_parts) if readable_parts else text
+                    except:
+                        pass  # Keep original text if JSON parsing fails
+                
+                return text
+            
+            return str(result)
+            
+        except Exception as e:
+            self.logger.error(f"API call for readable analysis failed: {str(e)}")
+            return f"Analysis failed: {str(e)}"
+    
+    # FIXED: Add missing _get_program_chunks method
+    async def _get_program_chunks(self, program_name: str) -> List[Tuple]:
+        """FIXED: Get program chunks with proper parameter validation"""
+        try:
+            # Validate input parameter
+            if not program_name or not isinstance(program_name, str):
+                self.logger.error(f"Invalid program_name parameter: {program_name}")
+                return []
+            
+            # Clean program name
+            program_name = str(program_name).strip()
+            if not program_name:
+                return []
+            
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            try:
+                cursor.execute("""
+                    SELECT program_name, chunk_id, chunk_type, content, metadata
+                    FROM program_chunks
+                    WHERE program_name = ?
+                    ORDER BY chunk_id
+                """, (program_name,))
+                
+                chunks = cursor.fetchall()
+                self.logger.info(f"Found {len(chunks)} chunks for program {program_name}")
+                return chunks
+                
+            except sqlite3.Error as db_error:
+                self.logger.error(f"Database error in _get_program_chunks: {db_error}")
+                return []
+            finally:
+                conn.close()
+                
+        except Exception as e:
+            self.logger.error(f"Failed to get program chunks: {str(e)}")
+            return []
+
+
+
     def _generate_fallback_file_flow_analysis(self, file_name: str, flow_summary: Dict) -> str:
         """Generate fallback file flow analysis when API fails"""
         analysis = f"## File Data Flow Analysis: {file_name}\n\n"
@@ -746,56 +834,83 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             return self._add_processing_info({"error": str(e)})
 
     async def _get_program_file_access(self, program_name: str) -> Dict[str, Any]:
-        """Get file access patterns for a specific program"""
+        """FIXED: Get file access patterns with proper validation"""
         try:
+            # Validate input
+            if not program_name or not isinstance(program_name, str):
+                self.logger.error(f"Invalid program_name: {program_name}")
+                return {"input_files": [], "output_files": [], "update_files": [], "temporary_files": []}
+            
+            program_name = str(program_name).strip()
+            if not program_name:
+                return {"input_files": [], "output_files": [], "update_files": [], "temporary_files": []}
+            
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            cursor.execute("""
-                SELECT file_name, physical_file, access_type, access_mode,
-                    record_format, access_location, line_number
-                FROM file_access_relationships
-                WHERE program_name = ?
-                ORDER BY line_number
-            """, (program_name,))
-            
-            access_records = cursor.fetchall()
-            conn.close()
-            
-            # Categorize file access
-            file_access = {
-                "input_files": [],
-                "output_files": [],
-                "update_files": [],
-                "temporary_files": []
-            }
-            
-            for record in access_records:
-                file_info = {
-                    "file_name": record[0],
-                    "physical_file": record[1],
-                    "access_type": record[2],
-                    "access_mode": record[3],
-                    "record_format": record[4],
-                    "access_location": record[5],
-                    "line_number": record[6]
+            try:
+                # Check if table exists first
+                cursor.execute("""
+                    SELECT name FROM sqlite_master 
+                    WHERE type='table' AND name='file_access_relationships'
+                """)
+                
+                if not cursor.fetchone():
+                    self.logger.warning("file_access_relationships table does not exist")
+                    return {"input_files": [], "output_files": [], "update_files": [], "temporary_files": []}
+                
+                # Query with proper parameter binding
+                cursor.execute("""
+                    SELECT file_name, physical_file, access_type, access_mode,
+                        record_format, access_location, line_number
+                    FROM file_access_relationships
+                    WHERE program_name = ?
+                    ORDER BY line_number
+                """, (program_name,))
+                
+                access_records = cursor.fetchall()
+                
+                # Categorize file access
+                file_access = {
+                    "input_files": [],
+                    "output_files": [],
+                    "update_files": [],
+                    "temporary_files": []
                 }
                 
-                if record[3] == "INPUT":
-                    file_access["input_files"].append(file_info)
-                elif record[3] in ["OUTPUT", "EXTEND"]:
-                    file_access["output_files"].append(file_info)
-                elif record[3] == "I-O":
-                    file_access["update_files"].append(file_info)
-                else:
-                    file_access["temporary_files"].append(file_info)
-            
-            return file_access
-            
+                for record in access_records:
+                    file_info = {
+                        "file_name": record[0] or "",
+                        "physical_file": record[1] or "",
+                        "access_type": record[2] or "",
+                        "access_mode": record[3] or "",
+                        "record_format": record[4] or "",
+                        "access_location": record[5] or "",
+                        "line_number": record[6] or 0
+                    }
+                    
+                    access_mode = str(record[3] or "").upper()
+                    if access_mode == "INPUT":
+                        file_access["input_files"].append(file_info)
+                    elif access_mode in ["OUTPUT", "EXTEND"]:
+                        file_access["output_files"].append(file_info)
+                    elif access_mode == "I-O":
+                        file_access["update_files"].append(file_info)
+                    else:
+                        file_access["temporary_files"].append(file_info)
+                
+                return file_access
+                
+            except sqlite3.Error as db_error:
+                self.logger.error(f"Database error in _get_program_file_access: {db_error}")
+                return {"input_files": [], "output_files": [], "update_files": [], "temporary_files": []}
+            finally:
+                conn.close()
+                
         except Exception as e:
-            self.logger.error(f"Failed to get program file access: {e}")
+            self.logger.error(f"Failed to get program file access: {str(e)}")
             return {"input_files": [], "output_files": [], "update_files": [], "temporary_files": []}
-
+    
     async def _get_program_field_usage(self, program_name: str) -> Dict[str, Any]:
         """Get field usage patterns within a program"""
         try:
