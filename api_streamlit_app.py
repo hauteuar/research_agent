@@ -2731,6 +2731,10 @@ def display_enhanced_analysis_result(analysis_type: str, analysis_result: Dict[s
                     if isinstance(value, list):
                         st.markdown(f"**{key.replace('_', ' ').title()}:** {len(value)} dependencies")
     
+    # In the display_single_analysis_result_enhanced function, add this case:
+    elif analysis_type.startswith('semantic_'):
+        display_semantic_analysis_results_enhanced(analysis_result, analysis_type)
+    
     else:
         # Generic enhanced display
         for key, value in analysis_result.items():
@@ -2739,6 +2743,111 @@ def display_enhanced_analysis_result(analysis_type: str, analysis_result: Dict[s
                 st.json(value)
             else:
                 st.write(value)
+
+def display_semantic_analysis_results_enhanced(semantic_data: Dict[str, Any], analysis_type: str):
+    """Enhanced display for semantic analysis results from vector agent"""
+    
+    st.markdown(f"**🔍 {analysis_type.replace('_', ' ').title()}**")
+    
+    if not semantic_data:
+        st.info("No semantic analysis data available")
+        return
+    
+    if analysis_type == "semantic_similar_components":
+        # Display similar components
+        similar_components = semantic_data.get('similar_components', [])
+        if similar_components:
+            st.markdown(f"**🎯 Found {len(similar_components)} Similar Components:**")
+            
+            for i, component in enumerate(similar_components):
+                similarity_score = component.get('similarity_score', 0)
+                component_name = component.get('component_name', 'Unknown')
+                chunk_type = component.get('chunk_type', 'Unknown')
+                content_preview = component.get('content_preview', 'No preview')
+                
+                with st.expander(f"📄 {component_name} - {chunk_type} (Score: {similarity_score:.3f})", expanded=False):
+                    st.code(content_preview)
+                    st.markdown(f"**Component:** {component_name}")
+                    st.markdown(f"**Type:** {chunk_type}")
+                    st.markdown(f"**Similarity:** {similarity_score:.3f}")
+        else:
+            st.info("No similar components found")
+    
+    elif analysis_type == "semantic_functionality":
+        # Display functionality matches
+        functionality_matches = semantic_data.get('functionality_matches', [])
+        search_query = semantic_data.get('search_query', 'Unknown')
+        
+        if functionality_matches:
+            st.markdown(f"**💼 Found {len(functionality_matches)} Functionality Matches:**")
+            st.caption(f"Search Query: {search_query}")
+            
+            for i, match in enumerate(functionality_matches):
+                metadata = match.get('metadata', {})
+                content = match.get('content', 'No content')
+                similarity_score = match.get('similarity_score', 0)
+                program_name = metadata.get('program_name', 'Unknown')
+                chunk_type = metadata.get('chunk_type', 'Unknown')
+                
+                with st.expander(f"📁 {program_name} - {chunk_type} (Score: {similarity_score:.3f})", expanded=False):
+                    st.code(content[:300] + '...' if len(content) > 300 else content)
+                    st.markdown(f"**Program:** {program_name}")
+                    st.markdown(f"**Chunk Type:** {chunk_type}")
+                    st.markdown(f"**Similarity:** {similarity_score:.3f}")
+        else:
+            st.info("No functionality matches found")
+    
+    elif analysis_type == "semantic_dependencies":
+        # Display dependency analysis
+        dependencies = semantic_data.get('dependencies', {})
+        program_name = semantic_data.get('program_name', 'Unknown')
+        total_chunks = semantic_data.get('total_chunks_analyzed', 0)
+        
+        if dependencies:
+            st.markdown(f"**🔗 Dependency Analysis for {program_name}:**")
+            st.caption(f"Analyzed {total_chunks} code chunks")
+            
+            # Direct calls
+            direct_calls = dependencies.get('direct_calls', [])
+            if direct_calls:
+                st.markdown(f"**📞 Direct Calls ({len(direct_calls)}):**")
+                for call in direct_calls[:10]:  # Show first 10
+                    st.markdown(f"- {call}")
+                if len(direct_calls) > 10:
+                    st.markdown(f"- ... and {len(direct_calls) - 10} more")
+            
+            # File dependencies
+            file_deps = dependencies.get('file_dependencies', [])
+            if file_deps:
+                st.markdown(f"**📁 File Dependencies ({len(file_deps)}):**")
+                for file_dep in file_deps[:10]:  # Show first 10
+                    st.markdown(f"- {file_dep}")
+                if len(file_deps) > 10:
+                    st.markdown(f"- ... and {len(file_deps) - 10} more")
+            
+            # Data dependencies
+            data_deps = dependencies.get('data_dependencies', [])
+            if data_deps:
+                st.markdown(f"**📊 Data Dependencies ({len(data_deps)}):**")
+                for data_dep in data_deps[:10]:  # Show first 10
+                    st.markdown(f"- {data_dep}")
+                if len(data_deps) > 10:
+                    st.markdown(f"- ... and {len(data_deps) - 10} more")
+            
+            # Similar programs
+            similar_programs = dependencies.get('similar_programs', [])
+            if similar_programs:
+                st.markdown(f"**🔄 Similar Programs ({len(similar_programs)}):**")
+                for similar in similar_programs[:5]:  # Show first 5
+                    component_name = similar.get('component_name', 'Unknown')
+                    similarity_score = similar.get('similarity_score', 0)
+                    st.markdown(f"- {component_name} (Score: {similarity_score:.3f})")
+        else:
+            st.info("No dependencies found")
+    
+    else:
+        # Generic semantic display
+        st.json(semantic_data)
 
 def display_lineage_analysis_fixed(lineage_data: Dict[str, Any]):
     """FIXED: Display lineage analysis with proper data handling"""
