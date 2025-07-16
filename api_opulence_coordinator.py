@@ -1643,7 +1643,7 @@ class APIOpulenceCoordinator:
                     
                     # Use the new program control flow analysis
                     control_flow_result = await self._safe_agent_call(
-                        logic_agent.analyze_program_control_flow,
+                        logic_agent.analyze_complete_program_flow,  # ✅ CHANGED FROM analyze_program_control_flow
                         analysis_component_name
                     )
                     
@@ -2354,7 +2354,7 @@ class APIOpulenceCoordinator:
             return {"impact_relationships": [], "total_impacts": 0}
 
 
-    def clean_component_name_enhanced(component_name: str) -> Tuple[str, str]:
+    def _clean_component_name(self, component_name: str) -> Tuple[str, str]:
         """
         FIXED: Enhanced component name cleaning that returns both original and cleaned names
         Returns: (cleaned_name, original_name_pattern)

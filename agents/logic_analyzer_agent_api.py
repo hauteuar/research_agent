@@ -1374,6 +1374,83 @@ Return as JSON array:
             self.logger.error(f"Complete program flow analysis failed: {str(e)}")
             return self._add_processing_info({"error": str(e)})
 
+    async def _generate_complete_flow_analysis_api(self, program_name: str, 
+                                             program_relationships: Dict,
+                                             copybook_relationships: List,
+                                             file_access_patterns: List,
+                                             field_cross_references: List,
+                                             impact_analysis: Dict) -> str:
+        """Generate comprehensive flow analysis using API"""
+        
+        flow_summary = {
+            "program_name": program_name,
+            "outbound_calls": len(program_relationships.get("outbound_calls", [])),
+            "inbound_calls": len(program_relationships.get("inbound_calls", [])),
+            "copybooks_used": len(copybook_relationships),
+            "files_accessed": len(file_access_patterns),
+            "fields_defined": len(field_cross_references),
+            "impact_count": len(impact_analysis.get("program_impacts", [])),
+            "dependency_count": len(impact_analysis.get("program_dependencies", []))
+        }
+        
+        prompt = f"""
+        Generate a comprehensive program flow analysis for: {program_name}
+        
+        Flow Summary:
+        - Calls {flow_summary['outbound_calls']} other programs
+        - Called by {flow_summary['inbound_calls']} programs
+        - Uses {flow_summary['copybooks_used']} copybooks
+        - Accesses {flow_summary['files_accessed']} files
+        - Defines {flow_summary['fields_defined']} fields
+        - Impacts {flow_summary['impact_count']} components
+        - Has {flow_summary['dependency_count']} dependencies
+        
+        Called Programs: {[call['called_program'] for call in program_relationships.get('outbound_calls', [])]}
+        Files Accessed: {[file['file_name'] for file in file_access_patterns]}
+        
+        Provide a detailed analysis covering:
+        
+        **Program Flow Overview:**
+        - Main business process this program implements
+        - Position in the overall system workflow
+        - Critical business functions performed
+        
+        **Call Flow Analysis:**
+        - Program invocation patterns and sequences
+        - Conditional vs unconditional calls
+        - Parameter passing mechanisms
+        
+        **Data Flow Analysis:**
+        - Input data sources and formats
+        - Data transformations and processing logic
+        - Output data destinations and formats
+        - Field-level data lineage
+        
+        **Integration Points:**
+        - External system interfaces
+        - File system interactions
+        - Database operations
+        
+        **Impact Assessment:**
+        - Components affected by changes to this program
+        - Dependencies that could impact this program
+        - Risk assessment for modifications
+        
+        **Performance Characteristics:**
+        - Processing complexity indicators
+        - Resource utilization patterns
+        - Optimization opportunities
+        
+        Write as a comprehensive technical analysis suitable for both development and business teams.
+        """
+        
+        try:
+            return await self._call_api_for_readable_analysis(prompt, max_tokens=1200)
+        except Exception as e:
+            self.logger.error(f"Flow analysis generation failed: {e}")
+            return self._generate_fallback_flow_analysis(program_name, flow_summary)
+
+
     async def _get_program_relationships(self, program_name: str) -> List[Dict[str, Any]]:
         """Get all program call relationships"""
         try:
