@@ -181,7 +181,34 @@ class CodeParserAgent(BaseOpulenceAgent):
             re.IGNORECASE
         ),
         'picture_clause': re.compile(r'(?:PIC|PICTURE)\s+([X9S\(\)V\-\+,\$Z\*]+)', re.IGNORECASE),
-     }
+        }
+     # CICS, JCL, MQ, DB2 patterns remain unchanged as they don't have the same issues
+        self.cics_patterns = {
+            'cics_link': re.compile(r'EXEC\s+CICS\s+LINK\s+PROGRAM\s*\(\s*([A-Z][A-Z0-9-]*)\s*\)', re.IGNORECASE),
+            'cics_xctl': re.compile(r'EXEC\s+CICS\s+XCTL\s+PROGRAM\s*\(\s*([A-Z][A-Z0-9-]*)\s*\)', re.IGNORECASE),
+            'cics_read': re.compile(r'EXEC\s+CICS\s+READ\s+FILE\s*\(\s*([A-Z][A-Z0-9-]*)\s*\)', re.IGNORECASE),
+            'cics_write': re.compile(r'EXEC\s+CICS\s+WRITE\s+FILE\s*\(\s*([A-Z][A-Z0-9-]*)\s*\)', re.IGNORECASE),
+        }
+        
+        self.jcl_patterns = {
+            'job_card': re.compile(r'^//(\w+)\s+JOB\s', re.MULTILINE),
+            'exec_pgm': re.compile(r'^//(\w+)\s+EXEC\s+PGM=([A-Z0-9]+)', re.MULTILINE | re.IGNORECASE),
+            'exec_proc': re.compile(r'^//(\w+)\s+EXEC\s+PROC=([A-Z0-9]+)', re.MULTILINE | re.IGNORECASE),
+            'exec_simple': re.compile(r'^//(\w+)\s+EXEC\s+([A-Z0-9]+)', re.MULTILINE | re.IGNORECASE),
+            'dd_statement': re.compile(r'^//(\w+)\s+DD\s+DSN=([^,\s]+)', re.MULTILINE | re.IGNORECASE),
+        }
+        
+        self.mq_patterns = {
+            'mq_call': re.compile(r'CALL\s+[\'"]MQ([A-Z]+)[\'"]', re.IGNORECASE),
+            'mq_queue': re.compile(r'[\'"]([A-Z][A-Z0-9\._]*\.Q)[\'"]', re.IGNORECASE),
+        }
+        
+        self.db2_patterns = {
+            'create_procedure': re.compile(r'CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\s+([A-Z][A-Z0-9_]*)', re.IGNORECASE),
+            'sql_table': re.compile(r'FROM\s+([A-Z][A-Z0-9_]*)', re.IGNORECASE),
+            'sql_insert': re.compile(r'INSERT\s+INTO\s+([A-Z][A-Z0-9_]*)', re.IGNORECASE),
+            'sql_update': re.compile(r'UPDATE\s+([A-Z][A-Z0-9_]*)', re.IGNORECASE),
+        }
 
     def should_exclude_line_from_parsing(self, line: str) -> bool:
         """
