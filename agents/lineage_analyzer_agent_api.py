@@ -502,7 +502,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             }
 
     async def _get_file_access_data(self, component_name: str) -> Dict[str, Any]:
-        """FIXED: Get file access data - auto-detect if component is a file or program"""
+        """FIXED: Get file access data using correct column names"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -513,23 +513,24 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             is_program = await self._is_component_a_program(component_name, cursor)
             
             if is_program:
-                # FIXED: For programs, get files accessed BY the program
+                # FIXED: For programs, get files accessed BY the program using correct column names
                 self.logger.info(f"📄 Treating {component_name} as PROGRAM - finding files it accesses")
                 cursor.execute("""
-                    SELECT program_name, file_name, physical_file, access_type, access_mode,
+                    SELECT program_name, logical_file_name, physical_file_name, access_type, access_mode,
                         record_format, access_location, line_number
                     FROM file_access_relationships
                     WHERE program_name = ? OR program_name LIKE ?
                     ORDER BY line_number
                 """, (str(component_name), f"%{component_name}%"))
             else:
-                # For files, get programs that access the file
+                # For files, get programs that access the file using correct column names
                 self.logger.info(f"📁 Treating {component_name} as FILE - finding programs that access it")
                 cursor.execute("""
-                    SELECT program_name, file_name, physical_file, access_type, access_mode,
+                    SELECT program_name, logical_file_name, physical_file_name, access_type, access_mode,
                         record_format, access_location, line_number
                     FROM file_access_relationships
-                    WHERE file_name = ? OR physical_file = ? OR file_name LIKE ? OR physical_file LIKE ?
+                    WHERE logical_file_name = ? OR physical_file_name = ? 
+                    OR logical_file_name LIKE ? OR physical_file_name LIKE ?
                     ORDER BY program_name, line_number
                 """, (str(component_name), str(component_name), f"%{component_name}%", f"%{component_name}%"))
             
@@ -550,7 +551,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                     "warning": f"No access relationships found for {component_name}"
                 }
             
-            # STEP 2: Organize access patterns
+            # STEP 2: Organize access patterns using correct column names
             access_patterns = {
                 "creators": [],
                 "readers": [],
@@ -562,21 +563,22 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             files_accessed = set()
             
             for record in access_records:
+                # FIXED: Map to correct column positions
                 access_info = {
                     "program_name": record[0],
-                    "file_name": record[1],
-                    "physical_file": record[2],
+                    "logical_file_name": record[1],  # FIXED: was file_name
+                    "physical_file_name": record[2], # FIXED: was physical_file
                     "access_type": record[3],
                     "access_mode": record[4],
                     "record_format": record[5],
-                    "access_location": record[6],
-                    "line_number": record[7]
+                    "access_location": record[6] if len(record) > 6 else None,
+                    "line_number": record[7] if len(record) > 7 else None
                 }
                 
                 programs_accessing.add(record[0])
-                if record[1]:  # file_name
+                if record[1]:  # logical_file_name
                     files_accessed.add(record[1])
-                if record[2]:  # physical_file
+                if record[2]:  # physical_file_name
                     files_accessed.add(record[2])
                 
                 # FIXED: More comprehensive categorization
@@ -680,12 +682,23 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
 
 
     async def _get_file_field_definitions(self, file_name: str) -> List[Dict[str, Any]]:
-        """FIXED: Get field definitions associated with a file"""
+        """FIXED: Get field definitions associated with a file - handle missing tables gracefully"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # FIXED: Proper parameter binding
+            # Check if field_cross_reference table exists
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='field_cross_reference'
+            """)
+            
+            if not cursor.fetchone():
+                self.logger.warning("field_cross_reference table not found - returning empty field definitions")
+                conn.close()
+                return []
+            
+            # FIXED: Use correct table structure if it exists
             cursor.execute("""
                 SELECT field_name, qualified_name, source_type, source_name,
                     definition_location, data_type, picture_clause, usage_clause,
@@ -693,11 +706,11 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 FROM field_cross_reference
                 WHERE source_name = ? OR source_name IN (
                     SELECT DISTINCT program_name FROM file_access_relationships 
-                    WHERE file_name = ? OR physical_file = ?
+                    WHERE logical_file_name = ? OR physical_file_name = ?
                 )
                 AND definition_location IN ('FD', 'FILE_SECTION', 'WORKING_STORAGE')
                 ORDER BY source_name, level_number, field_name
-            """, (str(file_name), str(file_name), str(file_name)))  # FIXED: String parameters
+            """, (str(file_name), str(file_name), str(file_name)))
             
             field_records = cursor.fetchall()
             conn.close()
@@ -722,7 +735,6 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
         except Exception as e:
             self.logger.error(f"Failed to get file field definitions: {e}")
             return []
-
     async def _analyze_program_data_flow(self, program_name: str) -> Dict[str, Any]:
         """🔄 FIXED: Analyze program data flow with proper program analysis"""
         try:
@@ -775,24 +787,24 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
         
 
     async def _get_program_file_access(self, program_name: str) -> Dict[str, Any]:
-        """FIXED: Get file access patterns for a specific program"""
+        """FIXED: Get file access patterns for a specific program using correct column names"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # FIXED: Proper parameter binding
+            # FIXED: Use correct column names
             cursor.execute("""
-                SELECT file_name, physical_file, access_type, access_mode,
+                SELECT logical_file_name, physical_file_name, access_type, access_mode,
                     record_format, access_location, line_number
                 FROM file_access_relationships
-                WHERE program_name = ?
+                WHERE program_name = ? OR program_name LIKE ?
                 ORDER BY line_number
-            """, (str(program_name),))  # FIXED: String parameter
+            """, (str(program_name), f"%{program_name}%"))
             
             access_records = cursor.fetchall()
             conn.close()
             
-            # Categorize file access
+            # Categorize file access using correct column names
             file_access = {
                 "input_files": [],
                 "output_files": [],
@@ -802,20 +814,21 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             
             for record in access_records:
                 file_info = {
-                    "file_name": record[0],
-                    "physical_file": record[1],
+                    "logical_file_name": record[0],   # FIXED: was file_name
+                    "physical_file_name": record[1],  # FIXED: was physical_file
                     "access_type": record[2],
                     "access_mode": record[3],
                     "record_format": record[4],
-                    "access_location": record[5],
-                    "line_number": record[6]
+                    "access_location": record[5] if len(record) > 5 else None,
+                    "line_number": record[6] if len(record) > 6 else None
                 }
                 
-                if record[3] == "INPUT":
+                access_mode = record[3] if record[3] else ""
+                if access_mode == "INPUT":
                     file_access["input_files"].append(file_info)
-                elif record[3] in ["OUTPUT", "EXTEND"]:
+                elif access_mode in ["OUTPUT", "EXTEND"]:
                     file_access["output_files"].append(file_info)
-                elif record[3] == "I-O":
+                elif access_mode == "I-O":
                     file_access["update_files"].append(file_info)
                 else:
                     file_access["temporary_files"].append(file_info)
@@ -825,7 +838,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
         except Exception as e:
             self.logger.error(f"Failed to get program file access: {e}")
             return {"input_files": [], "output_files": [], "update_files": [], "temporary_files": []}
-
+        
     async def _get_program_field_usage(self, program_name: str) -> Dict[str, Any]:
         """FIXED: Get field usage patterns within a program"""
         try:
@@ -2917,52 +2930,246 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             })
 
     async def _determine_component_type(self, component_name: str) -> str:
-        """Determine the type of component"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        """FIXED: Determine component type with proper COBOL file extension handling"""
         
+        # Check file extension first
+        component_lower = component_name.lower()
+        
+        # Handle COBOL file extensions
+        if any(component_lower.endswith(ext) for ext in ['.cbl', '.cob', '.cobol']):
+            self.logger.info(f"✅ Detected COBOL program file by extension: {component_name}")
+            return "cobol"
+        elif any(component_lower.endswith(ext) for ext in ['.copy', '.cpy', '.copybook']):
+            self.logger.info(f"✅ Detected COBOL copybook file by extension: {component_name}")
+            return "copybook"
+        elif any(component_lower.endswith(ext) for ext in ['.jcl', '.job', '.proc']):
+            self.logger.info(f"✅ Detected JCL file by extension: {component_name}")
+            return "jcl"
+        
+        # FIXED: Database-based detection with better logging
         try:
-            # Check if it's a field (look in file metadata fields)
-            cursor.execute("""
-                SELECT COUNT(*) FROM file_metadata 
-                WHERE fields LIKE ? OR fields LIKE ? OR fields LIKE ?
-            """, (f"%{component_name}%", f"%{component_name.upper()}%", f"%{component_name.lower()}%"))
+            def check_database():
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                try:
+                    self.logger.info(f"🔍 Checking database for component type: {component_name}")
+                    
+                    # STEP 1: Check program_chunks table with multiple patterns
+                    patterns_to_check = [
+                        component_name,                    # Exact match
+                        f"{component_name}%",             # Starts with
+                        f"%{component_name}",             # Ends with  
+                        f"%{component_name}%"             # Contains
+                    ]
+                    
+                    program_found = False
+                    for i, pattern in enumerate(patterns_to_check):
+                        if i == 0:
+                            # Exact match
+                            cursor.execute("""
+                                SELECT COUNT(*), program_name FROM program_chunks 
+                                WHERE program_name = ?
+                                GROUP BY program_name
+                                LIMIT 1
+                            """, (pattern,))
+                        else:
+                            # LIKE patterns
+                            cursor.execute("""
+                                SELECT COUNT(*), program_name FROM program_chunks 
+                                WHERE program_name LIKE ?
+                                GROUP BY program_name
+                                LIMIT 1
+                            """, (pattern,))
+                        
+                        result = cursor.fetchone()
+                        if result and result[0] > 0:
+                            chunk_count, found_program_name = result
+                            self.logger.info(f"✅ FOUND in program_chunks: {found_program_name} (pattern: {pattern}, chunks: {chunk_count})")
+                            program_found = True
+                            break
+                        else:
+                            self.logger.debug(f"❌ Not found with pattern: {pattern}")
+                    
+                    if program_found:
+                        # STEP 2: Get chunk types to determine specific program type
+                        cursor.execute("""
+                            SELECT chunk_type, COUNT(*) as count 
+                            FROM program_chunks 
+                            WHERE program_name = ? OR program_name LIKE ?
+                            GROUP BY chunk_type
+                            ORDER BY count DESC
+                        """, (component_name, f"%{component_name}%"))
+                        
+                        chunk_types = cursor.fetchall()
+                        self.logger.info(f"📊 Chunk types found: {chunk_types}")
+                        
+                        if chunk_types:
+                            chunk_type_names = [ct.lower() for ct, _ in chunk_types]
+                            
+                            if any('job' in ct for ct in chunk_type_names):
+                                self.logger.info(f"✅ Identified as JCL (job chunks found)")
+                                return "jcl"
+                            elif any(ct in ['working_storage', 'procedure_division', 'data_division', 'identification_division'] for ct in chunk_type_names):
+                                self.logger.info(f"✅ Identified as COBOL (COBOL divisions found)")
+                                return "cobol"
+                            elif any(ct in ['copybook', 'copy'] for ct in chunk_type_names):
+                                self.logger.info(f"✅ Identified as COPYBOOK (copybook chunks found)")
+                                return "copybook"
+                            else:
+                                self.logger.info(f"✅ Identified as COBOL (default for program chunks)")
+                                return "cobol"
+                        else:
+                            self.logger.info(f"✅ Identified as COBOL (program found but no chunk type details)")
+                            return "cobol"
+                    
+                    # STEP 3: Check file_access_relationships as program
+                    cursor.execute("""
+                        SELECT COUNT(*), program_name FROM file_access_relationships 
+                        WHERE program_name = ? OR program_name LIKE ?
+                        GROUP BY program_name
+                        LIMIT 1
+                    """, (component_name, f"%{component_name}%"))
+                    
+                    access_result = cursor.fetchone()
+                    if access_result and access_result[0] > 0:
+                        access_count, found_program = access_result
+                        self.logger.info(f"✅ FOUND as program in file_access_relationships: {found_program} (accesses: {access_count})")
+                        return "cobol"  # Programs that access files are typically COBOL
+                    
+                    # STEP 4: Check if it might be a field
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM program_chunks
+                        WHERE (content LIKE ? OR metadata LIKE ?) 
+                        AND chunk_type NOT IN ('file_header', 'comment')
+                        LIMIT 1
+                    """, (f"%{component_name}%", f"%{component_name}%"))
+                    
+                    field_count = cursor.fetchone()[0]
+                    self.logger.info(f"🔍 Field references found: {field_count}")
+                    
+                    # Field detection heuristics
+                    is_field_like = (
+                        field_count > 0 and 
+                        component_name.isupper() and 
+                        ('_' in component_name or '-' in component_name or len(component_name) <= 30) and
+                        not any(component_lower.endswith(ext) for ext in ['.cbl', '.cob', '.copy', '.cpy'])
+                    )
+                    
+                    if is_field_like:
+                        self.logger.info(f"✅ Identified as FIELD (field-like characteristics)")
+                        return "field"
+                    
+                    # Default fallback
+                    self.logger.info(f"❓ Could not determine type, defaulting to COBOL")
+                    return "cobol"
+                    
+                except Exception as e:
+                    self.logger.error(f"❌ Database query error in component type detection: {e}")
+                    return "cobol"
+                finally:
+                    conn.close()
             
-            if cursor.fetchone()[0] > 0:
-                conn.close()
-                return "field"
-        except sqlite3.OperationalError:
-            pass  # Table might not exist
-        
-        try:
-            # Check if it's a table
-            cursor.execute("SELECT COUNT(*) FROM file_metadata WHERE table_name = ?", (str(component_name),))
-            if cursor.fetchone()[0] > 0:
-                conn.close()
-                return "table"
-        except sqlite3.OperationalError:
-            pass
-        
-        # Check if it's a program
-        cursor.execute("SELECT COUNT(*) FROM program_chunks WHERE program_name = ?", (str(component_name),))
-        if cursor.fetchone()[0] > 0:
-            # Further determine if it's COBOL or JCL
-            cursor.execute("""
-                SELECT chunk_type FROM program_chunks 
-                WHERE program_name = ? 
-                LIMIT 1
-            """, (str(component_name),))
-            chunk_type = cursor.fetchone()
-            conn.close()
+            # Run database check in executor
+            result = await asyncio.get_event_loop().run_in_executor(None, check_database)
+            self.logger.info(f"🎯 Final component type determination for {component_name}: {result}")
+            return result
             
-            if chunk_type and 'job' in chunk_type[0]:
-                return "jcl"
-            else:
-                return "program"
-        
-        conn.close()
-        return "unknown"
+        except Exception as e:
+            self.logger.error(f"❌ Component type determination failed for {component_name}: {e}")
+            return "cobol"
 
+
+    # ALSO: Fix the lineage analyzer's component detection method
+    async def _is_component_a_program(self, component_name: str, cursor) -> bool:
+        """FIXED: Determine if component is a program or file with enhanced detection"""
+        try:
+            self.logger.info(f"🔍 Determining if {component_name} is a program or file...")
+            
+            # STEP 1: Check program_chunks with multiple search patterns
+            search_patterns = [
+                (component_name, "exact match"),
+                (f"{component_name}%", "starts with"),
+                (f"%{component_name}", "ends with"),
+                (f"%{component_name}%", "contains")
+            ]
+            
+            program_found = False
+            for pattern, description in search_patterns:
+                if pattern == component_name:
+                    cursor.execute("""
+                        SELECT COUNT(*), program_name FROM program_chunks 
+                        WHERE program_name = ?
+                        GROUP BY program_name
+                        LIMIT 1
+                    """, (pattern,))
+                else:
+                    cursor.execute("""
+                        SELECT COUNT(*), program_name FROM program_chunks 
+                        WHERE program_name LIKE ?
+                        GROUP BY program_name
+                        LIMIT 1
+                    """, (pattern,))
+                
+                result = cursor.fetchone()
+                if result and result[0] > 0:
+                    chunk_count, found_name = result
+                    self.logger.info(f"✅ PROGRAM detected in program_chunks: {found_name} ({description}, {chunk_count} chunks)")
+                    program_found = True
+                    break
+                else:
+                    self.logger.debug(f"❌ No match with {description}: {pattern}")
+            
+            if program_found:
+                return True
+            
+            # STEP 2: Check file_access_relationships as program_name
+            for pattern, description in search_patterns:
+                if pattern == component_name:
+                    cursor.execute("""
+                        SELECT COUNT(*), program_name FROM file_access_relationships 
+                        WHERE program_name = ?
+                        GROUP BY program_name
+                        LIMIT 1
+                    """, (pattern,))
+                else:
+                    cursor.execute("""
+                        SELECT COUNT(*), program_name FROM file_access_relationships 
+                        WHERE program_name LIKE ?
+                        GROUP BY program_name
+                        LIMIT 1
+                    """, (pattern,))
+                
+                result = cursor.fetchone()
+                if result and result[0] > 0:
+                    access_count, found_name = result
+                    self.logger.info(f"✅ PROGRAM detected in file_access_relationships: {found_name} ({description}, {access_count} accesses)")
+                    return True
+            
+            # STEP 3: Check if it appears as a file in file_access_relationships
+            cursor.execute("""
+                SELECT COUNT(*) FROM file_access_relationships 
+                WHERE file_name = ? OR physical_file = ? OR file_name LIKE ? OR physical_file LIKE ?
+                LIMIT 1
+            """, (component_name, component_name, f"%{component_name}%", f"%{component_name}%"))
+            
+            file_access_count = cursor.fetchone()[0]
+            
+            if file_access_count > 0:
+                self.logger.info(f"📁 FILE detected in file_access_relationships: {component_name} (accessed {file_access_count} times)")
+                return False
+            
+            # Default: if not found anywhere, assume it's a file
+            self.logger.info(f"❓ Component {component_name} not found in database - defaulting to FILE")
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to determine component type for {component_name}: {e}")
+            return False  # Default to file
+
+
+    # ALSO: Add debugging method to verify database contents
+    
     async def _generate_executive_summary_api(self, component_name: str, component_type: str, analysis: Dict) -> str:
         """✅ API-BASED: Generate executive summary for lineage analysis"""
         
