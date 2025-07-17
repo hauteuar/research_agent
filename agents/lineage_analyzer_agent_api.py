@@ -399,20 +399,25 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
 
     
     async def analyze_complete_data_flow(self, component_name: str, component_type: str) -> Dict[str, Any]:
-        """🔄 FIXED: Complete data flow analysis with proper result building"""
+        """🔄 FIXED: Complete data flow analysis with auto-detection"""
         try:
-            # FIXED: Ensure parameters are strings
             component_name = str(component_name)
             component_type = str(component_type)
             
             self.logger.info(f"🔄 Starting complete data flow analysis for {component_name} ({component_type})")
             
-            if component_type == "file":
-                analysis_result = await self._analyze_file_data_flow(component_name)
-            elif component_type in ["program", "cobol"]:
+            # FIXED: Auto-detect actual component type from database
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            actual_is_program = await self._is_component_a_program(component_name, cursor)
+            conn.close()
+            
+            if actual_is_program:
+                self.logger.info(f"📄 Auto-detected {component_name} as PROGRAM - using program analysis")
                 analysis_result = await self._analyze_program_data_flow(component_name)
             else:
-                analysis_result = await self._analyze_field_data_flow(component_name)
+                self.logger.info(f"📁 Auto-detected {component_name} as FILE - using file analysis")
+                analysis_result = await self._analyze_file_data_flow(component_name)
             
             # FIXED: Ensure proper result structure
             if not analysis_result or analysis_result.get('error'):
@@ -420,6 +425,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 return self._add_processing_info({
                     "component_name": component_name,
                     "component_type": component_type,
+                    "detected_type": "program" if actual_is_program else "file",
                     "error": analysis_result.get('error', 'Analysis failed'),
                     "status": "error"
                 })
@@ -428,6 +434,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             final_result = {
                 "component_name": component_name,
                 "component_type": component_type,
+                "detected_type": "program" if actual_is_program else "file",
                 "analysis_result": analysis_result,
                 "analysis_type": "complete_data_flow",
                 "analysis_timestamp": dt.now().isoformat(),
@@ -447,14 +454,13 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             })
         
     async def _analyze_file_data_flow(self, file_name: str) -> Dict[str, Any]:
-        """🔄 FIXED: Analyze file data flow with proper result building"""
+        """🔄 FIXED: Analyze file data flow with proper file vs program detection"""
         try:
-            # FIXED: Ensure file_name is string
             file_name = str(file_name)
             
-            self.logger.info(f"📁 Analyzing file data flow for: {file_name}")
+            self.logger.info(f"📁 Analyzing FILE data flow for: {file_name}")
             
-            # Get file access relationships
+            # Get file access relationships (programs that access this file)
             file_access_data = await self._get_file_access_data(file_name)
             self.logger.info(f"Found {file_access_data.get('total_access_points', 0)} file access points")
             
@@ -495,41 +501,56 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 "status": "error"
             }
 
-    async def _get_file_access_data(self, file_name: str) -> Dict[str, Any]:
-        """FIXED: Get file access data with comprehensive logging"""
+    async def _get_file_access_data(self, component_name: str) -> Dict[str, Any]:
+        """FIXED: Get file access data - auto-detect if component is a file or program"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # FIXED: Log the query being executed
-            self.logger.info(f"🔍 Searching for file access data for: {file_name}")
+            self.logger.info(f"🔍 Analyzing file access data for component: {component_name}")
             
-            # FIXED: Proper parameter binding with string conversion
-            cursor.execute("""
-                SELECT program_name, file_name, physical_file, access_type, access_mode,
-                    record_format, access_location, line_number
-                FROM file_access_relationships
-                WHERE file_name = ? OR physical_file = ?
-                ORDER BY program_name, line_number
-            """, (str(file_name), str(file_name)))
+            # STEP 1: Determine if this is a file or program by checking database
+            is_program = await self._is_component_a_program(component_name, cursor)
+            
+            if is_program:
+                # FIXED: For programs, get files accessed BY the program
+                self.logger.info(f"📄 Treating {component_name} as PROGRAM - finding files it accesses")
+                cursor.execute("""
+                    SELECT program_name, file_name, physical_file, access_type, access_mode,
+                        record_format, access_location, line_number
+                    FROM file_access_relationships
+                    WHERE program_name = ? OR program_name LIKE ?
+                    ORDER BY line_number
+                """, (str(component_name), f"%{component_name}%"))
+            else:
+                # For files, get programs that access the file
+                self.logger.info(f"📁 Treating {component_name} as FILE - finding programs that access it")
+                cursor.execute("""
+                    SELECT program_name, file_name, physical_file, access_type, access_mode,
+                        record_format, access_location, line_number
+                    FROM file_access_relationships
+                    WHERE file_name = ? OR physical_file = ? OR file_name LIKE ? OR physical_file LIKE ?
+                    ORDER BY program_name, line_number
+                """, (str(component_name), str(component_name), f"%{component_name}%", f"%{component_name}%"))
             
             access_records = cursor.fetchall()
             conn.close()
             
-            # FIXED: Log what was found
-            self.logger.info(f"📊 Found {len(access_records)} file access records for {file_name}")
+            self.logger.info(f"📊 Found {len(access_records)} file access records for {component_name}")
             
             if not access_records:
-                self.logger.warning(f"⚠️ No file access relationships found for {file_name}")
+                self.logger.warning(f"⚠️ No file access relationships found for {component_name}")
                 return {
                     "access_patterns": {"creators": [], "readers": [], "updaters": [], "deleters": []},
                     "programs_accessing": [],
+                    "files_accessed": [],
                     "total_access_points": 0,
                     "file_operations": {"create_operations": 0, "read_operations": 0, "update_operations": 0, "delete_operations": 0},
-                    "warning": f"No access relationships found for {file_name}"
+                    "component_type": "program" if is_program else "file",
+                    "warning": f"No access relationships found for {component_name}"
                 }
             
-            # Organize by access type
+            # STEP 2: Organize access patterns
             access_patterns = {
                 "creators": [],
                 "readers": [],
@@ -538,6 +559,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             }
             
             programs_accessing = set()
+            files_accessed = set()
             
             for record in access_records:
                 access_info = {
@@ -552,11 +574,16 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 }
                 
                 programs_accessing.add(record[0])
+                if record[1]:  # file_name
+                    files_accessed.add(record[1])
+                if record[2]:  # physical_file
+                    files_accessed.add(record[2])
                 
                 # FIXED: More comprehensive categorization
                 access_type = record[3].upper() if record[3] else ""
                 access_mode = record[4].upper() if record[4] else ""
                 
+                # Categorize by access pattern
                 if access_type in ["WRITE", "FD"] and access_mode in ["OUTPUT", "EXTEND"]:
                     access_patterns["creators"].append(access_info)
                 elif access_type in ["READ", "SELECT"] and access_mode == "INPUT":
@@ -566,13 +593,22 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 elif access_type == "DELETE":
                     access_patterns["deleters"].append(access_info)
                 else:
-                    # Default to readers if unclear
-                    access_patterns["readers"].append(access_info)
+                    # Default categorization based on access_mode
+                    if access_mode == "INPUT":
+                        access_patterns["readers"].append(access_info)
+                    elif access_mode in ["OUTPUT", "EXTEND"]:
+                        access_patterns["creators"].append(access_info)
+                    elif access_mode == "I-O":
+                        access_patterns["updaters"].append(access_info)
+                    else:
+                        access_patterns["readers"].append(access_info)  # Default
             
             result = {
                 "access_patterns": access_patterns,
                 "programs_accessing": list(programs_accessing),
+                "files_accessed": list(files_accessed),
                 "total_access_points": len(access_records),
+                "component_type": "program" if is_program else "file",
                 "file_operations": {
                     "create_operations": len(access_patterns["creators"]),
                     "read_operations": len(access_patterns["readers"]),
@@ -581,24 +617,66 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 }
             }
             
-            # FIXED: Log the results summary
-            self.logger.info(f"📈 File access summary for {file_name}: "
-                            f"{len(programs_accessing)} programs, "
-                            f"{result['file_operations']['create_operations']} creators, "
+            # FIXED: Log detailed results
+            if is_program:
+                self.logger.info(f"📈 Program {component_name} accesses {len(files_accessed)} files: {list(files_accessed)[:5]}...")
+            else:
+                self.logger.info(f"📈 File {component_name} accessed by {len(programs_accessing)} programs: {list(programs_accessing)[:5]}...")
+            
+            self.logger.info(f"📊 Access breakdown: {result['file_operations']['create_operations']} creators, "
                             f"{result['file_operations']['read_operations']} readers, "
                             f"{result['file_operations']['update_operations']} updaters")
             
             return result
             
         except Exception as e:
-            self.logger.error(f"❌ Failed to get file access data for {file_name}: {e}")
+            self.logger.error(f"❌ Failed to get file access data for {component_name}: {e}")
             return {
                 "access_patterns": {"creators": [], "readers": [], "updaters": [], "deleters": []},
                 "programs_accessing": [],
+                "files_accessed": [],
                 "total_access_points": 0,
                 "file_operations": {"create_operations": 0, "read_operations": 0, "update_operations": 0, "delete_operations": 0},
                 "error": str(e)
             }
+    
+    async def _is_component_a_program(self, component_name: str, cursor) -> bool:
+        """FIXED: Determine if component is a program or file by checking program_chunks table"""
+        try:
+            # Check if this component exists as a program in program_chunks
+            cursor.execute("""
+                SELECT COUNT(*) FROM program_chunks 
+                WHERE program_name = ? OR program_name LIKE ?
+                LIMIT 1
+            """, (str(component_name), f"%{component_name}%"))
+            
+            program_chunk_count = cursor.fetchone()[0]
+            
+            # If it exists in program_chunks, it's a program
+            if program_chunk_count > 0:
+                self.logger.info(f"✅ {component_name} identified as PROGRAM (found in program_chunks)")
+                return True
+            
+            # Check if it appears as a program_name in file_access_relationships
+            cursor.execute("""
+                SELECT COUNT(*) FROM file_access_relationships 
+                WHERE program_name = ? OR program_name LIKE ?
+                LIMIT 1
+            """, (str(component_name), f"%{component_name}%"))
+            
+            program_access_count = cursor.fetchone()[0]
+            
+            if program_access_count > 0:
+                self.logger.info(f"✅ {component_name} identified as PROGRAM (found accessing files)")
+                return True
+            
+            # Default: assume it's a file if not found as program
+            self.logger.info(f"📁 {component_name} identified as FILE (not found as program)")
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to determine component type for {component_name}: {e}")
+            return False  # Default to file
 
 
     async def _get_file_field_definitions(self, file_name: str) -> List[Dict[str, Any]]:
@@ -646,14 +724,13 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             return []
 
     async def _analyze_program_data_flow(self, program_name: str) -> Dict[str, Any]:
-        """🔄 FIXED: Analyze program data flow with proper result building"""
+        """🔄 FIXED: Analyze program data flow with proper program analysis"""
         try:
-            # FIXED: Ensure program_name is string
             program_name = str(program_name)
             
-            self.logger.info(f"📄 Analyzing program data flow for: {program_name}")
+            self.logger.info(f"📄 Analyzing PROGRAM data flow for: {program_name}")
             
-            # Get file access relationships for this program
+            # Get file access relationships for this program (files accessed by this program)
             program_file_access = await self._get_program_file_access(program_name)
             total_files = sum(len(files) for files in program_file_access.values())
             self.logger.info(f"Found {total_files} file access relationships")
