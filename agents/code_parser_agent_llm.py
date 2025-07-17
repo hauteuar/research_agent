@@ -42,7 +42,8 @@ class CodeParserAgent:
     Handles all mainframe patterns: COBOL, CICS, SQL, MQ, JCL, etc.
     """
     
-    def __init__(self, coordinator, db_path: str = None, llm_engine = None, gpu_id: int = 0):
+    def __init__(self, coordinator, db_path: str = None, llm_engine = None, gpu_id : int = 0):
+        
         self.coordinator = coordinator
         self.db_path = db_path or "opulence_data.db"
         self.logger = coordinator.logger if hasattr(coordinator, 'logger') else self._setup_logger()
@@ -54,13 +55,13 @@ class CodeParserAgent:
             "top_p": 0.9
         }
         
-        # Chunking parameters - More aggressive limits for token safety
-        self.max_tokens_per_chunk = 1000  # Further reduced from 1400
-        self.min_chunk_lines = 10         # Reduced from 20
-        self.overlap_lines = 5            # Reduced from 10
-        self.max_chunk_size = 100         # Reduced from 200
-        self.chars_per_token = 3.0        # More conservative from 3.5
-        self.prompt_overhead_tokens = 700 # Increased from 600
+        # Chunking parameters - Optimized for 4096 context window
+        self.max_tokens_per_chunk = 2500  # Much larger for 4096 context
+        self.min_chunk_lines = 50         # Can handle larger chunks
+        self.overlap_lines = 20           # More overlap for context
+        self.max_chunk_size = 300         # Larger chunks
+        self.chars_per_token = 3.0        # Conservative estimate
+        self.prompt_overhead_tokens = 1000 # More room for comprehensive prompts
         
         # Statistics tracking
         self.stats = {
@@ -79,7 +80,7 @@ class CodeParserAgent:
 
     def _setup_logger(self):
         """Setup basic logger if coordinator doesn't provide one"""
-        logger = logging.getLogger('CodeParserAgent')
+        logger = logging.getLogger('CompleteLLMCodeParser')
         logger.setLevel(logging.INFO)
         handler = logging.StreamHandler()
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -384,7 +385,7 @@ Part 2: Prompt Creation and Intelligent Code Chunking
 
     def create_focused_analysis_prompt(self, code_section: CodeSection, 
                                      file_type: str, program_name: str) -> str:
-        """Create focused prompt based on code content - much smaller and specific"""
+        """Create focused prompt optimized for 4096 context window"""
         
         # Analyze what's actually in the code to determine focus
         content_upper = code_section.content.upper()
@@ -398,23 +399,378 @@ Part 2: Prompt Creation and Intelligent Code Chunking
         has_file_ops = any(op in content_upper for op in ['READ ', 'WRITE ', 'OPEN ', 'CLOSE '])
         has_mq = any(mq in content_upper for mq in ['MQOPEN', 'MQPUT', 'MQGET', 'MQCLOSE'])
         
-        # Create focused prompt based on what's actually present
+        # Create comprehensive but focused prompt for 4096 context
         if has_cics:
-            return self._create_cics_focused_prompt(code_section, program_name)
+            return self._create_cics_comprehensive_prompt(code_section, program_name)
         elif has_sql:
-            return self._create_sql_focused_prompt(code_section, program_name)
+            return self._create_sql_comprehensive_prompt(code_section, program_name)
         elif has_copy:
-            return self._create_copybook_focused_prompt(code_section, program_name)
+            return self._create_copy_comprehensive_prompt(code_section, program_name)
         elif has_call:
-            return self._create_call_focused_prompt(code_section, program_name)
+            return self._create_call_comprehensive_prompt(code_section, program_name)
         elif has_fields:
-            return self._create_field_focused_prompt(code_section, program_name)
+            return self._create_field_comprehensive_prompt(code_section, program_name)
         elif has_file_ops:
-            return self._create_file_focused_prompt(code_section, program_name)
+            return self._create_file_comprehensive_prompt(code_section, program_name)
         elif has_mq:
-            return self._create_mq_focused_prompt(code_section, program_name)
+            return self._create_mq_comprehensive_prompt(code_section, program_name)
         else:
-            return self._create_minimal_prompt(code_section, program_name)
+            return self._create_multi_pattern_prompt(code_section, program_name)
+
+    def _create_cics_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Comprehensive CICS analysis prompt for 4096 context"""
+        return f"""Analyze this COBOL code section for CICS operations and related patterns.
+
+PROGRAM: {program_name}
+SECTION: {section.name} (Lines {section.start_line}-{section.end_line})
+
+CODE:
+{section.content}
+
+Extract ALL CICS operations and any related patterns. Return JSON:
+
+{{
+  "cics_operations": [
+    {{
+      "type": "CICS_READ|CICS_WRITE|CICS_LINK|CICS_XCTL|CICS_START|CICS_RETURN|CICS_SEND|CICS_RECEIVE",
+      "target": "dataset_file_or_program_name",
+      "line_number": 123,
+      "statement": "EXEC CICS READ DATASET('TMS92ASO')",
+      "operation_details": "INTO(record) RIDFLD(key) RESP(ws-resp)",
+      "confidence": 0.95
+    }}
+  ],
+  "copybook_includes": [
+    {{
+      "type": "COPY",
+      "target": "copybook_name", 
+      "line_number": 45,
+      "statement": "COPY TMS06ASU",
+      "location": "WORKING-STORAGE",
+      "confidence": 0.99
+    }}
+  ],
+  "field_definitions": [
+    {{
+      "type": "FIELD_DEFINITION",
+      "target": "field_name",
+      "line_number": 67,
+      "statement": "05 WS-RESP PIC S9(8) COMP",
+      "picture_clause": "S9(8)",
+      "level_number": 5,
+      "confidence": 0.98
+    }}
+  ]
+}}
+
+Focus on CICS operations but include any COPY statements or field definitions in the same section."""
+
+    def _create_sql_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Comprehensive SQL analysis prompt for 4096 context"""
+        return f"""Analyze this COBOL code section for SQL operations and related patterns.
+
+PROGRAM: {program_name}
+SECTION: {section.name} (Lines {section.start_line}-{section.end_line})
+
+CODE:
+{section.content}
+
+Extract ALL SQL operations and any related patterns. Return JSON:
+
+{{
+  "sql_operations": [
+    {{
+      "type": "SQL_SELECT|SQL_INSERT|SQL_UPDATE|SQL_DELETE|SQL_CALL",
+      "target": "table_or_procedure_name",
+      "line_number": 200,
+      "statement": "EXEC SQL SELECT * FROM CUSTOMER WHERE ID = :WS-ID",
+      "database_objects": ["CUSTOMER"],
+      "confidence": 0.96
+    }}
+  ],
+  "stored_procedures": [
+    {{
+      "type": "CREATE_PROCEDURE|EXEC_PROCEDURE|CALL_PROCEDURE",
+      "target": "procedure_name",
+      "line_number": 500,
+      "statement": "EXEC SQL CALL MYPROC(:PARM1, :PARM2)",
+      "parameters": ":PARM1, :PARM2",
+      "confidence": 0.93
+    }}
+  ],
+  "field_definitions": [
+    {{
+      "type": "FIELD_DEFINITION",
+      "target": "field_name",
+      "line_number": 67,
+      "statement": "05 WS-ID PIC X(10)",
+      "picture_clause": "X(10)",
+      "level_number": 5,
+      "confidence": 0.98
+    }}
+  ]
+}}
+
+Focus on SQL operations but include field definitions that are used in SQL statements."""
+
+    def _create_copy_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Comprehensive COPY analysis prompt for 4096 context"""
+        return f"""Analyze this COBOL code section for COPY statements and related patterns.
+
+PROGRAM: {program_name}
+SECTION: {section.name} (Lines {section.start_line}-{section.end_line})
+
+CODE:
+{section.content}
+
+Extract ALL COPY statements and any related field definitions. Return JSON:
+
+{{
+  "copybook_includes": [
+    {{
+      "type": "COPY",
+      "target": "copybook_name",
+      "line_number": 123,
+      "statement": "COPY TMS06ASU REPLACING ==TAG== BY ==PROD==",
+      "location": "WORKING-STORAGE",
+      "replacing_clause": "==TAG== BY ==PROD==",
+      "confidence": 0.99
+    }}
+  ],
+  "field_definitions": [
+    {{
+      "type": "FIELD_DEFINITION",
+      "target": "field_name",
+      "line_number": 67,
+      "statement": "05 WS-CUSTOMER-NAME PIC X(30)",
+      "picture_clause": "X(30)",
+      "level_number": 5,
+      "business_domain": "CUSTOMER",
+      "confidence": 0.98
+    }}
+  ]
+}}
+
+Focus on COPY statements and include any field definitions that appear in the same section."""
+
+    def _create_call_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Comprehensive CALL analysis prompt for 4096 context"""
+        return f"""Analyze this COBOL code section for program calls and related patterns.
+
+PROGRAM: {program_name}
+SECTION: {section.name} (Lines {section.start_line}-{section.end_line})
+
+CODE:
+{section.content}
+
+Extract ALL program calls and any related patterns. Return JSON:
+
+{{
+  "program_calls": [
+    {{
+      "type": "CALL",
+      "target": "program_name",
+      "line_number": 156,
+      "statement": "CALL 'SUBPROG' USING WS-PARMS",
+      "parameters": "WS-PARMS",
+      "confidence": 0.97
+    }}
+  ],
+  "field_definitions": [
+    {{
+      "type": "FIELD_DEFINITION",
+      "target": "field_name",
+      "line_number": 67,
+      "statement": "05 WS-PARMS PIC X(100)",
+      "picture_clause": "X(100)",
+      "level_number": 5,
+      "confidence": 0.98
+    }}
+  ]
+}}
+
+Focus on CALL statements and include parameter field definitions."""
+
+    def _create_field_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Comprehensive field analysis prompt for 4096 context"""
+        return f"""Analyze this COBOL code section for field definitions and data structures.
+
+PROGRAM: {program_name}
+SECTION: {section.name} (Lines {section.start_line}-{section.end_line})
+
+CODE:
+{section.content}
+
+Extract ALL field definitions and data structures. Return JSON:
+
+{{
+  "field_definitions": [
+    {{
+      "type": "FIELD_DEFINITION",
+      "target": "field_name",
+      "line_number": 67,
+      "statement": "05 WS-CUSTOMER-NAME PIC X(30) VALUE SPACES",
+      "data_type": "CHARACTER",
+      "picture_clause": "X(30)",
+      "value_clause": "SPACES",
+      "level_number": 5,
+      "business_domain": "CUSTOMER",
+      "confidence": 0.98
+    }}
+  ]
+}}
+
+Include ALL field definitions with PIC clauses, VALUE clauses, and 88-level condition names."""
+
+    def _create_file_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Comprehensive file operations prompt for 4096 context"""
+        return f"""Analyze this COBOL code section for file operations and related patterns.
+
+PROGRAM: {program_name}
+SECTION: {section.name} (Lines {section.start_line}-{section.end_line})
+
+CODE:
+{section.content}
+
+Extract ALL file operations and related patterns. Return JSON:
+
+{{
+  "file_operations": [
+    {{
+      "type": "READ|WRITE|OPEN|CLOSE|REWRITE",
+      "target": "file_name",
+      "line_number": 123,
+      "statement": "READ CUSTOMER-FILE INTO WS-CUSTOMER-REC",
+      "access_mode": "INPUT",
+      "confidence": 0.95
+    }}
+  ],
+  "field_definitions": [
+    {{
+      "type": "FIELD_DEFINITION",
+      "target": "field_name",
+      "line_number": 67,
+      "statement": "01 WS-CUSTOMER-REC PIC X(100)",
+      "picture_clause": "X(100)",
+      "level_number": 1,
+      "confidence": 0.98
+    }}
+  ]
+}}
+
+Focus on file I/O operations and include related record definitions."""
+
+    def _create_mq_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Comprehensive MQ operations prompt for 4096 context"""
+        return f"""Analyze this COBOL code section for MQ operations and related patterns.
+
+PROGRAM: {program_name}
+SECTION: {section.name} (Lines {section.start_line}-{section.end_line})
+
+CODE:
+{section.content}
+
+Extract ALL MQ operations and related patterns. Return JSON:
+
+{{
+  "mq_operations": [
+    {{
+      "type": "MQOPEN|MQPUT|MQGET|MQCLOSE",
+      "target": "queue_name",
+      "line_number": 300,
+      "statement": "CALL 'MQOPEN' USING HCONN, OBJDESC",
+      "queue_manager": "QM1",
+      "confidence": 0.94
+    }}
+  ],
+  "field_definitions": [
+    {{
+      "type": "FIELD_DEFINITION",
+      "target": "field_name",
+      "line_number": 67,
+      "statement": "05 HCONN PIC S9(9) COMP",
+      "picture_clause": "S9(9)",
+      "level_number": 5,
+      "confidence": 0.98
+    }}
+  ]
+}}
+
+Focus on MQ operations and include related MQ field definitions."""
+
+    def _create_multi_pattern_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Multi-pattern analysis for mixed content with 4096 context"""
+        return f"""Analyze this COBOL code section for ALL types of patterns and relationships.
+
+PROGRAM: {program_name}
+SECTION: {section.name} (Lines {section.start_line}-{section.end_line})
+
+CODE:
+{section.content}
+
+Extract ALL patterns found. Return JSON with any categories that have findings:
+
+{{
+  "file_operations": [
+    {{
+      "type": "READ|WRITE|OPEN|CLOSE|REWRITE",
+      "target": "file_name",
+      "line_number": 123,
+      "statement": "READ CUSTOMER-FILE INTO WS-CUSTOMER-REC",
+      "confidence": 0.95
+    }}
+  ],
+  "cics_operations": [
+    {{
+      "type": "CICS_READ|CICS_WRITE|CICS_LINK|CICS_XCTL",
+      "target": "dataset_or_program_name",
+      "line_number": 124,
+      "statement": "EXEC CICS READ DATASET('TMS92ASO')",
+      "confidence": 0.98
+    }}
+  ],
+  "copybook_includes": [
+    {{
+      "type": "COPY",
+      "target": "copybook_name",
+      "line_number": 45,
+      "statement": "COPY TMS06ASU",
+      "location": "WORKING-STORAGE",
+      "confidence": 0.99
+    }}
+  ],
+  "program_calls": [
+    {{
+      "type": "CALL",
+      "target": "program_name",
+      "line_number": 156,
+      "statement": "CALL 'SUBPROG' USING WS-PARMS",
+      "confidence": 0.97
+    }}
+  ],
+  "sql_operations": [
+    {{
+      "type": "SQL_SELECT|SQL_INSERT|SQL_UPDATE|SQL_DELETE",
+      "target": "table_name",
+      "line_number": 200,
+      "statement": "EXEC SQL SELECT * FROM CUSTOMER",
+      "confidence": 0.96
+    }}
+  ],
+  "field_definitions": [
+    {{
+      "type": "FIELD_DEFINITION",
+      "target": "field_name",
+      "line_number": 67,
+      "statement": "05 WS-CUSTOMER-NAME PIC X(30)",
+      "picture_clause": "X(30)",
+      "level_number": 5,
+      "confidence": 0.98
+    }}
+  ]
+}}
+
+Only include categories that have actual findings. Be thorough but precise."""
 
     def _create_cics_focused_prompt(self, section: CodeSection, program_name: str) -> str:
         """Focused prompt for CICS operations only"""
@@ -846,8 +1202,8 @@ Be precise and only include what you actually find."""
         content_tokens = self._estimate_tokens(section.content)
         total_tokens = content_tokens + self.prompt_overhead_tokens
         
-        # Use even more conservative limit
-        max_safe_tokens = 1300  # Well under 2048 limit
+        # Use 4096 context window with safety margin
+        max_safe_tokens = 3800  # Leave 296 tokens safety margin
         
         if total_tokens > max_safe_tokens:
             self.logger.warning(f"Chunk {section.name} exceeds safe limit: {total_tokens} tokens (limit: {max_safe_tokens})")
@@ -861,8 +1217,8 @@ Be precise and only include what you actually find."""
         sections = []
         chunk_num = 1
         
-        # Use smaller chunks for force splitting
-        max_safe_tokens = 600  # Very conservative for content only
+        # Use larger content limit for 4096 context
+        max_content_tokens = 2000  # Much larger for 4096 context
         
         i = 0
         while i < len(lines):
@@ -875,15 +1231,15 @@ Be precise and only include what you actually find."""
                 line_tokens = self._estimate_tokens(line)
                 
                 # Check if adding this line would exceed safe content limit
-                if current_tokens + line_tokens > max_safe_tokens and chunk_lines:
+                if current_tokens + line_tokens > max_content_tokens and chunk_lines:
                     break
                 
                 chunk_lines.append(line)
                 current_tokens += line_tokens
                 i += 1
                 
-                # Also check line count limit (smaller for force split)
-                if len(chunk_lines) >= 50:  # Smaller chunks
+                # Also check line count limit (larger for 4096 context)
+                if len(chunk_lines) >= 200:  # Larger chunks
                     break
             
             if chunk_lines:
@@ -1103,7 +1459,7 @@ Part 3: Main Processing Engine and LLM Analysis
 
     async def _analyze_section_with_llm(self, section: CodeSection, file_type: str, 
                                       program_name: str) -> Optional[Dict[str, Any]]:
-        """Analyze a single section with LLM using focused prompts"""
+        """Analyze a single section with LLM using 4096 context window"""
         
         # Critical: Validate chunk size before LLM call
         if not self._validate_chunk_size(section):
@@ -1120,15 +1476,15 @@ Part 3: Main Processing Engine and LLM Analysis
         # Create focused prompt based on content
         prompt = self.create_focused_analysis_prompt(section, file_type, program_name)
         
-        # Final token check with actual prompt
+        # Final token check with actual prompt for 4096 context
         prompt_tokens = self._estimate_tokens(prompt)
-        if prompt_tokens > 1800:  # Conservative limit well under 2048
+        if prompt_tokens > 3800:  # Safe limit for 4096 context
             self.logger.error(f"🚨 Prompt too large: {prompt_tokens} tokens for {section.name}")
             return {"error": "Prompt exceeds model limit", "section": section.name}
         
         try:
             self.stats["llm_calls"] += 1
-            self.logger.info(f"📤 Sending focused prompt to LLM: {section.name} ({prompt_tokens} tokens)")
+            self.logger.info(f"📤 Sending comprehensive prompt to LLM: {section.name} ({prompt_tokens} tokens)")
             
             response = await self.coordinator.call_model_api(
                 prompt=prompt,
@@ -1149,71 +1505,81 @@ Part 3: Main Processing Engine and LLM Analysis
 
     def _parse_focused_response(self, response: Dict[str, Any], 
                                section: CodeSection) -> Dict[str, Any]:
-        """Parse focused LLM response - handle smaller, specific responses"""
+        """Parse focused LLM response - aggressive cleaning"""
         try:
             text_content = self._extract_response_text(response)
             if not text_content:
-                return {"error": "No content in response", "section": section.name}
+                self.logger.warning(f"Empty response for {section.name}, using fallback")
+                return self._fallback_pattern_extraction("", section)
             
-            self.logger.debug(f"Raw LLM response: {text_content[:200]}...")
+            self.logger.debug(f"Raw response for {section.name}: {text_content[:100]}...")
             
-            # Clean the response - remove any explanation text
-            text_content = text_content.strip()
+            # AGGRESSIVE CLEANING - remove everything before first {
+            first_brace = text_content.find('{')
+            if first_brace == -1:
+                self.logger.warning(f"No JSON found in response for {section.name}, using fallback")
+                return self._fallback_pattern_extraction(text_content, section)
             
-            # Remove common LLM response prefixes/suffixes
-            prefixes_to_remove = [
-                "Here is the JSON:",
-                "Here's the JSON:",
-                "The JSON is:",
-                "JSON:",
-                "```json",
-                "```",
-                "Based on the analysis:",
-                "After analyzing the code:",
-            ]
+            # Extract from first { to last }
+            last_brace = text_content.rfind('}') + 1
+            if last_brace <= first_brace:
+                self.logger.warning(f"Malformed JSON brackets for {section.name}, using fallback")
+                return self._fallback_pattern_extraction(text_content, section)
             
-            for prefix in prefixes_to_remove:
-                if text_content.startswith(prefix):
-                    text_content = text_content[len(prefix):].strip()
+            json_str = text_content[first_brace:last_brace].strip()
+            self.logger.debug(f"Extracted JSON for {section.name}: {json_str[:100]}...")
             
-            # Remove trailing explanation text
-            suffixes_to_remove = [
-                "```",
-                "This analysis is based on",
-                "The above JSON contains",
-                "Note that",
-            ]
-            
-            for suffix in suffixes_to_remove:
-                if suffix in text_content:
-                    text_content = text_content.split(suffix)[0].strip()
-            
-            # Extract JSON more aggressively
-            json_start = text_content.find('{')
-            json_end = text_content.rfind('}') + 1
-            
-            if json_start >= 0 and json_end > json_start:
-                json_str = text_content[json_start:json_end]
+            try:
+                analysis = json.loads(json_str)
+                self.logger.info(f"✅ Successfully parsed JSON for {section.name}")
                 
-                try:
-                    analysis = json.loads(json_str)
-                    
-                    # Normalize the response to standard format
-                    normalized = self._normalize_focused_response(analysis, section)
-                    
-                    return normalized
-                    
-                except json.JSONDecodeError as e:
-                    self.logger.warning(f"JSON decode error for {section.name}: {e}")
-                    return self._repair_and_parse_json(json_str, section)
-            
-            # Fallback to pattern-based extraction
-            self.logger.warning(f"No valid JSON found in response for {section.name}, using fallback")
-            return self._fallback_pattern_extraction(text_content, section)
+                # Normalize the response
+                normalized = self._normalize_focused_response(analysis, section)
+                return normalized
+                
+            except json.JSONDecodeError as e:
+                self.logger.warning(f"JSON decode failed for {section.name}: {e}")
+                self.logger.debug(f"Failed JSON: {json_str}")
+                
+                # Try basic JSON repair
+                repaired = self._basic_json_repair(json_str)
+                if repaired:
+                    try:
+                        analysis = json.loads(repaired)
+                        self.logger.info(f"✅ Repaired and parsed JSON for {section.name}")
+                        return self._normalize_focused_response(analysis, section)
+                    except:
+                        pass
+                
+                # Final fallback to pattern extraction
+                self.logger.warning(f"Using pattern fallback for {section.name}")
+                return self._fallback_pattern_extraction("", section)
             
         except Exception as e:
-            self.logger.error(f"Failed to parse focused response for {section.name}: {e}")
-            return {"error": str(e), "section": section.name}
+            self.logger.error(f"Response parsing error for {section.name}: {e}")
+            return self._fallback_pattern_extraction("", section)
+
+    def _basic_json_repair(self, json_str: str) -> Optional[str]:
+        """Basic JSON repair attempts"""
+        try:
+            # Remove trailing commas
+            repaired = re.sub(r',(\s*[}\]])', r'\1', json_str)
+            
+            # Add quotes to unquoted keys
+            repaired = re.sub(r'(\w+):', r'"\1":', repaired)
+            
+            # Fix single quotes
+            repaired = repaired.replace("'", '"')
+            
+            # Remove any text after the closing brace
+            last_brace = repaired.rfind('}')
+            if last_brace != -1:
+                repaired = repaired[:last_brace + 1]
+            
+            return repaired
+            
+        except Exception:
+            return None
 
     def _normalize_focused_response(self, analysis: Dict[str, Any], 
                                    section: CodeSection) -> Dict[str, Any]:
