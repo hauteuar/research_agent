@@ -36,14 +36,13 @@ class DependencyAnalysis:
     missing_programs: Set[str]
     confidence_score: float
 
-class CodeParserAgent:
+class CompleteLLMCodeParser:
     """
     Complete LLM-based code parser with full database integration
     Handles all mainframe patterns: COBOL, CICS, SQL, MQ, JCL, etc.
     """
     
-    def __init__(self, coordinator, db_path: str = None, llm_engine = None, gpu_id : int = 0):
-        
+    def __init__(self, coordinator, db_path: str = None):
         self.coordinator = coordinator
         self.db_path = db_path or "opulence_data.db"
         self.logger = coordinator.logger if hasattr(coordinator, 'logger') else self._setup_logger()
@@ -55,13 +54,13 @@ class CodeParserAgent:
             "top_p": 0.9
         }
         
-        # Chunking parameters - Optimized for 4096 context window
-        self.max_tokens_per_chunk = 2500  # Much larger for 4096 context
-        self.min_chunk_lines = 50         # Can handle larger chunks
-        self.overlap_lines = 20           # More overlap for context
-        self.max_chunk_size = 300         # Larger chunks
-        self.chars_per_token = 3.0        # Conservative estimate
-        self.prompt_overhead_tokens = 1000 # More room for comprehensive prompts
+        # Chunking parameters - Very aggressive limits to prevent 4888 token chunks
+        self.max_tokens_per_chunk = 1800  # Much smaller to prevent oversized chunks
+        self.min_chunk_lines = 30         # Reasonable minimum
+        self.overlap_lines = 15           # Moderate overlap
+        self.max_chunk_size = 150         # Much smaller line limit
+        self.chars_per_token = 2.8        # More conservative estimate
+        self.prompt_overhead_tokens = 800 # Conservative prompt overhead
         
         # Statistics tracking
         self.stats = {
@@ -1059,8 +1058,8 @@ Be precise and only include what you actually find."""
         sections = []
         lines = content.split('\n')
         
-        # Use conservative token limit for content
-        max_content_tokens = 600
+        # Use very conservative token limit for content
+        max_content_tokens = 1000  # Much smaller to prevent oversized chunks
         
         # For PROCEDURE DIVISION, split by paragraphs
         if section_type == 'DIVISION' and 'PROCEDURE' in section_name.upper():
@@ -1078,17 +1077,25 @@ Be precise and only include what you actually find."""
                 para_end = paragraph_starts[i + 1] if i + 1 < len(paragraph_starts) else len(lines)
                 para_content = '\n'.join(lines[para_start:para_end])
                 
-                # Check if paragraph fits within limits
+                # Check if paragraph fits within conservative limits
                 para_tokens = self._estimate_tokens(para_content)
                 if para_tokens <= max_content_tokens:
                     para_name = lines[para_start].strip().rstrip('.')
-                    sections.append(CodeSection(
+                    new_section = CodeSection(
                         section_type='PARAGRAPH',
                         name=para_name,
                         content=para_content,
                         start_line=start_line_offset + para_start + 1,
                         end_line=start_line_offset + para_end
-                    ))
+                    )
+                    
+                    # Double-check validation
+                    if self._validate_chunk_size(new_section):
+                        sections.append(new_section)
+                    else:
+                        # Paragraph still too large, split by lines
+                        line_chunks = self._split_by_lines(para_content, para_start + start_line_offset)
+                        sections.extend(line_chunks)
                 else:
                     # Paragraph too large, split by lines
                     line_chunks = self._split_by_lines(para_content, para_start + start_line_offset)
@@ -1107,37 +1114,69 @@ Be precise and only include what you actually find."""
         
         chunk_start = 0
         chunk_num = 1
-        max_content_tokens = 600  # Conservative content limit
+        max_content_tokens = 1000  # Very conservative content limit
         
         while chunk_start < len(lines):
             chunk_lines = []
             current_tokens = 0
             
-            # Build chunk line by line, checking tokens
+            # Build chunk line by line, checking tokens aggressively
             for i in range(chunk_start, len(lines)):
                 line = lines[i]
                 line_tokens = self._estimate_tokens(line)
                 
-                # Check if adding this line would exceed safe content limit
+                # Check if adding this line would exceed very conservative content limit
                 if current_tokens + line_tokens > max_content_tokens and chunk_lines:
                     break
                 
                 chunk_lines.append(line)
                 current_tokens += line_tokens
                 
-                # Also check line count limit (smaller chunks)
-                if len(chunk_lines) >= 50:
+                # Also check line count limit (much smaller chunks)
+                if len(chunk_lines) >= 60:  # Very small chunks
                     break
             
             if chunk_lines:
                 chunk_content = '\n'.join(chunk_lines)
-                sections.append(CodeSection(
+                new_section = CodeSection(
                     section_type='CHUNK',
                     name=f'CHUNK-{chunk_num}',
                     content=chunk_content,
                     start_line=start_line_offset + chunk_start + 1,
                     end_line=start_line_offset + chunk_start + len(chunk_lines)
-                ))
+                )
+                
+                # Validate the chunk before adding
+                if self._validate_chunk_size(new_section):
+                    sections.append(new_section)
+                else:
+                    # If still too large, make it even smaller
+                    self.logger.warning(f"Line-based chunk still too large, making smaller")
+                    half_lines = chunk_lines[:len(chunk_lines)//2]
+                    if half_lines:
+                        half_content = '\n'.join(half_lines)
+                        half_section = CodeSection(
+                            section_type='EMERGENCY',
+                            name=f'EMERGENCY-{chunk_num}',
+                            content=half_content,
+                            start_line=start_line_offset + chunk_start + 1,
+                            end_line=start_line_offset + chunk_start + len(half_lines)
+                        )
+                        sections.append(half_section)
+                        chunk_start += len(half_lines)
+                    else:
+                        # Single line emergency
+                        if chunk_start < len(lines):
+                            single_line = lines[chunk_start]
+                            single_section = CodeSection(
+                                section_type='SINGLE_LINE',
+                                name=f'SINGLE-{chunk_num}',
+                                content=single_line,
+                                start_line=start_line_offset + chunk_start + 1,
+                                end_line=start_line_offset + chunk_start + 1
+                            )
+                            sections.append(single_section)
+                            chunk_start += 1
                 
                 chunk_start += len(chunk_lines) - self.overlap_lines
                 chunk_num += 1
@@ -1202,8 +1241,8 @@ Be precise and only include what you actually find."""
         content_tokens = self._estimate_tokens(section.content)
         total_tokens = content_tokens + self.prompt_overhead_tokens
         
-        # Use 4096 context window with safety margin
-        max_safe_tokens = 3800  # Leave 296 tokens safety margin
+        # Use much more conservative limit to prevent 4888 token chunks
+        max_safe_tokens = 2800  # Very conservative limit
         
         if total_tokens > max_safe_tokens:
             self.logger.warning(f"Chunk {section.name} exceeds safe limit: {total_tokens} tokens (limit: {max_safe_tokens})")
@@ -1217,20 +1256,20 @@ Be precise and only include what you actually find."""
         sections = []
         chunk_num = 1
         
-        # Use larger content limit for 4096 context
-        max_content_tokens = 2000  # Much larger for 4096 context
+        # Use very conservative content limit to prevent oversized chunks
+        max_content_tokens = 1200  # Very small to ensure no 4888 token chunks
         
         i = 0
         while i < len(lines):
             chunk_lines = []
             current_tokens = 0
             
-            # Build chunk line by line, checking tokens
+            # Build chunk line by line, checking tokens aggressively
             while i < len(lines):
                 line = lines[i]
                 line_tokens = self._estimate_tokens(line)
                 
-                # Check if adding this line would exceed safe content limit
+                # Check if adding this line would exceed very conservative content limit
                 if current_tokens + line_tokens > max_content_tokens and chunk_lines:
                     break
                 
@@ -1238,8 +1277,8 @@ Be precise and only include what you actually find."""
                 current_tokens += line_tokens
                 i += 1
                 
-                # Also check line count limit (larger for 4096 context)
-                if len(chunk_lines) >= 200:  # Larger chunks
+                # Also check line count limit (much smaller)
+                if len(chunk_lines) >= 80:  # Much smaller chunks
                     break
             
             if chunk_lines:
@@ -1252,6 +1291,26 @@ Be precise and only include what you actually find."""
                     end_line=section.start_line + i - 1
                 ))
                 chunk_num += 1
+                
+                # Double-check that this chunk is actually safe
+                if not self._validate_chunk_size(sections[-1]):
+                    self.logger.error(f"Force split still created oversized chunk: {sections[-1].name}")
+                    # Remove the oversized chunk and try smaller
+                    sections.pop()
+                    # Reduce chunk size even more and retry
+                    i -= len(chunk_lines)
+                    chunk_lines = chunk_lines[:len(chunk_lines)//2]  # Half the size
+                    if chunk_lines:
+                        chunk_content = '\n'.join(chunk_lines)
+                        sections.append(CodeSection(
+                            section_type=section.section_type,
+                            name=f"{section.name}-EMERGENCY-{chunk_num}",
+                            content=chunk_content,
+                            start_line=section.start_line + i,
+                            end_line=section.start_line + i + len(chunk_lines) - 1
+                        ))
+                        i += len(chunk_lines)
+                    chunk_num += 1
         
         return sections
 
