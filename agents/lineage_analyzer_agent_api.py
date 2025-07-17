@@ -155,17 +155,17 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             );
             
             CREATE TABLE IF NOT EXISTS file_access_relationships (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                program_name TEXT,
-                file_name TEXT,
-                physical_file TEXT,
-                access_type TEXT,  -- 'READ', 'WRITE', 'REWRITE', 'DELETE', 'FD'
-                access_mode TEXT,  -- 'INPUT', 'OUTPUT', 'I-O', 'EXTEND'
-                record_format TEXT,
-                access_location TEXT,
-                line_number INTEGER,
-                created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    program_name TEXT NOT NULL,
+                    logical_file_name TEXT NOT NULL,
+                    physical_file_name TEXT,
+                    access_type TEXT NOT NULL,
+                    access_mode TEXT,
+                    line_number INTEGER,
+                    access_statement TEXT,
+                    record_format TEXT,
+                    created_timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+                );
             
             CREATE TABLE IF NOT EXISTS field_cross_reference (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -517,7 +517,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 self.logger.info(f"📄 Treating {component_name} as PROGRAM - finding files it accesses")
                 cursor.execute("""
                     SELECT program_name, logical_file_name, physical_file_name, access_type, access_mode,
-                        record_format, access_location, line_number
+                        record_format,  line_number
                     FROM file_access_relationships
                     WHERE program_name = ? OR program_name LIKE ?
                     ORDER BY line_number
@@ -527,7 +527,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 self.logger.info(f"📁 Treating {component_name} as FILE - finding programs that access it")
                 cursor.execute("""
                     SELECT program_name, logical_file_name, physical_file_name, access_type, access_mode,
-                        record_format, access_location, line_number
+                        record_format,  line_number
                     FROM file_access_relationships
                     WHERE logical_file_name = ? OR physical_file_name = ? 
                     OR logical_file_name LIKE ? OR physical_file_name LIKE ?
@@ -571,8 +571,8 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                     "access_type": record[3],
                     "access_mode": record[4],
                     "record_format": record[5],
-                    "access_location": record[6] if len(record) > 6 else None,
-                    "line_number": record[7] if len(record) > 7 else None
+                    
+                    "line_number": record[6] if len(record) > 6 else None
                 }
                 
                 programs_accessing.add(record[0])
@@ -795,7 +795,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             # FIXED: Use correct column names
             cursor.execute("""
                 SELECT logical_file_name, physical_file_name, access_type, access_mode,
-                    record_format, access_location, line_number
+                    record_format,  line_number
                 FROM file_access_relationships
                 WHERE program_name = ? OR program_name LIKE ?
                 ORDER BY line_number
@@ -819,8 +819,8 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                     "access_type": record[2],
                     "access_mode": record[3],
                     "record_format": record[4],
-                    "access_location": record[5] if len(record) > 5 else None,
-                    "line_number": record[6] if len(record) > 6 else None
+                    
+                    "line_number": record[5] if len(record) > 5 else None
                 }
                 
                 access_mode = record[3] if record[3] else ""
@@ -1077,7 +1077,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 FROM program_chunks pc
                 JOIN file_access_relationships far ON pc.program_name = far.program_name
                 WHERE (pc.content LIKE ? OR pc.content LIKE ?) 
-                AND (far.file_name = ? OR far.physical_file = ?)
+                AND (far.logical_file_name = ? OR far.physical_file_name = ?)
                 ORDER BY pc.program_name, pc.line_start
             """, (f"%{field_name}%", f"%{field_name.upper()}%", str(file_name), str(file_name)))
             
@@ -3149,7 +3149,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             # STEP 3: Check if it appears as a file in file_access_relationships
             cursor.execute("""
                 SELECT COUNT(*) FROM file_access_relationships 
-                WHERE file_name = ? OR physical_file = ? OR file_name LIKE ? OR physical_file LIKE ?
+                WHERE logical_file_name = ? OR physical_file_name = ? OR logical_file_name LIKE ? OR physical_file_name LIKE ?
                 LIMIT 1
             """, (component_name, component_name, f"%{component_name}%", f"%{component_name}%"))
             
