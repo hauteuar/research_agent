@@ -382,37 +382,179 @@ COMPLETE LLM CodeParser Agent with Full Database Storage
 Part 2: Prompt Creation and Intelligent Code Chunking
 """
 
-    def create_comprehensive_analysis_prompt(self, code_section: CodeSection, 
-                                           file_type: str, program_name: str, 
-                                           section_context: str = "") -> str:
-        """Create comprehensive prompt for all mainframe patterns"""
+    def create_focused_analysis_prompt(self, code_section: CodeSection, 
+                                     file_type: str, program_name: str) -> str:
+        """Create focused prompt based on code content - much smaller and specific"""
         
-        prompt = f"""You are a COBOL/Mainframe code analysis expert. Analyze this {file_type} code section and extract ALL relationships and patterns with high precision.
+        # Analyze what's actually in the code to determine focus
+        content_upper = code_section.content.upper()
+        
+        # Determine primary focus based on content
+        has_cics = 'EXEC CICS' in content_upper
+        has_sql = 'EXEC SQL' in content_upper  
+        has_copy = 'COPY ' in content_upper
+        has_call = 'CALL ' in content_upper
+        has_fields = 'PIC ' in content_upper and ('05 ' in content_upper or '01 ' in content_upper)
+        has_file_ops = any(op in content_upper for op in ['READ ', 'WRITE ', 'OPEN ', 'CLOSE '])
+        has_mq = any(mq in content_upper for mq in ['MQOPEN', 'MQPUT', 'MQGET', 'MQCLOSE'])
+        
+        # Create focused prompt based on what's actually present
+        if has_cics:
+            return self._create_cics_focused_prompt(code_section, program_name)
+        elif has_sql:
+            return self._create_sql_focused_prompt(code_section, program_name)
+        elif has_copy:
+            return self._create_copybook_focused_prompt(code_section, program_name)
+        elif has_call:
+            return self._create_call_focused_prompt(code_section, program_name)
+        elif has_fields:
+            return self._create_field_focused_prompt(code_section, program_name)
+        elif has_file_ops:
+            return self._create_file_focused_prompt(code_section, program_name)
+        elif has_mq:
+            return self._create_mq_focused_prompt(code_section, program_name)
+        else:
+            return self._create_minimal_prompt(code_section, program_name)
+
+    def _create_cics_focused_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Focused prompt for CICS operations only"""
+        return f"""Extract CICS operations from this COBOL code.
 
 PROGRAM: {program_name}
-SECTION: {code_section.section_type} - {code_section.name}
-CONTEXT: {section_context}
-LINES: {code_section.start_line}-{code_section.end_line}
+SECTION: {section.name}
 
 CODE:
-```cobol
-{code_section.content}
-```
+{section.content}
 
-Extract ALL patterns and return precise JSON. Be extremely thorough and accurate:
+Find all EXEC CICS statements. Return only JSON:
+{{
+  "cics_operations": [
+    {{
+      "type": "CICS_READ|CICS_WRITE|CICS_LINK|CICS_XCTL|CICS_START|CICS_RETURN",
+      "target": "dataset_or_program_name",
+      "line_number": 123,
+      "statement": "EXEC CICS READ DATASET('TMS92ASO')",
+      "confidence": 0.95
+    }}
+  ]
+}}
 
-1. **File Operations**: READ, WRITE, OPEN, CLOSE, REWRITE operations on files
-2. **CICS Operations**: All EXEC CICS commands (READ/WRITE DATASET, FILE, LINK, XCTL, START, RETURN, etc.)
-3. **Copy Statements**: All COPY statements including copybook names
-4. **Program Calls**: CALL statements, CICS LINK/XCTL to other programs
-5. **DB2/SQL Operations**: EXEC SQL statements, table access, stored procedures, cursors
-6. **MQ Operations**: MQOPEN, MQPUT, MQGET, MQCLOSE, MQINQ, MQSET, queue operations
-7. **WebSphere/XML**: XML parsing, WebSphere calls, SOAP/REST operations
-8. **Field Definitions**: Data items with PIC clauses, VALUE clauses, 88 condition names
-9. **JCL Operations**: EXEC statements, DD statements, job steps
-10. **Stored Procedures**: CREATE PROCEDURE, EXEC/CALL procedure statements
+Only include actual CICS operations found. Be precise."""
 
-Return ONLY valid JSON in this exact format:
+    def _create_sql_focused_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Focused prompt for SQL operations only"""
+        return f"""Extract SQL operations from this COBOL code.
+
+PROGRAM: {program_name}
+SECTION: {section.name}
+
+CODE:
+{section.content}
+
+Find all EXEC SQL statements. Return only JSON:
+{{
+  "sql_operations": [
+    {{
+      "type": "SQL_SELECT|SQL_INSERT|SQL_UPDATE|SQL_DELETE|SQL_CALL",
+      "target": "table_or_procedure_name",
+      "line_number": 123,
+      "statement": "EXEC SQL SELECT * FROM CUSTOMER",
+      "confidence": 0.95
+    }}
+  ]
+}}
+
+Only include actual SQL operations found. Be precise."""
+
+    def _create_copybook_focused_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Focused prompt for COPY statements only"""
+        return f"""Extract COPY statements from this COBOL code.
+
+PROGRAM: {program_name}
+SECTION: {section.name}
+
+CODE:
+{section.content}
+
+Find all COPY statements. Return only JSON:
+{{
+  "copybook_includes": [
+    {{
+      "type": "COPY",
+      "target": "copybook_name",
+      "line_number": 123,
+      "statement": "COPY TMS06ASU",
+      "location": "WORKING-STORAGE|FILE-SECTION|LINKAGE-SECTION",
+      "confidence": 0.95
+    }}
+  ]
+}}
+
+Only include actual COPY statements found. Be precise."""
+
+    def _create_call_focused_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Focused prompt for CALL statements only"""
+        return f"""Extract CALL statements from this COBOL code.
+
+PROGRAM: {program_name}
+SECTION: {section.name}
+
+CODE:
+{section.content}
+
+Find all CALL statements. Return only JSON:
+{{
+  "program_calls": [
+    {{
+      "type": "CALL",
+      "target": "program_name",
+      "line_number": 123,
+      "statement": "CALL 'SUBPROG' USING WS-PARMS",
+      "confidence": 0.95
+    }}
+  ]
+}}
+
+Only include actual CALL statements found. Be precise."""
+
+    def _create_field_focused_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Focused prompt for field definitions only"""
+        return f"""Extract field definitions from this COBOL code.
+
+PROGRAM: {program_name}
+SECTION: {section.name}
+
+CODE:
+{section.content}
+
+Find all field definitions with PIC clauses. Return only JSON:
+{{
+  "field_definitions": [
+    {{
+      "type": "FIELD_DEFINITION",
+      "target": "field_name",
+      "line_number": 123,
+      "statement": "05 WS-CUSTOMER-NAME PIC X(30)",
+      "picture_clause": "X(30)",
+      "level_number": 5,
+      "confidence": 0.95
+    }}
+  ]
+}}
+
+Only include actual field definitions found. Be precise."""
+
+    def _create_file_focused_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Focused prompt for file operations only"""
+        return f"""Extract file operations from this COBOL code.
+
+PROGRAM: {program_name}
+SECTION: {section.name}
+
+CODE:
+{section.content}
+
+Find all file I/O operations. Return only JSON:
 {{
   "file_operations": [
     {{
@@ -420,120 +562,61 @@ Return ONLY valid JSON in this exact format:
       "target": "file_name",
       "line_number": 123,
       "statement": "READ CUSTOMER-FILE INTO WS-CUSTOMER-REC",
-      "access_mode": "INPUT|OUTPUT|I-O|EXTEND",
       "confidence": 0.95
-    }}
-  ],
-  "cics_operations": [
-    {{
-      "type": "CICS_READ|CICS_WRITE|CICS_LINK|CICS_XCTL|CICS_START|CICS_RETURN",
-      "target": "dataset_file_or_program_name", 
-      "line_number": 124,
-      "statement": "EXEC CICS READ DATASET('TMS92ASO')",
-      "operation_details": "INTO(record) RIDFLD(key) RESP(ws-resp)",
-      "confidence": 0.98
-    }}
-  ],
-  "copybook_includes": [
-    {{
-      "type": "COPY",
-      "target": "copybook_name",
-      "line_number": 45,
-      "statement": "COPY TMS06ASU",
-      "location": "WORKING-STORAGE|FILE-SECTION|LINKAGE-SECTION", 
-      "replacing_clause": "",
-      "confidence": 0.99
-    }}
-  ],
-  "program_calls": [
-    {{
-      "type": "CALL|CICS_LINK|CICS_XCTL",
-      "target": "program_name",
-      "line_number": 156,
-      "statement": "CALL 'SUBPROG' USING WS-PARMS",
-      "parameters": "WS-PARMS",
-      "confidence": 0.97
-    }}
-  ],
-  "sql_operations": [
-    {{
-      "type": "SQL_SELECT|SQL_INSERT|SQL_UPDATE|SQL_DELETE|SQL_CALL",
-      "target": "table_or_procedure_name",
-      "line_number": 200,
-      "statement": "EXEC SQL SELECT * FROM CUSTOMER WHERE ID = :WS-ID",
-      "database_objects": ["CUSTOMER"],
-      "confidence": 0.96
-    }}
-  ],
-  "mq_operations": [
-    {{
-      "type": "MQOPEN|MQPUT|MQGET|MQCLOSE|MQINQ|MQSET",
-      "target": "queue_name",
-      "line_number": 300,
-      "statement": "CALL 'MQOPEN' USING HCONN, OBJDESC, OPTIONS, COMPCODE, REASON",
-      "queue_manager": "QM1",
-      "confidence": 0.94
-    }}
-  ],
-  "websphere_xml": [
-    {{
-      "type": "XML_PARSE|SOAP_CALL|REST_CALL|WS_INVOKE",
-      "target": "service_name",
-      "line_number": 400,
-      "statement": "CALL 'XMLPARSE' USING XML-DOCUMENT, PARSED-DATA",
-      "service_details": "endpoint or document type",
-      "confidence": 0.90
-    }}
-  ],
-  "field_definitions": [
-    {{
-      "type": "FIELD_DEFINITION|CONDITION_NAME|GROUP_ITEM",
-      "target": "field_name",
-      "line_number": 67,
-      "statement": "05 WS-CUSTOMER-NAME PIC X(30) VALUE SPACES",
-      "data_type": "CHARACTER|NUMERIC|CONDITION|GROUP",
-      "picture_clause": "X(30)",
-      "value_clause": "SPACES",
-      "level_number": 5,
-      "business_domain": "CUSTOMER|FINANCIAL|TEMPORAL|ADDRESS|GENERAL",
-      "confidence": 0.98
-    }}
-  ],
-  "jcl_operations": [
-    {{
-      "type": "JCL_EXEC|JCL_DD",
-      "target": "program_or_dataset_name",
-      "line_number": 10,
-      "statement": "//STEP01 EXEC PGM=MYPROG",
-      "step_details": "step parameters",
-      "confidence": 0.95
-    }}
-  ],
-  "stored_procedures": [
-    {{
-      "type": "CREATE_PROCEDURE|EXEC_PROCEDURE|CALL_PROCEDURE",
-      "target": "procedure_name",
-      "line_number": 500,
-      "statement": "EXEC SQL CALL MYPROC(:PARM1, :PARM2)",
-      "parameters": ":PARM1, :PARM2",
-      "confidence": 0.93
     }}
   ]
 }}
 
-CRITICAL REQUIREMENTS:
-- Extract EVERY relationship found in the code - be comprehensive
-- Line numbers must be accurate relative to section start ({code_section.start_line})
-- Include confidence scores (0.0-1.0) based on pattern certainty
-- Handle all syntax variations (quotes, spaces, case differences)
-- Distinguish between actual code and comments
-- For CICS: Capture both FILE('name') and DATASET('name') patterns
-- For SQL: Include all table names, procedure names
-- For MQ: Capture queue names, queue managers
-- Only include categories that have actual findings in the code
-- Ensure all JSON is valid and properly formatted"""
+Only include actual file operations found. Be precise."""
 
-        return prompt
+    def _create_mq_focused_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Focused prompt for MQ operations only"""
+        return f"""Extract MQ operations from this COBOL code.
+
+PROGRAM: {program_name}
+SECTION: {section.name}
+
+CODE:
+{section.content}
+
+Find all MQ operations. Return only JSON:
+{{
+  "mq_operations": [
+    {{
+      "type": "MQOPEN|MQPUT|MQGET|MQCLOSE",
+      "target": "queue_name",
+      "line_number": 123,
+      "statement": "CALL 'MQOPEN' USING HCONN, OBJDESC",
+      "confidence": 0.95
+    }}
+  ]
+}}
+
+Only include actual MQ operations found. Be precise."""
+
+    def _create_minimal_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Minimal prompt for general analysis"""
+        return f"""Analyze this COBOL code section for any relationships.
+
+PROGRAM: {program_name}
+SECTION: {section.name}
+
+CODE:
+{section.content}
+
+Return JSON with any relationships found:
+{{
+  "relationships": [
+    {{
+      "type": "relationship_type",
+      "target": "target_name",
+      "line_number": 123,
+      "confidence": 0.95
+    }}
+  ]
+}}
+
+Be precise and only include what you actually find."""
 
     def intelligent_chunk_cobol(self, content: str, program_name: str) -> List[CodeSection]:
         """Intelligently chunk COBOL code based on structure"""
@@ -881,6 +964,7 @@ CRITICAL REQUIREMENTS:
                 continue
         
         return None
+    
     """
 COMPLETE LLM CodeParser Agent with Full Database Storage
 Part 3: Main Processing Engine and LLM Analysis
@@ -1017,15 +1101,94 @@ Part 3: Main Processing Engine and LLM Analysis
             self.logger.error(f"LLM analysis failed for section {section.name}: {e}")
             return {"error": str(e), "section": section.name}
 
-    def _parse_comprehensive_response(self, response: Dict[str, Any], 
-                                    section: CodeSection) -> Dict[str, Any]:
-        """Parse comprehensive LLM response"""
+    async def _analyze_section_with_llm(self, section: CodeSection, file_type: str, 
+                                      program_name: str) -> Optional[Dict[str, Any]]:
+        """Analyze a single section with LLM using focused prompts"""
+        
+        # Critical: Validate chunk size before LLM call
+        if not self._validate_chunk_size(section):
+            self.logger.error(f"🚨 Skipping oversized chunk: {section.name}")
+            return {"error": "Chunk too large for model", "section": section.name}
+        
+        # Check cache
+        section_hash = hashlib.sha256(section.content.encode()).hexdigest()
+        cached_result = await self._check_analysis_cache(section_hash)
+        if cached_result:
+            self.stats["cache_hits"] += 1
+            return cached_result
+        
+        # Create focused prompt based on content
+        prompt = self.create_focused_analysis_prompt(section, file_type, program_name)
+        
+        # Final token check with actual prompt
+        prompt_tokens = self._estimate_tokens(prompt)
+        if prompt_tokens > 1800:  # Conservative limit well under 2048
+            self.logger.error(f"🚨 Prompt too large: {prompt_tokens} tokens for {section.name}")
+            return {"error": "Prompt exceeds model limit", "section": section.name}
+        
+        try:
+            self.stats["llm_calls"] += 1
+            self.logger.info(f"📤 Sending focused prompt to LLM: {section.name} ({prompt_tokens} tokens)")
+            
+            response = await self.coordinator.call_model_api(
+                prompt=prompt,
+                params=self.base_llm_params
+            )
+            
+            analysis = self._parse_focused_response(response, section)
+            
+            # Cache successful analysis
+            if analysis and "error" not in analysis:
+                await self._cache_analysis_result(section_hash, analysis)
+            
+            return analysis
+            
+        except Exception as e:
+            self.logger.error(f"❌ LLM analysis failed for section {section.name}: {e}")
+            return {"error": str(e), "section": section.name}
+
+    def _parse_focused_response(self, response: Dict[str, Any], 
+                               section: CodeSection) -> Dict[str, Any]:
+        """Parse focused LLM response - handle smaller, specific responses"""
         try:
             text_content = self._extract_response_text(response)
             if not text_content:
                 return {"error": "No content in response", "section": section.name}
             
-            # Extract JSON
+            self.logger.debug(f"Raw LLM response: {text_content[:200]}...")
+            
+            # Clean the response - remove any explanation text
+            text_content = text_content.strip()
+            
+            # Remove common LLM response prefixes/suffixes
+            prefixes_to_remove = [
+                "Here is the JSON:",
+                "Here's the JSON:",
+                "The JSON is:",
+                "JSON:",
+                "```json",
+                "```",
+                "Based on the analysis:",
+                "After analyzing the code:",
+            ]
+            
+            for prefix in prefixes_to_remove:
+                if text_content.startswith(prefix):
+                    text_content = text_content[len(prefix):].strip()
+            
+            # Remove trailing explanation text
+            suffixes_to_remove = [
+                "```",
+                "This analysis is based on",
+                "The above JSON contains",
+                "Note that",
+            ]
+            
+            for suffix in suffixes_to_remove:
+                if suffix in text_content:
+                    text_content = text_content.split(suffix)[0].strip()
+            
+            # Extract JSON more aggressively
             json_start = text_content.find('{')
             json_end = text_content.rfind('}') + 1
             
@@ -1034,22 +1197,201 @@ Part 3: Main Processing Engine and LLM Analysis
                 
                 try:
                     analysis = json.loads(json_str)
-                    analysis['section_info'] = {
-                        'section_type': section.section_type,
-                        'section_name': section.name,
-                        'start_line': section.start_line,
-                        'end_line': section.end_line
-                    }
-                    return analysis
                     
-                except json.JSONDecodeError:
+                    # Normalize the response to standard format
+                    normalized = self._normalize_focused_response(analysis, section)
+                    
+                    return normalized
+                    
+                except json.JSONDecodeError as e:
+                    self.logger.warning(f"JSON decode error for {section.name}: {e}")
                     return self._repair_and_parse_json(json_str, section)
             
-            return self._fallback_comprehensive_extraction(text_content, section)
+            # Fallback to pattern-based extraction
+            self.logger.warning(f"No valid JSON found in response for {section.name}, using fallback")
+            return self._fallback_pattern_extraction(text_content, section)
             
         except Exception as e:
-            self.logger.error(f"Failed to parse response for {section.name}: {e}")
+            self.logger.error(f"Failed to parse focused response for {section.name}: {e}")
             return {"error": str(e), "section": section.name}
+
+    def _normalize_focused_response(self, analysis: Dict[str, Any], 
+                                   section: CodeSection) -> Dict[str, Any]:
+        """Normalize focused response to standard format"""
+        
+        # Initialize standard format
+        normalized = {
+            "file_operations": [],
+            "cics_operations": [],
+            "copybook_includes": [],
+            "program_calls": [],
+            "sql_operations": [],
+            "mq_operations": [],
+            "websphere_xml": [],
+            "field_definitions": [],
+            "jcl_operations": [],
+            "stored_procedures": [],
+            "section_info": {
+                "section_type": section.section_type,
+                "section_name": section.name,
+                "start_line": section.start_line,
+                "end_line": section.end_line,
+                "focused_analysis": True
+            }
+        }
+        
+        # Copy over any found relationships
+        for key in normalized.keys():
+            if key in analysis and isinstance(analysis[key], list):
+                normalized[key] = analysis[key]
+        
+        # Handle generic "relationships" key from minimal prompt
+        if "relationships" in analysis:
+            for rel in analysis["relationships"]:
+                rel_type = rel.get("type", "").lower()
+                
+                if "cics" in rel_type:
+                    normalized["cics_operations"].append(rel)
+                elif "copy" in rel_type:
+                    normalized["copybook_includes"].append(rel)
+                elif "call" in rel_type:
+                    normalized["program_calls"].append(rel)
+                elif "sql" in rel_type:
+                    normalized["sql_operations"].append(rel)
+                elif "field" in rel_type or "pic" in rel_type:
+                    normalized["field_definitions"].append(rel)
+                elif "file" in rel_type or "read" in rel_type or "write" in rel_type:
+                    normalized["file_operations"].append(rel)
+                elif "mq" in rel_type:
+                    normalized["mq_operations"].append(rel)
+        
+        # Validate line numbers are relative to section start
+        for category in normalized:
+            if isinstance(normalized[category], list):
+                for item in normalized[category]:
+                    if isinstance(item, dict) and "line_number" in item:
+                        # Ensure line number is absolute, not relative to section
+                        if item["line_number"] < section.start_line:
+                            item["line_number"] += section.start_line
+        
+        return normalized
+
+    def _fallback_pattern_extraction(self, text: str, section: CodeSection) -> Dict[str, Any]:
+        """Enhanced fallback extraction for when JSON parsing fails"""
+        
+        analysis = {
+            "file_operations": [], "cics_operations": [], "copybook_includes": [],
+            "program_calls": [], "sql_operations": [], "field_definitions": [],
+            "mq_operations": [], "websphere_xml": [], "jcl_operations": [],
+            "stored_procedures": [],
+            "section_info": {
+                "section_type": section.section_type, 
+                "section_name": section.name, 
+                "fallback_parsing": True
+            }
+        }
+        
+        # Use the original code content for pattern extraction, not the LLM response
+        code_lines = section.content.split('\n')
+        
+        for i, line in enumerate(code_lines):
+            line_clean = line.strip().upper()
+            actual_line_num = section.start_line + i
+            
+            # Extract CICS operations
+            if 'EXEC CICS' in line_clean:
+                if 'DATASET(' in line_clean or 'FILE(' in line_clean:
+                    # Extract dataset/file name
+                    for pattern in [r"DATASET\s*\(\s*['\"]([^'\"]+)['\"]", r"FILE\s*\(\s*['\"]([^'\"]+)['\"]"]:
+                        match = re.search(pattern, line_clean)
+                        if match:
+                            op_type = 'CICS_READ' if 'READ' in line_clean else 'CICS_WRITE'
+                            analysis["cics_operations"].append({
+                                "type": op_type,
+                                "target": match.group(1),
+                                "line_number": actual_line_num,
+                                "statement": line.strip(),
+                                "confidence": 0.7
+                            })
+                            break
+                
+                elif 'LINK' in line_clean or 'XCTL' in line_clean:
+                    # Extract program name
+                    match = re.search(r"PROGRAM\s*\(\s*['\"]([^'\"]+)['\"]", line_clean)
+                    if match:
+                        op_type = 'CICS_LINK' if 'LINK' in line_clean else 'CICS_XCTL'
+                        analysis["cics_operations"].append({
+                            "type": op_type,
+                            "target": match.group(1),
+                            "line_number": actual_line_num,
+                            "statement": line.strip(),
+                            "confidence": 0.8
+                        })
+            
+            # Extract COPY statements
+            elif line_clean.startswith('COPY ') or ' COPY ' in line_clean:
+                match = re.search(r'COPY\s+([A-Z][A-Z0-9-]*)', line_clean)
+                if match:
+                    analysis["copybook_includes"].append({
+                        "type": "COPY",
+                        "target": match.group(1),
+                        "line_number": actual_line_num,
+                        "statement": line.strip(),
+                        "location": "UNKNOWN",
+                        "confidence": 0.9
+                    })
+            
+            # Extract CALL statements
+            elif 'CALL ' in line_clean and not line_clean.strip().startswith('*'):
+                match = re.search(r"CALL\s+['\"]([^'\"]+)['\"]", line_clean)
+                if match:
+                    analysis["program_calls"].append({
+                        "type": "CALL",
+                        "target": match.group(1),
+                        "line_number": actual_line_num,
+                        "statement": line.strip(),
+                        "confidence": 0.8
+                    })
+            
+            # Extract SQL operations
+            elif 'EXEC SQL' in line_clean:
+                sql_type = 'SQL_SELECT'
+                if 'SELECT' in line_clean:
+                    sql_type = 'SQL_SELECT'
+                elif 'INSERT' in line_clean:
+                    sql_type = 'SQL_INSERT'
+                elif 'UPDATE' in line_clean:
+                    sql_type = 'SQL_UPDATE'
+                elif 'DELETE' in line_clean:
+                    sql_type = 'SQL_DELETE'
+                
+                # Try to extract table name
+                table_match = re.search(r'FROM\s+([A-Z][A-Z0-9_]*)', line_clean)
+                target = table_match.group(1) if table_match else "UNKNOWN_TABLE"
+                
+                analysis["sql_operations"].append({
+                    "type": sql_type,
+                    "target": target,
+                    "line_number": actual_line_num,
+                    "statement": line.strip(),
+                    "confidence": 0.8
+                })
+            
+            # Extract field definitions
+            elif re.match(r'^\s*\d+\s+\w+.*PIC\s+', line_clean):
+                match = re.search(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*)\s+.*PIC\s+([X9V()]+)', line_clean)
+                if match:
+                    analysis["field_definitions"].append({
+                        "type": "FIELD_DEFINITION",
+                        "target": match.group(2),
+                        "line_number": actual_line_num,
+                        "statement": line.strip(),
+                        "level_number": int(match.group(1)),
+                        "picture_clause": match.group(3),
+                        "confidence": 0.9
+                    })
+        
+        return analysis
 
     def _repair_and_parse_json(self, json_str: str, section: CodeSection) -> Dict[str, Any]:
         """Attempt to repair malformed JSON"""
@@ -1127,20 +1469,34 @@ Part 3: Main Processing Engine and LLM Analysis
         return list(seen.values())
 
     def _fallback_comprehensive_extraction(self, text: str, section: CodeSection) -> Dict[str, Any]:
-        """Fallback extraction when JSON parsing fails"""
-        analysis = {
-            "file_operations": [], "cics_operations": [], "copybook_includes": [],
-            "program_calls": [], "sql_operations": [], "field_definitions": [],
-            "section_info": {"section_type": section.section_type, "section_name": section.name, "fallback_parsing": True}
-        }
-        
-        lines = text.split('\n')
-        for line in lines:
-            line_clean = line.strip()
+        """This method is no longer used - replaced by _fallback_pattern_extraction"""
+        return self._fallback_pattern_extraction(text, section)
+
+    def _extract_response_text(self, response: Dict[str, Any]) -> str:
+        """Extract text from LLM response with better handling"""
+        # Handle different response formats from your model server
+        if isinstance(response, dict):
+            # Try common response keys
+            for key in ['text', 'response', 'content', 'generated_text', 'output']:
+                if key in response and response[key]:
+                    return str(response[key]).strip()
             
-            # Extract CICS operations
-            if 'CICS' in line_clean.upper():
-                match = re.search(r"['\"]([A-Z0-9]+)['\"]", line_clean)
+            # Handle nested response structures
+            if 'choices' in response and response['choices']:
+                choice = response['choices'][0]
+                if isinstance(choice, dict):
+                    for key in ['text', 'message', 'content']:
+                        if key in choice and choice[key]:
+                            if isinstance(choice[key], dict) and 'content' in choice[key]:
+                                return str(choice[key]['content']).strip()
+                            return str(choice[key]).strip()
+            
+            # If response is a simple dict with direct content
+            if len(response) == 1:
+                return str(list(response.values())[0]).strip()
+        
+        # Fallback to string conversion
+        return str(response).strip() if response else ""Z0-9]+)['\"]", line_clean)
                 if match:
                     op_type = 'CICS_READ' if 'READ' in line_clean.upper() else 'CICS_WRITE'
                     if 'LINK' in line_clean.upper():
