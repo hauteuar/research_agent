@@ -272,7 +272,7 @@ class LoadBalancer:
             return available_servers[0]
         
         # For high token requests, prefer less busy servers
-        if estimated_tokens > 1000:
+        if estimated_tokens > 2000:
             selected = min(available_servers, key=lambda s: s.active_requests)
             self.logger.info(f"🔥 High load ({estimated_tokens} tokens) -> least busy: {selected.config.name}")
             return selected
@@ -586,7 +586,7 @@ class ModelServerClient:
         # PRODUCTION: Much higher token limits
         request_data = {
             "prompt": prompt,  # No truncation
-            "max_tokens": min(params.get("max_tokens", 800), 1500),  # High limit
+            "max_tokens": min(params.get("max_tokens", 800), 2500),  # High limit
             "temperature": params.get("temperature", 0.1),
             "top_p": params.get("top_p", 0.9),
             "stream": False,
@@ -871,49 +871,49 @@ class APIOpulenceCoordinator:
         # FIXED: Ultra-conservative agent configurations
         self.agent_configs = {
             "code_parser": {
-                "max_tokens": 20,  # FIXED: Very small
+                "max_tokens": 2000,  # FIXED: Very small
                 "temperature": 0.1,
                 "top_p": 0.9,
                 "description": "Analyzes and parses code structures"
             },
             "vector_index": {
-                "max_tokens": 15,  # FIXED: Even smaller
+                "max_tokens": 1500,  # FIXED: Even smaller
                 "temperature": 0.1,
                 "top_p": 0.9,
                 "description": "Handles vector embeddings and similarity search"
             },
             "data_loader": {
-                "max_tokens": 20,  # FIXED: Small
+                "max_tokens": 2000,  # FIXED: Small
                 "temperature": 0.1,
                 "top_p": 0.9,
                 "description": "Processes and loads data files"
             },
             "lineage_analyzer": {
-                "max_tokens": 25,  # FIXED: Small
+                "max_tokens": 2500,  # FIXED: Small
                 "temperature": 0.1,
                 "top_p": 0.9,
                 "description": "Analyzes data and code lineage"
             },
             "logic_analyzer": {
-                "max_tokens": 25,  # FIXED: Small
+                "max_tokens": 2500,  # FIXED: Small
                 "temperature": 0.1,
                 "top_p": 0.9,
                 "description": "Analyzes program logic and flow"
             },
             "documentation": {
-                "max_tokens": 30,  # FIXED: Medium
+                "max_tokens": 3000,  # FIXED: Medium
                 "temperature": 0.1,
                 "top_p": 0.9,
                 "description": "Generates documentation"
             },
             "db2_comparator": {
-                "max_tokens": 20,  # FIXED: Small
+                "max_tokens": 2000,  # FIXED: Small
                 "temperature": 0.1,
                 "top_p": 0.9,
                 "description": "Compares database schemas and data"
             },
             "chat_agent": {
-                "max_tokens": 25,  # FIXED: Small
+                "max_tokens": 2500,  # FIXED: Small
                 "temperature": 0.15,  # Slightly higher for chat
                 "top_p": 0.9,
                 "description": "Handles interactive chat queries"
