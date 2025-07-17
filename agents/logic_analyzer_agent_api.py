@@ -1332,8 +1332,35 @@ Return as JSON array:
         
         return list(set(operations))
     
+    def _normalize_component_name(self, component_name) -> str:
+        """FIXED: Normalize component name to handle tuples and other formats"""
+        try:
+            # If it's already a string, return as-is
+            if isinstance(component_name, str):
+                return component_name.strip()
+            
+            # If it's a tuple or list, take the first element
+            if isinstance(component_name, (tuple, list)) and len(component_name) > 0:
+                first_element = component_name[0]
+                if isinstance(first_element, str):
+                    self.logger.info(f"🔧 Normalized tuple/list component name: {component_name} -> {first_element}")
+                    return first_element.strip()
+            
+            # If it's something else, convert to string
+            normalized = str(component_name).strip()
+            if normalized != str(component_name):
+                self.logger.info(f"🔧 Converted component name to string: {component_name} -> {normalized}")
+            
+            return normalized
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to normalize component name {component_name}: {e}")
+            return str(component_name) if component_name else "UNKNOWN"
+
+
     async def analyze_complete_program_flow(self, program_name: str) -> Dict[str, Any]:
         """✅ ENHANCED: Complete program flow analysis using new relationship tables"""
+        program_name = self._normalize_component_name(program_name)
         try:
             # Get program relationships
             program_relationships = await self._get_program_relationships(program_name)
