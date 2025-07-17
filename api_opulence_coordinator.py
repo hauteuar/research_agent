@@ -1008,7 +1008,9 @@ class APIOpulenceCoordinator:
                     fields TEXT,
                     source_type TEXT,
                     last_modified TIMESTAMP,
-                    processing_status TEXT DEFAULT 'pending',
+                    processing_status TEXT DEFAULT 'processed',
+                    extraction_method TEXT DEFAULT 'llm',
+                    confidence_score REAL DEFAULT 1.0,
                     created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
                 

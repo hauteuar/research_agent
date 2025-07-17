@@ -36,13 +36,15 @@ class DependencyAnalysis:
     missing_programs: Set[str]
     confidence_score: float
 
-class CompleteLLMCodeParser:
+class CodeParserAgent:
     """
     Complete LLM-based code parser with full database integration
     Handles all mainframe patterns: COBOL, CICS, SQL, MQ, JCL, etc.
     """
     
-    def __init__(self, coordinator, db_path: str = None):
+    def __init__(self, coordinator, db_path: str = None, llm_engine=None,
+                    
+                    gpu_id: int = 0  ):
         self.coordinator = coordinator
         self.db_path = db_path or "opulence_data.db"
         self.logger = coordinator.logger if hasattr(coordinator, 'logger') else self._setup_logger()
@@ -54,13 +56,13 @@ class CompleteLLMCodeParser:
             "top_p": 0.9
         }
         
-        # Chunking parameters
-        self.max_tokens_per_chunk = 1800
-        self.min_chunk_lines = 50
-        self.overlap_lines = 20
-        self.max_chunk_size = 500
-        self.chars_per_token = 4
-        self.prompt_overhead_tokens = 400
+        # Chunking parameters - Fixed for proper token limits
+        self.max_tokens_per_chunk = 1400  # Reduced from 1800 to account for prompt overhead
+        self.min_chunk_lines = 20         # Reduced from 50
+        self.overlap_lines = 10           # Reduced from 20
+        self.max_chunk_size = 200         # Reduced from 500
+        self.chars_per_token = 3.5        # More conservative from 4
+        self.prompt_overhead_tokens = 600 # Increased from 400
         
         # Statistics tracking
         self.stats = {
@@ -377,6 +379,12 @@ class CompleteLLMCodeParser:
         
         for index_sql in indexes:
             cursor.execute(index_sql)
+    
+    """
+COMPLETE LLM CodeParser Agent with Full Database Storage
+Part 2: Prompt Creation and Intelligent Code Chunking
+"""
+
     """
 COMPLETE LLM CodeParser Agent with Full Database Storage
 Part 2: Prompt Creation and Intelligent Code Chunking
@@ -551,7 +559,8 @@ CRITICAL REQUIREMENTS:
             section_content = '\n'.join(lines[start_line:end_line])
             estimated_tokens = self._estimate_tokens(section_content)
             
-            if estimated_tokens <= self.max_tokens_per_chunk:
+            # Check if section fits within limits (accounting for prompt overhead)
+            if estimated_tokens + self.prompt_overhead_tokens <= self.max_tokens_per_chunk:
                 sections.append(CodeSection(
                     section_type=boundary_type,
                     name=name,
@@ -569,8 +578,18 @@ CRITICAL REQUIREMENTS:
         if not sections:
             sections = self._fallback_line_chunking(content, program_name)
         
-        self.logger.info(f"Created {len(sections)} intelligent sections for {program_name}")
-        return sections
+        # Validate all sections are within token limits
+        validated_sections = []
+        for section in sections:
+            if self._validate_chunk_size(section):
+                validated_sections.append(section)
+            else:
+                # Force split oversized chunks
+                split_chunks = self._force_split_chunk(section, program_name)
+                validated_sections.extend(split_chunks)
+        
+        self.logger.info(f"Created {len(validated_sections)} validated sections for {program_name}")
+        return validated_sections
 
     def _find_cobol_boundaries(self, lines: List[str]) -> List[Tuple[str, str, int, int]]:
         """Find COBOL division and section boundaries"""
@@ -625,7 +644,9 @@ CRITICAL REQUIREMENTS:
                 para_end = paragraph_starts[i + 1] if i + 1 < len(paragraph_starts) else len(lines)
                 para_content = '\n'.join(lines[para_start:para_end])
                 
-                if self._estimate_tokens(para_content) <= self.max_tokens_per_chunk:
+                # Check if paragraph fits within limits
+                para_tokens = self._estimate_tokens(para_content)
+                if para_tokens + self.prompt_overhead_tokens <= 2048:
                     para_name = lines[para_start].strip().rstrip('.')
                     sections.append(CodeSection(
                         section_type='PARAGRAPH',
@@ -654,30 +675,55 @@ CRITICAL REQUIREMENTS:
         chunk_num = 1
         
         while chunk_start < len(lines):
-            chunk_end = min(chunk_start + self.max_chunk_size, len(lines))
+            chunk_lines = []
+            current_tokens = 0
             
-            # Find logical break point
-            if chunk_end < len(lines):
-                for i in range(chunk_end - 10, min(chunk_end + 10, len(lines))):
-                    if i < len(lines) and (not lines[i].strip() or lines[i].strip().startswith('*')):
-                        chunk_end = i
-                        break
+            # Build chunk line by line, checking tokens
+            for i in range(chunk_start, len(lines)):
+                line = lines[i]
+                line_tokens = self._estimate_tokens(line)
+                
+                # Check if adding this line would exceed safe limit
+                if current_tokens + line_tokens + self.prompt_overhead_tokens > 2048 and chunk_lines:
+                    break
+                
+                chunk_lines.append(line)
+                current_tokens += line_tokens
+                
+                # Also check line count limit
+                if len(chunk_lines) >= self.max_chunk_size:
+                    break
             
-            chunk_content = '\n'.join(lines[chunk_start:chunk_end])
-            
-            sections.append(CodeSection(
-                section_type='CHUNK',
-                name=f'CHUNK-{chunk_num}',
-                content=chunk_content,
-                start_line=start_line_offset + chunk_start + 1,
-                end_line=start_line_offset + chunk_end
-            ))
-            
-            chunk_start = chunk_end - self.overlap_lines
-            chunk_num += 1
-            
-            if chunk_start >= len(lines) - self.overlap_lines:
-                break
+            if chunk_lines:
+                chunk_content = '\n'.join(chunk_lines)
+                sections.append(CodeSection(
+                    section_type='CHUNK',
+                    name=f'CHUNK-{chunk_num}',
+                    content=chunk_content,
+                    start_line=start_line_offset + chunk_start + 1,
+                    end_line=start_line_offset + chunk_start + len(chunk_lines)
+                ))
+                
+                chunk_start += len(chunk_lines) - self.overlap_lines
+                chunk_num += 1
+                
+                if chunk_start >= len(lines) - self.overlap_lines:
+                    break
+            else:
+                # Emergency: single line chunk
+                if chunk_start < len(lines):
+                    single_line = lines[chunk_start]
+                    sections.append(CodeSection(
+                        section_type='CHUNK',
+                        name=f'EMERGENCY-{chunk_num}',
+                        content=single_line,
+                        start_line=start_line_offset + chunk_start + 1,
+                        end_line=start_line_offset + chunk_start + 1
+                    ))
+                    chunk_start += 1
+                    chunk_num += 1
+                else:
+                    break
         
         return sections
 
@@ -706,8 +752,67 @@ CRITICAL REQUIREMENTS:
         return sections
 
     def _estimate_tokens(self, content: str) -> int:
-        """Estimate token count for content"""
-        return len(content) // self.chars_per_token
+        """Estimate token count for content with safety buffer"""
+        # Remove excessive whitespace for better estimation
+        content = re.sub(r'\s+', ' ', content.strip())
+        
+        # More conservative token estimation
+        estimated = len(content) / self.chars_per_token
+        
+        # Add 10% safety buffer
+        return int(estimated * 1.1)
+
+    def _validate_chunk_size(self, section: CodeSection) -> bool:
+        """Validate that chunk is within token limits including prompt overhead"""
+        content_tokens = self._estimate_tokens(section.content)
+        total_tokens = content_tokens + self.prompt_overhead_tokens
+        
+        if total_tokens > 2048:  # Hard limit for CodeLlama
+            self.logger.warning(f"Chunk {section.name} exceeds limit: {total_tokens} tokens")
+            return False
+        
+        return True
+
+    def _force_split_chunk(self, section: CodeSection, program_name: str) -> List[CodeSection]:
+        """Force split a chunk that's too large into smaller pieces"""
+        lines = section.content.split('\n')
+        sections = []
+        chunk_num = 1
+        
+        i = 0
+        while i < len(lines):
+            chunk_lines = []
+            current_tokens = 0
+            
+            # Build chunk line by line, checking tokens
+            while i < len(lines):
+                line = lines[i]
+                line_tokens = self._estimate_tokens(line)
+                
+                # Check if adding this line would exceed safe limit
+                if current_tokens + line_tokens + self.prompt_overhead_tokens > 2048 and chunk_lines:
+                    break
+                
+                chunk_lines.append(line)
+                current_tokens += line_tokens
+                i += 1
+                
+                # Also check line count limit
+                if len(chunk_lines) >= self.max_chunk_size:
+                    break
+            
+            if chunk_lines:
+                chunk_content = '\n'.join(chunk_lines)
+                sections.append(CodeSection(
+                    section_type=section.section_type,
+                    name=f"{section.name}-SPLIT-{chunk_num}",
+                    content=chunk_content,
+                    start_line=section.start_line + i - len(chunk_lines),
+                    end_line=section.start_line + i - 1
+                ))
+                chunk_num += 1
+        
+        return sections
 
     def _detect_file_type(self, content: str, suffix: str) -> str:
         """Enhanced file type detection"""
@@ -774,7 +879,6 @@ CRITICAL REQUIREMENTS:
                 continue
         
         return None
-    
     """
 COMPLETE LLM CodeParser Agent with Full Database Storage
 Part 3: Main Processing Engine and LLM Analysis
@@ -869,6 +973,11 @@ Part 3: Main Processing Engine and LLM Analysis
                                       program_name: str) -> Optional[Dict[str, Any]]:
         """Analyze a single section with LLM"""
         
+        # Critical: Validate chunk size before LLM call
+        if not self._validate_chunk_size(section):
+            self.logger.error(f"🚨 Skipping oversized chunk: {section.name}")
+            return {"error": "Chunk too large for model", "section": section.name}
+        
         # Check cache
         section_hash = hashlib.sha256(section.content.encode()).hexdigest()
         cached_result = await self._check_analysis_cache(section_hash)
@@ -879,8 +988,15 @@ Part 3: Main Processing Engine and LLM Analysis
         # Create prompt
         prompt = self.create_comprehensive_analysis_prompt(section, file_type, program_name)
         
+        # Final token check with actual prompt
+        prompt_tokens = self._estimate_tokens(prompt)
+        if prompt_tokens > 2048:
+            self.logger.error(f"🚨 Prompt too large: {prompt_tokens} tokens for {section.name}")
+            return {"error": "Prompt exceeds model limit", "section": section.name}
+        
         try:
             self.stats["llm_calls"] += 1
+            self.logger.info(f"📤 Sending to LLM: {section.name} ({prompt_tokens} tokens)")
             
             response = await self.coordinator.call_model_api(
                 prompt=prompt,
@@ -1847,4 +1963,4 @@ Part 5: Reporting, Statistics, and Utility Methods
             return {"status": "error", "error": str(e)}
 
 # Export the main class
-__all__ = ['CompleteLLMCodeParser']
+__all__ = ['CodeParserAgent']
