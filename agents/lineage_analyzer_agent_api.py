@@ -397,14 +397,42 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 "analysis_timestamp": dt.now().isoformat()
             })
 
-    
-    async def analyze_complete_data_flow(self, component_name: str, component_type: str) -> Dict[str, Any]:
-        """🔄 FIXED: Complete data flow analysis with auto-detection"""
+    def _normalize_component_name(self, component_name) -> str:
+        """FIXED: Normalize component name to handle tuples and other formats"""
         try:
-            component_name = str(component_name)
+            # If it's already a string, return as-is
+            if isinstance(component_name, str):
+                return component_name.strip()
+            
+            # If it's a tuple or list, take the first element
+            if isinstance(component_name, (tuple, list)) and len(component_name) > 0:
+                first_element = component_name[0]
+                if isinstance(first_element, str):
+                    self.logger.info(f"🔧 Normalized tuple/list component name: {component_name} -> {first_element}")
+                    return first_element.strip()
+            
+            # If it's something else, convert to string
+            normalized = str(component_name).strip()
+            if normalized != str(component_name):
+                self.logger.info(f"🔧 Converted component name to string: {component_name} -> {normalized}")
+            
+            return normalized
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to normalize component name {component_name}: {e}")
+            return str(component_name) if component_name else "UNKNOWN"
+
+    async def analyze_complete_data_flow(self, component_name: str, component_type: str) -> Dict[str, Any]:
+        """🔄 FIXED: Complete data flow analysis with tuple handling"""
+        try:
+            # CRITICAL FIX: Normalize component name first
+            original_component_name = component_name
+            component_name = self._normalize_component_name(component_name)
             component_type = str(component_type)
             
             self.logger.info(f"🔄 Starting complete data flow analysis for {component_name} ({component_type})")
+            if original_component_name != component_name:
+                self.logger.info(f"🔧 Component name normalized: {original_component_name} -> {component_name}")
             
             # FIXED: Auto-detect actual component type from database
             conn = sqlite3.connect(self.db_path)
@@ -424,6 +452,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 self.logger.warning(f"⚠️ Analysis failed for {component_name}: {analysis_result.get('error', 'Unknown error')}")
                 return self._add_processing_info({
                     "component_name": component_name,
+                    "original_component_name": original_component_name,
                     "component_type": component_type,
                     "detected_type": "program" if actual_is_program else "file",
                     "error": analysis_result.get('error', 'Analysis failed'),
@@ -433,6 +462,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             # FIXED: Add metadata and return properly formatted result
             final_result = {
                 "component_name": component_name,
+                "original_component_name": original_component_name,
                 "component_type": component_type,
                 "detected_type": "program" if actual_is_program else "file",
                 "analysis_result": analysis_result,
@@ -447,16 +477,19 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
         except Exception as e:
             self.logger.error(f"❌ Complete data flow analysis failed: {str(e)}")
             return self._add_processing_info({
-                "component_name": component_name,
+                "component_name": self._normalize_component_name(component_name),
+                "original_component_name": component_name,
                 "component_type": component_type,
                 "error": str(e),
                 "status": "error"
             })
+
         
     async def _analyze_file_data_flow(self, file_name: str) -> Dict[str, Any]:
-        """🔄 FIXED: Analyze file data flow with proper file vs program detection"""
+        """🔄 FIXED: Analyze file data flow with tuple handling"""
         try:
-            file_name = str(file_name)
+            # CRITICAL FIX: Normalize file name first
+            file_name = self._normalize_component_name(file_name)
             
             self.logger.info(f"📁 Analyzing FILE data flow for: {file_name}")
             
@@ -496,14 +529,17 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
         except Exception as e:
             self.logger.error(f"❌ File data flow analysis failed for {file_name}: {str(e)}")
             return {
-                "file_name": file_name,
+                "file_name": self._normalize_component_name(file_name),
                 "error": str(e),
                 "status": "error"
             }
 
     async def _get_file_access_data(self, component_name: str) -> Dict[str, Any]:
-        """FIXED: Get file access data using correct column names"""
+        """FIXED: Get file access data with component name normalization"""
         try:
+            # CRITICAL FIX: Normalize component name first
+            component_name = self._normalize_component_name(component_name)
+            
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
@@ -517,7 +553,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 self.logger.info(f"📄 Treating {component_name} as PROGRAM - finding files it accesses")
                 cursor.execute("""
                     SELECT program_name, logical_file_name, physical_file_name, access_type, access_mode,
-                        record_format,  line_number
+                        record_format, line_number
                     FROM file_access_relationships
                     WHERE program_name = ? OR program_name LIKE ?
                     ORDER BY line_number
@@ -527,7 +563,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 self.logger.info(f"📁 Treating {component_name} as FILE - finding programs that access it")
                 cursor.execute("""
                     SELECT program_name, logical_file_name, physical_file_name, access_type, access_mode,
-                        record_format,  line_number
+                        record_format, line_number
                     FROM file_access_relationships
                     WHERE logical_file_name = ? OR physical_file_name = ? 
                     OR logical_file_name LIKE ? OR physical_file_name LIKE ?
@@ -571,7 +607,6 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                     "access_type": record[3],
                     "access_mode": record[4],
                     "record_format": record[5],
-                    
                     "line_number": record[6] if len(record) > 6 else None
                 }
                 
@@ -588,7 +623,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 # Categorize by access pattern
                 if access_type in ["WRITE", "FD"] and access_mode in ["OUTPUT", "EXTEND"]:
                     access_patterns["creators"].append(access_info)
-                elif access_type in ["READ", "SELECT"] and access_mode == "INPUT":
+                elif access_type in ["READ", "SELECT", "FILE_SELECT"] and access_mode == "INPUT":
                     access_patterns["readers"].append(access_info)
                 elif access_type in ["REWRITE", "WRITE"] and access_mode == "I-O":
                     access_patterns["updaters"].append(access_info)
@@ -641,45 +676,96 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 "file_operations": {"create_operations": 0, "read_operations": 0, "update_operations": 0, "delete_operations": 0},
                 "error": str(e)
             }
+
     
     async def _is_component_a_program(self, component_name: str, cursor) -> bool:
-        """FIXED: Determine if component is a program or file by checking program_chunks table"""
+        """FIXED: Determine if component is a program or file with tuple handling"""
         try:
-            # Check if this component exists as a program in program_chunks
-            cursor.execute("""
-                SELECT COUNT(*) FROM program_chunks 
-                WHERE program_name = ? OR program_name LIKE ?
-                LIMIT 1
-            """, (str(component_name), f"%{component_name}%"))
+            # CRITICAL FIX: Normalize component name first
+            component_name = self._normalize_component_name(component_name)
             
-            program_chunk_count = cursor.fetchone()[0]
+            self.logger.info(f"🔍 Determining if {component_name} is a program or file...")
             
-            # If it exists in program_chunks, it's a program
-            if program_chunk_count > 0:
-                self.logger.info(f"✅ {component_name} identified as PROGRAM (found in program_chunks)")
+            # STEP 1: Check program_chunks with multiple search patterns
+            search_patterns = [
+                (component_name, "exact match"),
+                (f"{component_name}%", "starts with"),
+                (f"%{component_name}", "ends with"),
+                (f"%{component_name}%", "contains")
+            ]
+            
+            program_found = False
+            for pattern, description in search_patterns:
+                if pattern == component_name:
+                    cursor.execute("""
+                        SELECT COUNT(*), program_name FROM program_chunks 
+                        WHERE program_name = ?
+                        GROUP BY program_name
+                        LIMIT 1
+                    """, (pattern,))
+                else:
+                    cursor.execute("""
+                        SELECT COUNT(*), program_name FROM program_chunks 
+                        WHERE program_name LIKE ?
+                        GROUP BY program_name
+                        LIMIT 1
+                    """, (pattern,))
+                
+                result = cursor.fetchone()
+                if result and result[0] > 0:
+                    chunk_count, found_name = result
+                    self.logger.info(f"✅ PROGRAM detected in program_chunks: {found_name} ({description}, {chunk_count} chunks)")
+                    program_found = True
+                    break
+                else:
+                    self.logger.debug(f"❌ No match with {description}: {pattern}")
+            
+            if program_found:
                 return True
             
-            # Check if it appears as a program_name in file_access_relationships
+            # STEP 2: Check file_access_relationships as program_name
+            for pattern, description in search_patterns:
+                if pattern == component_name:
+                    cursor.execute("""
+                        SELECT COUNT(*), program_name FROM file_access_relationships 
+                        WHERE program_name = ?
+                        GROUP BY program_name
+                        LIMIT 1
+                    """, (pattern,))
+                else:
+                    cursor.execute("""
+                        SELECT COUNT(*), program_name FROM file_access_relationships 
+                        WHERE program_name LIKE ?
+                        GROUP BY program_name
+                        LIMIT 1
+                    """, (pattern,))
+                
+                result = cursor.fetchone()
+                if result and result[0] > 0:
+                    access_count, found_name = result
+                    self.logger.info(f"✅ PROGRAM detected in file_access_relationships: {found_name} ({description}, {access_count} accesses)")
+                    return True
+            
+            # STEP 3: Check if it appears as a file in file_access_relationships
             cursor.execute("""
                 SELECT COUNT(*) FROM file_access_relationships 
-                WHERE program_name = ? OR program_name LIKE ?
+                WHERE logical_file_name = ? OR physical_file_name = ? OR logical_file_name LIKE ? OR physical_file_name LIKE ?
                 LIMIT 1
-            """, (str(component_name), f"%{component_name}%"))
+            """, (component_name, component_name, f"%{component_name}%", f"%{component_name}%"))
             
-            program_access_count = cursor.fetchone()[0]
+            file_access_count = cursor.fetchone()[0]
             
-            if program_access_count > 0:
-                self.logger.info(f"✅ {component_name} identified as PROGRAM (found accessing files)")
-                return True
+            if file_access_count > 0:
+                self.logger.info(f"📁 FILE detected in file_access_relationships: {component_name} (accessed {file_access_count} times)")
+                return False
             
-            # Default: assume it's a file if not found as program
-            self.logger.info(f"📁 {component_name} identified as FILE (not found as program)")
+            # Default: if not found anywhere, assume it's a file
+            self.logger.info(f"❓ Component {component_name} not found in database - defaulting to FILE")
             return False
             
         except Exception as e:
             self.logger.error(f"❌ Failed to determine component type for {component_name}: {e}")
             return False  # Default to file
-
 
     async def _get_file_field_definitions(self, file_name: str) -> List[Dict[str, Any]]:
         """FIXED: Get field definitions associated with a file - handle missing tables gracefully"""
@@ -735,10 +821,12 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
         except Exception as e:
             self.logger.error(f"Failed to get file field definitions: {e}")
             return []
+    
     async def _analyze_program_data_flow(self, program_name: str) -> Dict[str, Any]:
-        """🔄 FIXED: Analyze program data flow with proper program analysis"""
+        """🔄 FIXED: Analyze program data flow with tuple handling"""
         try:
-            program_name = str(program_name)
+            # CRITICAL FIX: Normalize program name first
+            program_name = self._normalize_component_name(program_name)
             
             self.logger.info(f"📄 Analyzing PROGRAM data flow for: {program_name}")
             
@@ -780,11 +868,10 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
         except Exception as e:
             self.logger.error(f"❌ Program data flow analysis failed for {program_name}: {str(e)}")
             return {
-                "program_name": program_name,
+                "program_name": self._normalize_component_name(program_name),
                 "error": str(e),
                 "status": "error"
-            }
-        
+            }    
 
     async def _get_program_file_access(self, program_name: str) -> Dict[str, Any]:
         """FIXED: Get file access patterns for a specific program using correct column names"""
@@ -2331,6 +2418,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
     async def analyze_field_lineage_with_fallback(self, field_name: str) -> Dict[str, Any]:
         """Enhanced field lineage with timeout protection and partial saves"""
         try:
+            field_name = self._normalize_component_name(field_name)
             # Check existing partial results first
             existing = await self._load_existing_partial(field_name)
             if existing:
@@ -2896,7 +2984,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
         """✅ API-BASED: Generate a comprehensive lineage summary for any component"""
         try:
             await self._load_existing_lineage()
-            
+            component_name = self._normalize_component_name(component_name)
             # Determine component type
             component_type = await self._determine_component_type(component_name)
             
