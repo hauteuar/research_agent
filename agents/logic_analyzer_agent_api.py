@@ -1451,137 +1451,239 @@ Return as JSON array:
             return self._generate_fallback_flow_analysis(program_name, flow_summary)
 
 
-    async def _get_program_relationships(self, program_name: str) -> List[Dict[str, Any]]:
-        """Get all program call relationships for the program"""
+    async def _get_program_relationships(self, program_name: str) -> Dict[str, Any]:
+        """FIXED: Get program relationships with column existence check"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Get programs called by this program
-            cursor.execute("""
-                SELECT calling_program, called_program, call_type, call_location,
-                    parameters, call_statement, conditional_call, line_number
+            # FIXED: Check what columns exist in program_relationships table
+            cursor.execute("PRAGMA table_info(program_relationships)")
+            columns_info = cursor.fetchall()
+            column_names = [col[1] for col in columns_info]
+            
+            self.logger.debug(f"🔍 Available columns in program_relationships: {column_names}")
+            
+            # Build query based on available columns
+            base_columns = ["calling_program", "called_program", "call_type", "call_location", "line_number", "call_statement"]
+            available_base_columns = [col for col in base_columns if col in column_names]
+            
+            # Add optional columns if they exist
+            optional_columns = []
+            if "parameters" in column_names:
+                optional_columns.append("parameters")
+            if "conditional_call" in column_names:
+                optional_columns.append("conditional_call")
+            
+            all_columns = available_base_columns + optional_columns
+            columns_str = ", ".join(all_columns)
+            
+            # FIXED: Dynamic query based on available columns
+            cursor.execute(f"""
+                SELECT {columns_str}
                 FROM program_relationships
                 WHERE calling_program = ?
                 ORDER BY line_number
-            """, (program_name,))
+            """, (str(program_name),))
             
             outbound_calls = cursor.fetchall()
             
-            # Get programs that call this program
-            cursor.execute("""
-                SELECT calling_program, called_program, call_type, call_location,
-                    parameters, call_statement, conditional_call, line_number
+            cursor.execute(f"""
+                SELECT {columns_str}
                 FROM program_relationships
                 WHERE called_program = ?
                 ORDER BY calling_program, line_number
-            """, (program_name,))
+            """, (str(program_name),))
             
             inbound_calls = cursor.fetchall()
             conn.close()
             
-            return {
-                "outbound_calls": [
-                    {
-                        "calling_program": row[0],
-                        "called_program": row[1],
-                        "call_type": row[2],
-                        "call_location": row[3],
-                        "parameters": json.loads(row[4]) if row[4] else [],
-                        "call_statement": row[5],
-                        "conditional_call": bool(row[6]),
-                        "line_number": row[7]
-                    } for row in outbound_calls
-                ],
-                "inbound_calls": [
-                    {
-                        "calling_program": row[0],
-                        "called_program": row[1],
-                        "call_type": row[2],
-                        "call_location": row[3],
-                        "parameters": json.loads(row[4]) if row[4] else [],
-                        "call_statement": row[5],
-                        "conditional_call": bool(row[6]),
-                        "line_number": row[7]
-                    } for row in inbound_calls
-                ]
+            # FIXED: Build result with available data
+            def build_call_info(row):
+                call_info = {}
+                for i, col in enumerate(all_columns):
+                    if i < len(row):
+                        if col == "parameters" and row[i]:
+                            try:
+                                call_info[col] = json.loads(row[i])
+                            except:
+                                call_info[col] = []
+                        elif col == "conditional_call":
+                            call_info[col] = bool(row[i]) if row[i] is not None else False
+                        else:
+                            call_info[col] = row[i]
+                    else:
+                        # Default values for missing columns
+                        if col == "parameters":
+                            call_info[col] = []
+                        elif col == "conditional_call":
+                            call_info[col] = False
+                        else:
+                            call_info[col] = None
+                return call_info
+            
+            result = {
+                "outbound_calls": [build_call_info(row) for row in outbound_calls],
+                "inbound_calls": [build_call_info(row) for row in inbound_calls]
             }
             
+            self.logger.info(f"📞 Found {len(outbound_calls)} outbound and {len(inbound_calls)} inbound calls for {program_name}")
+            
+            return result
+            
         except Exception as e:
-            self.logger.error(f"Failed to get program relationships: {e}")
+            self.logger.error(f"❌ Failed to get program relationships: {e}")
             return {"outbound_calls": [], "inbound_calls": []}
-        
+            
     async def _get_copybook_relationships(self, program_name: str) -> List[Dict[str, Any]]:
-        """Get all copybook dependencies for the program"""
+        """FIXED: Get copybook relationships with column existence check"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            cursor.execute("""
-                SELECT program_name, copybook_name, copy_location, replacing_clause,
-                    copy_statement, line_number, usage_context
+            # Check available columns
+            cursor.execute("PRAGMA table_info(copybook_relationships)")
+            columns_info = cursor.fetchall()
+            column_names = [col[1] for col in columns_info]
+            
+            base_columns = ["program_name", "copybook_name", "copy_location", "line_number", "copy_statement"]
+            available_base_columns = [col for col in base_columns if col in column_names]
+            
+            optional_columns = []
+            if "replacing_clause" in column_names:
+                optional_columns.append("replacing_clause")
+            if "usage_context" in column_names:
+                optional_columns.append("usage_context")
+            
+            all_columns = available_base_columns + optional_columns
+            columns_str = ", ".join(all_columns)
+            
+            cursor.execute(f"""
+                SELECT {columns_str}
                 FROM copybook_relationships
                 WHERE program_name = ?
                 ORDER BY line_number
-            """, (program_name,))
+            """, (str(program_name),))
             
             relationships = cursor.fetchall()
             conn.close()
             
-            return [
-                {
-                    "program_name": row[0],
-                    "copybook_name": row[1],
-                    "copy_location": row[2],
-                    "replacing_clause": row[3],
-                    "copy_statement": row[4],
-                    "line_number": row[5],
-                    "usage_context": row[6]
-                } for row in relationships
-            ]
+            # Build result with available data
+            result = []
+            for row in relationships:
+                rel_info = {}
+                for i, col in enumerate(all_columns):
+                    if i < len(row):
+                        rel_info[col] = row[i]
+                    else:
+                        rel_info[col] = None
+                result.append(rel_info)
+            
+            self.logger.info(f"📋 Found {len(relationships)} copybook relationships for {program_name}")
+            return result
             
         except Exception as e:
-            self.logger.error(f"Failed to get copybook relationships: {e}")
+            self.logger.error(f"❌ Failed to get copybook relationships: {e}")
             return []
-        
+            
     async def _get_file_access_relationships(self, program_name: str) -> List[Dict[str, Any]]:
-        """Get all file access patterns for the program"""
+        """FIXED: Get file access relationships with column existence check"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            cursor.execute("""
-                SELECT program_name, logical_file_name, physical_file_name, 
-                    access_type, access_mode, line_number, access_statement
+            # Check available columns
+            cursor.execute("PRAGMA table_info(file_access_relationships)")
+            columns_info = cursor.fetchall()
+            column_names = [col[1] for col in columns_info]
+            
+            # Use different column names based on what's available
+            if "logical_file_name" in column_names:
+                file_name_col = "logical_file_name"
+            elif "file_name" in column_names:
+                file_name_col = "file_name"
+            else:
+                self.logger.warning("⚠️ No recognizable file name column found")
+                return []
+            
+            base_columns = ["program_name", file_name_col, "access_type", "access_mode", "line_number"]
+            available_base_columns = [col for col in base_columns if col in column_names]
+            
+            optional_columns = []
+            if "physical_file_name" in column_names:
+                optional_columns.append("physical_file_name")
+            elif "physical_file" in column_names:
+                optional_columns.append("physical_file")
+            
+            if "record_format" in column_names:
+                optional_columns.append("record_format")
+            if "access_statement" in column_names:
+                optional_columns.append("access_statement")
+            elif "access_location" in column_names:
+                optional_columns.append("access_location")
+            
+            all_columns = available_base_columns + optional_columns
+            columns_str = ", ".join(all_columns)
+            
+            cursor.execute(f"""
+                SELECT {columns_str}
                 FROM file_access_relationships
                 WHERE program_name = ?
                 ORDER BY line_number
-            """, (program_name,))
+            """, (str(program_name),))
             
             relationships = cursor.fetchall()
             conn.close()
             
-            return [
-                {
-                    "program_name": row[0],
-                    "logical_file_name": row[1],
-                    "physical_file_name": row[2],
-                    "access_type": row[3],
-                    "access_mode": row[4],
-                    "line_number": row[5],
-                    "access_statement": row[6]
-                } for row in relationships
-            ]
+            # Build result with standardized column names
+            result = []
+            for row in relationships:
+                rel_info = {
+                    "program_name": row[0] if len(row) > 0 else None,
+                    "file_name": row[1] if len(row) > 1 else None,
+                    "physical_file": None,
+                    "access_type": None,
+                    "access_mode": None,
+                    "record_format": None,
+                    "access_location": None,
+                    "line_number": None
+                }
+                
+                # Map columns based on position and what's available
+                for i, col in enumerate(all_columns):
+                    if i < len(row) and row[i] is not None:
+                        if col in ["physical_file_name", "physical_file"]:
+                            rel_info["physical_file"] = row[i]
+                        elif col in ["access_statement", "access_location"]:
+                            rel_info["access_location"] = row[i]
+                        elif col in rel_info:
+                            rel_info[col] = row[i]
+                
+                result.append(rel_info)
+            
+            self.logger.info(f"📁 Found {len(relationships)} file access relationships for {program_name}")
+            return result
             
         except Exception as e:
-            self.logger.error(f"Failed to get file access relationships: {e}")
+            self.logger.error(f"❌ Failed to get file access relationships: {e}")
             return []
-        
+    
     async def _get_field_cross_references(self, program_name: str) -> List[Dict[str, Any]]:
-        """Get field cross-references for the program"""
+        """FIXED: Get field cross-references with table existence check"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
+            
+            # Check if field_cross_reference table exists
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='field_cross_reference'
+            """)
+            
+            if not cursor.fetchone():
+                self.logger.warning("⚠️ field_cross_reference table does not exist")
+                conn.close()
+                return []
             
             cursor.execute("""
                 SELECT field_name, qualified_name, source_type, source_name,
@@ -1592,30 +1694,35 @@ Return as JSON array:
                     SELECT copybook_name FROM copybook_relationships WHERE program_name = ?
                 )
                 ORDER BY level_number, field_name
-            """, (program_name, program_name))
+            """, (str(program_name), str(program_name)))
             
             relationships = cursor.fetchall()
             conn.close()
             
-            return [
-                {
-                    "field_name": row[0],
-                    "qualified_name": row[1],
-                    "source_type": row[2],
-                    "source_name": row[3],
-                    "definition_location": row[4],
-                    "data_type": row[5],
-                    "picture_clause": row[6],
-                    "usage_clause": row[7],
-                    "level_number": row[8],
-                    "parent_field": row[9],
-                    "occurs_info": json.loads(row[10]) if row[10] else {},
-                    "business_domain": row[11]
-                } for row in relationships
-            ]
+            result = []
+            for row in relationships:
+                if len(row) >= 12:
+                    rel_info = {
+                        "field_name": row[0],
+                        "qualified_name": row[1],
+                        "source_type": row[2],
+                        "source_name": row[3],
+                        "definition_location": row[4],
+                        "data_type": row[5],
+                        "picture_clause": row[6],
+                        "usage_clause": row[7],
+                        "level_number": row[8],
+                        "parent_field": row[9],
+                        "occurs_info": json.loads(row[10]) if row[10] else {},
+                        "business_domain": row[11]
+                    }
+                    result.append(rel_info)
+            
+            self.logger.info(f"🔤 Found {len(result)} field cross-references for {program_name}")
+            return result
             
         except Exception as e:
-            self.logger.error(f"Failed to get field cross-references: {e}")
+            self.logger.error(f"❌ Failed to get field cross-references: {e}")
             return []
 
     async def _get_impact_analysis(self, program_name: str) -> Dict[str, Any]:

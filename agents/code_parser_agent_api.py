@@ -8447,32 +8447,7 @@ class CodeParserAgent(BaseOpulenceAgent):
         
         return enhanced_prompt
 
-    async def _cache_llm_result(self, content_hash: str, analysis_type: str, result: Dict[str, Any]):
-        """Cache LLM analysis result"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                INSERT OR REPLACE INTO llm_analysis_cache 
-                (content_hash, analysis_type, analysis_result, confidence_score, model_version)
-                VALUES (?, ?, ?, ?, ?)
-            """, (
-                content_hash, 
-                analysis_type, 
-                json.dumps(result['analysis']), 
-                result['confidence_score'], 
-                "claude-sonnet-4-chunked"
-            ))
-            
-            conn.commit()
-            conn.close()
-            
-            self.logger.debug(f"📋 Cached analysis result for {analysis_type}")
-            
-        except Exception as e:
-            self.logger.warning(f"Failed to cache LLM result: {e}")
-            
+
     def _parse_llm_response_enhanced(self, response: str, analysis_type: str) -> Dict[str, Any]:
         """Simple response parsing for direct (non-chunked) analysis"""
         
