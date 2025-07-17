@@ -42,7 +42,7 @@ class CodeParserAgent:
     Handles all mainframe patterns: COBOL, CICS, SQL, MQ, JCL, etc.
     """
     
-    def __init__(self, coordinator, db_path: str = None):
+    def __init__(self, coordinator, db_path: str = None, llm_engine = None, gpu_id: int = 0):
         self.coordinator = coordinator
         self.db_path = db_path or "opulence_data.db"
         self.logger = coordinator.logger if hasattr(coordinator, 'logger') else self._setup_logger()
@@ -970,7 +970,7 @@ COMPLETE LLM CodeParser Agent with Full Database Storage
 Part 3: Main Processing Engine and LLM Analysis
 """
 
-    async def process_file_complete(self, file_path: Path) -> Dict[str, Any]:
+    async def process_file(self, file_path: Path) -> Dict[str, Any]:
         """Complete file processing with full database storage"""
         start_time = dt.now()
         
@@ -1496,29 +1496,7 @@ Part 3: Main Processing Engine and LLM Analysis
                 return str(list(response.values())[0]).strip()
         
         # Fallback to string conversion
-        return str(response).strip() if response else ""Z0-9]+)['\"]", line_clean)
-                if match:
-                    op_type = 'CICS_READ' if 'READ' in line_clean.upper() else 'CICS_WRITE'
-                    if 'LINK' in line_clean.upper():
-                        op_type = 'CICS_LINK'
-                    elif 'XCTL' in line_clean.upper():
-                        op_type = 'CICS_XCTL'
-                    
-                    analysis["cics_operations"].append({
-                        "type": op_type, "target": match.group(1),
-                        "confidence": 0.7, "statement": line_clean
-                    })
-            
-            # Extract COPY statements
-            if 'COPY' in line_clean.upper():
-                match = re.search(r'COPY\s+([A-Z][A-Z0-9-]*)', line_clean, re.IGNORECASE)
-                if match:
-                    analysis["copybook_includes"].append({
-                        "type": "COPY", "target": match.group(1),
-                        "confidence": 0.8, "statement": line_clean
-                    })
-        
-        return analysis
+        return str(response).strip() if response else ""
 
     def _extract_response_text(self, response: Dict[str, Any]) -> str:
         """Extract text from LLM response"""
@@ -1570,7 +1548,6 @@ Part 3: Main Processing Engine and LLM Analysis
             
         except Exception as e:
             self.logger.warning(f"Failed to cache analysis: {e}")
-    
     """
 COMPLETE LLM CodeParser Agent with Full Database Storage
 Part 4: Complete Database Storage Engine - All Relationship Types
