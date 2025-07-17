@@ -36,7 +36,7 @@ class DependencyAnalysis:
     missing_programs: Set[str]
     confidence_score: float
 
-class CompleteLLMCodeParser:
+class CodeParserAgent:
     """
     Complete LLM-based code parser with full database integration
     Handles all mainframe patterns: COBOL, CICS, SQL, MQ, JCL, etc.
@@ -79,7 +79,7 @@ class CompleteLLMCodeParser:
 
     def _setup_logger(self):
         """Setup basic logger if coordinator doesn't provide one"""
-        logger = logging.getLogger('CompleteLLMCodeParser')
+        logger = logging.getLogger('CodeParserAgent')
         logger.setLevel(logging.INFO)
         handler = logging.StreamHandler()
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
