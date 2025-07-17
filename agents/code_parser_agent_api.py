@@ -6709,8 +6709,8 @@ class CodeParserAgent(BaseOpulenceAgent):
                 
                 relationships.append({
                     'program_name': program_name,
-                    'file_name': logical_file,
-                    'physical_file': physical_file,
+                    'logical_file_name': logical_file,
+                    'physical_file_name': physical_file,
                     'access_type': 'SELECT',
                     'access_mode': '',
                     'record_format': '',
@@ -6727,8 +6727,8 @@ class CodeParserAgent(BaseOpulenceAgent):
                 
                 relationships.append({
                     'program_name': program_name,
-                    'file_name': file_name,
-                    'physical_file': '',
+                    'logical_file_name': file_name,
+                    'physical_file_name': '',
                     'access_type': 'FD',
                     'access_mode': '',
                     'record_format': '',
@@ -6748,8 +6748,8 @@ class CodeParserAgent(BaseOpulenceAgent):
                     
                     relationships.append({
                         'program_name': program_name,
-                        'file_name': file_name,
-                        'physical_file': '',
+                        'logical_file_name': file_name,
+                        'physical_file_name': '',
                         'access_type': op.upper(),
                         'access_mode': '',
                         'record_format': '',
@@ -6900,13 +6900,13 @@ class CodeParserAgent(BaseOpulenceAgent):
             for rel in relationships:
                 cursor.execute("""
                     INSERT OR IGNORE INTO file_access_relationships 
-                    (program_name, file_name, physical_file, access_type,
+                    (program_name, logical_file_name, physical_file_name, access_type,
                     access_mode, record_format, access_location, line_number)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     rel['program_name'],
-                    rel['file_name'],
-                    rel['physical_file'],
+                    rel['logical_file_name'],
+                    rel['physical_file_name'],
                     rel['access_type'],
                     rel['access_mode'],
                     rel['record_format'],
@@ -7238,8 +7238,8 @@ class CodeParserAgent(BaseOpulenceAgent):
                 CREATE TABLE IF NOT EXISTS file_access_relationships (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     program_name TEXT NOT NULL,
-                    file_name TEXT NOT NULL, -- logical file name
-                    physical_file TEXT, -- DDname or dataset name
+                    logical_file_name TEXT NOT NULL, -- logical file name
+                    physical_file_name  TEXT, -- DDname or dataset name
                     access_type TEXT NOT NULL, -- SELECT, FD, READ, WRITE, REWRITE, DELETE
                     access_mode TEXT, -- INPUT, OUTPUT, I-O, EXTEND
                     record_format TEXT, -- from FD
@@ -7303,7 +7303,7 @@ class CodeParserAgent(BaseOpulenceAgent):
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_copy_rel_program ON copybook_relationships(program_name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_copy_rel_copybook ON copybook_relationships(copybook_name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_rel_program ON file_access_relationships(program_name)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_rel_file ON file_access_relationships(file_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_rel_file ON file_access_relationships(logical_file_name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_field_xref_field ON field_cross_reference(field_name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_field_xref_source ON field_cross_reference(source_name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_impact_source ON impact_analysis(source_artifact)")
@@ -8505,41 +8505,585 @@ class CodeParserAgent(BaseOpulenceAgent):
             aggregated.update(self._aggregate_generic_analysis(chunk_analyses))
         
         return aggregated
-
-    def _aggregate_cobol_analysis(self, chunk_analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Aggregate COBOL-specific analyses"""
-        all_purposes = []
-        all_operations = []
-        complexity_scores = []
-        business_functions = []
-        
-        for chunk_analysis in chunk_analyses:
-            analysis = chunk_analysis.get('analysis', {})
+    
+    async def _cache_llm_result(self, content_hash: str, analysis_type: str, 
+                               analysis_result: Dict[str, Any]):
+        """Cache LLM analysis result for future use"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
             
-            if 'purpose' in analysis:
-                all_purposes.append(analysis['purpose'])
-            if 'operations' in analysis:
-                if isinstance(analysis['operations'], list):
-                    all_operations.extend(analysis['operations'])
-                else:
-                    all_operations.append(analysis['operations'])
-            if 'complexity' in analysis:
-                complexity_mapping = {'low': 1, 'medium': 2, 'high': 3}
-                complexity_scores.append(complexity_mapping.get(analysis['complexity'], 2))
-            if 'business_function' in analysis:
-                business_functions.append(analysis['business_function'])
+            # Extract analysis and confidence
+            analysis_data = analysis_result.get('analysis', {})
+            confidence_score = analysis_result.get('confidence_score', 0.5)
+            
+            cursor.execute("""
+                INSERT OR REPLACE INTO llm_analysis_cache 
+                (content_hash, analysis_type, analysis_result, confidence_score, 
+                 model_version, created_timestamp, last_accessed)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """, (
+                content_hash,
+                analysis_type,
+                json.dumps(analysis_data),
+                confidence_score,
+                "enhanced_3.0"  # Model version
+            ))
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.debug(f"Cached LLM result for {analysis_type} (hash: {content_hash[:8]}...)")
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to cache LLM result: {e}")
+
+    # ==================== FIELD ANALYSIS HELPER METHODS ====================
+    
+    def _extract_pic_clause(self, definition: str) -> str:
+        """Extract PIC clause from field definition"""
+        pic_match = re.search(r'PIC(?:TURE)?\s+(?:IS\s+)?([X9AVSN\(\)\+\-\.,/ZB*$]+)', 
+                             definition, re.IGNORECASE)
+        return pic_match.group(1) if pic_match else ""
+    
+    def _extract_usage_clause(self, definition: str) -> str:
+        """Extract USAGE clause from field definition"""
+        usage_match = re.search(
+            r'USAGE\s+(?:IS\s+)?(COMP(?:-[0-9])?|BINARY|DISPLAY|PACKED-DECIMAL|INDEX|POINTER)', 
+            definition, re.IGNORECASE
+        )
+        return usage_match.group(1) if usage_match else ""
+    
+    def _extract_occurs_info(self, definition: str) -> Dict[str, Any]:
+        """Extract OCCURS information from field definition"""
+        occurs_info = {}
         
-        # Determine overall complexity
-        avg_complexity = sum(complexity_scores) / len(complexity_scores) if complexity_scores else 2
-        overall_complexity = 'low' if avg_complexity < 1.5 else 'high' if avg_complexity > 2.5 else 'medium'
+        # Basic OCCURS pattern
+        occurs_match = re.search(r'OCCURS\s+(\d+)(?:\s+TO\s+(\d+))?\s+TIMES', 
+                                definition, re.IGNORECASE)
+        if occurs_match:
+            occurs_info['min_occurs'] = int(occurs_match.group(1))
+            occurs_info['max_occurs'] = int(occurs_match.group(2)) if occurs_match.group(2) else int(occurs_match.group(1))
+            
+            # DEPENDING ON clause
+            depending_match = re.search(r'DEPENDING\s+ON\s+([A-Z][A-Z0-9-]*)', 
+                                       definition, re.IGNORECASE)
+            if depending_match:
+                occurs_info['depending_on'] = depending_match.group(1)
+            
+            # INDEXED BY clause
+            indexed_match = re.search(r'INDEXED\s+BY\s+([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)', 
+                                     definition, re.IGNORECASE)
+            if indexed_match:
+                occurs_info['indexed_by'] = [idx.strip() for idx in indexed_match.group(1).split(',')]
+        
+        return occurs_info
+    
+    def _determine_data_type_enhanced(self, definition: str) -> str:
+        """Determine enhanced data type from field definition"""
+        definition_upper = definition.upper()
+        
+        # Check for specific PIC patterns
+        if 'PIC' in definition_upper:
+            pic_match = re.search(r'PIC(?:TURE)?\s+(?:IS\s+)?([X9AVSN\(\)\+\-\.,/ZB*$]+)', 
+                                 definition_upper)
+            if pic_match:
+                pic_clause = pic_match.group(1)
+                
+                if 'X' in pic_clause:
+                    return 'alphanumeric'
+                elif '9' in pic_clause:
+                    if 'V' in pic_clause or '.' in pic_clause:
+                        return 'decimal'
+                    else:
+                        return 'numeric'
+                elif 'A' in pic_clause:
+                    return 'alphabetic'
+                elif 'S' in pic_clause:
+                    return 'signed_numeric'
+        
+        # Check for USAGE clause
+        if 'COMP' in definition_upper:
+            if 'COMP-3' in definition_upper:
+                return 'packed_decimal'
+            elif 'COMP-1' in definition_upper:
+                return 'single_float'
+            elif 'COMP-2' in definition_upper:
+                return 'double_float'
+            else:
+                return 'binary'
+        
+        # Check for group items (no PIC clause)
+        if 'PIC' not in definition_upper and re.search(r'^\s*\d+\s+[A-Z]', definition):
+            return 'group_item'
+        
+        return 'unknown'
+    
+    def _infer_business_domain(self, field_name: str) -> str:
+        """Infer business domain from field name"""
+        field_upper = field_name.upper()
+        
+        # Financial domain
+        if any(term in field_upper for term in ['AMOUNT', 'AMT', 'BALANCE', 'BAL', 'RATE', 'FEE', 'COST', 'PRICE']):
+            return 'financial'
+        
+        # Temporal domain
+        if any(term in field_upper for term in ['DATE', 'TIME', 'TIMESTAMP', 'DT', 'TM', 'YEAR', 'MONTH', 'DAY']):
+            return 'temporal'
+        
+        # Customer domain
+        if any(term in field_upper for term in ['CUSTOMER', 'CUST', 'CLIENT', 'NAME', 'ADDR', 'ADDRESS', 'PHONE', 'EMAIL']):
+            return 'customer'
+        
+        # Account domain
+        if any(term in field_upper for term in ['ACCOUNT', 'ACCT', 'ACC', 'NUMBER', 'NUM', 'ID', 'IDENTIFIER']):
+            return 'account'
+        
+        # Transaction domain
+        if any(term in field_upper for term in ['TRANS', 'TXN', 'TRANSACTION', 'PAYMENT', 'TRANSFER']):
+            return 'transaction'
+        
+        # System/Control domain
+        if any(term in field_upper for term in ['STATUS', 'STAT', 'FLAG', 'IND', 'INDICATOR', 'CODE', 'TYPE']):
+            return 'control'
+        
+        # Product domain
+        if any(term in field_upper for term in ['PRODUCT', 'PROD', 'ITEM', 'SERVICE', 'SVC']):
+            return 'product'
+        
+        # Location domain
+        if any(term in field_upper for term in ['BRANCH', 'LOCATION', 'LOC', 'REGION', 'AREA', 'ZONE']):
+            return 'location'
+        
+        return 'general'
+
+    # ==================== COBOL STORED PROCEDURE PARSING ====================
+    
+    async def _parse_cobol_stored_procedure_with_enhanced_analysis(self, content: str, filename: str) -> List[CodeChunk]:
+        """Parse COBOL stored procedure with enhanced analysis - corrected method name"""
+        return await self.parse_cobol_stored_procedure_with_enhanced_analysis(content, filename)
+
+    # ==================== COPYBOOK LAYOUT ANALYSIS METHODS ====================
+    
+    async def _analyze_copybook_layout(self, content: str, copybook_name: str) -> Dict[str, Any]:
+        """Analyze copybook layout type and complexity"""
+        
+        # Count different layout indicators using safe pattern access
+        layout_indicators = 0
+        record_types = 0
+        redefines_count = 0
+        occurs_count = 0
+        conditional_fields = 0
+        
+        try:
+            # Safely check for patterns
+            if hasattr(self, 'copybook_patterns'):
+                layout_indicators = len(self.copybook_patterns.get('layout_indicator', re.compile(r'(?!)')).findall(content))
+                record_types = len(self.copybook_patterns.get('record_type_field', re.compile(r'(?!)')).findall(content))
+                redefines_count = len(self.copybook_patterns.get('redefines_complex', re.compile(r'(?!)')).findall(content))
+                occurs_count = len(self.copybook_patterns.get('occurs_complex', re.compile(r'(?!)')).findall(content))
+                conditional_fields = len(self.copybook_patterns.get('conditional_field', re.compile(r'(?!)')).findall(content))
+        except Exception as e:
+            self.logger.warning(f"Pattern matching failed in copybook analysis: {e}")
+        
+        # Determine layout type
+        from enum import Enum
+        
+        # Define enum if not imported
+        class CopybookLayoutType(Enum):
+            SINGLE_RECORD = "single_record"
+            MULTI_RECORD = "multi_record" 
+            CONDITIONAL_LAYOUT = "conditional_layout"
+            REDEFINES_LAYOUT = "redefines_layout"
+            OCCURS_LAYOUT = "occurs_layout"
+        
+        if layout_indicators > 1 or record_types > 1:
+            layout_type = CopybookLayoutType.MULTI_RECORD
+        elif conditional_fields > 0:
+            layout_type = CopybookLayoutType.CONDITIONAL_LAYOUT
+        elif redefines_count > 2:
+            layout_type = CopybookLayoutType.REDEFINES_LAYOUT
+        elif occurs_count > 1:
+            layout_type = CopybookLayoutType.OCCURS_LAYOUT
+        else:
+            layout_type = CopybookLayoutType.SINGLE_RECORD
+        
+        # Calculate complexity score
+        complexity_score = (layout_indicators * 3 + record_types * 2 + 
+                          redefines_count * 2 + occurs_count * 1 + conditional_fields * 2)
         
         return {
-            'consolidated_purpose': ' | '.join(set(all_purposes)) if all_purposes else 'multiple_functions',
-            'all_operations': list(set(all_operations)),
-            'overall_complexity': overall_complexity,
-            'business_functions': list(set(business_functions)),
-            'analysis_coverage': 'comprehensive'
+            'layout_type': layout_type,
+            'complexity_score': min(complexity_score, 20),
+            'layout_indicators': layout_indicators,
+            'record_types': record_types,
+            'redefines_count': redefines_count,
+            'occurs_count': occurs_count,
+            'conditional_fields': conditional_fields
         }
+
+    # ==================== IMPACT ANALYSIS METHODS ====================
+    
+    async def _generate_impact_analysis(self, artifact_name: str, artifact_type: str):
+        """Generate impact analysis for an artifact"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            impacts = []
+            
+            if artifact_type in ['cobol', 'cics']:
+                # Programs that call this program
+                cursor.execute("""
+                    SELECT DISTINCT calling_program, call_type 
+                    FROM program_relationships 
+                    WHERE called_program = ?
+                """, (artifact_name,))
+                
+                for row in cursor.fetchall():
+                    impacts.append({
+                        'source_artifact': row[0],
+                        'source_type': 'program',
+                        'dependent_artifact': artifact_name,
+                        'dependent_type': artifact_type,
+                        'relationship_type': f'calls_via_{row[1]}',
+                        'impact_level': 'high',
+                        'change_propagation': 'interface_change_required'
+                    })
+                
+                # Programs that use same copybooks
+                cursor.execute("""
+                    SELECT DISTINCT cr2.program_name, cr1.copybook_name
+                    FROM copybook_relationships cr1
+                    JOIN copybook_relationships cr2 ON cr1.copybook_name = cr2.copybook_name
+                    WHERE cr1.program_name = ? AND cr2.program_name != ?
+                """, (artifact_name, artifact_name))
+                
+                for row in cursor.fetchall():
+                    impacts.append({
+                        'source_artifact': artifact_name,
+                        'source_type': artifact_type,
+                        'dependent_artifact': row[0],
+                        'dependent_type': 'program',
+                        'relationship_type': f'shares_copybook_{row[1]}',
+                        'impact_level': 'medium',
+                        'change_propagation': 'data_structure_dependency'
+                    })
+            
+            # Store impact analysis
+            for impact in impacts:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO impact_analysis 
+                    (source_artifact, source_type, dependent_artifact, dependent_type,
+                    relationship_type, impact_level, change_propagation)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    impact['source_artifact'],
+                    impact['source_type'],
+                    impact['dependent_artifact'],
+                    impact['dependent_type'],
+                    impact['relationship_type'],
+                    impact['impact_level'],
+                    impact['change_propagation']
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.info(f"Generated {len(impacts)} impact relationships for {artifact_name}")
+            
+        except Exception as e:
+            self.logger.error(f"Impact analysis failed for {artifact_name}: {str(e)}")
+
+    # ==================== ADDITIONAL HELPER METHODS ====================
+    
+    def _validate_chunk_content(self, chunk_content: str, min_length: int = 10) -> bool:
+        """Validate chunk content before processing"""
+        if not chunk_content or len(chunk_content.strip()) < min_length:
+            return False
+        
+        # Check for meaningful content (not just whitespace or comments)
+        lines = chunk_content.strip().split('\n')
+        meaningful_lines = [line for line in lines 
+                          if line.strip() and not line.strip().startswith('*')]
+        
+        return len(meaningful_lines) > 0
+    
+    def _estimate_processing_complexity(self, content: str, file_type: str) -> str:
+        """Estimate processing complexity for the content"""
+        content_length = len(content)
+        line_count = content.count('\n') + 1
+        
+        # Base complexity on file type and size
+        if file_type in ['db2_procedure', 'cobol_stored_procedure']:
+            complexity_threshold_low = 500
+            complexity_threshold_high = 2000
+        elif file_type in ['mq_program', 'cics']:
+            complexity_threshold_low = 1000  
+            complexity_threshold_high = 3000
+        else:
+            complexity_threshold_low = 800
+            complexity_threshold_high = 2500
+        
+        # Count complexity indicators
+        complexity_indicators = 0
+        if 'PERFORM' in content.upper():
+            complexity_indicators += content.upper().count('PERFORM')
+        if 'IF' in content.upper():
+            complexity_indicators += content.upper().count('IF')
+        if 'EVALUATE' in content.upper():
+            complexity_indicators += content.upper().count('EVALUATE') * 2
+        if 'EXEC SQL' in content.upper():
+            complexity_indicators += content.upper().count('EXEC SQL')
+        if 'EXEC CICS' in content.upper():
+            complexity_indicators += content.upper().count('EXEC CICS')
+        
+        # Determine complexity
+        if content_length < complexity_threshold_low and complexity_indicators < 10:
+            return 'low'
+        elif content_length > complexity_threshold_high or complexity_indicators > 25:
+            return 'high'
+        else:
+            return 'medium'
+    
+    def _create_processing_summary(self, chunks: List, violations: List, 
+                                 file_type: str, processing_time: float) -> Dict[str, Any]:
+        """Create a comprehensive processing summary"""
+        
+        chunk_type_counts = {}
+        for chunk in chunks:
+            chunk_type = getattr(chunk, 'chunk_type', 'unknown')
+            chunk_type_counts[chunk_type] = chunk_type_counts.get(chunk_type, 0) + 1
+        
+        violation_severity_counts = {}
+        for violation in violations:
+            severity = getattr(violation, 'severity', 'unknown')
+            violation_severity_counts[severity] = violation_severity_counts.get(severity, 0) + 1
+        
+        # Calculate quality metrics
+        total_confidence = sum(getattr(chunk, 'confidence_score', 0.5) for chunk in chunks)
+        avg_confidence = total_confidence / len(chunks) if chunks else 0.0
+        
+        high_confidence_chunks = sum(1 for chunk in chunks 
+                                   if getattr(chunk, 'confidence_score', 0.5) >= 0.8)
+        
+        return {
+            'processing_summary': {
+                'total_chunks': len(chunks),
+                'chunk_types': chunk_type_counts,
+                'total_violations': len(violations),
+                'violation_severities': violation_severity_counts,
+                'quality_metrics': {
+                    'average_confidence': round(avg_confidence, 3),
+                    'high_confidence_chunks': high_confidence_chunks,
+                    'confidence_percentage': round((high_confidence_chunks / len(chunks)) * 100, 1) if chunks else 0
+                },
+                'processing_metrics': {
+                    'file_type': file_type,
+                    'processing_time_seconds': round(processing_time, 2),
+                    'chunks_per_second': round(len(chunks) / max(processing_time, 0.1), 2)
+                }
+            }
+        }
+
+    # ==================== ERROR RECOVERY METHODS ====================
+    
+    def _recover_from_parsing_error(self, content: str, filename: str, error: Exception) -> List:
+        """Attempt to recover from parsing errors with fallback parsing"""
+        self.logger.warning(f"Attempting error recovery for {filename}: {error}")
+        
+        try:
+            # Try simple line-based chunking as fallback
+            chunks = []
+            program_name = self._extract_program_name(content, filename)
+            
+            lines = content.split('\n')
+            chunk_size = 30  # Smaller chunks for error recovery
+            
+            for i in range(0, len(lines), chunk_size):
+                chunk_lines = lines[i:i + chunk_size]
+                chunk_content = '\n'.join(chunk_lines)
+                
+                if chunk_content.strip():
+                    # Import here to avoid circular imports
+                    from dataclasses import dataclass
+                    
+                    @dataclass 
+                    class SimpleChunk:
+                        program_name: str
+                        chunk_id: str
+                        chunk_type: str
+                        content: str
+                        metadata: dict
+                        business_context: dict
+                        confidence_score: float
+                        line_start: int
+                        line_end: int
+                    
+                    chunk = SimpleChunk(
+                        program_name=program_name,
+                        chunk_id=f"{program_name}_RECOVERY_{i//chunk_size + 1}",
+                        chunk_type="recovery_chunk",
+                        content=chunk_content,
+                        metadata={
+                            'recovery_mode': True,
+                            'original_error': str(error),
+                            'chunk_number': i//chunk_size + 1,
+                            'line_count': len(chunk_lines)
+                        },
+                        business_context={'parsing_mode': 'error_recovery'},
+                        confidence_score=0.3,  # Low confidence for recovery chunks
+                        line_start=i,
+                        line_end=min(i + chunk_size, len(lines))
+                    )
+                    chunks.append(chunk)
+            
+            self.logger.info(f"Error recovery created {len(chunks)} fallback chunks")
+            return chunks
+            
+        except Exception as recovery_error:
+            self.logger.error(f"Error recovery also failed: {recovery_error}")
+            return []
+    
+    def _log_parsing_metrics(self, filename: str, chunks_created: int, 
+                           processing_time: float, file_type: str):
+        """Log comprehensive parsing metrics"""
+        self.logger.info(f"""
+        📊 PARSING METRICS for {filename}:
+        ├── File Type: {file_type}
+        ├── Chunks Created: {chunks_created}
+        ├── Processing Time: {processing_time:.2f}s
+        ├── Chunks/Second: {chunks_created / max(processing_time, 0.1):.1f}
+        └── Status: {'✅ SUCCESS' if chunks_created > 0 else '❌ NO CHUNKS'}
+        """)
+
+# ==================== ADDITIONAL UTILITY FUNCTIONS ====================
+
+    def create_safe_chunk_id(program_name: str, chunk_type: str, 
+                            identifier: str = "", max_length: int = 100) -> str:
+        """Create a safe chunk ID with length limits"""
+        # Clean inputs
+        safe_program = re.sub(r'[^A-Z0-9_-]', '', program_name.upper())[:20]
+        safe_type = re.sub(r'[^A-Z0-9_-]', '', chunk_type.upper())[:30]
+        safe_identifier = re.sub(r'[^A-Z0-9_-]', '', identifier.upper())[:20]
+        
+        # Build ID
+        parts = [safe_program, safe_type]
+        if safe_identifier:
+            parts.append(safe_identifier)
+        
+        chunk_id = "_".join(parts)
+        
+        # Ensure it doesn't exceed max length
+        if len(chunk_id) > max_length:
+            chunk_id = chunk_id[:max_length-8] + "_" + hashlib.md5(chunk_id.encode()).hexdigest()[:7]
+        
+        return chunk_id
+
+    def sanitize_business_context(context: Dict[str, Any]) -> Dict[str, Any]:
+        """Sanitize business context to ensure serializability"""
+        sanitized = {}
+        
+        for key, value in context.items():
+            try:
+                # Convert key to string
+                safe_key = str(key)[:50]  # Limit key length
+                
+                # Handle different value types
+                if isinstance(value, (str, int, float, bool)):
+                    sanitized[safe_key] = value
+                elif isinstance(value, (list, tuple)):
+                    # Convert to list and sanitize elements
+                    sanitized[safe_key] = [str(item)[:100] for item in value[:10]]  # Limit items
+                elif isinstance(value, dict):
+                    # Recursively sanitize nested dict
+                    sanitized[safe_key] = sanitize_business_context(value)
+                else:
+                    # Convert unknown types to string
+                    sanitized[safe_key] = str(value)[:200]
+                    
+            except Exception as e:
+                # Skip problematic entries
+                continue
+        
+        return sanitized
+
+    # ==================== PATTERN VALIDATION HELPERS ====================
+
+    def validate_cobol_patterns(patterns: Dict[str, Any]) -> Dict[str, bool]:
+        """Validate COBOL pattern definitions"""
+        validation_results = {}
+        
+        required_patterns = [
+            'program_id', 'procedure_division', 'data_division',
+            'working_storage', 'perform_simple', 'if_statement',
+            'sql_block', 'copy_statement'
+        ]
+        
+        for pattern_name in required_patterns:
+            try:
+                pattern = patterns.get(pattern_name)
+                if pattern and hasattr(pattern, 'pattern'):
+                    # Test the pattern with a simple string
+                    test_result = pattern.search("TEST PROGRAM-ID. TESTPROG.")
+                    validation_results[pattern_name] = True
+                else:
+                    validation_results[pattern_name] = False
+            except Exception:
+                validation_results[pattern_name] = False
+        
+        return validation_results
+
+    def create_fallback_patterns() -> Dict[str, Any]:
+        """Create fallback patterns if main patterns fail to load"""
+        import re
+        
+        fallback_patterns = {
+            'program_id': re.compile(r'PROGRAM-ID\s*\.\s*([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
+            'procedure_division': re.compile(r'PROCEDURE\s+DIVISION', re.IGNORECASE),
+            'data_division': re.compile(r'DATA\s+DIVISION', re.IGNORECASE),
+            'working_storage': re.compile(r'WORKING-STORAGE\s+SECTION', re.IGNORECASE),
+            'perform_simple': re.compile(r'\bPERFORM\s+([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
+            'if_statement': re.compile(r'\bIF\s+', re.IGNORECASE),
+            'sql_block': re.compile(r'EXEC\s+SQL.*?END-EXEC', re.DOTALL | re.IGNORECASE),
+            'copy_statement': re.compile(r'\bCOPY\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE)
+        }
+        
+        return fallback_patterns
+        def _aggregate_cobol_analysis(self, chunk_analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
+            """Aggregate COBOL-specific analyses"""
+            all_purposes = []
+            all_operations = []
+            complexity_scores = []
+            business_functions = []
+            
+            for chunk_analysis in chunk_analyses:
+                analysis = chunk_analysis.get('analysis', {})
+                
+                if 'purpose' in analysis:
+                    all_purposes.append(analysis['purpose'])
+                if 'operations' in analysis:
+                    if isinstance(analysis['operations'], list):
+                        all_operations.extend(analysis['operations'])
+                    else:
+                        all_operations.append(analysis['operations'])
+                if 'complexity' in analysis:
+                    complexity_mapping = {'low': 1, 'medium': 2, 'high': 3}
+                    complexity_scores.append(complexity_mapping.get(analysis['complexity'], 2))
+                if 'business_function' in analysis:
+                    business_functions.append(analysis['business_function'])
+            
+            # Determine overall complexity
+            avg_complexity = sum(complexity_scores) / len(complexity_scores) if complexity_scores else 2
+            overall_complexity = 'low' if avg_complexity < 1.5 else 'high' if avg_complexity > 2.5 else 'medium'
+            
+            return {
+                'consolidated_purpose': ' | '.join(set(all_purposes)) if all_purposes else 'multiple_functions',
+                'all_operations': list(set(all_operations)),
+                'overall_complexity': overall_complexity,
+                'business_functions': list(set(business_functions)),
+                'analysis_coverage': 'comprehensive'
+            }
 
     def _aggregate_sql_analysis(self, chunk_analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Aggregate SQL-specific analyses"""
