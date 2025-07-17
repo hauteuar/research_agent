@@ -36,15 +36,13 @@ class DependencyAnalysis:
     missing_programs: Set[str]
     confidence_score: float
 
-class CodeParserAgent:
+class CompleteLLMCodeParser:
     """
     Complete LLM-based code parser with full database integration
     Handles all mainframe patterns: COBOL, CICS, SQL, MQ, JCL, etc.
     """
     
-    def __init__(self, coordinator, db_path: str = None, llm_engine=None,
-                    
-                    gpu_id: int = 0  ):
+    def __init__(self, coordinator, db_path: str = None):
         self.coordinator = coordinator
         self.db_path = db_path or "opulence_data.db"
         self.logger = coordinator.logger if hasattr(coordinator, 'logger') else self._setup_logger()
@@ -56,13 +54,13 @@ class CodeParserAgent:
             "top_p": 0.9
         }
         
-        # Chunking parameters - Fixed for proper token limits
-        self.max_tokens_per_chunk = 1400  # Reduced from 1800 to account for prompt overhead
-        self.min_chunk_lines = 20         # Reduced from 50
-        self.overlap_lines = 10           # Reduced from 20
-        self.max_chunk_size = 200         # Reduced from 500
-        self.chars_per_token = 3.5        # More conservative from 4
-        self.prompt_overhead_tokens = 600 # Increased from 400
+        # Chunking parameters - More aggressive limits for token safety
+        self.max_tokens_per_chunk = 1000  # Further reduced from 1400
+        self.min_chunk_lines = 10         # Reduced from 20
+        self.overlap_lines = 5            # Reduced from 10
+        self.max_chunk_size = 100         # Reduced from 200
+        self.chars_per_token = 3.0        # More conservative from 3.5
+        self.prompt_overhead_tokens = 700 # Increased from 600
         
         # Statistics tracking
         self.stats = {
@@ -379,12 +377,6 @@ class CodeParserAgent:
         
         for index_sql in indexes:
             cursor.execute(index_sql)
-    
-    """
-COMPLETE LLM CodeParser Agent with Full Database Storage
-Part 2: Prompt Creation and Intelligent Code Chunking
-"""
-
     """
 COMPLETE LLM CodeParser Agent with Full Database Storage
 Part 2: Prompt Creation and Intelligent Code Chunking
@@ -628,6 +620,9 @@ CRITICAL REQUIREMENTS:
         sections = []
         lines = content.split('\n')
         
+        # Use conservative token limit for content
+        max_content_tokens = 600
+        
         # For PROCEDURE DIVISION, split by paragraphs
         if section_type == 'DIVISION' and 'PROCEDURE' in section_name.upper():
             paragraph_starts = []
@@ -646,7 +641,7 @@ CRITICAL REQUIREMENTS:
                 
                 # Check if paragraph fits within limits
                 para_tokens = self._estimate_tokens(para_content)
-                if para_tokens + self.prompt_overhead_tokens <= 2048:
+                if para_tokens <= max_content_tokens:
                     para_name = lines[para_start].strip().rstrip('.')
                     sections.append(CodeSection(
                         section_type='PARAGRAPH',
@@ -673,6 +668,7 @@ CRITICAL REQUIREMENTS:
         
         chunk_start = 0
         chunk_num = 1
+        max_content_tokens = 600  # Conservative content limit
         
         while chunk_start < len(lines):
             chunk_lines = []
@@ -683,15 +679,15 @@ CRITICAL REQUIREMENTS:
                 line = lines[i]
                 line_tokens = self._estimate_tokens(line)
                 
-                # Check if adding this line would exceed safe limit
-                if current_tokens + line_tokens + self.prompt_overhead_tokens > 2048 and chunk_lines:
+                # Check if adding this line would exceed safe content limit
+                if current_tokens + line_tokens > max_content_tokens and chunk_lines:
                     break
                 
                 chunk_lines.append(line)
                 current_tokens += line_tokens
                 
-                # Also check line count limit
-                if len(chunk_lines) >= self.max_chunk_size:
+                # Also check line count limit (smaller chunks)
+                if len(chunk_lines) >= 50:
                     break
             
             if chunk_lines:
@@ -714,7 +710,7 @@ CRITICAL REQUIREMENTS:
                 if chunk_start < len(lines):
                     single_line = lines[chunk_start]
                     sections.append(CodeSection(
-                        section_type='CHUNK',
+                        section_type='EMERGENCY',
                         name=f'EMERGENCY-{chunk_num}',
                         content=single_line,
                         start_line=start_line_offset + chunk_start + 1,
@@ -767,8 +763,11 @@ CRITICAL REQUIREMENTS:
         content_tokens = self._estimate_tokens(section.content)
         total_tokens = content_tokens + self.prompt_overhead_tokens
         
-        if total_tokens > 2048:  # Hard limit for CodeLlama
-            self.logger.warning(f"Chunk {section.name} exceeds limit: {total_tokens} tokens")
+        # Use even more conservative limit
+        max_safe_tokens = 1300  # Well under 2048 limit
+        
+        if total_tokens > max_safe_tokens:
+            self.logger.warning(f"Chunk {section.name} exceeds safe limit: {total_tokens} tokens (limit: {max_safe_tokens})")
             return False
         
         return True
@@ -778,6 +777,9 @@ CRITICAL REQUIREMENTS:
         lines = section.content.split('\n')
         sections = []
         chunk_num = 1
+        
+        # Use smaller chunks for force splitting
+        max_safe_tokens = 600  # Very conservative for content only
         
         i = 0
         while i < len(lines):
@@ -789,16 +791,16 @@ CRITICAL REQUIREMENTS:
                 line = lines[i]
                 line_tokens = self._estimate_tokens(line)
                 
-                # Check if adding this line would exceed safe limit
-                if current_tokens + line_tokens + self.prompt_overhead_tokens > 2048 and chunk_lines:
+                # Check if adding this line would exceed safe content limit
+                if current_tokens + line_tokens > max_safe_tokens and chunk_lines:
                     break
                 
                 chunk_lines.append(line)
                 current_tokens += line_tokens
                 i += 1
                 
-                # Also check line count limit
-                if len(chunk_lines) >= self.max_chunk_size:
+                # Also check line count limit (smaller for force split)
+                if len(chunk_lines) >= 50:  # Smaller chunks
                     break
             
             if chunk_lines:
