@@ -95,181 +95,167 @@ class CodeParserAgent(BaseOpulenceAgent):
         """CORRECTED: Initialize patterns with proper COBOL syntax validation"""
         
         # CORRECTED COBOL Patterns - Fixed file operation detection
+     
+    # BALANCED COBOL Patterns - Less restrictive but still filtered
         self.cobol_patterns = {
-            # Basic identification - unchanged
-            'program_id': re.compile(r'PROGRAM-ID\s*\.\s*([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
-            
-            # File definitions - more restrictive
-            'select_assign': re.compile(
-                r'^\s*SELECT\s+([A-Z][A-Z0-9-]*)\s+ASSIGN\s+TO\s+([A-Z0-9-]+)', 
-                re.IGNORECASE | re.MULTILINE
-            ),
-            'fd_definition': re.compile(
-                r'^\s*FD\s+([A-Z][A-Z0-9-]*)', 
-                re.IGNORECASE | re.MULTILINE
-            ),
-            
-            # CORRECTED: File operations - CRITICAL FIXES to prevent false positives
-            'file_open': re.compile(
-                r'(?:^|\s)OPEN\s+(INPUT|OUTPUT|I-O|EXTEND)\s+([A-Z][A-Z0-9-]+)(?:\s|$|\.|,)', 
-                re.IGNORECASE | re.MULTILINE
-            ),
-            
-            'file_read': re.compile(
-                r'(?:^|\s)READ\s+([A-Z][A-Z0-9-]+)(?:\s+INTO\s+[A-Z][A-Z0-9-]*)?(?:\s|$|\.|,)', 
-                re.IGNORECASE | re.MULTILINE
-            ),
-            
-            'file_write': re.compile(
-                r'(?:^|\s)WRITE\s+([A-Z][A-Z0-9-]+)(?:\s+FROM\s+[A-Z][A-Z0-9-]*)?(?:\s|$|\.|,)', 
-                re.IGNORECASE | re.MULTILINE
-            ),
-            
-            'file_close': re.compile(
-                r'(?:^|\s)CLOSE\s+([A-Z][A-Z0-9-]+)(?:\s|$|\.|,)', 
-                re.IGNORECASE | re.MULTILINE
-            ),
-            
-            # Program calls - more restrictive
-            'cobol_call': re.compile(
-                r'(?:^|\s)CALL\s+[\'"]([A-Z0-9][A-Z0-9-]*)[\'"]', 
-                re.IGNORECASE | re.MULTILINE
-            ),
-            
-            # Copy statements - more restrictive
-            'copy_statement': re.compile(
-                r'(?:^|\s)COPY\s+([A-Z][A-Z0-9-]*)(?:\s|$|\.)', 
-                re.IGNORECASE | re.MULTILINE
-            ),
-            
-            # SQL blocks - unchanged
-            'sql_block': re.compile(r'EXEC\s+SQL(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
-            'sql_include': re.compile(r'EXEC\s+SQL\s+INCLUDE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
-            
-            # Data items - unchanged
-            'data_item': re.compile(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*)', re.MULTILINE | re.IGNORECASE),
-            
-            # Field usage patterns
-            'move_to_field': re.compile(
-                r'(?:^|\s)MOVE\s+([^.]+?)\s+TO\s+([A-Z][A-Z0-9-]*)(?:\s|$|\.)', 
-                re.IGNORECASE | re.MULTILINE
-            ),
-            'move_from_field': re.compile(
-                r'(?:^|\s)MOVE\s+([A-Z][A-Z0-9-]*)\s+TO\s+([^.]+?)(?:\s|$|\.)', 
-                re.IGNORECASE | re.MULTILINE
-            ),
-            'compute_field': re.compile(
-                r'(?:^|\s)COMPUTE\s+([A-Z][A-Z0-9-]*)\s*=\s*([^.]+?)(?:\s|$|\.)', 
-                re.IGNORECASE | re.MULTILINE
-            ),
-            'if_field': re.compile(
-                r'(?:^|\s)IF\s+([A-Z][A-Z0-9-]*)(?:\s|$|\.)', 
-                re.IGNORECASE | re.MULTILINE
-            ),
-            'picture_clause': re.compile(r'PIC\s+([X9S\(\)V\-\+,]+)', re.IGNORECASE),
-        }
+        # Basic identification - unchanged
+        'program_id': re.compile(r'PROGRAM-ID\s*\.\s*([A-Z0-9][A-Z0-9-]*)', re.IGNORECASE),
         
-        # CICS, JCL, MQ, DB2 patterns remain unchanged as they don't have the same issues
-        self.cics_patterns = {
-            'cics_link': re.compile(r'EXEC\s+CICS\s+LINK\s+PROGRAM\s*\(\s*([A-Z][A-Z0-9-]*)\s*\)', re.IGNORECASE),
-            'cics_xctl': re.compile(r'EXEC\s+CICS\s+XCTL\s+PROGRAM\s*\(\s*([A-Z][A-Z0-9-]*)\s*\)', re.IGNORECASE),
-            'cics_read': re.compile(r'EXEC\s+CICS\s+READ\s+FILE\s*\(\s*([A-Z][A-Z0-9-]*)\s*\)', re.IGNORECASE),
-            'cics_write': re.compile(r'EXEC\s+CICS\s+WRITE\s+FILE\s*\(\s*([A-Z][A-Z0-9-]*)\s*\)', re.IGNORECASE),
-        }
+        # File definitions - keep existing (these work well)
+        'select_assign': re.compile(
+            r'^\s*SELECT\s+([A-Z][A-Z0-9-]*)\s+ASSIGN\s+TO\s+([A-Z0-9-]+)', 
+            re.IGNORECASE | re.MULTILINE
+        ),
+        'fd_definition': re.compile(
+            r'^\s*FD\s+([A-Z][A-Z0-9-]*)', 
+            re.IGNORECASE | re.MULTILINE
+        ),
         
-        self.jcl_patterns = {
-            'job_card': re.compile(r'^//(\w+)\s+JOB\s', re.MULTILINE),
-            'exec_pgm': re.compile(r'^//(\w+)\s+EXEC\s+PGM=([A-Z0-9]+)', re.MULTILINE | re.IGNORECASE),
-            'exec_proc': re.compile(r'^//(\w+)\s+EXEC\s+PROC=([A-Z0-9]+)', re.MULTILINE | re.IGNORECASE),
-            'exec_simple': re.compile(r'^//(\w+)\s+EXEC\s+([A-Z0-9]+)', re.MULTILINE | re.IGNORECASE),
-            'dd_statement': re.compile(r'^//(\w+)\s+DD\s+DSN=([^,\s]+)', re.MULTILINE | re.IGNORECASE),
-        }
+        # BALANCED: File operations - Less restrictive to catch OUTPUT files
+        'file_open': re.compile(
+            r'\bOPEN\s+(INPUT|OUTPUT|I-O|EXTEND)\s+([A-Z][A-Z0-9-]+)', 
+            re.IGNORECASE
+        ),
         
-        self.mq_patterns = {
-            'mq_call': re.compile(r'CALL\s+[\'"]MQ([A-Z]+)[\'"]', re.IGNORECASE),
-            'mq_queue': re.compile(r'[\'"]([A-Z][A-Z0-9\._]*\.Q)[\'"]', re.IGNORECASE),
-        }
+        'file_read': re.compile(
+            r'\bREAD\s+([A-Z][A-Z0-9-]+)(?:\s+INTO\s+[A-Z][A-Z0-9-]*)?', 
+            re.IGNORECASE
+        ),
         
-        self.db2_patterns = {
-            'create_procedure': re.compile(r'CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\s+([A-Z][A-Z0-9_]*)', re.IGNORECASE),
-            'sql_table': re.compile(r'FROM\s+([A-Z][A-Z0-9_]*)', re.IGNORECASE),
-            'sql_insert': re.compile(r'INSERT\s+INTO\s+([A-Z][A-Z0-9_]*)', re.IGNORECASE),
-            'sql_update': re.compile(r'UPDATE\s+([A-Z][A-Z0-9_]*)', re.IGNORECASE),
-        }
+        'file_write': re.compile(
+            r'\bWRITE\s+([A-Z][A-Z0-9-]+)(?:\s+FROM\s+[A-Z][A-Z0-9-]*)?', 
+            re.IGNORECASE
+        ),
+        
+        'file_close': re.compile(
+            r'\bCLOSE\s+([A-Z][A-Z0-9-]+)', 
+            re.IGNORECASE
+        ),
+        
+        # Program calls - unchanged
+        'cobol_call': re.compile(
+            r'\bCALL\s+[\'"]([A-Z0-9][A-Z0-9-]*)[\'"]', 
+            re.IGNORECASE
+        ),
+        
+        # Copy statements - unchanged
+        'copy_statement': re.compile(
+            r'\bCOPY\s+([A-Z][A-Z0-9-]*)', 
+            re.IGNORECASE
+        ),
+        
+        # SQL blocks - unchanged
+        'sql_block': re.compile(r'EXEC\s+SQL(.*?)END-EXEC', re.DOTALL | re.IGNORECASE),
+        'sql_include': re.compile(r'EXEC\s+SQL\s+INCLUDE\s+([A-Z][A-Z0-9-]*)', re.IGNORECASE),
+        
+        # ENHANCED: Data items - More comprehensive for field cross-reference
+        'data_item': re.compile(r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*)', re.MULTILINE | re.IGNORECASE),
+        
+        # ENHANCED: Field definitions with PIC clauses - for working storage and copybooks
+        'field_with_pic': re.compile(
+            r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*)\s+(?:PIC|PICTURE)\s+([X9S\(\)V\-\+,\$Z\*]+)(?:\s+VALUE\s+([^.]+?))?(?:\s|\.)', 
+            re.MULTILINE | re.IGNORECASE
+        ),
+        
+        # ENHANCED: Field definitions with VALUE (without PIC)
+        'field_with_value': re.compile(
+            r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*)\s+VALUE\s+([^.]+?)(?:\s|\.)', 
+            re.MULTILINE | re.IGNORECASE
+        ),
+        
+        # Field usage patterns - less restrictive
+        'move_to_field': re.compile(
+            r'\bMOVE\s+([^.]+?)\s+TO\s+([A-Z][A-Z0-9-]*)', 
+            re.IGNORECASE
+        ),
+        'move_from_field': re.compile(
+            r'\bMOVE\s+([A-Z][A-Z0-9-]*)\s+TO\s+([^.]+?)', 
+            re.IGNORECASE
+        ),
+        'compute_field': re.compile(
+            r'\bCOMPUTE\s+([A-Z][A-Z0-9-]*)\s*=\s*([^.]+?)', 
+            re.IGNORECASE
+        ),
+        'if_field': re.compile(
+            r'\bIF\s+([A-Z][A-Z0-9-]*)', 
+            re.IGNORECASE
+        ),
+        'picture_clause': re.compile(r'(?:PIC|PICTURE)\s+([X9S\(\)V\-\+,\$Z\*]+)', re.IGNORECASE),
+     }
 
     def should_exclude_line_from_parsing(self, line: str) -> bool:
         """
-        CRITICAL: Check if a line should be excluded from file operation parsing
-        This prevents false positives from comments and working storage
+        BALANCED: More nuanced exclusion - only exclude obvious non-executable lines
         """
         line_stripped = line.strip().upper()
         
-        # Exclude comment lines
+        # Always exclude comment lines
         if line_stripped.startswith('*'):
             return True
         
-        # Exclude lines that are clearly working storage definitions
-        # Look for level numbers (01-99) followed by field names with PIC/VALUE
-        if re.match(r'^\s*\d{2}\s+[A-Z][A-Z0-9-]*\s+', line_stripped):
-            if any(keyword in line_stripped for keyword in ['PIC', 'PICTURE', 'VALUE', 'OCCURS', 'REDEFINES']):
-                return True
-        
-        # Exclude lines that are clearly data definitions
-        if any(keyword in line_stripped for keyword in ['WORKING-STORAGE', 'FILE SECTION', 'LINKAGE SECTION']):
+        # Exclude section headers only
+        if line_stripped in ['WORKING-STORAGE SECTION.', 'FILE SECTION.', 'LINKAGE SECTION.', 'PROCEDURE DIVISION.']:
             return True
         
-        # Exclude procedure division paragraph names
-        if line_stripped.endswith('.') and len(line_stripped.split()) == 1:
+        # Exclude division headers
+        if line_stripped.endswith('DIVISION.'):
             return True
+        
+        # DON'T exclude working storage fields - we want these for field cross-reference!
+        # DON'T exclude procedure division statements - we want file operations!
         
         return False
-
-    def is_valid_file_name(self, name: str) -> bool:
+    def is_valid_file_name(self, name: str, context: str = "") -> bool:
         """
-        CRITICAL: Validate that a matched name is actually a valid COBOL file name
-        This prevents false positives like 'VALUE', 'THE', etc.
+        BALANCED: More nuanced validation that considers context
         """
         if not name:
             return False
         
         name_upper = name.upper()
         
-        # Exclude common COBOL keywords that are not file names
-        cobol_keywords = {
-            'VALUE', 'PIC', 'PICTURE', 'OCCURS', 'TIMES', 'REDEFINES', 'COMP', 'COMP-3',
-            'DISPLAY', 'BINARY', 'PACKED-DECIMAL', 'USAGE', 'SIGN', 'LEADING', 'TRAILING',
-            'SEPARATE', 'CHARACTER', 'ALPHANUMERIC', 'NUMERIC', 'INTO', 'FROM', 'GIVING',
-            'REMAINDER', 'QUOTIENT', 'SIZE', 'ERROR', 'OVERFLOW', 'ROUNDED', 'ON',
-            'NOT', 'EQUAL', 'GREATER', 'LESS', 'THAN', 'OR', 'AND', 'TRUE', 'FALSE',
+        # CRITICAL: Exclude obvious COBOL keywords that are never file names
+        never_file_names = {
+            'VALUE', 'PIC', 'PICTURE', 'THE', 'TO', 'FROM', 'INTO', 'GIVING',
             'SPACES', 'SPACE', 'ZEROS', 'ZEROES', 'QUOTES', 'HIGH-VALUES', 'LOW-VALUES',
-            'ALL', 'THE', 'TO', 'OF', 'IN', 'AT', 'BY', 'FOR', 'WITH', 'THROUGH', 'THRU',
-            'UNTIL', 'WHILE', 'WHEN', 'IF', 'THEN', 'ELSE', 'END-IF', 'PERFORM', 'GO',
-            'EXIT', 'STOP', 'RETURN', 'GOBACK', 'NEXT', 'SENTENCE', 'PARAGRAPH', 'SECTION',
-            'YES', 'NO', 'TRUE', 'FALSE'
+            'YES', 'NO', 'TRUE', 'FALSE', 'ON', 'OFF', 'ERROR', 'OVERFLOW',
+            'EQUAL', 'GREATER', 'LESS', 'THAN', 'OR', 'AND', 'NOT'
         }
         
-        if name_upper in cobol_keywords:
+        if name_upper in never_file_names:
             return False
         
-        # Exclude single letters or very short names that are likely not file names
+        # Exclude single letters or very short names
         if len(name) <= 2:
             return False
         
-        # Exclude names that are clearly numeric values
+        # Exclude obviously numeric values
         if name.replace('-', '').replace('.', '').isdigit():
             return False
         
-        # Valid file names should start with a letter and contain only letters, numbers, hyphens
+        # Valid file names should start with a letter
         if not re.match(r'^[A-Z][A-Z0-9-]*$', name_upper):
             return False
         
-        # Additional validation: file names typically have certain patterns
-        # Most COBOL file names are 6-8 characters and often end with certain suffixes
-        if len(name) >= 3 and name_upper.startswith(('TMS', 'FILE', 'MST', 'DTL', 'HDR')):
-            return True
+        # CONTEXT-AWARE: If in working storage context, be more lenient
+        if 'WORKING-STORAGE' in context.upper() or 'LINKAGE' in context.upper():
+            # Working storage fields can have various patterns
+            if 3 <= len(name) <= 30:  # Allow longer working storage field names
+                return True
         
-        # If it's a reasonable length and format, probably valid
-        if 3 <= len(name) <= 12:
+        # For file operations, be more selective
+        # Common file name patterns in mainframe COBOL
+        if len(name) >= 3:
+            # Common prefixes for files
+            if name_upper.startswith(('TMS', 'FILE', 'MST', 'DTL', 'HDR', 'TRL', 'MSTR', 'DETAIL', 'CUSTOMER', 'ACCOUNT')):
+                return True
+            
+            # Common suffixes for files  
+            if name_upper.endswith(('FILE', 'MST', 'DTL', 'HDR', 'TRL', 'DAT', 'REC')):
+                return True
+        
+        # If it's reasonable length and format, probably valid
+        if 3 <= len(name) <= 15:
             return True
         
         return False
@@ -673,7 +659,7 @@ class CodeParserAgent(BaseOpulenceAgent):
         relationships.extend(self._extract_program_calls(content, program_name))
         
         # CORRECTED: File relationships with validation
-        relationships.extend(self._extract_file_relationships_corrected(content, program_name))
+        relationships.extend(self._extract_file_relationships(content, program_name))
         
         # Copybook relationships (unchanged)
         relationships.extend(self._extract_copybook_relationships(content, program_name))
@@ -684,13 +670,27 @@ class CodeParserAgent(BaseOpulenceAgent):
         self.logger.info(f"📊 Extracted {len(relationships)} validated relationships")
         return relationships
 
-    def _extract_file_relationships_corrected(self, content: str, program_name: str) -> List[RelationshipRecord]:
-        """CORRECTED: Extract file access relationships with proper validation"""
+    def _extract_file_relationships(self, content: str, program_name: str) -> List[RelationshipRecord]:
+        """BALANCED: Extract file relationships with better context awareness"""
         relationships = []
         lines = content.split('\n')
         
+        # Track current section to provide context
+        current_section = 'UNKNOWN'
+        
         for line_num, line in enumerate(lines, 1):
-            # CRITICAL: Skip excluded lines (comments, working storage, etc.)
+            # Update current section tracking
+            line_upper = line.strip().upper()
+            if 'WORKING-STORAGE SECTION' in line_upper:
+                current_section = 'WORKING-STORAGE'
+            elif 'FILE SECTION' in line_upper:
+                current_section = 'FILE-SECTION'
+            elif 'PROCEDURE DIVISION' in line_upper:
+                current_section = 'PROCEDURE'
+            elif 'LINKAGE SECTION' in line_upper:
+                current_section = 'LINKAGE'
+            
+            # BALANCED: Only exclude comment lines and section headers
             if self.should_exclude_line_from_parsing(line):
                 continue
             
@@ -699,26 +699,26 @@ class CodeParserAgent(BaseOpulenceAgent):
                 logical_file = match.group(1).strip()
                 physical_file = match.group(2).strip()
                 
-                if self.is_valid_file_name(logical_file):
-                    relationships.append(RelationshipRecord(
-                        source_name=program_name,
-                        target_name=logical_file,
-                        relationship_type='FILE_SELECT',
-                        location='FILE-CONTROL',
-                        line_number=line_num,
-                        metadata={
-                            'logical_file': logical_file,
-                            'physical_file': physical_file,
-                            'statement': match.group(0),
-                            'validated': True,
-                            'line_content': line.strip()
-                        }
-                    ))
+                # File definitions are always valid
+                relationships.append(RelationshipRecord(
+                    source_name=program_name,
+                    target_name=logical_file,
+                    relationship_type='FILE_SELECT',
+                    location='FILE-CONTROL',
+                    line_number=line_num,
+                    metadata={
+                        'logical_file': logical_file,
+                        'physical_file': physical_file,
+                        'statement': match.group(0),
+                        'validated': True,
+                        'line_content': line.strip()
+                    }
+                ))
             
-            # File operations with validation
+            # File operations with context-aware validation
             file_ops = {
-                'file_open': ('OPEN', 2),  # file name is in group 2
-                'file_read': ('READ', 1),  # file name is in group 1
+                'file_open': ('OPEN', 2),
+                'file_read': ('READ', 1),
                 'file_write': ('WRITE', 1),
                 'file_close': ('CLOSE', 1)
             }
@@ -733,38 +733,35 @@ class CodeParserAgent(BaseOpulenceAgent):
                         file_name = match.group(group_num).strip()
                         file_mode = ''
                     
-                    # CRITICAL: Validate the file name
-                    if self.is_valid_file_name(file_name):
-                        # Additional context check: make sure this isn't in a comment section
-                        context_start = max(0, line_num - 3)
-                        context_lines = lines[context_start:line_num + 2]
-                        context_text = '\n'.join(context_lines).upper()
-                        
-                        # Skip if this appears to be in a comment block
-                        if context_text.count('*') > len(context_lines) // 2:
+                    # BALANCED: Context-aware validation
+                    context_info = f"Section: {current_section}, Line: {line.strip()}"
+                    
+                    if self.is_valid_file_name(file_name, context_info):
+                        # Additional checks for procedure division (where file ops should be)
+                        if current_section == 'PROCEDURE' or current_section == 'UNKNOWN':
+                            relationships.append(RelationshipRecord(
+                                source_name=program_name,
+                                target_name=file_name,
+                                relationship_type=f'FILE_{op_type}',
+                                location=self._find_paragraph_context(lines, line_num),
+                                line_number=line_num,
+                                metadata={
+                                    'access_mode': file_mode,
+                                    'statement': match.group(0),
+                                    'validated': True,
+                                    'line_content': line.strip(),
+                                    'section': current_section
+                                }
+                            ))
+                        else:
+                            # In working storage - might be false positive
                             self._false_positives_prevented += 1
-                            self.logger.debug(f"Prevented false positive: {file_name} in comment block at line {line_num}")
-                            continue
-                        
-                        relationships.append(RelationshipRecord(
-                            source_name=program_name,
-                            target_name=file_name,
-                            relationship_type=f'FILE_{op_type}',
-                            location=self._find_paragraph_context(lines, line_num),
-                            line_number=line_num,
-                            metadata={
-                                'access_mode': file_mode,
-                                'statement': match.group(0),
-                                'validated': True,
-                                'line_content': line.strip()
-                            }
-                        ))
+                            self.logger.debug(f"Prevented potential false positive: {file_name} in {current_section} at line {line_num}")
                     else:
                         self._false_positives_prevented += 1
                         self.logger.debug(f"Prevented false positive: {file_name} (invalid file name) at line {line_num}")
         
         return relationships
-
     def _find_paragraph_context(self, lines: list, current_line: int) -> str:
         """Find the containing paragraph for better context"""
         # Look backwards for paragraph name
@@ -843,36 +840,31 @@ class CodeParserAgent(BaseOpulenceAgent):
             self.logger.error(f"❌ Failed to store lineage data: {e}")
 
     async def _extract_field_definitions(self, cursor, content: str, program_name: str, file_type: str):
-        """Extract field definitions for field_cross_reference table"""
+        """ENHANCED: Extract comprehensive field definitions including working storage and copybooks"""
         try:
-            # Extract data items with picture clauses
-            data_item_pattern = re.compile(
-                r'^\s*(\d+)\s+([A-Z][A-Z0-9-]*)\s+PIC\s+([X9S\(\)V\-\+,]+)(?:\s+USAGE\s+([A-Z]+))?',
-                re.MULTILINE | re.IGNORECASE
-            )
+            # Track current section
+            current_section = 'UNKNOWN'
             
-            matches = data_item_pattern.finditer(content)
-            for match in matches:
+            # Extract fields with PIC clauses (most comprehensive)
+            for match in self.cobol_patterns['field_with_pic'].finditer(content):
                 level_number = int(match.group(1))
                 field_name = match.group(2).strip()
                 picture_clause = match.group(3).strip()
-                usage_clause = match.group(4).strip() if match.group(4) else None
+                value_clause = match.group(4).strip() if match.group(4) else None
                 
-                # Determine definition location
+                # Determine section context
                 line_pos = content[:match.start()].count('\n') + 1
-                section = self._find_section(content, match.start())
+                section = self._find_section_enhanced(content, match.start())
                 
-                # Determine data type from picture clause
+                # Determine data type
                 data_type = self._determine_data_type(picture_clause)
-                
-                # Determine business domain (simple heuristics)
                 business_domain = self._infer_business_domain(field_name)
                 
                 cursor.execute("""
                     INSERT OR IGNORE INTO field_cross_reference 
                     (field_name, qualified_name, source_type, source_name, definition_location,
-                     data_type, picture_clause, usage_clause, level_number, parent_field,
-                     occurs_info, business_domain)
+                    data_type, picture_clause, usage_clause, level_number, parent_field,
+                    occurs_info, business_domain)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     field_name,
@@ -882,18 +874,90 @@ class CodeParserAgent(BaseOpulenceAgent):
                     section,
                     data_type,
                     picture_clause,
-                    usage_clause,
+                    None,  # usage_clause
                     level_number,
-                    None,  # parent_field - would need hierarchy analysis
-                    json.dumps({}),  # occurs_info - would need OCCURS parsing
+                    None,  # parent_field
+                    json.dumps({}),  # occurs_info
                     business_domain
                 ))
             
-            self.logger.debug(f"Extracted field definitions for {program_name}")
+            # Extract fields with VALUE clauses (condition names, constants)
+            for match in self.cobol_patterns['field_with_value'].finditer(content):
+                level_number = int(match.group(1))
+                field_name = match.group(2).strip()
+                value_clause = match.group(3).strip()
+                
+                line_pos = content[:match.start()].count('\n') + 1
+                section = self._find_section_enhanced(content, match.start())
+                
+                # These are typically condition names (88 levels) or constants
+                data_type = "CONDITION" if level_number == 88 else "CONSTANT"
+                business_domain = self._infer_business_domain(field_name)
+                
+                cursor.execute("""
+                    INSERT OR IGNORE INTO field_cross_reference 
+                    (field_name, qualified_name, source_type, source_name, definition_location,
+                    data_type, picture_clause, usage_clause, level_number, parent_field,
+                    occurs_info, business_domain)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    field_name,
+                    f"{program_name}.{field_name}",
+                    file_type,
+                    program_name,
+                    section,
+                    data_type,
+                    None,  # picture_clause
+                    value_clause,  # Store VALUE clause in usage_clause
+                    level_number,
+                    None,  # parent_field
+                    json.dumps({}),  # occurs_info
+                    business_domain
+                ))
+            
+            # Extract basic data items (for comprehensive coverage)
+            for match in self.cobol_patterns['data_item'].finditer(content):
+                level_number = int(match.group(1))
+                field_name = match.group(2).strip()
+                
+                # Skip if we already processed this field with PIC or VALUE
+                cursor.execute("SELECT COUNT(*) FROM field_cross_reference WHERE field_name = ? AND source_name = ?", 
+                            (field_name, program_name))
+                if cursor.fetchone()[0] > 0:
+                    continue
+                
+                line_pos = content[:match.start()].count('\n') + 1
+                section = self._find_section_enhanced(content, match.start())
+                
+                data_type = "GROUP" if level_number < 50 else "ELEMENTARY"
+                business_domain = self._infer_business_domain(field_name)
+                
+                cursor.execute("""
+                    INSERT OR IGNORE INTO field_cross_reference 
+                    (field_name, qualified_name, source_type, source_name, definition_location,
+                    data_type, picture_clause, usage_clause, level_number, parent_field,
+                    occurs_info, business_domain)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    field_name,
+                    f"{program_name}.{field_name}",
+                    file_type,
+                    program_name,
+                    section,
+                    data_type,
+                    None,  # picture_clause
+                    None,  # usage_clause
+                    level_number,
+                    None,  # parent_field
+                    json.dumps({}),  # occurs_info
+                    business_domain
+                ))
+            
+            self.logger.info(f"Enhanced field extraction completed for {program_name}")
             
         except Exception as e:
-            self.logger.error(f"Failed to extract field definitions: {e}")
-
+            self.logger.error(f"Failed to extract enhanced field definitions: {e}")
+            
     def _determine_data_type(self, picture_clause: str) -> str:
         """Determine data type from COBOL picture clause"""
         pic = picture_clause.upper()
@@ -1328,7 +1392,7 @@ class CodeParserAgent(BaseOpulenceAgent):
                 source_name=program_name,
                 target_name=copybook_name,
                 relationship_type='COPY',
-                location=self._find_section(content, match.start()),
+                location=self._find_section_enhanced(content, match.start()),
                 line_number=line_num,
                 metadata={'statement': match.group(0)}
             ))
@@ -1378,24 +1442,32 @@ class CodeParserAgent(BaseOpulenceAgent):
         
         return 'UNKNOWN'
 
-    def _find_section(self, content: str, position: int) -> str:
-        """Find containing section"""
+    def _find_section_enhanced(self, content: str, position: int) -> str:
+        """Enhanced section detection"""
         before_content = content[:position].upper()
         
+        # Look for the most recent section header
         sections = [
-            'WORKING-STORAGE SECTION',
-            'FILE SECTION', 
-            'LINKAGE SECTION',
-            'PROCEDURE DIVISION'
+            ('WORKING-STORAGE SECTION', 'WORKING-STORAGE'),
+            ('FILE SECTION', 'FILE-SECTION'), 
+            ('LINKAGE SECTION', 'LINKAGE'),
+            ('PROCEDURE DIVISION', 'PROCEDURE'),
+            ('ENVIRONMENT DIVISION', 'ENVIRONMENT'),
+            ('DATA DIVISION', 'DATA'),
+            ('IDENTIFICATION DIVISION', 'IDENTIFICATION')
         ]
         
         current_section = 'UNKNOWN'
-        for section in sections:
-            if section in before_content:
-                current_section = section.replace(' SECTION', '').replace(' ', '-')
+        last_position = -1
+        
+        for section_text, section_name in sections:
+            pos = before_content.rfind(section_text)
+            if pos > last_position:
+                last_position = pos
+                current_section = section_name
         
         return current_section
-
+    
     async def _store_all_relationships(self, relationships: List[RelationshipRecord]):
         """FIXED: Store all relationships in appropriate tables with proper column names"""
         if not relationships:
