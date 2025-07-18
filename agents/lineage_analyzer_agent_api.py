@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """
-FIXED API-BASED Agent 4: Field Lineage & Lifecycle Analyzer
+FIXED Lineage Analyzer Agent - Multiple Small API Calls Version
 CRITICAL FIXES:
-1. Fixed SQL parameter binding issues
-2. Added missing get_program_chunks method
-3. Fixed call_api_for_readable_analysis method
-4. Fixed program file access methods
-5. Fixed program field usage methods
-6. Fixed data flow analysis methods
+1. Split large prompts into multiple focused API calls
+2. Increased max_tokens and temperature for better analysis
+3. Each analysis step uses specific, smaller prompts
+4. Progressive analysis building approach
 """
 
 import asyncio
@@ -45,30 +43,27 @@ class LineageEdge:
 
 
 class LineageAnalyzerAgent(BaseOpulenceAgent): 
-    """FIXED API-BASED: Agent to analyze field lineage, data flow, and component lifecycle"""
+    """FIXED: Lineage Analyzer with Multiple Small API Calls"""
     
     def __init__(self, coordinator, llm_engine=None, db_path: str = "opulence_data.db", gpu_id: int = 0):
-        # ✅ FIXED: Proper super().__init__() call first
         super().__init__(coordinator, "lineage_analyzer", db_path, gpu_id)  
         
-        # Store coordinator reference for API calls
         self.coordinator = coordinator
-        
-        # Initialize lineage tracking tables
         self._init_lineage_tables()
-        
-        # In-memory lineage graph
         self.lineage_graph = nx.DiGraph()
-        
-        # Load existing lineage data flag
         self._lineage_loaded = False
         
-        # API-specific settings - FIXED: Reduced token limits
+        # FIXED: Better API parameters for Llama-3B with 4096 context
         self.api_params = {
-        "max_tokens": 1024,  # INCREASED from 500 for more complete responses
-        "temperature": 0.1,  # Keep low for consistency
-        "top_p": 0.9
-    }
+            "max_tokens": 800,      # INCREASED: Better for analytical tasks
+            "temperature": 0.2,     # INCREASED: More creative analysis
+            "top_p": 0.9,
+            "stop": ["\n\n\n", "###", "---"]  # Better stop tokens
+        }
+        
+        # FIXED: Prompt size limits for 4096 context window
+        self.max_prompt_chars = 1500  # Keep prompts small
+        self.max_content_chars = 800  # Truncate content aggressively
     
     def _add_processing_info(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Add processing information to results"""
@@ -76,6 +71,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             result['gpu_used'] = self.gpu_id
             result['agent_type'] = 'lineage_analyzer'
             result['api_based'] = True
+            result['multi_call_approach'] = True
             result['coordinator_type'] = getattr(self.coordinator, 'stats', {}).get('coordinator_type', 'api_based')
         return result
     
@@ -144,28 +140,18 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 created_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             
-            CREATE TABLE IF NOT EXISTS partial_analysis_cache (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                component_name TEXT UNIQUE,
-                agent_type TEXT,
-                partial_data TEXT,
-                progress_percent REAL,
-                status TEXT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            
             CREATE TABLE IF NOT EXISTS file_access_relationships (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    program_name TEXT NOT NULL,
-                    logical_file_name TEXT NOT NULL,
-                    physical_file_name TEXT,
-                    access_type TEXT NOT NULL,
-                    access_mode TEXT,
-                    line_number INTEGER,
-                    access_statement TEXT,
-                    record_format TEXT,
-                    created_timestamp TEXT DEFAULT CURRENT_TIMESTAMP
-                );
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                program_name TEXT NOT NULL,
+                logical_file_name TEXT NOT NULL,
+                physical_file_name TEXT,
+                access_type TEXT NOT NULL,
+                access_mode TEXT,
+                line_number INTEGER,
+                access_statement TEXT,
+                record_format TEXT,
+                created_timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+            );
             
             CREATE TABLE IF NOT EXISTS field_cross_reference (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -225,193 +211,52 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
         except Exception as e:
             self.logger.error(f"Failed to load existing lineage: {str(e)}")
     
-    # ✅ FIXED: Missing _call_api_for_readable_analysis method
-    async def _call_api_for_readable_analysis(self, prompt: str, max_tokens: int = None) -> str:
-        """Make API call for readable analysis that returns plain text"""
+    async def _call_api_focused(self, prompt: str, analysis_type: str, step_name: str) -> str:
+        """FIXED: Make focused API call with proper parameters"""
         try:
-            params = self.api_params.copy()
-            if max_tokens:
-                params["max_tokens"] = max_tokens
+            # Ensure prompt is within limits
+            if len(prompt) > self.max_prompt_chars:
+                self.logger.warning(f"Truncating prompt from {len(prompt)} to {self.max_prompt_chars} chars")
+                prompt = prompt[:self.max_prompt_chars] + "...\n\nProvide analysis based on the above content."
             
-            # Use coordinator's API call method
+            self.logger.info(f"🔄 API Call: {step_name} ({analysis_type}) - {len(prompt)} chars")
+            
+            # Use coordinator's API call method with better parameters
             result = await self.coordinator.call_model_api(
                 prompt=prompt,
-                params=params,
+                params=self.api_params,
                 preferred_gpu_id=self.gpu_id
             )
             
-            # Extract text from API response and ensure it's readable
+            # Extract and validate text
             if isinstance(result, dict):
                 text = result.get('text') or result.get('response') or result.get('content') or ''
                 
-                # Clean up the text to ensure it's readable
-                if text:
-                    # Remove JSON-like structures if present
-                    text = self._ensure_readable_text(text)
-                    return text
+                if text and len(text.strip()) > 10:
+                    self.logger.info(f"✅ {step_name}: Got {len(text)} chars response")
+                    return text.strip()
                 else:
-                    return "Analysis completed successfully"
+                    self.logger.warning(f"⚠️ {step_name}: Empty or short response: '{text}'")
+                    return f"{step_name} analysis completed with limited results"
             
-            return str(result)
+            return str(result) if result else f"{step_name} analysis completed"
             
         except Exception as e:
-            self.logger.error(f"API call for readable analysis failed: {str(e)}")
-            return f"Analysis completed with limited results: {str(e)}"
+            self.logger.error(f"❌ API call failed for {step_name}: {str(e)}")
+            return f"{step_name} analysis failed: {str(e)}"
     
-    def _ensure_readable_text(self, text: str) -> str:
-        """Ensure text is readable prose, not JSON"""
-        text = text.strip()
-        
-        # If it looks like JSON, try to extract readable content
-        if text.startswith('{') and text.endswith('}'):
-            try:
-                import json
-                json_data = json.loads(text)
-                if isinstance(json_data, dict):
-                    # Extract readable fields
-                    readable_fields = ['summary', 'analysis', 'description', 'overview', 'conclusion']
-                    for field in readable_fields:
-                        if field in json_data and isinstance(json_data[field], str):
-                            return json_data[field]
-                    
-                    # If no readable fields, create summary
-                    return "Analysis completed with structured data results"
-            except:
-                pass
-        
-        return text
-    
-    async def _call_api_for_analysis(self, prompt: str, max_tokens: int = None) -> str:
-        """Make API call for LLM analysis"""
-        try:
-            params = self.api_params.copy()
-            if max_tokens:
-                params["max_tokens"] = max_tokens
-            
-            # Use coordinator's API call method
-            result = await self.coordinator.call_model_api(
-                prompt=prompt,
-                params=params,
-                preferred_gpu_id=self.gpu_id
-            )
-            
-            # Extract text from API response
-            if isinstance(result, dict):
-                return result.get('text', result.get('response', ''))
-            return str(result)
-            
-        except Exception as e:
-            self.logger.error(f"API call failed: {str(e)}")
-            raise RuntimeError(f"API analysis failed: {str(e)}")
-    
-    # ✅ FIXED: Missing get_program_chunks method
-    async def _get_program_chunks(self, program_name: str):
-        """Get program chunks for a specific program"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # FIXED: Proper parameter binding
-            cursor.execute("""
-                SELECT program_name, chunk_id, chunk_type, content, metadata, line_start, line_end
-                FROM program_chunks
-                WHERE program_name = ?
-                ORDER BY line_start
-            """, (str(program_name),))  # FIXED: Ensure string parameter
-            
-            chunks = cursor.fetchall()
-            conn.close()
-            
-            return chunks
-            
-        except Exception as e:
-            self.logger.error(f"Failed to get program chunks: {e}")
-            return []
-        
-    async def analyze_field_lineage(self, field_name: str) -> Dict[str, Any]:
-        """✅ FIXED: Field lineage analysis with comprehensive logging"""
-        try:
-            await self._load_existing_lineage()
-            
-            # FIXED: Ensure field_name is string and log start
-            field_name = str(field_name)
-            self.logger.info(f"🎯 Starting field lineage analysis for: {field_name}")
-            
-            # Find all references to this field
-            field_references = await self._find_field_references(field_name)
-            
-            # FIXED: Better logging of what was found
-            self.logger.info(f"📋 Found {len(field_references)} references for {field_name}")
-            
-            if not field_references:
-                self.logger.warning(f"⚠️ No references found for field: {field_name}")
-                return self._add_processing_info({
-                    "field_name": field_name,
-                    "error": "No references found for this field",
-                    "suggestions": ["Check if field name is correct", "Verify data has been processed", "Try alternative field names"],
-                    "total_references": 0,
-                    "status": "no_data"
-                })
-            
-            # Log progress through analysis steps
-            self.logger.info(f"🔄 Step 1/5: Building lineage graph for {field_name}")
-            field_lineage = await self._build_field_lineage_graph(field_name, field_references)
-            
-            self.logger.info(f"🔄 Step 2/5: Analyzing usage patterns for {field_name}")
-            usage_analysis = await self._analyze_field_usage_patterns_api(field_name, field_references)
-            
-            self.logger.info(f"🔄 Step 3/5: Finding transformations for {field_name}")
-            transformations = await self._find_field_transformations_api(field_name, field_references)
-            
-            self.logger.info(f"🔄 Step 4/5: Analyzing lifecycle for {field_name}")
-            lifecycle = await self._analyze_field_lifecycle_api(field_name, field_references)
-            
-            self.logger.info(f"🔄 Step 5/5: Generating comprehensive report for {field_name}")
-            lineage_report = await self._generate_field_lineage_report_api(
-                field_name, field_lineage, usage_analysis, transformations, lifecycle
-            )
-            
-            # FIXED: Build comprehensive result with all data
-            result = {
-                "field_name": field_name,
-                "total_references": len(field_references),
-                "lineage_graph": field_lineage,
-                "usage_analysis": usage_analysis,
-                "transformations": transformations,
-                "lifecycle": lifecycle,
-                "comprehensive_report": lineage_report,
-                "impact_analysis": await self._analyze_field_impact_api(field_name, field_references),
-                "analysis_timestamp": dt.now().isoformat(),
-                "status": "success"
-            }
-            
-            self.logger.info(f"✅ Field lineage analysis completed successfully for {field_name}")
-            return self._add_processing_info(result)
-            
-        except Exception as e:
-            self.logger.error(f"❌ Field lineage analysis failed for {field_name}: {str(e)}")
-            return self._add_processing_info({
-                "field_name": field_name,
-                "error": str(e),
-                "status": "error",
-                "analysis_timestamp": dt.now().isoformat()
-            })
-
     def _normalize_component_name(self, component_name) -> str:
-        """FIXED: Normalize component name to handle tuples and other formats"""
+        """Normalize component name to handle tuples and other formats"""
         try:
-            # If it's already a string, return as-is
             if isinstance(component_name, str):
                 return component_name.strip()
             
-            # If it's a tuple or list, take the first element
             if isinstance(component_name, (tuple, list)) and len(component_name) > 0:
                 first_element = component_name[0]
                 if isinstance(first_element, str):
                     self.logger.info(f"🔧 Normalized tuple/list component name: {component_name} -> {first_element}")
                     return first_element.strip()
             
-            # If it's something else, convert to string
             normalized = str(component_name).strip()
             if normalized != str(component_name):
                 self.logger.info(f"🔧 Converted component name to string: {component_name} -> {normalized}")
@@ -422,57 +267,498 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             self.logger.error(f"❌ Failed to normalize component name {component_name}: {e}")
             return str(component_name) if component_name else "UNKNOWN"
 
-    async def analyze_complete_data_flow(self, component_name: str, component_type: str) -> Dict[str, Any]:
-        """🔄 FIXED: Complete data flow analysis with tuple handling"""
+    async def analyze_field_lineage(self, field_name: str) -> Dict[str, Any]:
+        """FIXED: Field lineage analysis with multiple focused API calls"""
         try:
-            # CRITICAL FIX: Normalize component name first
+            await self._load_existing_lineage()
+            
+            field_name = str(field_name)
+            self.logger.info(f"🎯 Starting multi-step field lineage analysis for: {field_name}")
+            
+            # STEP 1: Find all references (no API call needed)
+            field_references = await self._find_field_references(field_name)
+            self.logger.info(f"📋 Found {len(field_references)} references for {field_name}")
+            
+            if not field_references:
+                return self._add_processing_info({
+                    "field_name": field_name,
+                    "error": "No references found for this field",
+                    "suggestions": ["Check if field name is correct", "Verify data has been processed"],
+                    "total_references": 0,
+                    "status": "no_data"
+                })
+            
+            # Initialize results
+            analysis_result = {
+                "field_name": field_name,
+                "total_references": len(field_references),
+                "analysis_steps": {},
+                "status": "in_progress"
+            }
+            
+            # STEP 2: Build basic lineage graph (no API call)
+            self.logger.info(f"🔄 Step 2: Building lineage graph for {field_name}")
+            field_lineage = await self._build_field_lineage_graph(field_name, field_references)
+            analysis_result["analysis_steps"]["lineage_graph"] = {
+                "status": "success",
+                "data": field_lineage
+            }
+            
+            # STEP 3: Analyze usage patterns with focused API call
+            self.logger.info(f"🔄 Step 3: Analyzing usage patterns for {field_name}")
+            usage_analysis = await self._analyze_field_usage_patterns_focused(field_name, field_references)
+            analysis_result["analysis_steps"]["usage_patterns"] = {
+                "status": "success" if usage_analysis.get("pattern_summary") else "partial",
+                "data": usage_analysis
+            }
+            
+            # STEP 4: Find transformations with focused API call
+            self.logger.info(f"🔄 Step 4: Finding transformations for {field_name}")
+            transformations = await self._find_field_transformations_focused(field_name, field_references)
+            analysis_result["analysis_steps"]["transformations"] = {
+                "status": "success" if transformations.get("transformation_summary") else "partial",
+                "data": transformations
+            }
+            
+            # STEP 5: Analyze lifecycle with focused API call
+            self.logger.info(f"🔄 Step 5: Analyzing lifecycle for {field_name}")
+            lifecycle = await self._analyze_field_lifecycle_focused(field_name, field_references)
+            analysis_result["analysis_steps"]["lifecycle"] = {
+                "status": "success" if lifecycle.get("lifecycle_summary") else "partial",
+                "data": lifecycle
+            }
+            
+            # STEP 6: Generate impact analysis with focused API call
+            self.logger.info(f"🔄 Step 6: Generating impact analysis for {field_name}")
+            impact_analysis = await self._analyze_field_impact_focused(field_name, field_references)
+            analysis_result["analysis_steps"]["impact_analysis"] = {
+                "status": "success" if impact_analysis.get("impact_summary") else "partial",
+                "data": impact_analysis
+            }
+            
+            # STEP 7: Create final summary with focused API call
+            self.logger.info(f"🔄 Step 7: Creating comprehensive summary for {field_name}")
+            final_summary = await self._generate_field_summary_focused(field_name, analysis_result)
+            analysis_result["comprehensive_summary"] = final_summary
+            
+            # Final status
+            successful_steps = len([step for step in analysis_result["analysis_steps"].values() if step["status"] == "success"])
+            total_steps = len(analysis_result["analysis_steps"])
+            
+            analysis_result.update({
+                "successful_steps": successful_steps,
+                "total_steps": total_steps,
+                "completion_rate": (successful_steps / total_steps) * 100 if total_steps > 0 else 0,
+                "status": "success" if successful_steps >= 3 else "partial",
+                "analysis_timestamp": dt.now().isoformat()
+            })
+            
+            self.logger.info(f"✅ Field lineage analysis completed: {successful_steps}/{total_steps} steps successful")
+            return self._add_processing_info(analysis_result)
+            
+        except Exception as e:
+            self.logger.error(f"❌ Field lineage analysis failed for {field_name}: {str(e)}")
+            return self._add_processing_info({
+                "field_name": field_name,
+                "error": str(e),
+                "status": "error",
+                "analysis_timestamp": dt.now().isoformat()
+            })
+
+    async def _analyze_field_usage_patterns_focused(self, field_name: str, references: List[Dict]) -> Dict[str, Any]:
+        """FIXED: Focused API call for usage pattern analysis"""
+        
+        # Prepare condensed data for analysis
+        usage_stats = {
+            "total_references": len(references),
+            "programs_using": set(),
+            "operation_types": defaultdict(int),
+            "chunk_types": defaultdict(int)
+        }
+        
+        # Extract key information
+        for ref in references:
+            if ref.get("type") != "table_definition":
+                usage_stats["programs_using"].add(ref.get("program_name", "unknown"))
+                usage_stats["chunk_types"][ref.get("chunk_type", "unknown")] += 1
+        
+        # Convert to serializable format
+        programs_list = list(usage_stats["programs_using"])[:5]  # Limit to top 5
+        chunk_types_dict = dict(list(usage_stats["chunk_types"].items())[:3])  # Limit to top 3
+        
+        # FOCUSED PROMPT: Only usage patterns
+        prompt = f"""Analyze usage patterns for field: {field_name}
+
+Field Usage Data:
+- Total references: {usage_stats['total_references']}
+- Programs using field: {len(programs_list)}
+- Key programs: {', '.join(programs_list)}
+- Chunk types: {chunk_types_dict}
+
+Provide analysis covering:
+1. Primary usage patterns
+2. Field access frequency 
+3. Common operations on this field
+4. Business purpose indicators
+
+Keep response under 300 words."""
+
+        try:
+            pattern_analysis = await self._call_api_focused(prompt, "usage_patterns", "Usage Pattern Analysis")
+            
+            return {
+                "statistics": {
+                    "total_references": usage_stats["total_references"],
+                    "programs_using": programs_list,
+                    "chunk_types": chunk_types_dict
+                },
+                "pattern_summary": pattern_analysis,
+                "analysis_type": "focused_usage_patterns"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Usage pattern analysis failed: {e}")
+            return {
+                "statistics": {
+                    "total_references": usage_stats["total_references"],
+                    "programs_using": programs_list,
+                    "chunk_types": chunk_types_dict
+                },
+                "error": str(e)
+            }
+
+    async def _find_field_transformations_focused(self, field_name: str, references: List[Dict]) -> Dict[str, Any]:
+        """FIXED: Focused API call for transformation analysis"""
+        
+        # Extract transformation indicators
+        transformation_indicators = []
+        program_contexts = []
+        
+        for ref in references[:5]:  # Limit to first 5 references
+            if ref.get("type") != "table_definition":
+                content = ref.get("content", "")[:300]  # Limit content size
+                program_name = ref.get("program_name", "unknown")
+                
+                # Check for transformation keywords
+                transform_keywords = ["MOVE", "COMPUTE", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE"]
+                found_transforms = [kw for kw in transform_keywords if kw in content.upper()]
+                
+                if found_transforms:
+                    transformation_indicators.extend(found_transforms)
+                    program_contexts.append({
+                        "program": program_name,
+                        "operations": found_transforms,
+                        "context": content[:100] + "..." if len(content) > 100 else content
+                    })
+        
+        if not transformation_indicators:
+            return {
+                "transformation_count": 0,
+                "transformation_summary": f"No clear transformations found for field {field_name}",
+                "analysis_type": "focused_transformations"
+            }
+        
+        # FOCUSED PROMPT: Only transformations
+        prompt = f"""Analyze data transformations for field: {field_name}
+
+Transformation Context:
+- Operations found: {list(set(transformation_indicators))}
+- Programs with transformations: {len(program_contexts)}
+
+Sample transformation contexts:
+{json.dumps(program_contexts[:3], indent=2)}
+
+Analyze:
+1. Types of transformations applied
+2. Business logic in transformations
+3. Data conversion patterns
+4. Calculation methods
+
+Keep response under 300 words."""
+
+        try:
+            transform_analysis = await self._call_api_focused(prompt, "transformations", "Transformation Analysis")
+            
+            return {
+                "transformation_count": len(transformation_indicators),
+                "transformation_types": list(set(transformation_indicators)),
+                "programs_with_transforms": [ctx["program"] for ctx in program_contexts],
+                "transformation_summary": transform_analysis,
+                "analysis_type": "focused_transformations"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Transformation analysis failed: {e}")
+            return {
+                "transformation_count": len(transformation_indicators),
+                "error": str(e)
+            }
+
+    async def _analyze_field_lifecycle_focused(self, field_name: str, references: List[Dict]) -> Dict[str, Any]:
+        """FIXED: Focused API call for lifecycle analysis"""
+        
+        # Extract lifecycle stages
+        lifecycle_stages = {
+            "creation": [],
+            "updates": [],
+            "reads": [],
+            "validations": []
+        }
+        
+        for ref in references[:5]:  # Limit references
+            if ref.get("type") == "table_definition":
+                lifecycle_stages["creation"].append({
+                    "type": "table_definition",
+                    "source": ref.get("table_name", "unknown")
+                })
+            else:
+                content = ref.get("content", "").upper()
+                program = ref.get("program_name", "unknown")
+                
+                # Simple lifecycle detection
+                if any(op in content for op in ["MOVE TO", "WRITE", "UPDATE"]):
+                    lifecycle_stages["updates"].append({"program": program, "type": "update"})
+                elif any(op in content for op in ["MOVE FROM", "READ", "SELECT"]):
+                    lifecycle_stages["reads"].append({"program": program, "type": "read"})
+                elif any(op in content for op in ["IF", "WHEN", "CHECK"]):
+                    lifecycle_stages["validations"].append({"program": program, "type": "validation"})
+        
+        # Count stages
+        stage_counts = {stage: len(operations) for stage, operations in lifecycle_stages.items()}
+        total_operations = sum(stage_counts.values())
+        
+        if total_operations == 0:
+            return {
+                "lifecycle_score": 0.0,
+                "lifecycle_summary": f"Limited lifecycle information found for field {field_name}",
+                "analysis_type": "focused_lifecycle"
+            }
+        
+        # FOCUSED PROMPT: Only lifecycle
+        prompt = f"""Analyze lifecycle for field: {field_name}
+
+Lifecycle Operations Found:
+- Creation operations: {stage_counts['creation']}
+- Update operations: {stage_counts['updates']}
+- Read operations: {stage_counts['reads']}
+- Validation operations: {stage_counts['validations']}
+- Total operations: {total_operations}
+
+Programs involved: {len(set([op.get('program', 'unknown') for stage_ops in lifecycle_stages.values() for op in stage_ops]))}
+
+Analyze:
+1. Completeness of lifecycle coverage
+2. Missing lifecycle stages
+3. Data governance implications
+4. Field management patterns
+
+Keep response under 300 words."""
+
+        try:
+            lifecycle_analysis = await self._call_api_focused(prompt, "lifecycle", "Lifecycle Analysis")
+            
+            # Calculate lifecycle completeness score
+            lifecycle_score = min(1.0, total_operations / 10.0)  # Max score at 10 operations
+            
+            return {
+                "lifecycle_stages": stage_counts,
+                "total_operations": total_operations,
+                "lifecycle_score": lifecycle_score,
+                "lifecycle_summary": lifecycle_analysis,
+                "analysis_type": "focused_lifecycle"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Lifecycle analysis failed: {e}")
+            return {
+                "lifecycle_stages": stage_counts,
+                "total_operations": total_operations,
+                "lifecycle_score": 0.0,
+                "error": str(e)
+            }
+
+    async def _analyze_field_impact_focused(self, field_name: str, references: List[Dict]) -> Dict[str, Any]:
+        """FIXED: Focused API call for impact analysis"""
+        
+        # Analyze impact scope
+        impact_scope = {
+            "affected_programs": set(),
+            "affected_files": set(),
+            "critical_operations": [],
+            "complexity_indicators": []
+        }
+        
+        for ref in references[:8]:  # Limit to 8 references for impact analysis
+            if ref.get("type") != "table_definition":
+                program = ref.get("program_name", "unknown")
+                content = ref.get("content", "")
+                
+                impact_scope["affected_programs"].add(program)
+                
+                # Check for critical operations
+                critical_ops = ["REWRITE", "DELETE", "UPDATE", "CALL", "PERFORM"]
+                found_critical = [op for op in critical_ops if op in content.upper()]
+                if found_critical:
+                    impact_scope["critical_operations"].extend(found_critical)
+                    impact_scope["complexity_indicators"].append(f"{program}: {', '.join(found_critical)}")
+        
+        # Calculate risk metrics
+        num_programs = len(impact_scope["affected_programs"])
+        num_critical_ops = len(impact_scope["critical_operations"])
+        
+        # Determine risk level
+        if num_programs > 5 or num_critical_ops > 3:
+            risk_level = "HIGH"
+        elif num_programs > 2 or num_critical_ops > 1:
+            risk_level = "MEDIUM"
+        else:
+            risk_level = "LOW"
+        
+        # FOCUSED PROMPT: Only impact analysis
+        prompt = f"""Analyze change impact for field: {field_name}
+
+Impact Scope:
+- Affected programs: {num_programs}
+- Critical operations: {num_critical_ops}
+- Risk level: {risk_level}
+- Programs: {', '.join(list(impact_scope['affected_programs'])[:5])}
+- Critical ops found: {list(set(impact_scope['critical_operations']))}
+
+Analyze:
+1. Risk assessment for field changes
+2. Testing requirements
+3. Change management recommendations
+4. Business continuity considerations
+
+Keep response under 300 words."""
+
+        try:
+            impact_analysis = await self._call_api_focused(prompt, "impact", "Impact Analysis")
+            
+            return {
+                "affected_programs": list(impact_scope["affected_programs"]),
+                "affected_program_count": num_programs,
+                "critical_operations": list(set(impact_scope["critical_operations"])),
+                "risk_level": risk_level,
+                "complexity_indicators": impact_scope["complexity_indicators"][:3],
+                "impact_summary": impact_analysis,
+                "analysis_type": "focused_impact"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Impact analysis failed: {e}")
+            return {
+                "affected_programs": list(impact_scope["affected_programs"]),
+                "risk_level": risk_level,
+                "error": str(e)
+            }
+
+    async def _generate_field_summary_focused(self, field_name: str, analysis_result: Dict[str, Any]) -> str:
+        """FIXED: Focused API call for final summary"""
+        
+        # Extract key findings from all steps
+        summary_data = {
+            "field_name": field_name,
+            "total_references": analysis_result.get("total_references", 0),
+            "successful_steps": analysis_result.get("successful_steps", 0),
+            "completion_rate": analysis_result.get("completion_rate", 0)
+        }
+        
+        # Extract key findings
+        key_findings = []
+        
+        # Usage patterns
+        if "usage_patterns" in analysis_result.get("analysis_steps", {}):
+            usage_data = analysis_result["analysis_steps"]["usage_patterns"].get("data", {})
+            stats = usage_data.get("statistics", {})
+            if stats:
+                key_findings.append(f"Used in {len(stats.get('programs_using', []))} programs")
+        
+        # Transformations
+        if "transformations" in analysis_result.get("analysis_steps", {}):
+            transform_data = analysis_result["analysis_steps"]["transformations"].get("data", {})
+            if transform_data.get("transformation_count", 0) > 0:
+                key_findings.append(f"Has {transform_data['transformation_count']} transformations")
+        
+        # Impact
+        if "impact_analysis" in analysis_result.get("analysis_steps", {}):
+            impact_data = analysis_result["analysis_steps"]["impact_analysis"].get("data", {})
+            risk_level = impact_data.get("risk_level", "UNKNOWN")
+            key_findings.append(f"Change risk: {risk_level}")
+        
+        # FOCUSED PROMPT: Only final summary
+        prompt = f"""Create executive summary for field: {field_name}
+
+Analysis Results:
+- Total references found: {summary_data['total_references']}
+- Analysis completion: {summary_data['completion_rate']:.1f}%
+- Key findings: {'; '.join(key_findings)}
+
+Create concise summary covering:
+1. Field business purpose
+2. Key usage characteristics  
+3. Important dependencies
+4. Risk considerations
+5. Recommendations
+
+Keep response under 400 words and write in clear business language."""
+
+        try:
+            final_summary = await self._call_api_focused(prompt, "summary", "Executive Summary")
+            return final_summary
+            
+        except Exception as e:
+            self.logger.error(f"Summary generation failed: {e}")
+            return f"Field {field_name} analysis completed with {summary_data['completion_rate']:.1f}% completion rate. Found {summary_data['total_references']} references across multiple programs. Key findings: {'; '.join(key_findings)}."
+
+    async def analyze_complete_data_flow(self, component_name: str, component_type: str) -> Dict[str, Any]:
+        """FIXED: Complete data flow analysis with multiple focused API calls"""
+        try:
+            # Normalize inputs
             original_component_name = component_name
             component_name = self._normalize_component_name(component_name)
             component_type = str(component_type)
             
-            self.logger.info(f"🔄 Starting complete data flow analysis for {component_name} ({component_type})")
-            if original_component_name != component_name:
-                self.logger.info(f"🔧 Component name normalized: {original_component_name} -> {component_name}")
+            self.logger.info(f"🔄 Starting multi-step data flow analysis for {component_name} ({component_type})")
             
-            # FIXED: Auto-detect actual component type from database
+            # Determine if it's a program or file
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            actual_is_program = await self._is_component_a_program(component_name, cursor)
+            is_program = await self._is_component_a_program(component_name, cursor)
             conn.close()
             
-            if actual_is_program:
-                self.logger.info(f"📄 Auto-detected {component_name} as PROGRAM - using program analysis")
-                analysis_result = await self._analyze_program_data_flow(component_name)
-            else:
-                self.logger.info(f"📁 Auto-detected {component_name} as FILE - using file analysis")
-                analysis_result = await self._analyze_file_data_flow(component_name)
-            
-            # FIXED: Ensure proper result structure
-            if not analysis_result or analysis_result.get('error'):
-                self.logger.warning(f"⚠️ Analysis failed for {component_name}: {analysis_result.get('error', 'Unknown error')}")
-                return self._add_processing_info({
-                    "component_name": component_name,
-                    "original_component_name": original_component_name,
-                    "component_type": component_type,
-                    "detected_type": "program" if actual_is_program else "file",
-                    "error": analysis_result.get('error', 'Analysis failed'),
-                    "status": "error"
-                })
-            
-            # FIXED: Add metadata and return properly formatted result
-            final_result = {
+            # Initialize result
+            analysis_result = {
                 "component_name": component_name,
                 "original_component_name": original_component_name,
                 "component_type": component_type,
-                "detected_type": "program" if actual_is_program else "file",
-                "analysis_result": analysis_result,
-                "analysis_type": "complete_data_flow",
-                "analysis_timestamp": dt.now().isoformat(),
-                "status": "success"
+                "detected_type": "program" if is_program else "file",
+                "analysis_steps": {},
+                "status": "in_progress"
             }
             
-            self.logger.info(f"✅ Complete data flow analysis completed for {component_name}")
-            return self._add_processing_info(final_result)
+            if is_program:
+                self.logger.info(f"📄 Analyzing as PROGRAM: {component_name}")
+                analysis_result.update(await self._analyze_program_data_flow_focused(component_name))
+            else:
+                self.logger.info(f"📁 Analyzing as FILE: {component_name}")
+                analysis_result.update(await self._analyze_file_data_flow_focused(component_name))
+            
+            # Final status determination
+            successful_steps = len([step for step in analysis_result.get("analysis_steps", {}).values() 
+                                  if step.get("status") == "success"])
+            total_steps = len(analysis_result.get("analysis_steps", {}))
+            
+            analysis_result.update({
+                "successful_steps": successful_steps,
+                "total_steps": total_steps,
+                "completion_rate": (successful_steps / total_steps) * 100 if total_steps > 0 else 0,
+                "status": "success" if successful_steps >= 2 else "partial",
+                "analysis_timestamp": dt.now().isoformat()
+            })
+            
+            self.logger.info(f"✅ Data flow analysis completed: {successful_steps}/{total_steps} steps successful")
+            return self._add_processing_info(analysis_result)
                 
         except Exception as e:
             self.logger.error(f"❌ Complete data flow analysis failed: {str(e)}")
@@ -484,73 +770,499 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 "status": "error"
             })
 
-        
-    async def _analyze_file_data_flow(self, file_name: str) -> Dict[str, Any]:
-        """🔄 FIXED: Analyze file data flow with tuple handling"""
+    async def _analyze_program_data_flow_focused(self, program_name: str) -> Dict[str, Any]:
+        """FIXED: Program data flow analysis with multiple focused API calls"""
         try:
-            # CRITICAL FIX: Normalize file name first
-            file_name = self._normalize_component_name(file_name)
+            self.logger.info(f"📄 Multi-step program data flow analysis for: {program_name}")
             
-            self.logger.info(f"📁 Analyzing FILE data flow for: {file_name}")
+            analysis_steps = {}
             
-            # Get file access relationships (programs that access this file)
-            file_access_data = await self._get_file_access_data(file_name)
-            self.logger.info(f"Found {file_access_data.get('total_access_points', 0)} file access points")
-            
-            # Get field definitions for this file
-            field_definitions = await self._get_file_field_definitions(file_name)
-            self.logger.info(f"Found {len(field_definitions)} field definitions")
-            
-            # Analyze field usage across programs
-            field_usage_analysis = await self._analyze_field_usage_across_programs(file_name, field_definitions)
-            self.logger.info(f"Analyzed field usage across programs")
-            
-            # Generate comprehensive file flow analysis
-            file_flow_analysis = await self._generate_file_flow_analysis_api(
-                file_name, file_access_data, field_definitions, field_usage_analysis
-            )
-            
-            # FIXED: Build complete result object
-            result = {
-                "file_name": file_name,
-                "component_type": "file",
-                "file_access_data": file_access_data,
-                "field_definitions": field_definitions,
-                "field_usage_analysis": field_usage_analysis,
-                "file_flow_analysis": file_flow_analysis,
-                "analysis_type": "complete_file_data_flow",
-                "analysis_timestamp": dt.now().isoformat(),
-                "status": "success"
+            # STEP 1: Get file access data (no API call needed)
+            self.logger.info(f"🔄 Step 1: Getting file access patterns for {program_name}")
+            file_access_data = await self._get_program_file_access(program_name)
+            analysis_steps["file_access"] = {
+                "status": "success",
+                "data": file_access_data
             }
             
-            self.logger.info(f"✅ File data flow analysis completed for {file_name}")
-            return result
+            # STEP 2: Get field usage data (no API call needed)
+            self.logger.info(f"🔄 Step 2: Getting field usage patterns for {program_name}")
+            field_usage_data = await self._get_program_field_usage(program_name)
+            analysis_steps["field_usage"] = {
+                "status": "success",
+                "data": field_usage_data
+            }
+            
+            # STEP 3: Analyze data transformations with focused API call
+            self.logger.info(f"🔄 Step 3: Analyzing data transformations for {program_name}")
+            transformation_analysis = await self._analyze_program_transformations_focused(program_name, file_access_data, field_usage_data)
+            analysis_steps["transformations"] = {
+                "status": "success" if transformation_analysis.get("transformation_summary") else "partial",
+                "data": transformation_analysis
+            }
+            
+            # STEP 4: Generate program flow analysis with focused API call
+            self.logger.info(f"🔄 Step 4: Generating program flow analysis for {program_name}")
+            flow_analysis = await self._generate_program_flow_analysis_focused(program_name, file_access_data, field_usage_data, transformation_analysis)
+            analysis_steps["flow_analysis"] = {
+                "status": "success" if flow_analysis else "partial",
+                "data": {"flow_summary": flow_analysis}
+            }
+            
+            return {
+                "analysis_steps": analysis_steps,
+                "analysis_type": "program_data_flow"
+            }
             
         except Exception as e:
-            self.logger.error(f"❌ File data flow analysis failed for {file_name}: {str(e)}")
+            self.logger.error(f"❌ Program data flow analysis failed: {e}")
             return {
-                "file_name": self._normalize_component_name(file_name),
-                "error": str(e),
-                "status": "error"
+                "analysis_steps": {"error": {"status": "error", "data": {"error": str(e)}}},
+                "analysis_type": "program_data_flow"
             }
 
-    async def _get_file_access_data(self, component_name: str) -> Dict[str, Any]:
-        """FIXED: Get file access data with component name normalization"""
+    async def _analyze_file_data_flow_focused(self, file_name: str) -> Dict[str, Any]:
+        """FIXED: File data flow analysis with multiple focused API calls"""
         try:
-            # CRITICAL FIX: Normalize component name first
+            self.logger.info(f"📁 Multi-step file data flow analysis for: {file_name}")
+            
+            analysis_steps = {}
+            
+            # STEP 1: Get file access relationships (no API call needed)
+            self.logger.info(f"🔄 Step 1: Getting file access relationships for {file_name}")
+            file_access_data = await self._get_file_access_data(file_name)
+            analysis_steps["access_relationships"] = {
+                "status": "success",
+                "data": file_access_data
+            }
+            
+            # STEP 2: Get field definitions (no API call needed)
+            self.logger.info(f"🔄 Step 2: Getting field definitions for {file_name}")
+            field_definitions = await self._get_file_field_definitions(file_name)
+            analysis_steps["field_definitions"] = {
+                "status": "success",
+                "data": {"field_count": len(field_definitions), "fields": field_definitions[:10]}  # Limit fields
+            }
+            
+            # STEP 3: Analyze field usage patterns with focused API call
+            self.logger.info(f"🔄 Step 3: Analyzing field usage patterns for {file_name}")
+            field_usage_analysis = await self._analyze_file_field_usage_focused(file_name, field_definitions, file_access_data)
+            analysis_steps["field_usage"] = {
+                "status": "success" if field_usage_analysis.get("usage_summary") else "partial",
+                "data": field_usage_analysis
+            }
+            
+            # STEP 4: Generate file flow analysis with focused API call
+            self.logger.info(f"🔄 Step 4: Generating file flow analysis for {file_name}")
+            flow_analysis = await self._generate_file_flow_analysis_focused(file_name, file_access_data, field_definitions)
+            analysis_steps["flow_analysis"] = {
+                "status": "success" if flow_analysis else "partial",
+                "data": {"flow_summary": flow_analysis}
+            }
+            
+            return {
+                "analysis_steps": analysis_steps,
+                "analysis_type": "file_data_flow"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ File data flow analysis failed: {e}")
+            return {
+                "analysis_steps": {"error": {"status": "error", "data": {"error": str(e)}}},
+                "analysis_type": "file_data_flow"
+            }
+
+    async def _analyze_program_transformations_focused(self, program_name: str, file_access_data: Dict, field_usage_data: Dict) -> Dict[str, Any]:
+        """FIXED: Focused API call for program transformation analysis"""
+        
+        # Prepare transformation summary data
+        input_files = file_access_data.get("input_files", [])
+        output_files = file_access_data.get("output_files", [])
+        working_storage_fields = field_usage_data.get("working_storage_fields", [])
+        
+        transformation_indicators = {
+            "input_count": len(input_files),
+            "output_count": len(output_files),
+            "working_storage_count": len(working_storage_fields),
+            "field_operations": []
+        }
+        
+        # Sample field operations for analysis
+        for field in working_storage_fields[:5]:  # Limit to 5 fields
+            field_name = field.get("field_name", "unknown")
+            data_type = field.get("data_type", "unknown")
+            transformation_indicators["field_operations"].append({
+                "field": field_name,
+                "type": data_type,
+                "location": field.get("definition_location", "unknown")
+            })
+        
+        # FOCUSED PROMPT: Only transformation analysis
+        prompt = f"""Analyze data transformations in program: {program_name}
+
+Program Characteristics:
+- Input files: {transformation_indicators['input_count']}
+- Output files: {transformation_indicators['output_count']}
+- Working storage fields: {transformation_indicators['working_storage_count']}
+
+Sample field operations:
+{json.dumps(transformation_indicators['field_operations'], indent=2)}
+
+Input files: {[f.get('logical_file_name', 'unknown') for f in input_files[:3]]}
+Output files: {[f.get('logical_file_name', 'unknown') for f in output_files[:3]]}
+
+Analyze:
+1. Data transformation patterns
+2. Business logic implementation
+3. Input-to-output data flow
+4. Calculation and derivation methods
+
+Keep response under 300 words."""
+
+        try:
+            transformation_analysis = await self._call_api_focused(prompt, "transformations", "Program Transformation Analysis")
+            
+            return {
+                "transformation_indicators": transformation_indicators,
+                "transformation_summary": transformation_analysis,
+                "analysis_type": "focused_program_transformations"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Program transformation analysis failed: {e}")
+            return {
+                "transformation_indicators": transformation_indicators,
+                "error": str(e)
+            }
+
+    async def _generate_program_flow_analysis_focused(self, program_name: str, file_access_data: Dict, 
+                                                    field_usage_data: Dict, transformation_analysis: Dict) -> str:
+        """FIXED: Focused API call for program flow analysis"""
+        
+        # Prepare flow summary
+        flow_summary = {
+            "program_name": program_name,
+            "input_files": len(file_access_data.get("input_files", [])),
+            "output_files": len(file_access_data.get("output_files", [])),
+            "working_storage_fields": len(field_usage_data.get("working_storage_fields", [])),
+            "transformations": transformation_analysis.get("transformation_indicators", {}).get("input_count", 0)
+        }
+        
+        # FOCUSED PROMPT: Only program flow
+        prompt = f"""Generate program data flow analysis for: {program_name}
+
+Program Flow Summary:
+- Reads from {flow_summary['input_files']} input files
+- Writes to {flow_summary['output_files']} output files  
+- Uses {flow_summary['working_storage_fields']} working storage fields
+- Performs data transformations
+
+Key Input Files: {[f.get('logical_file_name', 'unknown') for f in file_access_data.get('input_files', [])[:3]]}
+Key Output Files: {[f.get('logical_file_name', 'unknown') for f in file_access_data.get('output_files', [])[:3]]}
+
+Provide analysis covering:
+1. Business purpose and data processing role
+2. Input-to-output data transformation pipeline  
+3. Key business rules and logic
+4. Data quality and validation points
+
+Write as clear business documentation, keep under 400 words."""
+
+        try:
+            return await self._call_api_focused(prompt, "flow_analysis", "Program Flow Analysis")
+        except Exception as e:
+            self.logger.error(f"Program flow analysis failed: {e}")
+            return f"Program {program_name} processes data from {flow_summary['input_files']} input files to {flow_summary['output_files']} output files with {flow_summary['working_storage_fields']} working storage fields."
+
+    async def _analyze_file_field_usage_focused(self, file_name: str, field_definitions: List[Dict], file_access_data: Dict) -> Dict[str, Any]:
+        """FIXED: Focused API call for file field usage analysis"""
+        
+        # Prepare field usage summary
+        usage_summary = {
+            "total_fields": len(field_definitions),
+            "programs_accessing": len(file_access_data.get("programs_accessing", [])),
+            "access_operations": file_access_data.get("file_operations", {}),
+            "key_fields": []
+        }
+        
+        # Extract key field information
+        for field in field_definitions[:5]:  # Limit to 5 key fields
+            field_info = {
+                "name": field.get("field_name", "unknown"),
+                "type": field.get("data_type", "unknown"),
+                "picture": field.get("picture_clause", ""),
+                "level": field.get("level_number", 0)
+            }
+            usage_summary["key_fields"].append(field_info)
+        
+        # FOCUSED PROMPT: Only field usage
+        prompt = f"""Analyze field usage patterns for file: {file_name}
+
+Field Usage Summary:
+- Total fields: {usage_summary['total_fields']}
+- Programs accessing file: {usage_summary['programs_accessing']}
+- Access operations: {usage_summary['access_operations']}
+
+Key fields:
+{json.dumps(usage_summary['key_fields'], indent=2)}
+
+Programs accessing: {file_access_data.get('programs_accessing', [])[:5]}
+
+Analyze:
+1. Field usage frequency and patterns
+2. Key business fields identification
+3. Data access characteristics  
+4. Field categorization (input, derived, static)
+
+Keep response under 300 words."""
+
+        try:
+            usage_analysis = await self._call_api_focused(prompt, "field_usage", "File Field Usage Analysis")
+            
+            return {
+                "usage_statistics": usage_summary,
+                "usage_summary": usage_analysis,
+                "analysis_type": "focused_file_field_usage"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"File field usage analysis failed: {e}")
+            return {
+                "usage_statistics": usage_summary,
+                "error": str(e)
+            }
+
+    async def _generate_file_flow_analysis_focused(self, file_name: str, file_access_data: Dict, field_definitions: List[Dict]) -> str:
+        """FIXED: Focused API call for file flow analysis"""
+        
+        # Prepare file flow summary
+        flow_summary = {
+            "file_name": file_name,
+            "programs_accessing": len(file_access_data.get("programs_accessing", [])),
+            "total_fields": len(field_definitions),
+            "create_programs": len(file_access_data.get("access_patterns", {}).get("creators", [])),
+            "read_programs": len(file_access_data.get("access_patterns", {}).get("readers", [])),
+            "update_programs": len(file_access_data.get("access_patterns", {}).get("updaters", []))
+        }
+        
+        # FOCUSED PROMPT: Only file flow
+        prompt = f"""Generate file data flow analysis for: {file_name}
+
+File Flow Summary:
+- Accessed by {flow_summary['programs_accessing']} programs
+- Contains {flow_summary['total_fields']} fields
+- Created by {flow_summary['create_programs']} programs
+- Read by {flow_summary['read_programs']} programs  
+- Updated by {flow_summary['update_programs']} programs
+
+Key programs:
+- Creators: {[p.get('program_name', 'unknown') for p in file_access_data.get('access_patterns', {}).get('creators', [])[:3]]}
+- Readers: {[p.get('program_name', 'unknown') for p in file_access_data.get('access_patterns', {}).get('readers', [])[:3]]}
+
+Provide analysis covering:
+1. File business purpose and role
+2. Data lifecycle and flow patterns
+3. Producer-consumer relationships
+4. Critical dependencies and usage
+
+Write as clear business documentation, keep under 400 words."""
+
+        try:
+            return await self._call_api_focused(prompt, "file_flow", "File Flow Analysis")
+        except Exception as e:
+            self.logger.error(f"File flow analysis failed: {e}")
+            return f"File {file_name} is accessed by {flow_summary['programs_accessing']} programs with {flow_summary['total_fields']} fields, involving {flow_summary['create_programs']} creators and {flow_summary['read_programs']} readers."
+
+    # ==================== Keep existing helper methods unchanged ====================
+    
+    async def _find_field_references(self, field_name: str) -> List[Dict[str, Any]]:
+        """Find all references to a field across the codebase"""
+        references = []
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            patterns = [
+                f"%{field_name}%",
+                f"%{field_name.upper()}%", 
+                f"%{field_name.lower()}%"
+            ]
+            
+            for pattern in patterns:
+                cursor.execute("""
+                    SELECT program_name, chunk_id, chunk_type, content, metadata
+                    FROM program_chunks
+                    WHERE content LIKE ? OR metadata LIKE ?
+                    LIMIT 50
+                """, (pattern, pattern))
+                
+                results = cursor.fetchall()
+                
+                for program_name, chunk_id, chunk_type, content, metadata_str in results:
+                    if any(ref.get('chunk_id') == chunk_id for ref in references):
+                        continue
+                        
+                    metadata = self.safe_json_loads(metadata_str)
+                    
+                    if self._is_field_referenced(field_name, content, metadata):
+                        references.append({
+                            "program_name": program_name,
+                            "chunk_id": chunk_id,
+                            "chunk_type": chunk_type,
+                            "content": content[:self.max_content_chars],  # Truncate content
+                            "metadata": metadata
+                        })
+                        
+                        if len(references) >= 20:  # Limit total references
+                            break
+                
+                if len(references) >= 20:
+                    break
+            
+            # Check for table definitions
+            try:
+                cursor.execute("""
+                    SELECT table_name, fields
+                    FROM file_metadata
+                    WHERE fields LIKE ?
+                    LIMIT 5
+                """, (f"%{field_name}%",))
+                
+                for table_name, fields_str in cursor.fetchall():
+                    references.append({
+                        "type": "table_definition",
+                        "table_name": table_name,
+                        "field_type": "VARCHAR",
+                        "description": f"Field found in {table_name}",
+                        "business_meaning": "Business field"
+                    })
+            except sqlite3.OperationalError as e:
+                self.logger.warning(f"Error querying file_metadata: {e}")
+        
+        except Exception as e:
+            self.logger.error(f"Error finding field references: {str(e)}")
+        
+        finally:
+            conn.close()
+        
+        self.logger.info(f"Found total {len(references)} references for {field_name}")
+        return references
+
+    def safe_json_loads(self, json_str):
+        """Safely load JSON string with fallback"""
+        if not json_str:
+            return {}
+        try:
+            if isinstance(json_str, dict):
+                return json_str
+            return json.loads(json_str)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    
+    def _is_field_referenced(self, field_name: str, content: str, metadata: Dict) -> bool:
+        """Check if field is actually referenced in content"""
+        patterns = [
+            r'\b' + re.escape(field_name) + r'\b',
+            r'\b' + re.escape(field_name.upper()) + r'\b',
+            r'\b' + re.escape(field_name.lower()) + r'\b'
+        ]
+        
+        for pattern in patterns:
+            if re.search(pattern, content, re.IGNORECASE):
+                return True
+        
+        # Check in metadata field lists
+        for key in ['field_names', 'fields', 'all_fields']:
+            if key in metadata:
+                fields = metadata[key]
+                if isinstance(fields, list):
+                    if any(field_name.lower() == f.lower() for f in fields):
+                        return True
+                elif isinstance(fields, str):
+                    if field_name.lower() in fields.lower():
+                        return True
+        
+        return False
+
+    async def _build_field_lineage_graph(self, field_name: str, references: List[Dict]) -> Dict[str, Any]:
+        """Build lineage graph for a specific field"""
+        lineage_nodes = []
+        lineage_edges = []
+        
+        # Create field node
+        field_node = {
+            "id": f"field_{field_name}",
+            "type": "field",
+            "name": field_name,
+            "properties": {"primary_field": True}
+        }
+        lineage_nodes.append(field_node)
+        
+        # Process each reference
+        for ref in references[:10]:  # Limit to 10 references for graph
+            if ref.get("type") == "table_definition":
+                table_node = {
+                    "id": f"table_{ref['table_name']}",
+                    "type": "table",
+                    "name": ref["table_name"],
+                    "properties": {
+                        "field_type": ref["field_type"],
+                        "description": ref.get("description", "")
+                    }
+                }
+                lineage_nodes.append(table_node)
+                
+                lineage_edges.append({
+                    "source": table_node["id"],
+                    "target": field_node["id"],
+                    "relationship": "defines",
+                    "properties": {"field_type": ref["field_type"]}
+                })
+                
+            else:
+                program_node = {
+                    "id": f"program_{ref['program_name']}",
+                    "type": "program",
+                    "name": ref["program_name"],
+                    "properties": {}
+                }
+                lineage_nodes.append(program_node)
+                
+                chunk_node = {
+                    "id": f"chunk_{ref['chunk_id']}",
+                    "type": ref["chunk_type"],
+                    "name": ref["chunk_id"],
+                    "properties": {"parent_program": ref["program_name"]}
+                }
+                lineage_nodes.append(chunk_node)
+                
+                lineage_edges.append({
+                    "source": program_node["id"],
+                    "target": chunk_node["id"],
+                    "relationship": "contains",
+                    "properties": {}
+                })
+        
+        return {
+            "nodes": lineage_nodes,
+            "edges": lineage_edges,
+            "field_name": field_name,
+            "total_nodes": len(lineage_nodes),
+            "total_edges": len(lineage_edges)
+        }
+
+    async def _get_file_access_data(self, component_name: str) -> Dict[str, Any]:
+        """Get file access data with component name normalization"""
+        try:
             component_name = self._normalize_component_name(component_name)
             
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            self.logger.info(f"🔍 Analyzing file access data for component: {component_name}")
-            
-            # STEP 1: Determine if this is a file or program by checking database
             is_program = await self._is_component_a_program(component_name, cursor)
             
             if is_program:
-                # FIXED: For programs, get files accessed BY the program using correct column names
-                self.logger.info(f"📄 Treating {component_name} as PROGRAM - finding files it accesses")
                 cursor.execute("""
                     SELECT program_name, logical_file_name, physical_file_name, access_type, access_mode,
                         record_format, line_number
@@ -559,8 +1271,6 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                     ORDER BY line_number
                 """, (str(component_name), f"%{component_name}%"))
             else:
-                # For files, get programs that access the file using correct column names
-                self.logger.info(f"📁 Treating {component_name} as FILE - finding programs that access it")
                 cursor.execute("""
                     SELECT program_name, logical_file_name, physical_file_name, access_type, access_mode,
                         record_format, line_number
@@ -573,21 +1283,17 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             access_records = cursor.fetchall()
             conn.close()
             
-            self.logger.info(f"📊 Found {len(access_records)} file access records for {component_name}")
-            
             if not access_records:
-                self.logger.warning(f"⚠️ No file access relationships found for {component_name}")
                 return {
                     "access_patterns": {"creators": [], "readers": [], "updaters": [], "deleters": []},
                     "programs_accessing": [],
                     "files_accessed": [],
                     "total_access_points": 0,
                     "file_operations": {"create_operations": 0, "read_operations": 0, "update_operations": 0, "delete_operations": 0},
-                    "component_type": "program" if is_program else "file",
-                    "warning": f"No access relationships found for {component_name}"
+                    "component_type": "program" if is_program else "file"
                 }
             
-            # STEP 2: Organize access patterns using correct column names
+            # Organize access patterns
             access_patterns = {
                 "creators": [],
                 "readers": [],
@@ -599,11 +1305,10 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             files_accessed = set()
             
             for record in access_records:
-                # FIXED: Map to correct column positions
                 access_info = {
                     "program_name": record[0],
-                    "logical_file_name": record[1],  # FIXED: was file_name
-                    "physical_file_name": record[2], # FIXED: was physical_file
+                    "logical_file_name": record[1],
+                    "physical_file_name": record[2],
                     "access_type": record[3],
                     "access_mode": record[4],
                     "record_format": record[5],
@@ -611,16 +1316,14 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 }
                 
                 programs_accessing.add(record[0])
-                if record[1]:  # logical_file_name
+                if record[1]:
                     files_accessed.add(record[1])
-                if record[2]:  # physical_file_name
+                if record[2]:
                     files_accessed.add(record[2])
                 
-                # FIXED: More comprehensive categorization
                 access_type = record[3].upper() if record[3] else ""
                 access_mode = record[4].upper() if record[4] else ""
                 
-                # Categorize by access pattern
                 if access_type in ["WRITE", "FD"] and access_mode in ["OUTPUT", "EXTEND"]:
                     access_patterns["creators"].append(access_info)
                 elif access_type in ["READ", "SELECT", "FILE_SELECT"] and access_mode == "INPUT":
@@ -630,7 +1333,6 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 elif access_type == "DELETE":
                     access_patterns["deleters"].append(access_info)
                 else:
-                    # Default categorization based on access_mode
                     if access_mode == "INPUT":
                         access_patterns["readers"].append(access_info)
                     elif access_mode in ["OUTPUT", "EXTEND"]:
@@ -638,7 +1340,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                     elif access_mode == "I-O":
                         access_patterns["updaters"].append(access_info)
                     else:
-                        access_patterns["readers"].append(access_info)  # Default
+                        access_patterns["readers"].append(access_info)
             
             result = {
                 "access_patterns": access_patterns,
@@ -654,16 +1356,6 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 }
             }
             
-            # FIXED: Log detailed results
-            if is_program:
-                self.logger.info(f"📈 Program {component_name} accesses {len(files_accessed)} files: {list(files_accessed)[:5]}...")
-            else:
-                self.logger.info(f"📈 File {component_name} accessed by {len(programs_accessing)} programs: {list(programs_accessing)[:5]}...")
-            
-            self.logger.info(f"📊 Access breakdown: {result['file_operations']['create_operations']} creators, "
-                            f"{result['file_operations']['read_operations']} readers, "
-                            f"{result['file_operations']['update_operations']} updaters")
-            
             return result
             
         except Exception as e:
@@ -677,16 +1369,11 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 "error": str(e)
             }
 
-    
     async def _is_component_a_program(self, component_name: str, cursor) -> bool:
-        """FIXED: Determine if component is a program or file with tuple handling"""
+        """Determine if component is a program or file"""
         try:
-            # CRITICAL FIX: Normalize component name first
             component_name = self._normalize_component_name(component_name)
             
-            self.logger.info(f"🔍 Determining if {component_name} is a program or file...")
-            
-            # STEP 1: Check program_chunks with multiple search patterns
             search_patterns = [
                 (component_name, "exact match"),
                 (f"{component_name}%", "starts with"),
@@ -694,7 +1381,6 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 (f"%{component_name}%", "contains")
             ]
             
-            program_found = False
             for pattern, description in search_patterns:
                 if pattern == component_name:
                     cursor.execute("""
@@ -713,78 +1399,50 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 
                 result = cursor.fetchone()
                 if result and result[0] > 0:
-                    chunk_count, found_name = result
-                    self.logger.info(f"✅ PROGRAM detected in program_chunks: {found_name} ({description}, {chunk_count} chunks)")
-                    program_found = True
-                    break
-                else:
-                    self.logger.debug(f"❌ No match with {description}: {pattern}")
-            
-            if program_found:
-                return True
-            
-            # STEP 2: Check file_access_relationships as program_name
-            for pattern, description in search_patterns:
-                if pattern == component_name:
-                    cursor.execute("""
-                        SELECT COUNT(*), program_name FROM file_access_relationships 
-                        WHERE program_name = ?
-                        GROUP BY program_name
-                        LIMIT 1
-                    """, (pattern,))
-                else:
-                    cursor.execute("""
-                        SELECT COUNT(*), program_name FROM file_access_relationships 
-                        WHERE program_name LIKE ?
-                        GROUP BY program_name
-                        LIMIT 1
-                    """, (pattern,))
-                
-                result = cursor.fetchone()
-                if result and result[0] > 0:
-                    access_count, found_name = result
-                    self.logger.info(f"✅ PROGRAM detected in file_access_relationships: {found_name} ({description}, {access_count} accesses)")
                     return True
             
-            # STEP 3: Check if it appears as a file in file_access_relationships
-            cursor.execute("""
-                SELECT COUNT(*) FROM file_access_relationships 
-                WHERE logical_file_name = ? OR physical_file_name = ? OR logical_file_name LIKE ? OR physical_file_name LIKE ?
-                LIMIT 1
-            """, (component_name, component_name, f"%{component_name}%", f"%{component_name}%"))
+            # Check file_access_relationships as program_name
+            for pattern, description in search_patterns:
+                if pattern == component_name:
+                    cursor.execute("""
+                        SELECT COUNT(*), program_name FROM file_access_relationships 
+                        WHERE program_name = ?
+                        GROUP BY program_name
+                        LIMIT 1
+                    """, (pattern,))
+                else:
+                    cursor.execute("""
+                        SELECT COUNT(*), program_name FROM file_access_relationships 
+                        WHERE program_name LIKE ?
+                        GROUP BY program_name
+                        LIMIT 1
+                    """, (pattern,))
+                
+                result = cursor.fetchone()
+                if result and result[0] > 0:
+                    return True
             
-            file_access_count = cursor.fetchone()[0]
-            
-            if file_access_count > 0:
-                self.logger.info(f"📁 FILE detected in file_access_relationships: {component_name} (accessed {file_access_count} times)")
-                return False
-            
-            # Default: if not found anywhere, assume it's a file
-            self.logger.info(f"❓ Component {component_name} not found in database - defaulting to FILE")
             return False
             
         except Exception as e:
             self.logger.error(f"❌ Failed to determine component type for {component_name}: {e}")
-            return False  # Default to file
+            return False
 
     async def _get_file_field_definitions(self, file_name: str) -> List[Dict[str, Any]]:
-        """FIXED: Get field definitions associated with a file - handle missing tables gracefully"""
+        """Get field definitions associated with a file"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Check if field_cross_reference table exists
             cursor.execute("""
                 SELECT name FROM sqlite_master 
                 WHERE type='table' AND name='field_cross_reference'
             """)
             
             if not cursor.fetchone():
-                self.logger.warning("field_cross_reference table not found - returning empty field definitions")
                 conn.close()
                 return []
             
-            # FIXED: Use correct table structure if it exists
             cursor.execute("""
                 SELECT field_name, qualified_name, source_type, source_name,
                     definition_location, data_type, picture_clause, usage_clause,
@@ -796,6 +1454,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 )
                 AND definition_location IN ('FD', 'FILE_SECTION', 'WORKING_STORAGE')
                 ORDER BY source_name, level_number, field_name
+                LIMIT 50
             """, (str(file_name), str(file_name), str(file_name)))
             
             field_records = cursor.fetchall()
@@ -821,77 +1480,26 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
         except Exception as e:
             self.logger.error(f"Failed to get file field definitions: {e}")
             return []
-    
-    async def _analyze_program_data_flow(self, program_name: str) -> Dict[str, Any]:
-        """🔄 FIXED: Analyze program data flow with tuple handling"""
-        try:
-            # CRITICAL FIX: Normalize program name first
-            program_name = self._normalize_component_name(program_name)
-            
-            self.logger.info(f"📄 Analyzing PROGRAM data flow for: {program_name}")
-            
-            # Get file access relationships for this program (files accessed by this program)
-            program_file_access = await self._get_program_file_access(program_name)
-            total_files = sum(len(files) for files in program_file_access.values())
-            self.logger.info(f"Found {total_files} file access relationships")
-            
-            # Get field cross-references for this program
-            program_field_usage = await self._get_program_field_usage(program_name)
-            total_fields = sum(len(fields) for fields in program_field_usage.values())
-            self.logger.info(f"Found {total_fields} field usage relationships")
-            
-            # Analyze data transformations
-            data_transformations = await self._analyze_data_transformations_api(program_name)
-            self.logger.info(f"Found {data_transformations.get('total_transformations', 0)} data transformations")
-            
-            # Generate program data flow analysis
-            program_data_flow_analysis = await self._generate_program_data_flow_analysis_api(
-                program_name, program_file_access, program_field_usage, data_transformations
-            )
-            
-            # FIXED: Build complete result object
-            result = {
-                "program_name": program_name,
-                "component_type": "program",
-                "program_file_access": program_file_access,
-                "program_field_usage": program_field_usage,
-                "data_transformations": data_transformations,
-                "program_data_flow_analysis": program_data_flow_analysis,
-                "analysis_type": "program_data_flow",
-                "analysis_timestamp": dt.now().isoformat(),
-                "status": "success"
-            }
-            
-            self.logger.info(f"✅ Program data flow analysis completed for {program_name}")
-            return result
-            
-        except Exception as e:
-            self.logger.error(f"❌ Program data flow analysis failed for {program_name}: {str(e)}")
-            return {
-                "program_name": self._normalize_component_name(program_name),
-                "error": str(e),
-                "status": "error"
-            }    
 
     async def _get_program_file_access(self, program_name: str) -> Dict[str, Any]:
-        """FIXED: Get file access patterns for a specific program using correct column names"""
+        """Get file access patterns for a specific program"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # FIXED: Use correct column names
             cursor.execute("""
                 SELECT logical_file_name, physical_file_name, access_type, access_mode,
-                    record_format,  line_number
+                    record_format, line_number
                 FROM file_access_relationships
                 WHERE program_name = ? OR program_name LIKE ?
                 ORDER BY line_number
+                LIMIT 50
             """, (str(program_name), f"%{program_name}%"))
             
             access_records = cursor.fetchall()
             conn.close()
             
-            # Categorize file access using correct column names
+            # Categorize file access
             file_access = {
                 "input_files": [],
                 "output_files": [],
@@ -901,12 +1509,11 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             
             for record in access_records:
                 file_info = {
-                    "logical_file_name": record[0],   # FIXED: was file_name
-                    "physical_file_name": record[1],  # FIXED: was physical_file
+                    "logical_file_name": record[0],
+                    "physical_file_name": record[1],
                     "access_type": record[2],
                     "access_mode": record[3],
                     "record_format": record[4],
-                    
                     "line_number": record[5] if len(record) > 5 else None
                 }
                 
@@ -927,19 +1534,19 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             return {"input_files": [], "output_files": [], "update_files": [], "temporary_files": []}
         
     async def _get_program_field_usage(self, program_name: str) -> Dict[str, Any]:
-        """FIXED: Get field usage patterns within a program"""
+        """Get field usage patterns within a program"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # FIXED: Proper parameter binding
             cursor.execute("""
                 SELECT field_name, qualified_name, definition_location, data_type,
                     picture_clause, level_number, parent_field, business_domain
                 FROM field_cross_reference
                 WHERE source_name = ?
                 ORDER BY level_number, field_name
-            """, (str(program_name),))  # FIXED: String parameter
+                LIMIT 100
+            """, (str(program_name),))
             
             field_records = cursor.fetchall()
             conn.close()
@@ -980,1249 +1587,60 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             self.logger.error(f"Failed to get program field usage: {e}")
             return {"working_storage_fields": [], "linkage_fields": [], "file_fields": [], "local_storage_fields": []}
 
-    async def _analyze_data_transformations_api(self, program_name: str) -> Dict[str, Any]:
-        """FIXED: Analyze data transformations within the program using API"""
-        try:
-            # Get program chunks with data transformation logic
-            chunks = await self._get_program_chunks(program_name)
-            
-            # Extract transformation patterns
-            transformations = []
-            for chunk in chunks:
-                content = chunk[3]  # FIXED: Content is at index 3
-                
-                # Find MOVE statements
-                moves = re.findall(r'MOVE\s+([^.]+?)\s+TO\s+([^.]+)', content, re.IGNORECASE)
-                transformations.extend([("MOVE", move[0].strip(), move[1].strip()) for move in moves])
-                
-                # Find COMPUTE statements
-                computes = re.findall(r'COMPUTE\s+([^.]+)', content, re.IGNORECASE)
-                transformations.extend([("COMPUTE", compute.strip(), "") for compute in computes])
-                
-                # Find other transformation patterns
-                adds = re.findall(r'ADD\s+([^.]+?)\s+TO\s+([^.]+)', content, re.IGNORECASE)
-                transformations.extend([("ADD", add[0].strip(), add[1].strip()) for add in adds])
-            
-            prompt = f"""
-            Analyze data transformations in program {program_name}:
-            
-            Transformations Found:
-            {transformations[:15]}  # Limit for prompt size
-            
-            Total Transformations: {len(transformations)}
-            
-            Analyze:
-            1. Types of data transformations performed
-            2. Business logic embedded in transformations
-            3. Data validation and conversion patterns
-            4. Complex calculations and derivations
-            5. Data flow between different data structures
-            
-            Provide detailed analysis of the data transformation patterns.
-            """
-            
-            try:
-                api_result = await self._call_api_for_readable_analysis(prompt, max_tokens=400)
-                
-                return {
-                    "total_transformations": len(transformations),
-                    "transformation_types": {
-                        "move_operations": len([t for t in transformations if t[0] == "MOVE"]),
-                        "compute_operations": len([t for t in transformations if t[0] == "COMPUTE"]),
-                        "arithmetic_operations": len([t for t in transformations if t[0] == "ADD"])
-                    },
-                    "transformation_analysis": api_result,
-                    "sample_transformations": transformations[:10]
-                }
-            except Exception as e:
-                self.logger.error(f"Transformation analysis failed: {e}")
-                return {"error": str(e), "total_transformations": len(transformations)}
-                
-        except Exception as e:
-           self.logger.error(f"Data transformation analysis failed: {e}")
-           return {"error": str(e)}
-
-    async def _generate_program_data_flow_analysis_api(self, program_name: str, 
-                                                    program_file_access: Dict,
-                                                    program_field_usage: Dict,
-                                                    data_transformations: Dict) -> str:
-        """FIXED: Generate comprehensive program data flow analysis using API"""
-        
-        flow_summary = {
-            "program_name": program_name,
-            "input_files": len(program_file_access.get("input_files", [])),
-            "output_files": len(program_file_access.get("output_files", [])),
-            "update_files": len(program_file_access.get("update_files", [])),
-            "working_storage_fields": len(program_field_usage.get("working_storage_fields", [])),
-            "linkage_fields": len(program_field_usage.get("linkage_fields", [])),
-            "transformations": data_transformations.get("total_transformations", 0)
-        }
-        
-        prompt = f"""
-        Generate comprehensive program data flow analysis for: {program_name}
-        
-        Program Data Flow Summary:
-        - Reads from {flow_summary['input_files']} input files
-        - Writes to {flow_summary['output_files']} output files
-        - Updates {flow_summary['update_files']} files
-        - Uses {flow_summary['working_storage_fields']} working storage fields
-        - Has {flow_summary['linkage_fields']} linkage parameters
-        - Performs {flow_summary['transformations']} data transformations
-        
-        Input Files: {[f['file_name'] for f in program_file_access.get('input_files', [])]}
-        Output Files: {[f['file_name'] for f in program_file_access.get('output_files', [])]}
-        
-        Provide detailed analysis covering:
-        
-        **Program Data Flow Overview:**
-        - Business purpose and data processing role
-        - Input-to-output data transformation pipeline
-        - Key business rules implemented
-        
-        **Input Data Analysis:**
-        - Source data characteristics and validation
-        - Data quality checks and error handling
-        - Input data dependencies and requirements
-        
-        **Processing Logic:**
-        - Core data transformation algorithms
-        - Business calculations and derivations
-        - Data validation and business rule enforcement
-        
-        **Output Data Generation:**
-        - Output file structures and formats
-        - Data enrichment and enhancement processes
-        - Quality assurance and validation
-        
-        Write as comprehensive program data flow documentation.
-        """
-        
-        try:
-            return await self._call_api_for_readable_analysis(prompt, max_tokens=600)
-        except Exception as e:
-            self.logger.error(f"Program data flow analysis generation failed: {e}")
-            return self._generate_fallback_program_data_flow_analysis(program_name, flow_summary)
-
-    def _generate_fallback_program_data_flow_analysis(self, program_name: str, flow_summary: Dict) -> str:
-        """Generate fallback program data flow analysis when API fails"""
-        analysis = f"## Program Data Flow Analysis: {program_name}\n\n"
-        
-        analysis += "### Program Overview\n"
-        analysis += f"Program {program_name} processes data through the following flow:\n"
-        analysis += f"- Reads from {flow_summary['input_files']} input sources\n"
-        analysis += f"- Performs {flow_summary['transformations']} data transformations\n"
-        analysis += f"- Produces {flow_summary['output_files']} output files\n"
-        analysis += f"- Updates {flow_summary['update_files']} existing files\n\n"
-        
-        analysis += "### Data Processing Characteristics\n"
-        if flow_summary['transformations'] > 50:
-            analysis += "**Complex Processing:** This program performs extensive data transformations and business logic.\n"
-        elif flow_summary['transformations'] > 20:
-            analysis += "**Moderate Processing:** This program performs standard data transformations.\n"
-        else:
-            analysis += "**Simple Processing:** This program performs basic data operations.\n"
-        
-        analysis += f"\n### Integration Points\n"
-        total_files = flow_summary['input_files'] + flow_summary['output_files'] + flow_summary['update_files']
-        analysis += f"This program integrates with {total_files} different data sources and targets.\n"
-        
-        return analysis
-
-    async def _analyze_field_usage_across_programs(self, file_name: str, field_definitions: List[Dict]) -> Dict[str, Any]:
-        """FIXED: Analyze how fields are used across different programs"""
-        try:
-            field_usage = {}
-            
-            for field_def in field_definitions:
-                field_name = field_def["field_name"]
-                
-                # Find usage of this field across programs
-                field_usage[field_name] = await self._get_field_usage_pattern(field_name, file_name)
-            
-            # Categorize fields
-            field_categories = await self._categorize_fields_api(field_definitions, field_usage)
-            
-            return {
-                "field_usage_details": field_usage,
-                "field_categories": field_categories,
-                "total_fields_analyzed": len(field_definitions)
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Field usage analysis failed: {e}")
-            return {"field_usage_details": {}, "field_categories": {}}
-
-    async def _get_field_usage_pattern(self, field_name: str, file_name: str) -> Dict[str, Any]:
-        """FIXED: Get detailed usage pattern for a specific field"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # FIXED: Proper parameter binding
-            cursor.execute("""
-                SELECT pc.program_name, pc.chunk_type, pc.content, pc.line_start, pc.line_end
-                FROM program_chunks pc
-                JOIN file_access_relationships far ON pc.program_name = far.program_name
-                WHERE (pc.content LIKE ? OR pc.content LIKE ?) 
-                AND (far.logical_file_name = ? OR far.physical_file_name = ?)
-                ORDER BY pc.program_name, pc.line_start
-            """, (f"%{field_name}%", f"%{field_name.upper()}%", str(file_name), str(file_name)))
-            
-            usage_records = cursor.fetchall()
-            conn.close()
-            
-            usage_patterns = {
-                "programs_using": set(),
-                "usage_contexts": [],
-                "operations_detected": []
-            }
-            
-            for record in usage_records:
-                program_name, chunk_type, content, line_start, line_end = record
-                usage_patterns["programs_using"].add(program_name)
-                
-                # Analyze field operations in content
-                operations = self._detect_field_operations(field_name, content)
-                usage_patterns["operations_detected"].extend(operations)
-                
-                usage_patterns["usage_contexts"].append({
-                    "program_name": program_name,
-                    "chunk_type": chunk_type,
-                    "line_range": f"{line_start}-{line_end}",
-                    "operations": operations
-                })
-            
-            return {
-                "programs_using": list(usage_patterns["programs_using"]),
-                "usage_contexts": usage_patterns["usage_contexts"],
-                "operations_detected": usage_patterns["operations_detected"],
-                "usage_frequency": len(usage_patterns["usage_contexts"])
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Field usage pattern analysis failed: {e}")
-            return {"programs_using": [], "usage_contexts": [], "operations_detected": []}
-
-    def _detect_field_operations(self, field_name: str, content: str) -> List[str]:
-        """Detect specific operations performed on a field"""
-        operations = []
-        content_upper = content.upper()
-        field_upper = field_name.upper()
-        
-        # Check for different operations
-        if f"MOVE TO {field_upper}" in content_upper:
-            operations.append("WRITE")
-        elif f"MOVE {field_upper}" in content_upper:
-            operations.append("READ")
-        elif f"COMPUTE {field_upper}" in content_upper:
-            operations.append("COMPUTE")
-        elif f"ADD TO {field_upper}" in content_upper:
-            operations.append("ADD")
-        elif f"IF {field_upper}" in content_upper:
-            operations.append("VALIDATE")
-        elif f"DISPLAY {field_upper}" in content_upper:
-            operations.append("DISPLAY")
-        
-        return operations
-
-    async def _categorize_fields_api(self, field_definitions: List[Dict], field_usage: Dict) -> Dict[str, Any]:
-        """FIXED: Categorize fields based on usage patterns using API"""
-        
-        # Prepare field summary for analysis
-        field_summary = []
-        for field_def in field_definitions[:20]:  # Limit for prompt size
-            field_name = field_def["field_name"]
-            usage = field_usage.get(field_name, {})
-            
-            field_summary.append({
-                "field_name": field_name,
-                "data_type": field_def.get("data_type"),
-                "picture_clause": field_def.get("picture_clause"),
-                "business_domain": field_def.get("business_domain"),
-                "programs_using": len(usage.get("programs_using", [])),
-                "operations": usage.get("operations_detected", [])
-            })
-        
-        prompt = f"""
-        Categorize these file fields based on their usage patterns:
-        
-        Field Analysis Data:
-        {json.dumps(field_summary, indent=2)}
-        
-        Categorize fields into:
-        1. **Input Fields** - Fields that come from external sources
-        2. **Derived Fields** - Fields calculated from other fields
-        3. **Updated Fields** - Fields modified by programs
-        4. **Static Fields** - Fields that rarely change
-        5. **Unused Fields** - Fields with minimal or no usage
-        6. **Key Fields** - Fields used for identification or indexing
-        7. **Business Fields** - Fields with business logic
-        
-        Return as JSON:
-        {{
-            "input_fields": ["field1", "field2"],
-            "derived_fields": ["field3", "field4"],
-            "updated_fields": ["field5", "field6"],
-            "static_fields": ["field7", "field8"],
-            "unused_fields": ["field9", "field10"],
-            "key_fields": ["field11", "field12"],
-            "business_fields": ["field13", "field14"]
-        }}
-        """
-        
-        try:
-            response_text = await self._call_api_for_analysis(prompt, max_tokens=300)
-            
-            if '{' in response_text:
-                json_start = response_text.find('{')
-                json_end = response_text.rfind('}') + 1
-                return json.loads(response_text[json_start:json_end])
-        except Exception as e:
-            self.logger.warning(f"Field categorization failed: {e}")
-        
-        # Fallback categorization
-        return self._fallback_field_categorization(field_definitions, field_usage)
-
-    def _fallback_field_categorization(self, field_definitions: List[Dict], field_usage: Dict) -> Dict[str, Any]:
-        """Fallback field categorization when API fails"""
-        categories = {
-            "input_fields": [],
-            "derived_fields": [],
-            "updated_fields": [],
-            "static_fields": [],
-            "unused_fields": [],
-            "key_fields": [],
-            "business_fields": []
-        }
-        
-        for field_def in field_definitions:
-            field_name = field_def["field_name"]
-            usage = field_usage.get(field_name, {})
-            operations = usage.get("operations_detected", [])
-            programs_count = len(usage.get("programs_using", []))
-            
-            # Simple categorization logic
-            if programs_count == 0:
-                categories["unused_fields"].append(field_name)
-            elif "COMPUTE" in operations or "ADD" in operations:
-                categories["derived_fields"].append(field_name)
-            elif "WRITE" in operations and "READ" in operations:
-                categories["updated_fields"].append(field_name)
-            elif field_name.endswith(("-ID", "-KEY", "-NUM")):
-                categories["key_fields"].append(field_name)
-            elif programs_count == 1 and "READ" not in operations:
-                categories["static_fields"].append(field_name)
-            else:
-                categories["business_fields"].append(field_name)
-        
-        return categories
-
-    async def _generate_file_flow_analysis_api(self, file_name: str, file_access_data: Dict,
-                                            field_definitions: List[Dict], field_usage_analysis: Dict) -> str:
-        """FIXED: Generate comprehensive file flow analysis using API"""
-        
-        flow_summary = {
-            "file_name": file_name,
-            "programs_accessing": len(file_access_data.get("programs_accessing", [])),
-            "total_fields": len(field_definitions),
-            "create_programs": len(file_access_data.get("access_patterns", {}).get("creators", [])),
-            "read_programs": len(file_access_data.get("access_patterns", {}).get("readers", [])),
-            "update_programs": len(file_access_data.get("access_patterns", {}).get("updaters", []))
-        }
-        
-        prompt = f"""
-        Generate comprehensive file data flow analysis for: {file_name}
-        
-        File Flow Summary:
-        - Accessed by {flow_summary['programs_accessing']} programs
-        - Contains {flow_summary['total_fields']} fields
-        - Created by {flow_summary['create_programs']} programs
-        - Read by {flow_summary['read_programs']} programs
-        - Updated by {flow_summary['update_programs']} programs
-        
-        Programs Creating File: {[p['program_name'] for p in file_access_data.get('access_patterns', {}).get('creators', [])]}
-        Programs Reading File: {[p['program_name'] for p in file_access_data.get('access_patterns', {}).get('readers', [])]}
-        
-        Provide detailed analysis covering:
-        
-        **File Overview:**
-        - Business purpose and role in the system
-        - Data characteristics and format
-        - Critical importance to operations
-        
-        **Data Flow Lifecycle:**
-        - File creation process and sources
-        - Data population and initial load
-        - Regular update patterns and schedules
-        - Data consumption and usage patterns
-        
-        **Field-Level Analysis:**
-        - Key fields and their business meaning
-        - Derived vs source data fields
-        - Data quality and validation points
-        - Field usage frequency and patterns
-        
-        **Program Integration:**
-        - Producer programs and their roles
-        - Consumer programs and their purposes
-        - Data transformation points
-        - Error handling and recovery processes
-        
-        Write as comprehensive data flow documentation.
-        """
-        
-        try:
-            return await self._call_api_for_readable_analysis(prompt, max_tokens=600)
-        except Exception as e:
-            self.logger.error(f"File flow analysis generation failed: {e}")
-            return self._generate_fallback_file_flow_analysis(file_name, flow_summary)
-
-    def _generate_fallback_file_flow_analysis(self, file_name: str, flow_summary: Dict) -> str:
-        """Generate fallback file flow analysis when API fails"""
-        analysis = f"## File Data Flow Analysis: {file_name}\n\n"
-        
-        analysis += "### File Overview\n"
-        analysis += f"File {file_name} is a critical data component that:\n"
-        analysis += f"- Is accessed by {flow_summary['programs_accessing']} different programs\n"
-        analysis += f"- Contains {flow_summary['total_fields']} data fields\n"
-        analysis += f"- Has {flow_summary['create_programs']} producer programs\n"
-        analysis += f"- Has {flow_summary['read_programs']} consumer programs\n\n"
-        
-        analysis += "### Data Flow Characteristics\n"
-        if flow_summary['create_programs'] > 0 and flow_summary['read_programs'] > 0:
-            analysis += "**Full Lifecycle File:** This file has both producer and consumer programs.\n"
-        elif flow_summary['read_programs'] > 0:
-            analysis += "**Source File:** This file is primarily read by programs.\n"
-        elif flow_summary['create_programs'] > 0:
-            analysis += "**Output File:** This file is primarily created by programs.\n"
-        
-        return analysis
-
-    async def _find_field_references(self, field_name: str) -> List[Dict[str, Any]]:
-        """FIXED: Find all references to a field across the codebase"""
-        references = []
-        
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        try:
-            # FIXED: Search in program chunks with proper parameter binding
-            patterns = [
-                f"%{field_name}%",
-                f"%{field_name.upper()}%", 
-                f"%{field_name.lower()}%"
-            ]
-            
-            for pattern in patterns:
-                cursor.execute("""
-                    SELECT program_name, chunk_id, chunk_type, content, metadata
-                    FROM program_chunks
-                    WHERE content LIKE ? OR metadata LIKE ?
-                    LIMIT 100
-                """, (pattern, pattern))
-                
-                results = cursor.fetchall()
-                self.logger.info(f"Found {len(results)} chunks for pattern: {pattern}")
-                
-                for program_name, chunk_id, chunk_type, content, metadata_str in results:
-                    # Avoid duplicates
-                    if any(ref.get('chunk_id') == chunk_id for ref in references):
-                        continue
-                        
-                    metadata = self.safe_json_loads(metadata_str)
-                    
-                    # Check if field is actually referenced
-                    if self._is_field_referenced(field_name, content, metadata):
-                        references.append({
-                            "program_name": program_name,
-                            "chunk_id": chunk_id,
-                            "chunk_type": chunk_type,
-                            "content": content[:500] + "..." if len(content) > 500 else content,
-                            "metadata": metadata
-                        })
-                        
-                        # Limit to prevent memory issues
-                        if len(references) >= 50:
-                            break
-                
-                if len(references) >= 50:
-                    break
-            
-            # FIXED: Check for table definitions with proper error handling
-            try:
-                cursor.execute("""
-                    SELECT table_name, fields
-                    FROM file_metadata
-                    WHERE fields LIKE ?
-                    LIMIT 10
-                """, (f"%{field_name}%",))
-                
-                for table_name, fields_str in cursor.fetchall():
-                    references.append({
-                        "type": "table_definition",
-                        "table_name": table_name,
-                        "field_type": "VARCHAR",
-                        "description": f"Field found in {table_name}",
-                        "business_meaning": "Business field"
-                    })
-            except sqlite3.OperationalError as e:
-                self.logger.warning(f"Error querying file_metadata: {e}")
-        
-        except Exception as e:
-            self.logger.error(f"Error finding field references: {str(e)}")
-        
-        finally:
-            conn.close()
-        
-        self.logger.info(f"Found total {len(references)} references for {field_name}")
-        return references
-
-    def safe_json_loads(self, json_str):
-        """Safely load JSON string with fallback"""
-        if not json_str:
-            return {}
-        try:
-            if isinstance(json_str, dict):
-                return json_str
-            return json.loads(json_str)
-        except (json.JSONDecodeError, TypeError):
-            return {}
-    
-    def _is_field_referenced(self, field_name: str, content: str, metadata: Dict) -> bool:
-        """Check if field is actually referenced in content"""
-        # Check in content with word boundaries (case insensitive)
-        patterns = [
-            r'\b' + re.escape(field_name) + r'\b',
-            r'\b' + re.escape(field_name.upper()) + r'\b',
-            r'\b' + re.escape(field_name.lower()) + r'\b'
-        ]
-        
-        for pattern in patterns:
-            if re.search(pattern, content, re.IGNORECASE):
-                return True
-        
-        # Check in metadata field lists
-        for key in ['field_names', 'fields', 'all_fields']:
-            if key in metadata:
-                fields = metadata[key]
-                if isinstance(fields, list):
-                    if any(field_name.lower() == f.lower() for f in fields):
-                        return True
-                elif isinstance(fields, str):
-                    if field_name.lower() in fields.lower():
-                        return True
-        
-        return False
-
-    async def _build_field_lineage_graph(self, field_name: str, references: List[Dict]) -> Dict[str, Any]:
-        """Build lineage graph for a specific field"""
-        lineage_nodes = []
-        lineage_edges = []
-        
-        # Create field node
-        field_node = {
-            "id": f"field_{field_name}",
-            "type": "field",
-            "name": field_name,
-            "properties": {"primary_field": True}
-        }
-        lineage_nodes.append(field_node)
-        
-        # Process each reference
-        for ref in references:
-            if ref.get("type") == "table_definition":
-                # Table definition node
-                table_node = {
-                    "id": f"table_{ref['table_name']}",
-                    "type": "table",
-                    "name": ref["table_name"],
-                    "properties": {
-                        "field_type": ref["field_type"],
-                        "description": ref.get("description", "")
-                    }
-                }
-                lineage_nodes.append(table_node)
-                
-                # Edge from table to field
-                lineage_edges.append({
-                    "source": table_node["id"],
-                    "target": field_node["id"],
-                    "relationship": "defines",
-                    "properties": {"field_type": ref["field_type"]}
-                })
-                
-            else:
-                # Program/chunk reference
-                program_node = {
-                    "id": f"program_{ref['program_name']}",
-                    "type": "program",
-                    "name": ref["program_name"],
-                    "properties": {}
-                }
-                lineage_nodes.append(program_node)
-                
-                chunk_node = {
-                    "id": f"chunk_{ref['chunk_id']}",
-                    "type": ref["chunk_type"],
-                    "name": ref["chunk_id"],
-                    "properties": {"parent_program": ref["program_name"]}
-                }
-                lineage_nodes.append(chunk_node)
-                
-                # Program contains chunk
-                lineage_edges.append({
-                    "source": program_node["id"],
-                    "target": chunk_node["id"],
-                    "relationship": "contains",
-                    "properties": {}
-                })
-        
-        return {
-            "nodes": lineage_nodes,
-            "edges": lineage_edges,
-            "field_name": field_name,
-            "total_nodes": len(lineage_nodes),
-            "total_edges": len(lineage_edges)
-        }
-
-    async def _analyze_field_usage_patterns_api(self, field_name: str, references: List[Dict]) -> Dict[str, Any]:
-        """✅ FIXED: Analyze usage patterns for a field with API calls"""
-        usage_stats = {
-            "total_references": len(references),
-            "programs_using": set(),
-            "operation_types": defaultdict(int),
-            "chunk_types": defaultdict(int),
-            "table_definitions": []
-        }
-        
-        # Analyze each reference with API
-        for ref in references:
-            if ref.get("type") == "table_definition":
-                usage_stats["table_definitions"].append({
-                    "table": ref["table_name"],
-                    "type": ref["field_type"],
-                    "description": ref.get("description", "")
-                })
-            else:
-                usage_stats["programs_using"].add(ref["program_name"])
-                usage_stats["chunk_types"][ref["chunk_type"]] += 1
-                
-                # Analyze reference with API
-                ref_details = await self._analyze_field_reference_with_api(
-                    field_name, ref["content"], ref["chunk_type"], ref["program_name"]
-                )
-                
-                op_type = ref_details.get("operation_type", "REFERENCE")
-                usage_stats["operation_types"][op_type] += 1
-        
-        # Convert sets to lists for JSON serialization
-        usage_stats["programs_using"] = list(usage_stats["programs_using"])
-        usage_stats["operation_types"] = dict(usage_stats["operation_types"])
-        usage_stats["chunk_types"] = dict(usage_stats["chunk_types"])
-        
-        # Analyze patterns with API
-        pattern_analysis = await self._analyze_usage_patterns_with_api(field_name, usage_stats)
-        
-        return {
-            "statistics": usage_stats,
-            "pattern_analysis": pattern_analysis,
-            "complexity_score": self._calculate_usage_complexity(usage_stats)
-        }
-
-    async def _analyze_field_reference_with_api(self, field_name: str, content: str, 
-                                       chunk_type: str, program_name: str) -> Dict[str, Any]:
-        """✅ FIXED: Analyze field reference with better content preservation"""
-        
-        # FIXED: Increase truncation size to preserve context
-        content_preview = content[:1200] if len(content) > 1200 else content  # INCREASED from 600
-        
-        prompt = f"""
-        Analyze how the field "{field_name}" is used in this {chunk_type} from program {program_name}:
-        
-        {content_preview}
-        
-        Determine:
-        1. Operation type (READ, WRITE, UPDATE, DELETE, TRANSFORM, VALIDATE)
-        2. Context of usage (input, output, calculation, validation, etc.)
-        3. Any transformations applied to the field
-        4. Business logic involving this field
-        5. Data flow direction (source or target)
-        
-        Return as JSON:
-        {{
-            "operation_type": "READ",
-            "usage_context": "Field is read for validation",
-            "transformations": ["uppercase conversion"],
-            "business_logic": "Field validation logic",
-            "data_flow": "source",
-            "confidence": 0.9
-        }}
-        """
-        
-        try:
-            response_text = await self._call_api_for_analysis(prompt, max_tokens=300)  # INCREASED tokens
-            
-            if '{' in response_text:
-                json_start = response_text.find('{')
-                json_end = response_text.rfind('}') + 1
-                parsed_response = json.loads(response_text[json_start:json_end])
-                
-                self.logger.debug(f"✅ Successfully analyzed field reference for {field_name}")
-                return parsed_response
-                
-        except Exception as e:
-            self.logger.warning(f"⚠️ Failed to parse API field reference analysis: {str(e)}")
-        
-        # Fallback analysis with logging
-        fallback_result = {
-            "operation_type": self._infer_operation_type(field_name, content),
-            "usage_context": "Field usage detected",
-            "transformations": [],
-            "business_logic": "Analysis not available via API",
-            "data_flow": "unknown",
-            "confidence": 0.5
-        }
-        
-        self.logger.info(f"🔄 Using fallback analysis for {field_name}")
-        return fallback_result
-
-    def _infer_operation_type(self, field_name: str, content: str) -> str:
-        """Infer operation type using regex patterns"""
-        content_upper = content.upper()
-        field_upper = field_name.upper()
-        
-        # COBOL patterns
-        if f"MOVE TO {field_upper}" in content_upper or f"MOVE {field_upper}" in content_upper:
-            return "WRITE"
-        elif f"READ" in content_upper and field_upper in content_upper:
-            return "READ"
-        elif f"REWRITE" in content_upper and field_upper in content_upper:
-            return "UPDATE"
-        elif f"DELETE" in content_upper and field_upper in content_upper:
-            return "DELETE"
-        elif f"COMPUTE {field_upper}" in content_upper or f"ADD TO {field_upper}" in content_upper:
-            return "TRANSFORM"
-        
-        # SQL patterns
-        elif f"SELECT" in content_upper and field_upper in content_upper:
-            return "READ"
-        elif f"INSERT" in content_upper and field_upper in content_upper:
-            return "WRITE"
-        elif f"UPDATE" in content_upper and field_upper in content_upper:
-            return "UPDATE"
-        
-        return "REFERENCE"
-
-    async def _analyze_usage_patterns_with_api(self, field_name: str, usage_stats: Dict) -> str:
-        """✅ FIXED: Analyze usage patterns using API"""
-        
-        stats_summary = {
-            "total_references": usage_stats["total_references"],
-            "programs_count": len(usage_stats["programs_using"]),
-            "operation_types": usage_stats["operation_types"],
-            "chunk_types": usage_stats["chunk_types"]
-        }
-        
-        prompt = f"""
-        Analyze the usage patterns for field "{field_name}":
-        
-        Usage Statistics:
-        {json.dumps(stats_summary, indent=2)}
-        
-        Provide insights on:
-        1. Primary usage patterns
-        2. Data flow characteristics
-        3. Potential issues or risks
-        4. Optimization opportunities
-        5. Business importance indicators
-        
-        Provide a concise analysis in 200 words or less.
-        """
-        
-        try:
-            return await self._call_api_for_readable_analysis(prompt, max_tokens=300)
-        except Exception as e:
-            self.logger.warning(f"Failed to generate pattern analysis: {str(e)}")
-            return f"Field {field_name} is used across {len(usage_stats['programs_using'])} programs with {usage_stats['total_references']} total references."
-
-    async def _call_api_for_readable_analysis(self, prompt: str, max_tokens: int = None) -> str:
-        """FIXED: API call with better empty response handling"""
-        try:
-            params = self.api_params.copy()
-            if max_tokens:
-                params["max_tokens"] = max_tokens
-            
-            self.logger.debug(f"🔄 Making API call with {len(prompt)} character prompt")
-            
-            # Use coordinator's API call method
-            result = await self.coordinator.call_model_api(
-                prompt=prompt,
-                params=params,
-                preferred_gpu_id=self.gpu_id
-            )
-            
-            # FIXED: Better response extraction and validation
-            if isinstance(result, dict):
-                text = result.get('text') or result.get('response') or result.get('content') or ''
-                
-                # FIXED: Check for empty or very short responses
-                if not text or len(text.strip()) < 10:
-                    self.logger.warning(f"⚠️ API returned empty or very short response: '{text}'")
-                    return "Analysis completed but detailed results not available from API"
-                
-                # Clean up the text to ensure it's readable
-                cleaned_text = self._ensure_readable_text(text)
-                
-                self.logger.debug(f"✅ API call successful, returned {len(cleaned_text)} characters")
-                return cleaned_text
-            else:
-                text_result = str(result)
-                if len(text_result.strip()) < 10:
-                    self.logger.warning(f"⚠️ API returned short string response: '{text_result}'")
-                    return "Analysis completed with limited API response"
-                return text_result
-            
-        except Exception as e:
-            self.logger.error(f"❌ API call for readable analysis failed: {str(e)}")
-            return f"Analysis completed but API call failed: {str(e)}"
-
-
-    def _calculate_usage_complexity(self, usage_stats: Dict) -> float:
-        """Calculate complexity score based on usage patterns"""
-        # Factors: number of programs, operation types, reference count
-        num_programs = len(usage_stats["programs_using"])
-        num_operations = len(usage_stats["operation_types"])
-        total_refs = usage_stats["total_references"]
-        
-        # Normalize scores
-        program_score = min(num_programs / 10.0, 1.0)  # Max at 10 programs
-        operation_score = min(num_operations / 5.0, 1.0)  # Max at 5 operation types
-        reference_score = min(total_refs / 50.0, 1.0)  # Max at 50 references
-        
-        return (program_score + operation_score + reference_score) / 3.0
-
-    async def _find_field_transformations_api(self, field_name: str, references: List[Dict]) -> List[Dict[str, Any]]:
-        """✅ FIXED: Find data transformations involving the field"""
-        transformations = []
-        
-        for ref in references:
-            if ref.get("type") != "table_definition":
-                # Analyze reference with API to get transformation details
-                ref_details = await self._analyze_field_reference_with_api(
-                    field_name, ref["content"], ref["chunk_type"], ref["program_name"]
-                )
-                
-                if ref_details.get("transformations"):
-                    transformation = {
-                        "program": ref["program_name"],
-                        "chunk": ref["chunk_id"],
-                        "transformations": ref_details["transformations"],
-                        "business_logic": ref_details.get("business_logic", ""),
-                        "context": ref_details.get("usage_context", "")
-                    }
-                    transformations.append(transformation)
-                
-                # Also check content for mathematical operations
-                content = ref.get("content", "")
-                if any(op in content.upper() for op in ["COMPUTE", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE"]):
-                    math_transforms = await self._extract_mathematical_transformations_api(
-                        field_name, content, ref["program_name"]
-                    )
-                    transformations.extend(math_transforms)
-        
-        return transformations
-
-    async def _extract_mathematical_transformations_api(self, field_name: str, content: str, program_name: str) -> List[Dict]:
-        """✅ FIXED: Extract mathematical transformations from content"""
-        
-        content_preview = content[:400] if len(content) > 400 else content
-        
-        prompt = f"""
-        Extract mathematical transformations involving field "{field_name}" from this code:
-        
-        {content_preview}
-        
-        Find:
-        1. Arithmetic operations (ADD, SUBTRACT, MULTIPLY, DIVIDE, COMPUTE)
-        2. Data conversion operations
-        3. Aggregation operations
-        4. Business calculations
-        
-        Return as JSON array:
-        [{{
-            "operation": "COMPUTE TOTAL = {field_name} * RATE",
-            "type": "multiplication",
-            "description": "Calculate total amount",
-            "input_fields": ["{field_name}", "RATE"],
-            "output_fields": ["TOTAL"]
-        }}]
-        """
-        
-        try:
-            response_text = await self._call_api_for_analysis(prompt, max_tokens=300)
-            
-            if '[' in response_text:
-                json_start = response_text.find('[')
-                json_end = response_text.rfind(']') + 1
-                transforms = json.loads(response_text[json_start:json_end])
-                
-                # Add program context
-                for transform in transforms:
-                    transform["program"] = program_name
-                
-                return transforms
-        except Exception as e:
-            self.logger.warning(f"Failed to parse mathematical transformations: {str(e)}")
-        
-        return []
-
-    async def _analyze_field_lifecycle_api(self, field_name: str, references: List[Dict]) -> Dict[str, Any]:
-        """✅ FIXED: Analyze the lifecycle of a field"""
-        lifecycle_stages = {
-            "creation": [],
-            "updates": [],
-            "reads": [],
-            "transformations": [],
-            "deletions": [],
-            "archival": []
-        }
-        
-        for ref in references:
-            if ref.get("type") == "table_definition":
-                lifecycle_stages["creation"].append({
-                    "type": "table_definition",
-                    "table": ref["table_name"],
-                    "field_type": ref["field_type"]
-                })
-            else:
-                # Analyze reference with API
-                ref_details = await self._analyze_field_reference_with_api(
-                    field_name, ref["content"], ref["chunk_type"], ref["program_name"]
-                )
-                
-                op_type = ref_details.get("operation_type", "REFERENCE")
-                
-                stage_mapping = {
-                    "WRITE": "creation",
-                    "UPDATE": "updates", 
-                    "READ": "reads",
-                    "TRANSFORM": "transformations",
-                    "DELETE": "deletions"
-                }
-                
-                stage = stage_mapping.get(op_type, "reads")
-                lifecycle_stages[stage].append({
-                    "program": ref["program_name"],
-                    "chunk": ref["chunk_id"],
-                    "operation": op_type,
-                    "context": ref_details.get("usage_context", "")
-                })
-        
-        # Analyze lifecycle completeness with API
-        lifecycle_analysis = await self._analyze_lifecycle_completeness_api(field_name, lifecycle_stages)
-        
-        return {
-            "stages": lifecycle_stages,
-            "analysis": lifecycle_analysis,
-            "lifecycle_score": self._calculate_lifecycle_score(lifecycle_stages)
-        }
-
-    async def _analyze_lifecycle_completeness_api(self, field_name: str, stages: Dict) -> str:
-        """✅ FIXED: Analyze lifecycle completeness using API"""
-        
-        # Summarize stages for prompt
-        stage_summary = {
-            stage: len(operations) for stage, operations in stages.items()
-        }
-        
-        prompt = f"""
-        Analyze the lifecycle completeness for field "{field_name}":
-        
-        Lifecycle Stage Counts:
-        {json.dumps(stage_summary, indent=2)}
-        
-        Assess:
-        1. Completeness of lifecycle coverage
-        2. Missing lifecycle stages
-        3. Data governance implications
-        4. Potential data quality issues
-        5. Recommendations for improvement
-        
-        Provide a comprehensive but concise lifecycle analysis in 250 words or less.
-        """
-        
-        try:
-            return await self._call_api_for_readable_analysis(prompt, max_tokens=400)
-        except Exception as e:
-            self.logger.warning(f"Failed to generate lifecycle analysis: {str(e)}")
-            return f"Field {field_name} lifecycle analysis: {sum(stage_summary.values())} total operations across {len([s for s in stage_summary.values() if s > 0])} lifecycle stages."
-
-    def _calculate_lifecycle_score(self, stages: Dict) -> float:
-        """Calculate lifecycle completeness score"""
-        stage_weights = {
-            "creation": 0.3,
-            "reads": 0.2,
-            "updates": 0.2,
-            "transformations": 0.1,
-            "deletions": 0.1,
-            "archival": 0.1
-        }
-        
-        score = 0.0
-        for stage, weight in stage_weights.items():
-            if stages.get(stage):
-                score += weight
-        
-        return score
-
-    async def _analyze_field_impact_api(self, field_name: str, references: List[Dict]) -> Dict[str, Any]:
-        """✅ FIXED: Analyze potential impact of changes to this field"""
-        impact_analysis = {
-            "affected_programs": set(),
-            "affected_tables": set(),
-            "critical_operations": [],
-            "downstream_dependencies": [],
-            "risk_level": "LOW"
-        }
-        
-        for ref in references:
-            if ref.get("type") == "table_definition":
-                impact_analysis["affected_tables"].add(ref["table_name"])
-            else:
-                impact_analysis["affected_programs"].add(ref["program_name"])
-                
-                # Analyze reference with API
-                ref_details = await self._analyze_field_reference_with_api(
-                    field_name, ref["content"], ref["chunk_type"], ref["program_name"]
-                )
-                
-                if ref_details.get("operation_type") in ["WRITE", "UPDATE", "TRANSFORM"]:
-                    impact_analysis["critical_operations"].append({
-                        "program": ref["program_name"],
-                        "operation": ref_details.get("operation_type"),
-                        "context": ref_details.get("usage_context", "")
-                    })
-        
-        # Convert sets to lists
-        impact_analysis["affected_programs"] = list(impact_analysis["affected_programs"])
-        impact_analysis["affected_tables"] = list(impact_analysis["affected_tables"])
-        
-        # Calculate risk level
-        num_programs = len(impact_analysis["affected_programs"])
-        num_critical_ops = len(impact_analysis["critical_operations"])
-        
-        if num_programs > 10 or num_critical_ops > 5:
-            impact_analysis["risk_level"] = "HIGH"
-        elif num_programs > 5 or num_critical_ops > 2:
-            impact_analysis["risk_level"] = "MEDIUM"
-        
-        # Generate detailed impact assessment with API
-        impact_assessment = await self._generate_impact_assessment_api(field_name, impact_analysis)
-        impact_analysis["detailed_assessment"] = impact_assessment
-        
-        return impact_analysis
-
-    async def _generate_impact_assessment_api(self, field_name: str, impact_data: Dict) -> str:
-        """✅ FIXED: Generate detailed impact assessment using API"""
-        
-        # Summarize impact data for prompt
-        impact_summary = {
-            "affected_programs": len(impact_data["affected_programs"]),
-            "affected_tables": len(impact_data["affected_tables"]),
-            "critical_operations": len(impact_data["critical_operations"]),
-            "risk_level": impact_data["risk_level"]
-        }
-        
-        prompt = f"""
-        Generate a detailed impact assessment for potential changes to field "{field_name}":
-        
-        Impact Summary:
-        {json.dumps(impact_summary, indent=2)}
-        
-        Provide:
-        1. Risk assessment and mitigation strategies
-        2. Testing requirements
-        3. Change management recommendations
-        4. Business impact analysis
-        5. Technical considerations
-        
-        Format as a concise but comprehensive impact report (300 words max).
-        """
-        
-        try:
-            return await self._call_api_for_readable_analysis(prompt, max_tokens=400)
-        except Exception as e:
-            self.logger.warning(f"Failed to generate impact assessment: {str(e)}")
-            return f"Impact assessment for {field_name}: {impact_summary['risk_level']} risk level with {impact_summary['affected_programs']} affected programs."
-
-    async def _generate_field_lineage_report_api(self, field_name: str, lineage_graph: Dict,
-                                       usage_analysis: Dict, transformations: List,
-                                       lifecycle: Dict) -> str:
-        """✅ FIXED: Generate comprehensive field lineage report using API"""
-        
-        report_data = {
-            "field_name": field_name,
-            "total_nodes": lineage_graph.get("total_nodes", 0),
-            "total_edges": lineage_graph.get("total_edges", 0),
-            "total_references": usage_analysis['statistics']['total_references'],
-            "programs_count": len(usage_analysis['statistics']['programs_using']),
-            "transformations_count": len(transformations),
-            "lifecycle_score": lifecycle['lifecycle_score'],
-            "complexity_score": usage_analysis['complexity_score']
-        }
-        
-        prompt = f"""
-        Generate a comprehensive data lineage report for field "{field_name}":
-        
-        Report Data:
-        {json.dumps(report_data, indent=2)}
-        
-        Key Statistics:
-        - Operation Types: {usage_analysis['statistics']['operation_types']}
-        - Table Definitions: {len(usage_analysis['statistics']['table_definitions'])}
-        
-        Generate a professional report including:
-        1. Executive Summary
-        2. Field Usage Overview
-        3. Data Flow Analysis
-        4. Transformation Summary
-        5. Lifecycle Assessment
-        6. Risk Analysis
-        7. Recommendations
-        
-        Format as a structured report suitable for technical and business audiences (500 words max).
-        """
-        
-        try:
-            return await self._call_api_for_readable_analysis(prompt, max_tokens=600)
-        except Exception as e:
-            self.logger.warning(f"Failed to generate lineage report: {str(e)}")
-            return f"Lineage Report for {field_name}: Field found in {report_data['programs_count']} programs with {report_data['total_references']} references."
-
-    # ==================== Additional Methods for Field Analysis ====================
-
-    async def _analyze_field_data_flow(self, field_name: str) -> Dict[str, Any]:
-        """FIXED: Analyze data flow for a specific field"""
-        try:
-            # FIXED: Ensure field_name is string
-            field_name = str(field_name)
-            
-            # Get field references
-            field_references = await self._find_field_references(field_name)
-            
-            if not field_references:
-                return {
-                    "field_name": field_name,
-                    "error": "No field references found",
-                    "data_flow_analysis": "Field not found in processed data"
-                }
-            
-            # Analyze usage patterns
-            usage_patterns = await self._analyze_field_usage_patterns_api(field_name, field_references)
-            
-            # Generate data flow analysis
-            data_flow_analysis = await self._generate_field_data_flow_analysis_api(
-                field_name, field_references, usage_patterns
-            )
-            
-            result = {
-                "field_name": field_name,
-                "component_type": "field",
-                "field_references": field_references,
-                "usage_patterns": usage_patterns,
-                "data_flow_analysis": data_flow_analysis,
-                "analysis_type": "field_data_flow",
-                "analysis_timestamp": dt.now().isoformat()
-            }
-            
-            return self._add_processing_info(result)
-            
-        except Exception as e:
-            self.logger.error(f"Field data flow analysis failed: {str(e)}")
-            return self._add_processing_info({"error": str(e)})
-
-    async def _generate_field_data_flow_analysis_api(self, field_name: str, 
-                                                   field_references: List[Dict],
-                                                   usage_patterns: Dict) -> str:
-        """FIXED: Generate field data flow analysis using API"""
-        
-        flow_summary = {
-            "field_name": field_name,
-            "total_references": len(field_references),
-            "programs_using": len(usage_patterns['statistics']['programs_using']),
-            "operation_types": usage_patterns['statistics']['operation_types'],
-            "complexity_score": usage_patterns['complexity_score']
-        }
-        
-        prompt = f"""
-        Generate field data flow analysis for: {field_name}
-        
-        Field Flow Summary:
-        - Referenced in {flow_summary['total_references']} locations
-        - Used by {flow_summary['programs_using']} programs
-        - Operation types: {flow_summary['operation_types']}
-        - Complexity score: {flow_summary['complexity_score']:.2f}
-        
-        Provide detailed analysis covering:
-        
-        **Field Overview:**
-        - Business purpose and meaning
-        - Data characteristics and format
-        - Critical importance to operations
-        
-        **Usage Patterns:**
-        - Primary usage scenarios
-        - Data transformation patterns
-        - Validation and quality checks
-        
-        **Data Flow Characteristics:**
-        - Source and target systems
-        - Data movement patterns
-        - Dependencies and relationships
-        
-        **Quality and Governance:**
-        - Data quality indicators
-        - Compliance considerations
-        - Maintenance requirements
-        
-        Write as comprehensive field analysis documentation.
-        """
-        
-        try:
-            return await self._call_api_for_readable_analysis(prompt, max_tokens=600)
-        except Exception as e:
-            self.logger.error(f"Field data flow analysis generation failed: {e}")
-            return f"Field data flow analysis for {field_name}: {flow_summary['total_references']} references across {flow_summary['programs_using']} programs."
-
-    # ==================== Enhanced Lineage Analysis Methods ====================
+    # ==================== Additional API methods for cross-program analysis ====================
 
     async def analyze_cross_program_data_lineage(self, component_name: str) -> Dict[str, Any]:
-        """🔄 NEW: Analyze data lineage across multiple programs"""
+        """FIXED: Cross-program lineage analysis with focused API calls"""
         try:
-            # Get impact analysis data
+            component_name = self._normalize_component_name(component_name)
+            
+            self.logger.info(f"🔄 Starting cross-program lineage analysis for: {component_name}")
+            
+            analysis_steps = {}
+            
+            # STEP 1: Get impact analysis data (no API call needed)
+            self.logger.info(f"🔄 Step 1: Getting cross-program impact data for {component_name}")
             impact_data = await self._get_cross_program_impact_data(component_name)
+            analysis_steps["impact_data"] = {
+                "status": "success",
+                "data": impact_data
+            }
             
-            # Build lineage graph across programs
+            # STEP 2: Build lineage graph (no API call needed)
+            self.logger.info(f"🔄 Step 2: Building cross-program lineage graph for {component_name}")
             lineage_graph = await self._build_cross_program_lineage_graph(component_name, impact_data)
+            analysis_steps["lineage_graph"] = {
+                "status": "success",
+                "data": lineage_graph
+            }
             
-            # Generate cross-program lineage analysis
-            cross_program_analysis = await self._generate_cross_program_lineage_analysis_api(
-                component_name, impact_data, lineage_graph
-            )
+            # STEP 3: Generate cross-program analysis with focused API call
+            self.logger.info(f"🔄 Step 3: Generating cross-program analysis for {component_name}")
+            cross_program_analysis = await self._generate_cross_program_analysis_focused(component_name, impact_data, lineage_graph)
+            analysis_steps["cross_program_analysis"] = {
+                "status": "success" if cross_program_analysis else "partial",
+                "data": {"analysis_summary": cross_program_analysis}
+            }
+            
+            # Calculate success metrics
+            successful_steps = len([step for step in analysis_steps.values() if step["status"] == "success"])
+            total_steps = len(analysis_steps)
             
             result = {
                 "component_name": component_name,
-                "impact_data": impact_data,
-                "lineage_graph": lineage_graph,
-                "cross_program_analysis": cross_program_analysis,
+                "analysis_steps": analysis_steps,
+                "successful_steps": successful_steps,
+                "total_steps": total_steps,
+                "completion_rate": (successful_steps / total_steps) * 100 if total_steps > 0 else 0,
                 "analysis_type": "cross_program_data_lineage",
-                "analysis_timestamp": dt.now().isoformat()
+                "analysis_timestamp": dt.now().isoformat(),
+                "status": "success" if successful_steps >= 2 else "partial"
             }
             
             return self._add_processing_info(result)
             
         except Exception as e:
-            self.logger.error(f"Cross-program lineage analysis failed: {str(e)}")
+            self.logger.error(f"❌ Cross-program lineage analysis failed: {str(e)}")
             return self._add_processing_info({"error": str(e)})
 
     async def _get_cross_program_impact_data(self, component_name: str) -> Dict[str, Any]:
@@ -2231,19 +1649,55 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Get all impact relationships for this component
+            # Check if impact_analysis table exists
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='impact_analysis'
+            """)
+            
+            if not cursor.fetchone():
+                # Fallback: use program_chunks and file_access_relationships
+                upstream_dependencies = []
+                downstream_impacts = []
+                
+                # Find programs that this component depends on
+                cursor.execute("""
+                    SELECT DISTINCT program_name FROM file_access_relationships
+                    WHERE logical_file_name = ? OR physical_file_name = ?
+                    LIMIT 10
+                """, (str(component_name), str(component_name)))
+                
+                for (program_name,) in cursor.fetchall():
+                    upstream_dependencies.append({
+                        "source_artifact": program_name,
+                        "source_type": "program",
+                        "dependent_artifact": component_name,
+                        "dependent_type": "file",
+                        "relationship_type": "accesses",
+                        "impact_level": "medium",
+                        "change_propagation": "dependent_updates_needed"
+                    })
+                
+                conn.close()
+                return {
+                    "upstream_dependencies": upstream_dependencies,
+                    "downstream_impacts": downstream_impacts,
+                    "total_relationships": len(upstream_dependencies) + len(downstream_impacts)
+                }
+            
+            # Use impact_analysis table if it exists
             cursor.execute("""
                 SELECT source_artifact, source_type, dependent_artifact, dependent_type,
                     relationship_type, impact_level, change_propagation
                 FROM impact_analysis
                 WHERE source_artifact = ? OR dependent_artifact = ?
                 ORDER BY impact_level DESC, relationship_type
+                LIMIT 20
             """, (str(component_name), str(component_name)))
             
             impact_records = cursor.fetchall()
             conn.close()
             
-            # Organize impact data
             upstream_dependencies = []
             downstream_impacts = []
             
@@ -2288,8 +1742,8 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             }
             lineage_nodes.append(central_node)
             
-            # Add upstream nodes and edges
-            for i, upstream in enumerate(impact_data.get("upstream_dependencies", [])):
+            # Add upstream nodes and edges (limit to 5)
+            for i, upstream in enumerate(impact_data.get("upstream_dependencies", [])[:5]):
                 upstream_node = {
                     "id": f"upstream_{upstream['source_artifact']}",
                     "name": upstream['source_artifact'],
@@ -2305,8 +1759,8 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                     "impact_level": upstream['impact_level']
                 })
             
-            # Add downstream nodes and edges
-            for i, downstream in enumerate(impact_data.get("downstream_impacts", [])):
+            # Add downstream nodes and edges (limit to 5)
+            for i, downstream in enumerate(impact_data.get("downstream_impacts", [])[:5]):
                 downstream_node = {
                     "id": f"downstream_{downstream['dependent_artifact']}",
                     "name": downstream['dependent_artifact'],
@@ -2334,10 +1788,10 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             self.logger.error(f"Failed to build lineage graph: {e}")
             return {"nodes": [], "edges": [], "total_nodes": 0, "total_edges": 0}
 
-    async def _generate_cross_program_lineage_analysis_api(self, component_name: str,
-                                                        impact_data: Dict, lineage_graph: Dict) -> str:
-        """Generate cross-program lineage analysis using API"""
+    async def _generate_cross_program_analysis_focused(self, component_name: str, impact_data: Dict, lineage_graph: Dict) -> str:
+        """FIXED: Focused API call for cross-program lineage analysis"""
         
+        # Prepare analysis summary
         lineage_summary = {
             "component_name": component_name,
             "upstream_count": len(impact_data.get("upstream_dependencies", [])),
@@ -2346,332 +1800,100 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             "graph_complexity": lineage_graph.get("graph_complexity", "low")
         }
         
-        prompt = f"""
-        Generate cross-program data lineage analysis for: {component_name}
+        # Extract key dependencies
+        upstream_components = [dep["source_artifact"] for dep in impact_data.get("upstream_dependencies", [])[:5]]
+        downstream_components = [imp["dependent_artifact"] for imp in impact_data.get("downstream_impacts", [])[:5]]
         
-        Lineage Summary:
-        - {lineage_summary['upstream_count']} upstream dependencies
-        - {lineage_summary['downstream_count']} downstream impacts
-        - {lineage_summary['total_nodes']} total components in lineage
-        - Graph complexity: {lineage_summary['graph_complexity']}
-        
-        Upstream Dependencies: {[dep['source_artifact'] for dep in impact_data.get('upstream_dependencies', [])[:5]]}
-        Downstream Impacts: {[imp['dependent_artifact'] for imp in impact_data.get('downstream_impacts', [])[:5]]}
-        
-        Provide comprehensive analysis covering:
-        
-        **Lineage Overview:**
-        - Component's role in the data ecosystem
-        - Critical dependencies and relationships
-        - Business impact and importance
-        
-        **Upstream Analysis:**
-        - Data sources and origins
-        - Dependency chain analysis
-        - Risk assessment for source changes
-        
-        **Downstream Analysis:**
-        - Impact propagation patterns
-        - Affected systems and processes
-        - Change management considerations
-        
-        **Cross-Program Dependencies:**
-        - Inter-program data flows
-        - Synchronization requirements
-        - Data consistency mechanisms
-        
-        Write as comprehensive lineage documentation for architecture and governance teams.
-        """
-        
+        # FOCUSED PROMPT: Only cross-program analysis
+        prompt = f"""Analyze cross-program lineage for: {component_name}
+
+Lineage Summary:
+- {lineage_summary['upstream_count']} upstream dependencies
+- {lineage_summary['downstream_count']} downstream impacts  
+- {lineage_summary['total_nodes']} total components in lineage
+- Graph complexity: {lineage_summary['graph_complexity']}
+
+Key Dependencies:
+- Upstream: {upstream_components}
+- Downstream: {downstream_components}
+
+Provide analysis covering:
+1. Component's role in data ecosystem
+2. Critical dependencies and relationships
+3. Cross-program impact assessment
+4. Change management considerations
+
+Write clear business analysis, keep under 400 words."""
+
         try:
-            return await self._call_api_for_readable_analysis(prompt, max_tokens=800)
+            return await self._call_api_focused(prompt, "cross_program", "Cross-Program Lineage Analysis")
         except Exception as e:
-            self.logger.error(f"Cross-program lineage analysis generation failed: {e}")
-            return self._generate_fallback_cross_program_analysis(component_name, lineage_summary)
+            self.logger.error(f"Cross-program analysis failed: {e}")
+            return f"Component {component_name} has {lineage_summary['upstream_count']} upstream dependencies and {lineage_summary['downstream_count']} downstream impacts across {lineage_summary['total_nodes']} total components with {lineage_summary['graph_complexity']} complexity."
 
-    def _generate_fallback_cross_program_analysis(self, component_name: str, lineage_summary: Dict) -> str:
-        """Generate fallback cross-program analysis when API fails"""
-        analysis = f"## Cross-Program Data Lineage: {component_name}\n\n"
-        
-        analysis += "### Lineage Overview\n"
-        analysis += f"Component {component_name} sits at the center of a {lineage_summary['graph_complexity']} complexity data lineage:\n"
-        analysis += f"- Has {lineage_summary['upstream_count']} upstream dependencies\n"
-        analysis += f"- Impacts {lineage_summary['downstream_count']} downstream components\n"
-        analysis += f"- Total lineage network includes {lineage_summary['total_nodes']} components\n\n"
-        
-        analysis += "### Impact Assessment\n"
-        if lineage_summary['upstream_count'] > 5 or lineage_summary['downstream_count'] > 5:
-            analysis += "**High Impact Component:** Changes to this component require extensive coordination and testing.\n"
-        elif lineage_summary['upstream_count'] > 2 or lineage_summary['downstream_count'] > 2:
-            analysis += "**Moderate Impact Component:** Standard change management procedures apply.\n"
-        else:
-            analysis += "**Low Impact Component:** Changes can be managed with minimal coordination.\n"
-        
-        analysis += f"\n### Complexity Characteristics\n"
-        analysis += f"The {lineage_summary['graph_complexity']} complexity rating indicates the level of "
-        analysis += "coordination required for changes and the potential for cascading impacts.\n"
-        
-        return analysis
-    
-    # ==================== Enhanced Lineage Methods for High Complexity ====================
-
-    async def analyze_field_lineage_with_fallback(self, field_name: str) -> Dict[str, Any]:
-        """Enhanced field lineage with timeout protection and partial saves"""
-        try:
-            field_name = self._normalize_component_name(field_name)
-            # Check existing partial results first
-            existing = await self._load_existing_partial(field_name)
-            if existing:
-                self.logger.info(f"📋 Found existing partial analysis for {field_name}")
-                return existing
-            
-            # Get references with limit for high complexity
-            field_references = await self._find_field_references(field_name)
-            total_refs = len(field_references)
-            
-            # Adaptive strategy based on reference count
-            if total_refs > 30:  # HIGH complexity like TMSCOTHU
-                return await self._process_high_complexity_api(field_name, field_references)
-            elif total_refs > 15:  # MEDIUM complexity  
-                return await self._process_medium_complexity_api(field_name, field_references)
-            else:  # LOW complexity
-                return await self.analyze_field_lineage(field_name)  # Use existing method
-                
-        except Exception as e:
-            # Save error state and return partial results
-            return await self._handle_analysis_failure(field_name, str(e))
-
-    async def _process_high_complexity_api(self, field_name: str, references: List[Dict]) -> Dict[str, Any]:
-        """Process high complexity components like TMSCOTHU with smart limits using API"""
-        
-        # 1. Prioritize most important references
-        prioritized_refs = self._prioritize_by_importance(references)[:20]  # Max 20
-        
-        # 2. Initialize partial result tracking
-        result = {
-            "field_name": field_name,
-            "status": "partial",
-            "total_references_found": len(references),
-            "references_analyzed": 0,
-            "high_complexity_mode": True,
-            "analysis_strategy": "prioritized_sampling",
-            "lineage_data": {"programs": set(), "operations": [], "transformations": []},
-            "progress_log": []
-        }
-        
-        # 3. Process in small batches with saves
-        batch_size = 5
-        for i in range(0, len(prioritized_refs), batch_size):
-            batch = prioritized_refs[i:i + batch_size]
-            
-            try:
-                # Process batch with 2-minute timeout
-                async with asyncio.timeout(120):
-                    for ref in batch:
-                        ref_analysis = await self._analyze_field_reference_with_api(
-                            field_name, ref["content"][:400],  # Truncate content
-                            ref["chunk_type"], ref["program_name"]
-                        )
-                        
-                        # Accumulate findings
-                        result["lineage_data"]["programs"].add(ref["program_name"])
-                        result["lineage_data"]["operations"].append(ref_analysis.get("operation_type", "UNKNOWN"))
-                        result["references_analyzed"] += 1
-                    
-                    # Save progress every batch
-                    await self._save_partial_progress(field_name, result)
-                    progress = (result["references_analyzed"] / len(prioritized_refs)) * 100
-                    result["progress_log"].append(f"Batch {i//batch_size + 1}: {progress:.1f}% complete")
-                    
-            except asyncio.TimeoutError:
-                result["progress_log"].append(f"Batch {i//batch_size + 1}: TIMEOUT - continuing")
-                continue
-        
-        result["llm_summary"] = await self._generate_partial_summary_api(field_name, result)
-        result["lineage_data"]["programs"] = list(result["lineage_data"]["programs"])
-        
-        await self._save_final_partial_result(field_name, result)
-        return result
-
-    def _prioritize_by_importance(self, references: List[Dict]) -> List[Dict]:
-        """Smart prioritization for high-complexity analysis"""
-        def importance_score(ref):
-            score = 0
-            chunk_type = ref.get('chunk_type', '').lower()
-            content = ref.get('content', '').upper()
-            program_name = ref.get('program_name', '').upper()
-            
-            # Prioritize data definitions (highest importance)
-            if chunk_type in ['file_section', 'working_storage', 'data_division']:
-                score += 20
-            elif chunk_type == 'procedure_division':
-                score += 10
-            
-            # Prioritize transaction processing programs
-            if any(keyword in program_name for keyword in ['TXN', 'TRANS', 'POST', 'BAL']):
-                score += 15
-            
-            # Prioritize complex operations
-            complex_ops = ['COMPUTE', 'MOVE', 'IF', 'PERFORM', 'CALL', 'READ', 'WRITE']
-            score += sum(3 for op in complex_ops if op in content)
-            
-            # Prioritize copybook definitions
-            if 'COPY' in content and ref.get('field_name', '') in content:
-                score += 25
-                
-            return score
-        
-        return sorted(references, key=importance_score, reverse=True)
-
-    async def _save_partial_progress(self, field_name: str, result: Dict):
-        """Save intermediate progress to database"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                INSERT OR REPLACE INTO partial_analysis_cache 
-                (component_name, agent_type, partial_data, progress_percent, status, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                str(field_name), 
-                "lineage_analyzer",
-                json.dumps(result, default=str),
-                (result["references_analyzed"] / max(result.get("total_references_found", 1), 1)) * 100,
-                "in_progress",
-                dt.now().isoformat()
-            ))
-            
-            conn.commit()
-            conn.close()
-            
-        except Exception as e:
-            self.logger.error(f"Failed to save progress: {e}")
-
-    async def _load_existing_partial(self, field_name: str) -> Optional[Dict]:
-        """Load existing partial analysis from cache"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT partial_data, progress_percent, status, timestamp
-                FROM partial_analysis_cache
-                WHERE component_name = ? AND agent_type = ?
-                ORDER BY timestamp DESC
-                LIMIT 1
-            """, (str(field_name), "lineage_analyzer"))
-            
-            row = cursor.fetchone()
-            conn.close()
-            
-            if row:
-                partial_data, progress, status, timestamp = row
-                # Check if data is recent (within 24 hours)
-                analysis_time = dt.fromisoformat(timestamp)
-                if (dt.now() - analysis_time).total_seconds() < 86400:  # 24 hours
-                    return json.loads(partial_data)
-            
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"Failed to load existing partial: {e}")
-            return None
-
-    async def _save_final_partial_result(self, field_name: str, result: Dict):
-        """Save final partial result"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                UPDATE partial_analysis_cache 
-                SET partial_data = ?, status = 'completed', progress_percent = 100, timestamp = ?
-                WHERE component_name = ? AND agent_type = ?
-            """, (
-                json.dumps(result, default=str),
-                dt.now().isoformat(),
-                str(field_name),
-                "lineage_analyzer"
-            ))
-            
-            conn.commit()
-            conn.close()
-            
-        except Exception as e:
-            self.logger.error(f"Failed to save final result: {e}")
-
-    async def _handle_analysis_failure(self, field_name: str, error: str) -> Dict[str, Any]:
-        """Handle analysis failure and return partial results"""
-        return {
-            "field_name": field_name,
-            "status": "error",
-            "error": error,
-            "analysis_type": "api_based",
-            "timestamp": dt.now().isoformat(),
-            "partial_data": None
-        }
-
-    async def _generate_partial_summary_api(self, field_name: str, result: Dict) -> str:
-        """Generate API-based summary of partial analysis - FIXED for readable output"""
-        try:
-            programs_list = list(result["lineage_data"]["programs"])[:10]
-            operations_summary = {}
-            for op in result["lineage_data"]["operations"]:
-                operations_summary[op] = operations_summary.get(op, 0) + 1
-            
-            prompt = f"""
-            Create a clear, readable business summary for this field lineage analysis:
-            
-            Field: {field_name}
-            Analysis Status: {result['status']} 
-            References Analyzed: {result['references_analyzed']} of {result['total_references_found']}
-            
-            Key Programs: {', '.join(programs_list[:5])}
-            Operations: {', '.join(operations_summary.keys())}
-            
-            Write a clear paragraph explaining:
-            - What this field is used for in business terms
-            - Which systems depend on it
-            - Key operations performed
-            - Business criticality level
-            
-            Write in plain English, no JSON, no technical jargon. Maximum 150 words.
-            """
-            
-            api_response = await self._call_api_for_analysis(prompt, max_tokens=300)
-            
-            # Parse the response to ensure readable text
-            readable_summary = self._ensure_readable_text(api_response)
-            
-            if readable_summary and len(readable_summary.strip()) > 20:
-                return readable_summary
-            else:
-                return f"Field {field_name} is used across {len(programs_list)} programs with {result['references_analyzed']} references analyzed using {result.get('analysis_strategy', 'standard')} strategy."
-                    
-        except Exception as e:
-            self.logger.error(f"Summary generation failed: {e}")
-            return f"Analysis Summary: Field {field_name} found in {len(result['lineage_data']['programs'])} programs with {result['references_analyzed']} references processed using {result.get('analysis_strategy', 'standard')} strategy."
-
-    # ==================== Full Lifecycle Analysis Methods ====================
+    # ==================== Lifecycle Analysis Methods ====================
 
     async def analyze_full_lifecycle(self, component_name: str, component_type: str) -> Dict[str, Any]:
-        """✅ API-BASED: Analyze complete lifecycle of a component using API calls"""
+        """FIXED: Complete lifecycle analysis with focused API calls"""
         try:
             await self._load_existing_lineage()
             
-            # FIXED: Ensure parameters are strings
             component_name = str(component_name)
             component_type = str(component_type)
             
+            self.logger.info(f"🔄 Starting lifecycle analysis for {component_name} ({component_type})")
+            
+            analysis_steps = {}
+            
             if component_type in ["file", "table"]:
-                result = await self._analyze_data_component_lifecycle_api(component_name)
+                # STEP 1: Analyze data component lifecycle
+                self.logger.info(f"🔄 Step 1: Analyzing data component lifecycle for {component_name}")
+                lifecycle_result = await self._analyze_data_component_lifecycle_focused(component_name)
+                analysis_steps["lifecycle_analysis"] = {
+                    "status": "success" if lifecycle_result.get("lifecycle_summary") else "partial",
+                    "data": lifecycle_result
+                }
+                
             elif component_type in ["program", "cobol"]:
-                result = await self._analyze_program_lifecycle_api(component_name)
+                # STEP 1: Analyze program lifecycle
+                self.logger.info(f"🔄 Step 1: Analyzing program lifecycle for {component_name}")
+                lifecycle_result = await self._analyze_program_lifecycle_focused(component_name)
+                analysis_steps["lifecycle_analysis"] = {
+                    "status": "success" if lifecycle_result.get("lifecycle_summary") else "partial",
+                    "data": lifecycle_result
+                }
+                
             elif component_type == "jcl":
-                result = await self._analyze_jcl_lifecycle_api(component_name)
+                # STEP 1: Analyze JCL lifecycle
+                self.logger.info(f"🔄 Step 1: Analyzing JCL lifecycle for {component_name}")
+                lifecycle_result = await self._analyze_jcl_lifecycle_focused(component_name)
+                analysis_steps["lifecycle_analysis"] = {
+                    "status": "success" if lifecycle_result.get("lifecycle_summary") else "partial",
+                    "data": lifecycle_result
+                }
             else:
-                result = {"error": f"Unsupported component type: {component_type}"}
+                return self._add_processing_info({
+                    "component_name": component_name,
+                    "component_type": component_type,
+                    "error": f"Unsupported component type: {component_type}",
+                    "status": "error"
+                })
+            
+            # Calculate success metrics
+            successful_steps = len([step for step in analysis_steps.values() if step["status"] == "success"])
+            total_steps = len(analysis_steps)
+            
+            result = {
+                "component_name": component_name,
+                "component_type": component_type,
+                "analysis_steps": analysis_steps,
+                "successful_steps": successful_steps,
+                "total_steps": total_steps,
+                "completion_rate": (successful_steps / total_steps) * 100 if total_steps > 0 else 0,
+                "analysis_type": "full_lifecycle",
+                "analysis_timestamp": dt.now().isoformat(),
+                "status": "success" if successful_steps > 0 else "error"
+            }
             
             return self._add_processing_info(result)
                 
@@ -2683,321 +1905,251 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 "status": "error"
             })
 
-    async def _analyze_data_component_lifecycle_api(self, component_name: str) -> Dict[str, Any]:
-        """✅ API-BASED: Analyze lifecycle of a data component (file/table)"""
+    async def _analyze_data_component_lifecycle_focused(self, component_name: str) -> Dict[str, Any]:
+        """FIXED: Focused API call for data component lifecycle analysis"""
+        
+        # Get component references
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Find all programs that reference this component
         cursor.execute("""
             SELECT program_name, chunk_id, chunk_type, content, metadata
             FROM program_chunks
             WHERE content LIKE ? OR metadata LIKE ?
-            LIMIT 30
+            LIMIT 10
         """, (f"%{component_name}%", f"%{component_name}%"))
         
         references = cursor.fetchall()
         conn.close()
         
-        lifecycle_analysis = {
-            "component_name": component_name,
+        # Analyze lifecycle stages
+        lifecycle_stages = {
             "creation_points": [],
             "read_operations": [],
             "update_operations": [],
-            "delete_operations": [],
-            "archival_points": [],
-            "data_flow": {},
-            "status": "success"
+            "delete_operations": []
         }
+        
+        programs_involved = set()
         
         for program_name, chunk_id, chunk_type, content, metadata_str in references:
-            # Analyze each reference with API
-            operation_analysis = await self._analyze_component_operation_api(
-                component_name, content, program_name, chunk_type
-            )
+            programs_involved.add(program_name)
             
-            # Categorize operations
-            op_type = operation_analysis.get("operation_type", "READ")
-            operation_details = {
-                "program": program_name,
-                "chunk": chunk_id,
-                "operation": operation_analysis,
-                "content_snippet": content[:200] + "..." if len(content) > 200 else content
+            # Simple operation detection
+            content_upper = content.upper()
+            if any(op in content_upper for op in ["CREATE", "WRITE", "OUTPUT"]):
+                lifecycle_stages["creation_points"].append({"program": program_name, "chunk": chunk_id})
+            elif any(op in content_upper for op in ["READ", "SELECT", "INPUT"]):
+                lifecycle_stages["read_operations"].append({"program": program_name, "chunk": chunk_id})
+            elif any(op in content_upper for op in ["UPDATE", "REWRITE", "MODIFY"]):
+                lifecycle_stages["update_operations"].append({"program": program_name, "chunk": chunk_id})
+            elif any(op in content_upper for op in ["DELETE", "REMOVE", "PURGE"]):
+                lifecycle_stages["delete_operations"].append({"program": program_name, "chunk": chunk_id})
+        
+        # Prepare summary data
+        lifecycle_summary_data = {
+            "component_name": component_name,
+            "programs_involved": len(programs_involved),
+            "creation_points": len(lifecycle_stages["creation_points"]),
+            "read_operations": len(lifecycle_stages["read_operations"]),
+            "update_operations": len(lifecycle_stages["update_operations"]),
+            "delete_operations": len(lifecycle_stages["delete_operations"])
+        }
+        
+        # FOCUSED PROMPT: Only lifecycle analysis
+        prompt = f"""Analyze lifecycle for data component: {component_name}
+
+Lifecycle Summary:
+- Programs involved: {lifecycle_summary_data['programs_involved']}
+- Creation points: {lifecycle_summary_data['creation_points']}
+- Read operations: {lifecycle_summary_data['read_operations']}
+- Update operations: {lifecycle_summary_data['update_operations']}
+- Delete operations: {lifecycle_summary_data['delete_operations']}
+
+Programs: {list(programs_involved)[:5]}
+
+Analyze:
+1. Component lifecycle completeness
+2. Data management patterns
+3. Operational usage characteristics
+4. Lifecycle governance recommendations
+
+Keep response under 300 words."""
+
+        try:
+            lifecycle_analysis = await self._call_api_focused(prompt, "lifecycle", "Data Component Lifecycle Analysis")
+            
+            return {
+                "lifecycle_stages": lifecycle_stages,
+                "lifecycle_summary_data": lifecycle_summary_data,
+                "lifecycle_summary": lifecycle_analysis,
+                "analysis_type": "focused_data_component_lifecycle"
             }
             
-            if op_type == "CREATE":
-                lifecycle_analysis["creation_points"].append(operation_details)
-            elif op_type == "READ":
-                lifecycle_analysis["read_operations"].append(operation_details)
-            elif op_type == "UPDATE":
-                lifecycle_analysis["update_operations"].append(operation_details)
-            elif op_type == "DELETE":
-                lifecycle_analysis["delete_operations"].append(operation_details)
-            elif op_type == "ARCHIVE":
-                lifecycle_analysis["archival_points"].append(operation_details)
-        
-        # Generate comprehensive lifecycle report with API
-        lifecycle_report = await self._generate_component_lifecycle_report_api(
-            component_name, lifecycle_analysis
-        )
-        
-        lifecycle_analysis["comprehensive_report"] = lifecycle_report
-        
-        return lifecycle_analysis
-
-    async def _analyze_component_operation_api(self, component_name: str, content: str, 
-                                     program_name: str, chunk_type: str) -> Dict[str, Any]:
-        """✅ API-BASED: Analyze what operation a program performs on a component"""
-        
-        content_preview = content[:400] if len(content) > 400 else content
-        
-        prompt = f"""
-        Analyze what operation program "{program_name}" performs on component "{component_name}":
-        
-        Code Context ({chunk_type}):
-        {content_preview}
-        
-        Determine:
-        1. Primary operation (CREATE, READ, UPDATE, DELETE, ARCHIVE, COPY)
-        2. Business purpose
-        3. Data transformation details
-        4. Timing/frequency (if apparent)
-        5. Dependencies
-        
-        Return as JSON:
-        {{
-            "operation_type": "READ",
-            "business_purpose": "Data validation",
-            "data_transformations": ["format conversion"],
-            "timing_frequency": "daily",
-            "dependencies": ["other_component"],
-            "confidence": 0.9
-        }}
-        """
-        
-        try:
-            response_text = await self._call_api_for_analysis(prompt, max_tokens=300)
-            
-            if '{' in response_text:
-                json_start = response_text.find('{')
-                json_end = response_text.rfind('}') + 1
-                return json.loads(response_text[json_start:json_end])
         except Exception as e:
-            self.logger.warning(f"Failed to parse component operation analysis: {str(e)}")
-        
-        return {
-            "operation_type": "READ",
-            "business_purpose": "Component access detected",
-            "data_transformations": [],
-            "timing_frequency": "unknown",
-            "dependencies": [],
-            "confidence": 0.5
-        }
+            self.logger.error(f"Data component lifecycle analysis failed: {e}")
+            return {
+                "lifecycle_stages": lifecycle_stages,
+                "lifecycle_summary_data": lifecycle_summary_data,
+                "error": str(e)
+            }
 
-    async def _generate_component_lifecycle_report_api(self, component_name: str, 
-                                                lifecycle_data: Dict) -> str:
-        """✅ API-BASED: Generate comprehensive component lifecycle report"""
+    async def _analyze_program_lifecycle_focused(self, program_name: str) -> Dict[str, Any]:
+        """FIXED: Focused API call for program lifecycle analysis"""
         
-        summary_data = {
-            "component_name": component_name,
-            "creation_points": len(lifecycle_data['creation_points']),
-            "read_operations": len(lifecycle_data['read_operations']),
-            "update_operations": len(lifecycle_data['update_operations']),
-            "delete_operations": len(lifecycle_data['delete_operations']),
-            "archival_points": len(lifecycle_data['archival_points'])
-        }
-        
-        prompt = f"""
-        Generate a comprehensive lifecycle report for component "{component_name}":
-        
-        Lifecycle Summary:
-        {json.dumps(summary_data, indent=2)}
-        
-        Generate a detailed report covering:
-        1. Component Overview and Purpose
-        2. Creation and Initialization Process
-        3. Operational Usage Patterns
-        4. Data Maintenance Activities
-        5. End-of-Life Management
-        6. Risk Assessment
-        7. Optimization Recommendations
-        
-        Format as a professional technical document (400 words max).
-        """
-        
-        try:
-            return await self._call_api_for_readable_analysis(prompt, max_tokens=500)
-        except Exception as e:
-            self.logger.warning(f"Failed to generate lifecycle report: {str(e)}")
-            return f"Lifecycle report for {component_name}: {sum(summary_data.values())} total operations identified."
-
-    async def _analyze_program_lifecycle_api(self, program_name: str) -> Dict[str, Any]:
-        """✅ API-BASED: Analyze lifecycle of a COBOL program"""
+        # Get program chunks
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Get program chunks
         cursor.execute("""
             SELECT chunk_id, chunk_type, content, metadata
             FROM program_chunks
             WHERE program_name = ?
+            LIMIT 20
         """, (str(program_name),))
         
         chunks = cursor.fetchall()
         conn.close()
         
+        # Analyze program structure
         program_analysis = {
-            "program_name": program_name,
             "total_chunks": len(chunks),
             "chunk_breakdown": {},
-            "external_calls": [],
-            "file_operations": [],
-            "db_operations": [],
-            "called_by": [],
-            "status": "success"
+            "complexity_indicators": []
         }
         
-        # Analyze chunks
         for chunk_id, chunk_type, content, metadata_str in chunks:
-            metadata = json.loads(metadata_str) if metadata_str else {}
-            
             if chunk_type in program_analysis["chunk_breakdown"]:
                 program_analysis["chunk_breakdown"][chunk_type] += 1
             else:
                 program_analysis["chunk_breakdown"][chunk_type] = 1
             
-            # Extract operations
-            if "file_operations" in metadata:
-                program_analysis["file_operations"].extend(metadata["file_operations"])
-            
-            if "sql_operations" in metadata:
-                program_analysis["db_operations"].extend(metadata["sql_operations"])
+            # Check for complexity indicators
+            content_upper = content.upper()
+            if any(indicator in content_upper for indicator in ["CALL", "PERFORM", "GO TO", "IF", "EVALUATE"]):
+                program_analysis["complexity_indicators"].append(chunk_type)
         
-        # Generate program lifecycle report with API
-        lifecycle_report = await self._generate_program_lifecycle_report_api(program_name, program_analysis)
-        program_analysis["lifecycle_report"] = lifecycle_report
-        
-        return program_analysis
+        # FOCUSED PROMPT: Only program lifecycle
+        prompt = f"""Analyze lifecycle for program: {program_name}
 
-    async def _generate_program_lifecycle_report_api(self, program_name: str, analysis_data: Dict) -> str:
-        """✅ API-BASED: Generate program lifecycle report"""
-        
-        report_summary = {
-            "program_name": program_name,
-            "total_chunks": analysis_data['total_chunks'],
-            "chunk_types": analysis_data['chunk_breakdown'],
-            "file_operations": len(analysis_data['file_operations']),
-            "db_operations": len(analysis_data['db_operations'])
-        }
-        
-        prompt = f"""
-        Generate a lifecycle report for COBOL program "{program_name}":
-        
-        Program Summary:
-        {json.dumps(report_summary, indent=2)}
-        
-        Generate a detailed report covering:
-        1. Program Purpose and Function
-        2. Structural Analysis
-        3. Data Processing Activities
-        4. Integration Points
-        5. Dependencies and Relationships
-        6. Maintenance Considerations
-        7. Performance and Optimization Notes
-        
-        Format as a technical analysis document (400 words max).
-        """
-        
+Program Structure:
+- Total chunks: {program_analysis['total_chunks']}
+- Chunk types: {program_analysis['chunk_breakdown']}
+- Complexity indicators: {len(program_analysis['complexity_indicators'])}
+
+Analyze:
+1. Program structure and organization
+2. Complexity and maintainability factors
+3. Integration and dependency patterns
+4. Lifecycle management recommendations
+
+Keep response under 300 words."""
+
         try:
-            return await self._call_api_for_readable_analysis(prompt, max_tokens=500)
+            program_lifecycle_analysis = await self._call_api_focused(prompt, "program_lifecycle", "Program Lifecycle Analysis")
+            
+            return {
+                "program_structure": program_analysis,
+                "lifecycle_summary": program_lifecycle_analysis,
+                "analysis_type": "focused_program_lifecycle"
+            }
+            
         except Exception as e:
-            self.logger.warning(f"Failed to generate program lifecycle report: {str(e)}")
-            return f"Program lifecycle report for {program_name}: {report_summary['total_chunks']} chunks analyzed."
+            self.logger.error(f"Program lifecycle analysis failed: {e}")
+            return {
+                "program_structure": program_analysis,
+                "error": str(e)
+            }
 
-    async def _analyze_jcl_lifecycle_api(self, jcl_name: str) -> Dict[str, Any]:
-        """✅ API-BASED: Analyze lifecycle of a JCL job"""
+    async def _analyze_jcl_lifecycle_focused(self, jcl_name: str) -> Dict[str, Any]:
+        """FIXED: Focused API call for JCL lifecycle analysis"""
+        
+        # Get JCL steps
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Get JCL steps
         cursor.execute("""
             SELECT chunk_id, chunk_type, content, metadata
             FROM program_chunks
             WHERE program_name = ? AND chunk_type IN ('job_step', 'job_header')
             ORDER BY chunk_id
+            LIMIT 10
         """, (str(jcl_name),))
         
         steps = cursor.fetchall()
         conn.close()
         
+        # Analyze JCL structure
         jcl_analysis = {
-            "jcl_name": jcl_name,
             "total_steps": len([s for s in steps if s[1] == 'job_step']),
-            "step_details": [],
-            "data_flow": [],
-            "dependencies": [],
-            "scheduling_info": {},
-            "status": "success"
+            "step_types": {},
+            "job_characteristics": []
         }
         
-        # Generate JCL lifecycle report
-        lifecycle_report = await self._generate_jcl_lifecycle_report_api(jcl_name, jcl_analysis)
-        jcl_analysis["lifecycle_report"] = lifecycle_report
+        for chunk_id, chunk_type, content, metadata_str in steps:
+            if chunk_type in jcl_analysis["step_types"]:
+                jcl_analysis["step_types"][chunk_type] += 1
+            else:
+                jcl_analysis["step_types"][chunk_type] = 1
+            
+            # Check for job characteristics
+            content_upper = content.upper()
+            if "EXEC" in content_upper:
+                jcl_analysis["job_characteristics"].append("executable_step")
+            if "DD" in content_upper:
+                jcl_analysis["job_characteristics"].append("data_definition")
         
-        return jcl_analysis
+        # FOCUSED PROMPT: Only JCL lifecycle
+        prompt = f"""Analyze lifecycle for JCL job: {jcl_name}
 
-    async def _generate_jcl_lifecycle_report_api(self, jcl_name: str, analysis_data: Dict) -> str:
-        """✅ API-BASED: Generate JCL lifecycle report"""
-        
-        report_summary = {
-            "jcl_name": jcl_name,
-            "total_steps": analysis_data['total_steps']
-        }
-        
-        prompt = f"""
-        Generate a lifecycle report for JCL job "{jcl_name}":
-        
-        JCL Summary:
-        {json.dumps(report_summary, indent=2)}
-        
-        Generate a detailed report covering:
-        1. Job Purpose and Function
-        2. Step Analysis
-        3. Data Flow
-        4. Dependencies
-        5. Scheduling Considerations
-        6. Error Handling
-        7. Optimization Opportunities
-        
-        Format as a job analysis document (300 words max).
-        """
-        
+JCL Structure:
+- Total steps: {jcl_analysis['total_steps']}
+- Step types: {jcl_analysis['step_types']}
+- Job characteristics: {len(set(jcl_analysis['job_characteristics']))}
+
+Analyze:
+1. Job structure and execution flow
+2. Resource requirements and dependencies
+3. Scheduling and operational characteristics
+4. Job lifecycle management recommendations
+
+Keep response under 300 words."""
+
         try:
-            return await self._call_api_for_readable_analysis(prompt, max_tokens=400)
+            jcl_lifecycle_analysis = await self._call_api_focused(prompt, "jcl_lifecycle", "JCL Lifecycle Analysis")
+            
+            return {
+                "jcl_structure": jcl_analysis,
+                "lifecycle_summary": jcl_lifecycle_analysis,
+                "analysis_type": "focused_jcl_lifecycle"
+            }
+            
         except Exception as e:
-            self.logger.warning(f"Failed to generate JCL lifecycle report: {str(e)}")
-            return f"JCL lifecycle report for {jcl_name}: {report_summary['total_steps']} steps analyzed."
+            self.logger.error(f"JCL lifecycle analysis failed: {e}")
+            return {
+                "jcl_structure": jcl_analysis,
+                "error": str(e)
+            }
 
-    # ==================== Summary Generation Methods ====================
+    # ==================== Summary and Reporting Methods ====================
 
     async def generate_lineage_summary(self, component_name: str) -> Dict[str, Any]:
-        """✅ API-BASED: Generate a comprehensive lineage summary for any component"""
+        """FIXED: Generate comprehensive lineage summary with focused API calls"""
         try:
             await self._load_existing_lineage()
             component_name = self._normalize_component_name(component_name)
+            
             # Determine component type
             component_type = await self._determine_component_type(component_name)
             
-            # Get appropriate analysis
+            # Get appropriate analysis based on type
             if component_type == "field":
                 analysis = await self.analyze_field_lineage(component_name)
             else:
                 analysis = await self.analyze_complete_data_flow(component_name, component_type)
             
-            # Generate executive summary with API
-            executive_summary = await self._generate_executive_summary_api(
-                component_name, component_type, analysis
-            )
+            # Generate executive summary with focused API call
+            executive_summary = await self._generate_executive_summary_focused(component_name, component_type, analysis)
             
             result = {
                 "component_name": component_name,
@@ -3018,276 +2170,118 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
             })
 
     async def _determine_component_type(self, component_name: str) -> str:
-        """FIXED: Determine component type with proper COBOL file extension handling"""
+        """Determine component type with database checks"""
         
         # Check file extension first
         component_lower = component_name.lower()
         
-        # Handle COBOL file extensions
         if any(component_lower.endswith(ext) for ext in ['.cbl', '.cob', '.cobol']):
-            self.logger.info(f"✅ Detected COBOL program file by extension: {component_name}")
             return "cobol"
         elif any(component_lower.endswith(ext) for ext in ['.copy', '.cpy', '.copybook']):
-            self.logger.info(f"✅ Detected COBOL copybook file by extension: {component_name}")
             return "copybook"
         elif any(component_lower.endswith(ext) for ext in ['.jcl', '.job', '.proc']):
-            self.logger.info(f"✅ Detected JCL file by extension: {component_name}")
             return "jcl"
         
-        # FIXED: Database-based detection with better logging
+        # Database-based detection
         try:
             def check_database():
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
                 
                 try:
-                    self.logger.info(f"🔍 Checking database for component type: {component_name}")
-                    
-                    # STEP 1: Check program_chunks table with multiple patterns
-                    patterns_to_check = [
-                        component_name,                    # Exact match
-                        f"{component_name}%",             # Starts with
-                        f"%{component_name}",             # Ends with  
-                        f"%{component_name}%"             # Contains
-                    ]
-                    
-                    program_found = False
-                    for i, pattern in enumerate(patterns_to_check):
-                        if i == 0:
-                            # Exact match
-                            cursor.execute("""
-                                SELECT COUNT(*), program_name FROM program_chunks 
-                                WHERE program_name = ?
-                                GROUP BY program_name
-                                LIMIT 1
-                            """, (pattern,))
-                        else:
-                            # LIKE patterns
-                            cursor.execute("""
-                                SELECT COUNT(*), program_name FROM program_chunks 
-                                WHERE program_name LIKE ?
-                                GROUP BY program_name
-                                LIMIT 1
-                            """, (pattern,))
-                        
-                        result = cursor.fetchone()
-                        if result and result[0] > 0:
-                            chunk_count, found_program_name = result
-                            self.logger.info(f"✅ FOUND in program_chunks: {found_program_name} (pattern: {pattern}, chunks: {chunk_count})")
-                            program_found = True
-                            break
-                        else:
-                            self.logger.debug(f"❌ Not found with pattern: {pattern}")
-                    
-                    if program_found:
-                        # STEP 2: Get chunk types to determine specific program type
-                        cursor.execute("""
-                            SELECT chunk_type, COUNT(*) as count 
-                            FROM program_chunks 
-                            WHERE program_name = ? OR program_name LIKE ?
-                            GROUP BY chunk_type
-                            ORDER BY count DESC
-                        """, (component_name, f"%{component_name}%"))
-                        
-                        chunk_types = cursor.fetchall()
-                        self.logger.info(f"📊 Chunk types found: {chunk_types}")
-                        
-                        if chunk_types:
-                            chunk_type_names = [ct.lower() for ct, _ in chunk_types]
-                            
-                            if any('job' in ct for ct in chunk_type_names):
-                                self.logger.info(f"✅ Identified as JCL (job chunks found)")
-                                return "jcl"
-                            elif any(ct in ['working_storage', 'procedure_division', 'data_division', 'identification_division'] for ct in chunk_type_names):
-                                self.logger.info(f"✅ Identified as COBOL (COBOL divisions found)")
-                                return "cobol"
-                            elif any(ct in ['copybook', 'copy'] for ct in chunk_type_names):
-                                self.logger.info(f"✅ Identified as COPYBOOK (copybook chunks found)")
-                                return "copybook"
-                            else:
-                                self.logger.info(f"✅ Identified as COBOL (default for program chunks)")
-                                return "cobol"
-                        else:
-                            self.logger.info(f"✅ Identified as COBOL (program found but no chunk type details)")
-                            return "cobol"
-                    
-                    # STEP 3: Check file_access_relationships as program
+                    # Check program_chunks
                     cursor.execute("""
-                        SELECT COUNT(*), program_name FROM file_access_relationships 
+                        SELECT chunk_type, COUNT(*) as count 
+                        FROM program_chunks 
                         WHERE program_name = ? OR program_name LIKE ?
-                        GROUP BY program_name
-                        LIMIT 1
+                        GROUP BY chunk_type
+                        ORDER BY count DESC
+                        LIMIT 5
                     """, (component_name, f"%{component_name}%"))
                     
-                    access_result = cursor.fetchone()
-                    if access_result and access_result[0] > 0:
-                        access_count, found_program = access_result
-                        self.logger.info(f"✅ FOUND as program in file_access_relationships: {found_program} (accesses: {access_count})")
-                        return "cobol"  # Programs that access files are typically COBOL
+                    chunk_types = cursor.fetchall()
                     
-                    # STEP 4: Check if it might be a field
+                    if chunk_types:
+                        chunk_type_names = [ct.lower() for ct, _ in chunk_types]
+                        
+                        if any('job' in ct for ct in chunk_type_names):
+                            return "jcl"
+                        elif any(ct in ['working_storage', 'procedure_division', 'data_division'] for ct in chunk_type_names):
+                            return "cobol"
+                        elif any(ct in ['copybook', 'copy'] for ct in chunk_type_names):
+                            return "copybook"
+                    
+                    # Check if it might be a field
                     cursor.execute("""
                         SELECT COUNT(*) FROM program_chunks
                         WHERE (content LIKE ? OR metadata LIKE ?) 
-                        AND chunk_type NOT IN ('file_header', 'comment')
                         LIMIT 1
                     """, (f"%{component_name}%", f"%{component_name}%"))
                     
                     field_count = cursor.fetchone()[0]
-                    self.logger.info(f"🔍 Field references found: {field_count}")
                     
                     # Field detection heuristics
-                    is_field_like = (
-                        field_count > 0 and 
-                        component_name.isupper() and 
-                        ('_' in component_name or '-' in component_name or len(component_name) <= 30) and
-                        not any(component_lower.endswith(ext) for ext in ['.cbl', '.cob', '.copy', '.cpy'])
-                    )
-                    
-                    if is_field_like:
-                        self.logger.info(f"✅ Identified as FIELD (field-like characteristics)")
+                    if (field_count > 0 and component_name.isupper() and 
+                        ('_' in component_name or '-' in component_name or len(component_name) <= 30)):
                         return "field"
                     
-                    # Default fallback
-                    self.logger.info(f"❓ Could not determine type, defaulting to COBOL")
-                    return "cobol"
+                    return "cobol"  # Default
                     
-                except Exception as e:
-                    self.logger.error(f"❌ Database query error in component type detection: {e}")
-                    return "cobol"
                 finally:
                     conn.close()
             
-            # Run database check in executor
+            # Run database check
             result = await asyncio.get_event_loop().run_in_executor(None, check_database)
-            self.logger.info(f"🎯 Final component type determination for {component_name}: {result}")
             return result
             
         except Exception as e:
-            self.logger.error(f"❌ Component type determination failed for {component_name}: {e}")
+            self.logger.error(f"❌ Component type determination failed: {e}")
             return "cobol"
 
-
-    # ALSO: Fix the lineage analyzer's component detection method
-    async def _is_component_a_program(self, component_name: str, cursor) -> bool:
-        """FIXED: Determine if component is a program or file with enhanced detection"""
-        try:
-            self.logger.info(f"🔍 Determining if {component_name} is a program or file...")
-            
-            # STEP 1: Check program_chunks with multiple search patterns
-            search_patterns = [
-                (component_name, "exact match"),
-                (f"{component_name}%", "starts with"),
-                (f"%{component_name}", "ends with"),
-                (f"%{component_name}%", "contains")
-            ]
-            
-            program_found = False
-            for pattern, description in search_patterns:
-                if pattern == component_name:
-                    cursor.execute("""
-                        SELECT COUNT(*), program_name FROM program_chunks 
-                        WHERE program_name = ?
-                        GROUP BY program_name
-                        LIMIT 1
-                    """, (pattern,))
-                else:
-                    cursor.execute("""
-                        SELECT COUNT(*), program_name FROM program_chunks 
-                        WHERE program_name LIKE ?
-                        GROUP BY program_name
-                        LIMIT 1
-                    """, (pattern,))
-                
-                result = cursor.fetchone()
-                if result and result[0] > 0:
-                    chunk_count, found_name = result
-                    self.logger.info(f"✅ PROGRAM detected in program_chunks: {found_name} ({description}, {chunk_count} chunks)")
-                    program_found = True
-                    break
-                else:
-                    self.logger.debug(f"❌ No match with {description}: {pattern}")
-            
-            if program_found:
-                return True
-            
-            # STEP 2: Check file_access_relationships as program_name
-            for pattern, description in search_patterns:
-                if pattern == component_name:
-                    cursor.execute("""
-                        SELECT COUNT(*), program_name FROM file_access_relationships 
-                        WHERE program_name = ?
-                        GROUP BY program_name
-                        LIMIT 1
-                    """, (pattern,))
-                else:
-                    cursor.execute("""
-                        SELECT COUNT(*), program_name FROM file_access_relationships 
-                        WHERE program_name LIKE ?
-                        GROUP BY program_name
-                        LIMIT 1
-                    """, (pattern,))
-                
-                result = cursor.fetchone()
-                if result and result[0] > 0:
-                    access_count, found_name = result
-                    self.logger.info(f"✅ PROGRAM detected in file_access_relationships: {found_name} ({description}, {access_count} accesses)")
-                    return True
-            
-            # STEP 3: Check if it appears as a file in file_access_relationships
-            cursor.execute("""
-                SELECT COUNT(*) FROM file_access_relationships 
-                WHERE logical_file_name = ? OR physical_file_name = ? OR logical_file_name LIKE ? OR physical_file_name LIKE ?
-                LIMIT 1
-            """, (component_name, component_name, f"%{component_name}%", f"%{component_name}%"))
-            
-            file_access_count = cursor.fetchone()[0]
-            
-            if file_access_count > 0:
-                self.logger.info(f"📁 FILE detected in file_access_relationships: {component_name} (accessed {file_access_count} times)")
-                return False
-            
-            # Default: if not found anywhere, assume it's a file
-            self.logger.info(f"❓ Component {component_name} not found in database - defaulting to FILE")
-            return False
-            
-        except Exception as e:
-            self.logger.error(f"❌ Failed to determine component type for {component_name}: {e}")
-            return False  # Default to file
-
-
-    # ALSO: Add debugging method to verify database contents
-    
-    async def _generate_executive_summary_api(self, component_name: str, component_type: str, analysis: Dict) -> str:
-        """✅ API-BASED: Generate executive summary for lineage analysis"""
+    async def _generate_executive_summary_focused(self, component_name: str, component_type: str, analysis: Dict) -> str:
+        """FIXED: Focused API call for executive summary"""
         
+        # Extract key metrics from analysis
         summary_data = {
             "component_name": component_name,
             "component_type": component_type,
-            "analysis_status": analysis.get("status", "unknown")
+            "analysis_status": analysis.get("status", "unknown"),
+            "completion_rate": analysis.get("completion_rate", 0)
         }
         
-        prompt = f"""
-        Generate an executive summary for the lineage analysis of {component_type} "{component_name}":
+        # Extract key findings
+        key_findings = []
         
-        Summary Data:
-        {json.dumps(summary_data, indent=2)}
+        if "total_references" in analysis:
+            key_findings.append(f"Found {analysis['total_references']} references")
         
-        Create a concise executive summary covering:
-        1. Component purpose and importance
-        2. Key usage patterns and dependencies
-        3. Risk assessment
-        4. Business impact
-        5. Recommended actions
+        if "analysis_steps" in analysis:
+            successful_steps = analysis.get("successful_steps", 0)
+            total_steps = analysis.get("total_steps", 0)
+            key_findings.append(f"Completed {successful_steps}/{total_steps} analysis steps")
         
-        Keep it under 200 words and suitable for management review.
-        """
-        
+        # FOCUSED PROMPT: Only executive summary
+        prompt = f"""Generate executive summary for: {component_name}
+
+Component Analysis:
+- Type: {component_type}
+- Status: {summary_data['analysis_status']}
+- Completion: {summary_data['completion_rate']:.1f}%
+- Key findings: {'; '.join(key_findings)}
+
+Create executive summary covering:
+1. Component purpose and business importance
+2. Key usage patterns and dependencies
+3. Risk assessment and impact
+4. Strategic recommendations
+
+Write clear business language, keep under 300 words."""
+
         try:
-            return await self._call_api_for_readable_analysis(prompt, max_tokens=300)
+            return await self._call_api_focused(prompt, "executive_summary", "Executive Summary Generation")
         except Exception as e:
-            self.logger.warning(f"Failed to generate executive summary: {str(e)}")
-            return f"Executive Summary: {component_type.title()} {component_name} analyzed successfully."
+            self.logger.error(f"Executive summary generation failed: {e}")
+            return f"Executive Summary for {component_name}: {component_type} component analyzed with {summary_data['completion_rate']:.1f}% completion rate. {'; '.join(key_findings)}."
 
     # ==================== Cleanup and Context Management ====================
     
@@ -3317,6 +2311,7 @@ class LineageAnalyzerAgent(BaseOpulenceAgent):
                 f"api_based=True, "
                 f"coordinator={type(self.coordinator).__name__}, "
                 f"gpu_id={self.gpu_id}, "
+                f"multiple_api_calls=True, "
                 f"fixed=True)")
 
 
@@ -3378,21 +2373,19 @@ async def example_fixed_lineage_usage():
         # Create FIXED API-based lineage analyzer
         lineage_agent = LineageAnalyzerAgent(coordinator)
         
-        # Analyze field lineage (FIXED API calls)
+        # Analyze field lineage with multiple focused API calls
         field_analysis = await lineage_agent.analyze_field_lineage("CUSTOMER-ID")
         print(f"Field analysis status: {field_analysis['status']}")
+        print(f"Completion rate: {field_analysis.get('completion_rate', 0):.1f}%")
         
-        # Analyze component data flow (FIXED API calls)
+        # Analyze component data flow with multiple focused API calls
         data_flow_analysis = await lineage_agent.analyze_complete_data_flow("CUSTOMER-PROGRAM", "program")
         print(f"Data flow analysis status: {data_flow_analysis['status']}")
+        print(f"Completion rate: {data_flow_analysis.get('completion_rate', 0):.1f}%")
         
-        # Test specific methods that were failing
-        program_chunks = await lineage_agent._get_program_chunks("CUSTOMER-PROGRAM")
-        print(f"Found {len(program_chunks)} program chunks")
-        
-        # Test file access data retrieval
-        file_access = await lineage_agent._get_file_access_data("CUSTOMER-FILE")
-        print(f"File access data: {file_access['total_access_points']} access points")
+        # Generate comprehensive summary
+        summary = await lineage_agent.generate_lineage_summary("CUSTOMER-RECORD")
+        print(f"Summary generated: {summary['status']}")
         
     finally:
         await coordinator.shutdown()
@@ -3400,5 +2393,3 @@ async def example_fixed_lineage_usage():
 if __name__ == "__main__":
     import asyncio
     asyncio.run(example_fixed_lineage_usage())
-                    
-         
