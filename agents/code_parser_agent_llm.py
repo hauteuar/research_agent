@@ -42,7 +42,7 @@ class CompleteLLMCodeParser:
     Handles all mainframe patterns: COBOL, CICS, SQL, MQ, JCL, etc.
     """
     
-    def __init__(self, coordinator, db_path: str = None):
+    def __init__(self, coordinator, db_path: str = None, llm_engine = None, gpu_id: int = 0):
         self.coordinator = coordinator
         self.db_path = db_path or "opulence_data.db"
         self.logger = coordinator.logger if hasattr(coordinator, 'logger') else self._setup_logger()
@@ -416,34 +416,190 @@ Part 2: Prompt Creation and Intelligent Code Chunking
         else:
             return self._create_multi_pattern_prompt(code_section, program_name)
 
+    def _create_sql_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Much shorter SQL analysis prompt to prevent echo-back"""
+        return f"""Find SQL operations in this COBOL code. Return only JSON:
+
+{section.content}
+
+Required JSON format:
+{{
+  "sql_operations": [
+    {{"type": "SQL_SELECT", "target": "table_name", "line_number": 123, "confidence": 0.9}}
+  ],
+  "field_definitions": [
+    {{"type": "FIELD_DEFINITION", "target": "field_name", "line_number": 67, "picture_clause": "X(10)", "confidence": 0.9}}
+  ]
+}}
+
+Return only JSON, no explanations."""
+
     def _create_cics_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
-        """Comprehensive CICS analysis prompt for 4096 context"""
-        return f"""Analyze this COBOL code section for CICS operations and related patterns.
+        """Much shorter CICS analysis prompt to prevent echo-back"""
+        return f"""Find CICS operations in this COBOL code. Return only JSON:
+
+{section.content}
+
+Required JSON format:
+{{
+  "cics_operations": [
+    {{"type": "CICS_READ", "target": "dataset_name", "line_number": 123, "confidence": 0.9}}
+  ],
+  "field_definitions": [
+    {{"type": "FIELD_DEFINITION", "target": "field_name", "line_number": 67, "picture_clause": "X(10)", "confidence": 0.9}}
+  ]
+}}
+
+Return only JSON, no explanations."""
+
+    def _create_copy_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Much shorter COPY analysis prompt to prevent echo-back"""
+        return f"""Find COPY statements in this COBOL code. Return only JSON:
+
+{section.content}
+
+Required JSON format:
+{{
+  "copybook_includes": [
+    {{"type": "COPY", "target": "copybook_name", "line_number": 123, "confidence": 0.9}}
+  ]
+}}
+
+Return only JSON, no explanations."""
+
+    def _create_call_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Much shorter CALL analysis prompt to prevent echo-back"""
+        return f"""Find CALL statements in this COBOL code. Return only JSON:
+
+{section.content}
+
+Required JSON format:
+{{
+  "program_calls": [
+    {{"type": "CALL", "target": "program_name", "line_number": 123, "confidence": 0.9}}
+  ]
+}}
+
+Return only JSON, no explanations."""
+
+    def _create_field_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Much shorter field analysis prompt to prevent echo-back"""
+        return f"""Find field definitions in this COBOL code. Return only JSON:
+
+{section.content}
+
+Required JSON format:
+{{
+  "field_definitions": [
+    {{"type": "FIELD_DEFINITION", "target": "field_name", "line_number": 67, "picture_clause": "X(10)", "level_number": 5, "confidence": 0.9}}
+  ]
+}}
+
+Return only JSON, no explanations."""
+
+    def _create_file_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Much shorter file operations prompt to prevent echo-back"""
+        return f"""Find file operations in this COBOL code. Return only JSON:
+
+{section.content}
+
+Required JSON format:
+{{
+  "file_operations": [
+    {{"type": "READ", "target": "file_name", "line_number": 123, "confidence": 0.9}}
+  ]
+}}
+
+Return only JSON, no explanations."""
+
+    def _create_mq_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Much shorter MQ operations prompt to prevent echo-back"""
+        return f"""Find MQ operations in this COBOL code. Return only JSON:
+
+{section.content}
+
+Required JSON format:
+{{
+  "mq_operations": [
+    {{"type": "MQOPEN", "target": "queue_name", "line_number": 123, "confidence": 0.9}}
+  ]
+}}
+
+Return only JSON, no explanations."""
+
+    def _create_multi_pattern_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Much shorter multi-pattern analysis prompt to prevent echo-back"""
+        return f"""Find ALL patterns in this COBOL code. Return only JSON:
+
+{section.content}
+
+Required JSON format:
+{{
+  "cics_operations": [],
+  "copybook_includes": [],
+  "program_calls": [],
+  "sql_operations": [],
+  "field_definitions": [],
+  "file_operations": []
+}}
+
+Fill arrays with findings. Return only JSON, no explanations."""
+
+    def _create_sql_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Comprehensive SQL analysis prompt with strict JSON requirements"""
+        return f"""Analyze this COBOL code for SQL operations. Return ONLY valid JSON, no explanations.
 
 PROGRAM: {program_name}
-SECTION: {section.name} (Lines {section.start_line}-{section.end_line})
+SECTION: {section.name}
 
 CODE:
 {section.content}
 
-Extract ALL CICS operations and any related patterns. Return JSON:
+CRITICAL: Return ONLY valid JSON in this EXACT format. No additional text:
 
 {{
-  "cics_operations": [
+  "sql_operations": [
     {{
-      "type": "CICS_READ|CICS_WRITE|CICS_LINK|CICS_XCTL|CICS_START|CICS_RETURN|CICS_SEND|CICS_RECEIVE",
-      "target": "dataset_file_or_program_name",
-      "line_number": 123,
-      "statement": "EXEC CICS READ DATASET('TMS92ASO')",
-      "operation_details": "INTO(record) RIDFLD(key) RESP(ws-resp)",
-      "confidence": 0.95
+      "type": "SQL_SELECT",
+      "target": "CUSTOMER",
+      "line_number": 200,
+      "statement": "EXEC SQL SELECT...",
+      "confidence": 0.96
     }}
   ],
+  "field_definitions": [
+    {{
+      "type": "FIELD_DEFINITION",
+      "target": "WS-ID",
+      "line_number": 67,
+      "statement": "05 WS-ID PIC X(10)",
+      "picture_clause": "X(10)",
+      "level_number": 5,
+      "confidence": 0.98
+    }}
+  ]
+}}
+
+Use empty arrays [] for categories with no findings."""
+
+    def _create_copy_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Comprehensive COPY analysis prompt with strict JSON requirements"""
+        return f"""Analyze this COBOL code for COPY statements. Return ONLY valid JSON, no explanations.
+
+PROGRAM: {program_name}
+SECTION: {section.name}
+
+CODE:
+{section.content}
+
+CRITICAL: Return ONLY valid JSON in this EXACT format. No additional text:
+
+{{
   "copybook_includes": [
     {{
       "type": "COPY",
-      "target": "copybook_name", 
-      "line_number": 45,
+      "target": "TMS06ASU",
+      "line_number": 123,
       "statement": "COPY TMS06ASU",
       "location": "WORKING-STORAGE",
       "confidence": 0.99
@@ -452,17 +608,185 @@ Extract ALL CICS operations and any related patterns. Return JSON:
   "field_definitions": [
     {{
       "type": "FIELD_DEFINITION",
-      "target": "field_name",
+      "target": "WS-NAME",
       "line_number": 67,
-      "statement": "05 WS-RESP PIC S9(8) COMP",
-      "picture_clause": "S9(8)",
+      "statement": "05 WS-NAME PIC X(30)",
+      "picture_clause": "X(30)",
       "level_number": 5,
       "confidence": 0.98
     }}
   ]
 }}
 
-Focus on CICS operations but include any COPY statements or field definitions in the same section."""
+Use empty arrays [] for categories with no findings."""
+
+    def _create_call_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Comprehensive CALL analysis prompt with strict JSON requirements"""
+        return f"""Analyze this COBOL code for program calls. Return ONLY valid JSON, no explanations.
+
+PROGRAM: {program_name}
+SECTION: {section.name}
+
+CODE:
+{section.content}
+
+CRITICAL: Return ONLY valid JSON in this EXACT format. No additional text:
+
+{{
+  "program_calls": [
+    {{
+      "type": "CALL",
+      "target": "SUBPROG",
+      "line_number": 156,
+      "statement": "CALL 'SUBPROG' USING WS-PARMS",
+      "confidence": 0.97
+    }}
+  ],
+  "field_definitions": [
+    {{
+      "type": "FIELD_DEFINITION",
+      "target": "WS-PARMS",
+      "line_number": 67,
+      "statement": "05 WS-PARMS PIC X(100)",
+      "picture_clause": "X(100)",
+      "level_number": 5,
+      "confidence": 0.98
+    }}
+  ]
+}}
+
+Use empty arrays [] for categories with no findings."""
+
+    def _create_field_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Comprehensive field analysis prompt with strict JSON requirements"""
+        return f"""Analyze this COBOL code for field definitions. Return ONLY valid JSON, no explanations.
+
+PROGRAM: {program_name}
+SECTION: {section.name}
+
+CODE:
+{section.content}
+
+CRITICAL: Return ONLY valid JSON in this EXACT format. No additional text:
+
+{{
+  "field_definitions": [
+    {{
+      "type": "FIELD_DEFINITION",
+      "target": "WS-CUSTOMER-NAME",
+      "line_number": 67,
+      "statement": "05 WS-CUSTOMER-NAME PIC X(30) VALUE SPACES",
+      "picture_clause": "X(30)",
+      "value_clause": "SPACES",
+      "level_number": 5,
+      "confidence": 0.98
+    }}
+  ]
+}}
+
+Use empty arrays [] if no field definitions found."""
+
+    def _create_file_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Comprehensive file operations prompt with strict JSON requirements"""
+        return f"""Analyze this COBOL code for file operations. Return ONLY valid JSON, no explanations.
+
+PROGRAM: {program_name}
+SECTION: {section.name}
+
+CODE:
+{section.content}
+
+CRITICAL: Return ONLY valid JSON in this EXACT format. No additional text:
+
+{{
+  "file_operations": [
+    {{
+      "type": "READ",
+      "target": "CUSTOMER-FILE",
+      "line_number": 123,
+      "statement": "READ CUSTOMER-FILE INTO WS-CUSTOMER-REC",
+      "confidence": 0.95
+    }}
+  ],
+  "field_definitions": [
+    {{
+      "type": "FIELD_DEFINITION",
+      "target": "WS-CUSTOMER-REC",
+      "line_number": 67,
+      "statement": "01 WS-CUSTOMER-REC PIC X(100)",
+      "picture_clause": "X(100)",
+      "level_number": 1,
+      "confidence": 0.98
+    }}
+  ]
+}}
+
+Use empty arrays [] for categories with no findings."""
+
+    def _create_mq_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Comprehensive MQ operations prompt with strict JSON requirements"""
+        return f"""Analyze this COBOL code for MQ operations. Return ONLY valid JSON, no explanations.
+
+PROGRAM: {program_name}
+SECTION: {section.name}
+
+CODE:
+{section.content}
+
+CRITICAL: Return ONLY valid JSON in this EXACT format. No additional text:
+
+{{
+  "mq_operations": [
+    {{
+      "type": "MQOPEN",
+      "target": "QUEUE1",
+      "line_number": 300,
+      "statement": "CALL 'MQOPEN' USING HCONN, OBJDESC",
+      "confidence": 0.94
+    }}
+  ],
+  "field_definitions": [
+    {{
+      "type": "FIELD_DEFINITION",
+      "target": "HCONN",
+      "line_number": 67,
+      "statement": "05 HCONN PIC S9(9) COMP",
+      "picture_clause": "S9(9)",
+      "level_number": 5,
+      "confidence": 0.98
+    }}
+  ]
+}}
+
+Use empty arrays [] for categories with no findings."""
+
+    def _create_multi_pattern_prompt(self, section: CodeSection, program_name: str) -> str:
+        """Multi-pattern analysis with strict JSON requirements"""
+        return f"""Analyze this COBOL code for ALL patterns. Return ONLY valid JSON, no explanations.
+
+PROGRAM: {program_name}
+SECTION: {section.name}
+
+CODE:
+{section.content}
+
+CRITICAL: Return ONLY valid JSON in this EXACT format. No additional text:
+
+{{
+  "file_operations": [],
+  "cics_operations": [],
+  "copybook_includes": [],
+  "program_calls": [],
+  "sql_operations": [],
+  "field_definitions": []
+}}
+
+Fill arrays only with actual findings. Example format for findings:
+- "type": "CICS_READ", "target": "TMS92ASO", "line_number": 123, "confidence": 0.95
+- "type": "COPY", "target": "TMS06ASU", "line_number": 45, "confidence": 0.99
+- "type": "FIELD_DEFINITION", "target": "WS-NAME", "picture_clause": "X(30)", "level_number": 5
+
+Use empty arrays [] for categories with no findings."""
 
     def _create_sql_comprehensive_prompt(self, section: CodeSection, program_name: str) -> str:
         """Comprehensive SQL analysis prompt for 4096 context"""
@@ -1564,32 +1888,35 @@ Part 3: Main Processing Engine and LLM Analysis
 
     def _parse_focused_response(self, response: Dict[str, Any], 
                                section: CodeSection) -> Dict[str, Any]:
-        """Parse focused LLM response - aggressive cleaning"""
+        """Parse focused LLM response with robust JSON cleaning"""
         try:
             text_content = self._extract_response_text(response)
             if not text_content:
                 self.logger.warning(f"Empty response for {section.name}, using fallback")
                 return self._fallback_pattern_extraction("", section)
             
-            self.logger.debug(f"Raw response for {section.name}: {text_content[:100]}...")
+            self.logger.debug(f"Raw response for {section.name}: {text_content[:200]}...")
             
-            # AGGRESSIVE CLEANING - remove everything before first {
+            # STEP 1: Aggressive cleaning - remove everything before first {
             first_brace = text_content.find('{')
             if first_brace == -1:
                 self.logger.warning(f"No JSON found in response for {section.name}, using fallback")
                 return self._fallback_pattern_extraction(text_content, section)
             
-            # Extract from first { to last }
+            # STEP 2: Extract from first { to last }
             last_brace = text_content.rfind('}') + 1
             if last_brace <= first_brace:
                 self.logger.warning(f"Malformed JSON brackets for {section.name}, using fallback")
                 return self._fallback_pattern_extraction(text_content, section)
             
             json_str = text_content[first_brace:last_brace].strip()
-            self.logger.debug(f"Extracted JSON for {section.name}: {json_str[:100]}...")
+            self.logger.debug(f"Extracted JSON for {section.name}: {json_str[:200]}...")
+            
+            # STEP 3: Comprehensive JSON cleaning
+            cleaned_json = self._comprehensive_json_cleaning(json_str)
             
             try:
-                analysis = json.loads(json_str)
+                analysis = json.loads(cleaned_json)
                 self.logger.info(f"✅ Successfully parsed JSON for {section.name}")
                 
                 # Normalize the response
@@ -1597,20 +1924,20 @@ Part 3: Main Processing Engine and LLM Analysis
                 return normalized
                 
             except json.JSONDecodeError as e:
-                self.logger.warning(f"JSON decode failed for {section.name}: {e}")
-                self.logger.debug(f"Failed JSON: {json_str}")
+                self.logger.warning(f"JSON decode failed for {section.name} at column {e.colno}: {str(e)}")
+                self.logger.debug(f"Failed JSON: {cleaned_json[:500]}...")
                 
-                # Try basic JSON repair
-                repaired = self._basic_json_repair(json_str)
-                if repaired:
+                # STEP 4: Try multiple repair strategies
+                repaired_json = self._multi_strategy_json_repair(cleaned_json, section)
+                if repaired_json:
                     try:
-                        analysis = json.loads(repaired)
+                        analysis = json.loads(repaired_json)
                         self.logger.info(f"✅ Repaired and parsed JSON for {section.name}")
                         return self._normalize_focused_response(analysis, section)
-                    except:
-                        pass
+                    except json.JSONDecodeError:
+                        self.logger.warning(f"Even repaired JSON failed for {section.name}")
                 
-                # Final fallback to pattern extraction
+                # STEP 5: Final fallback to pattern extraction
                 self.logger.warning(f"Using pattern fallback for {section.name}")
                 return self._fallback_pattern_extraction("", section)
             
@@ -1618,27 +1945,205 @@ Part 3: Main Processing Engine and LLM Analysis
             self.logger.error(f"Response parsing error for {section.name}: {e}")
             return self._fallback_pattern_extraction("", section)
 
-    def _basic_json_repair(self, json_str: str) -> Optional[str]:
-        """Basic JSON repair attempts"""
+    def _comprehensive_json_cleaning(self, json_str: str) -> str:
+        """Comprehensive JSON cleaning to fix common LLM JSON issues"""
+        
+        # Remove any text before the first { and after the last }
+        json_str = json_str.strip()
+        
+        # Remove common LLM prefixes/suffixes
+        prefixes_to_remove = [
+            "Here is the JSON:",
+            "Here's the JSON:",
+            "The JSON is:",
+            "JSON:",
+            "```json",
+            "```",
+            "Response:",
+            "Analysis:",
+        ]
+        
+        for prefix in prefixes_to_remove:
+            if json_str.startswith(prefix):
+                json_str = json_str[len(prefix):].strip()
+        
+        # Remove common suffixes
+        suffixes_to_remove = [
+            "```",
+            "End of JSON",
+            "That's the analysis",
+            "This completes",
+        ]
+        
+        for suffix in suffixes_to_remove:
+            if suffix in json_str:
+                json_str = json_str.split(suffix)[0].strip()
+        
+        # Clean up common JSON formatting issues
+        
+        # 1. Fix trailing commas before } or ]
+        json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+        
+        # 2. Fix missing commas between array elements
+        json_str = re.sub(r'}\s*{', r'},{', json_str)
+        
+        # 3. Fix missing commas between object properties
+        json_str = re.sub(r'"\s*"([^"]*)":', r'","\1":', json_str)
+        
+        # 4. Fix unquoted keys
+        json_str = re.sub(r'(\w+)(\s*):', r'"\1"\2:', json_str)
+        
+        # 5. Fix single quotes to double quotes
+        json_str = json_str.replace("'", '"')
+        
+        # 6. Fix escaped quotes issues
+        json_str = json_str.replace('\\"', '"')
+        
+        # 7. Remove any trailing text after the final }
+        last_brace = json_str.rfind('}')
+        if last_brace != -1:
+            json_str = json_str[:last_brace + 1]
+        
+        # 8. Fix common field name issues
+        json_str = re.sub(r'"type"(\s*)([^,}\]]+)', r'"type"\1"\2"', json_str)
+        json_str = re.sub(r'"target"(\s*)([^,}\]]+)', r'"target"\1"\2"', json_str)
+        
+        return json_str
+
+    def _multi_strategy_json_repair(self, json_str: str, section: CodeSection) -> Optional[str]:
+        """Try multiple strategies to repair malformed JSON"""
+        
+        strategies = [
+            self._repair_strategy_1_brackets,
+            self._repair_strategy_2_quotes,
+            self._repair_strategy_3_minimal,
+            self._repair_strategy_4_reconstruct,
+        ]
+        
+        for i, strategy in enumerate(strategies):
+            try:
+                repaired = strategy(json_str)
+                if repaired:
+                    # Test if it's valid JSON
+                    json.loads(repaired)
+                    self.logger.info(f"✅ JSON repair strategy {i+1} succeeded for {section.name}")
+                    return repaired
+            except (json.JSONDecodeError, Exception) as e:
+                self.logger.debug(f"Repair strategy {i+1} failed for {section.name}: {e}")
+                continue
+        
+        return None
+
+    def _repair_strategy_1_brackets(self, json_str: str) -> str:
+        """Strategy 1: Fix bracket matching issues"""
+        
+        # Count brackets
+        open_braces = json_str.count('{')
+        close_braces = json_str.count('}')
+        open_brackets = json_str.count('[')
+        close_brackets = json_str.count(']')
+        
+        # Add missing closing brackets
+        if open_braces > close_braces:
+            json_str += '}' * (open_braces - close_braces)
+        elif close_braces > open_braces:
+            json_str = '{' * (close_braces - open_braces) + json_str
+        
+        if open_brackets > close_brackets:
+            json_str += ']' * (open_brackets - close_brackets)
+        elif close_brackets > open_brackets:
+            json_str = '[' * (close_brackets - open_brackets) + json_str
+        
+        return json_str
+
+    def _repair_strategy_2_quotes(self, json_str: str) -> str:
+        """Strategy 2: Fix quote matching issues"""
+        
+        # Fix unmatched quotes
+        quote_count = json_str.count('"')
+        if quote_count % 2 != 0:
+            json_str += '"'
+        
+        # Fix common quote escaping issues
+        json_str = re.sub(r'([^\\])"([^",:}\]]*)"([^",:}\]]*)"', r'\1"\2\3"', json_str)
+        
+        return json_str
+
+    def _repair_strategy_3_minimal(self, json_str: str) -> str:
+        """Strategy 3: Create minimal valid JSON structure"""
+        
+        # If all else fails, create a minimal structure
+        if not json_str.strip().startswith('{'):
+            json_str = '{' + json_str
+        
+        if not json_str.strip().endswith('}'):
+            json_str = json_str + '}'
+        
+        # Ensure it has at least empty arrays for required fields
+        minimal_structure = {
+            "file_operations": [],
+            "cics_operations": [],
+            "copybook_includes": [],
+            "program_calls": [],
+            "sql_operations": [],
+            "field_definitions": []
+        }
+        
         try:
-            # Remove trailing commas
-            repaired = re.sub(r',(\s*[}\]])', r'\1', json_str)
-            
-            # Add quotes to unquoted keys
-            repaired = re.sub(r'(\w+):', r'"\1":', repaired)
-            
-            # Fix single quotes
-            repaired = repaired.replace("'", '"')
-            
-            # Remove any text after the closing brace
-            last_brace = repaired.rfind('}')
-            if last_brace != -1:
-                repaired = repaired[:last_brace + 1]
-            
-            return repaired
-            
-        except Exception:
-            return None
+            # Try to merge with minimal structure
+            parsed = json.loads(json_str)
+            for key in minimal_structure:
+                if key not in parsed:
+                    parsed[key] = []
+            return json.dumps(parsed)
+        except:
+            return json.dumps(minimal_structure)
+
+    def _repair_strategy_4_reconstruct(self, json_str: str) -> str:
+        """Strategy 4: Reconstruct JSON from partial data"""
+        
+        # Extract any recognizable patterns and reconstruct
+        result = {
+            "file_operations": [],
+            "cics_operations": [],
+            "copybook_includes": [],
+            "program_calls": [],
+            "sql_operations": [],
+            "field_definitions": []
+        }
+        
+        # Look for CICS patterns
+        cics_matches = re.findall(r'"type":\s*"CICS_[^"]*"[^}]*"target":\s*"([^"]*)"', json_str)
+        for match in cics_matches:
+            result["cics_operations"].append({
+                "type": "CICS_READ",
+                "target": match,
+                "line_number": 1,
+                "confidence": 0.7
+            })
+        
+        # Look for COPY patterns
+        copy_matches = re.findall(r'"type":\s*"COPY"[^}]*"target":\s*"([^"]*)"', json_str)
+        for match in copy_matches:
+            result["copybook_includes"].append({
+                "type": "COPY",
+                "target": match,
+                "line_number": 1,
+                "confidence": 0.7
+            })
+        
+        # Look for field patterns
+        field_matches = re.findall(r'"target":\s*"([^"]*)"[^}]*"picture_clause":\s*"([^"]*)"', json_str)
+        for field_name, pic_clause in field_matches:
+            result["field_definitions"].append({
+                "type": "FIELD_DEFINITION",
+                "target": field_name,
+                "line_number": 1,
+                "picture_clause": pic_clause,
+                "confidence": 0.7
+            })
+        
+        return json.dumps(result)
 
     def _normalize_focused_response(self, analysis: Dict[str, Any], 
                                    section: CodeSection) -> Dict[str, Any]:
@@ -1898,30 +2403,69 @@ Part 3: Main Processing Engine and LLM Analysis
         return self._fallback_pattern_extraction(text, section)
 
     def _extract_response_text(self, response: Dict[str, Any]) -> str:
-        """Extract text from LLM response with better handling"""
+        """Extract text from LLM response and detect prompt echo-back"""
         # Handle different response formats from your model server
+        text_content = ""
+        
         if isinstance(response, dict):
             # Try common response keys
             for key in ['text', 'response', 'content', 'generated_text', 'output']:
                 if key in response and response[key]:
-                    return str(response[key]).strip()
+                    text_content = str(response[key]).strip()
+                    break
             
             # Handle nested response structures
-            if 'choices' in response and response['choices']:
+            if not text_content and 'choices' in response and response['choices']:
                 choice = response['choices'][0]
                 if isinstance(choice, dict):
                     for key in ['text', 'message', 'content']:
                         if key in choice and choice[key]:
                             if isinstance(choice[key], dict) and 'content' in choice[key]:
-                                return str(choice[key]['content']).strip()
-                            return str(choice[key]).strip()
+                                text_content = str(choice[key]['content']).strip()
+                            else:
+                                text_content = str(choice[key]).strip()
+                            break
             
             # If response is a simple dict with direct content
-            if len(response) == 1:
-                return str(list(response.values())[0]).strip()
+            if not text_content and len(response) == 1:
+                text_content = str(list(response.values())[0]).strip()
         
         # Fallback to string conversion
-        return str(response).strip() if response else ""
+        if not text_content:
+            text_content = str(response).strip() if response else ""
+        
+        # CRITICAL: Detect if LLM is echoing back our prompt
+        prompt_indicators = [
+            "Find SQL operations in this COBOL code",
+            "Find CICS operations in this COBOL code", 
+            "Find COPY statements in this COBOL code",
+            "Find CALL statements in this COBOL code",
+            "Find field definitions in this COBOL code",
+            "Find file operations in this COBOL code",
+            "Find MQ operations in this COBOL code",
+            "Find ALL patterns in this COBOL code",
+            "Required JSON format:",
+            "Return only JSON, no explanations",
+            "Extract ALL SQL operations and any related patterns"
+        ]
+        
+        is_prompt_echo = any(indicator in text_content for indicator in prompt_indicators)
+        
+        if is_prompt_echo:
+            self.logger.warning(f"🚨 DETECTED PROMPT ECHO-BACK! LLM returned prompt instead of analysis")
+            self.logger.debug(f"Echo response preview: {text_content[:200]}...")
+            
+            # Try to extract any JSON that might be after the prompt echo
+            json_start = text_content.find('{')
+            if json_start > 200:  # If JSON is far into the response, might be actual response after echo
+                potential_json = text_content[json_start:]
+                self.logger.info(f"🔍 Attempting to extract JSON from echo response...")
+                return potential_json
+            else:
+                # This is mostly just echo, return empty to trigger fallback
+                return ""
+        
+        return text_content
 
     def _extract_response_text(self, response: Dict[str, Any]) -> str:
         """Extract text from LLM response"""
@@ -1973,6 +2517,7 @@ Part 3: Main Processing Engine and LLM Analysis
             
         except Exception as e:
             self.logger.warning(f"Failed to cache analysis: {e}")
+
     """
 COMPLETE LLM CodeParser Agent with Full Database Storage
 Part 4: Complete Database Storage Engine - All Relationship Types
