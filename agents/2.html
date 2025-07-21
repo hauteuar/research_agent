@@ -1406,30 +1406,8 @@
                 for (const cobolFile of cobolFiles) {
                     this.updateLoadingStatus(`Analyzing dependencies for ${cobolFile.name}...`);
                     
-                    const dependencies = {
-                        copybooks: [],
-                        calledPrograms: [],
-                        db2Tables: [],
-                        jclJobs: [],
-                        missing: []
-                    };
-
-                    // Use local pattern matching first for speed
-                    dependencies.copybooks = this.extractCopybooks(cobolFile.content);
-                    dependencies.calledPrograms = this.extractCalledPrograms(cobolFile.content);
-                    dependencies.db2Tables = this.extractDB2Tables(cobolFile.content);
-                    
-                    // Use vLLM for more sophisticated analysis if file is complex
-                    if (cobolFile.content.length > 5000) {
-                        try {
-                            await this.enhanceDependenciesWithAI(cobolFile, dependencies);
-                        } catch (error) {
-                            console.warn(`AI dependency enhancement failed for ${cobolFile.name}:`, error);
-                        }
-                    }
-                    
-                    // Check which dependencies are missing
-                    dependencies.missing = this.checkMissingDependencies(dependencies);
+                    // FIXED: Use vLLM for ALL dependency analysis
+                    const dependencies = await this.getAIDependencies(cobolFile);
                     
                     this.dependencies[cobolFile.name] = dependencies;
                     
@@ -1439,6 +1417,91 @@
                     }
                 }
             }
+
+            async getAIDependencies(cobolFile) {
+                const prompt = `
+            COBOL DEPENDENCY ANALYSIS
+
+            Analyze this COBOL program and identify ALL dependencies:
+
+            File: ${cobolFile.name}
+            Content:
+            ${cobolFile.content}
+
+            ANALYSIS REQUIRED:
+            1. COPYBOOKS (COPY statements, includes)
+            2. CALLED PROGRAMS (CALL statements, subroutines)  
+            3. DB2 TABLES (EXEC SQL statements, table references)
+            4. FILE DEPENDENCIES (SELECT statements, DD names)
+
+            If NO dependencies are found in any category, explicitly state "NONE FOUND".
+
+            Format response EXACTLY as:
+            COPYBOOKS: name1, name2 (or NONE FOUND)
+            PROGRAMS: prog1, prog2 (or NONE FOUND)
+            TABLES: table1, table2 (or NONE FOUND)
+            FILES: file1, file2 (or NONE FOUND)
+                `;
+
+                try {
+                    const response = await this.callvLLMAPI(prompt);
+                    return this.parseAIDependencyResponse(response);
+                } catch (error) {
+                    console.warn('AI dependency analysis failed:', error);
+                    return {
+                        copybooks: [],
+                        calledPrograms: [],
+                        db2Tables: [],
+                        jclJobs: [],
+                        missing: []
+                    };
+                }
+            }
+
+            parseAIDependencyResponse(response) {
+                const dependencies = {
+                    copybooks: [],
+                    calledPrograms: [],
+                    db2Tables: [],
+                    jclJobs: [],
+                    missing: []
+                };
+                
+                const lines = response.split('\n');
+                
+                lines.forEach(line => {
+                    const upperLine = line.toUpperCase();
+                    
+                    if (upperLine.startsWith('COPYBOOKS:')) {
+                        const content = line.substring(line.indexOf(':') + 1).trim();
+                        if (!content.includes('NONE FOUND') && content !== '') {
+                            dependencies.copybooks = content.split(',').map(s => s.trim()).filter(s => s);
+                        }
+                    } else if (upperLine.startsWith('PROGRAMS:')) {
+                        const content = line.substring(line.indexOf(':') + 1).trim();
+                        if (!content.includes('NONE FOUND') && content !== '') {
+                            dependencies.calledPrograms = content.split(',').map(s => s.trim()).filter(s => s);
+                        }
+                    } else if (upperLine.startsWith('TABLES:')) {
+                        const content = line.substring(line.indexOf(':') + 1).trim();
+                        if (!content.includes('NONE FOUND') && content !== '') {
+                            dependencies.db2Tables = content.split(',').map(s => s.trim()).filter(s => s);
+                        }
+                    } else if (upperLine.startsWith('FILES:')) {
+                        const content = line.substring(line.indexOf(':') + 1).trim();
+                        if (!content.includes('NONE FOUND') && content !== '') {
+                            dependencies.jclJobs = content.split(',').map(s => s.trim()).filter(s => s);
+                        }
+                    }
+                });
+                
+                // Check which dependencies are missing from uploaded files
+                dependencies.missing = this.checkMissingDependencies(dependencies);
+                
+                return dependencies;
+            }
+
+
 
             async enhanceDependenciesWithAI(cobolFile, dependencies) {
                 const prompt = `
