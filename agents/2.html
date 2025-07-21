@@ -1069,56 +1069,59 @@
             }
 
             createIntelligentChunks(content, fileName, context = '') {
-                const lines = content.split('\n');
-                const chunks = [];
-                const maxTokensPerChunk = Math.floor(this.maxTokens * 0.85); // Leave room for system context
-                const contextOverlap = 30; // Lines of overlap between chunks
-                
-                let currentChunk = {
-                    content: context,
-                    startLine: 0,
-                    endLine: 0,
-                    tokenCount: this.estimateTokenCount(context)
-                };
-                
-                let currentLine = 0;
-                
-                for (let i = 0; i < lines.length; i++) {
-                    const line = lines[i];
-                    const lineTokens = this.estimateTokenCount(line);
-                    
-                    // Check if adding this line would exceed the limit
-                    if (currentChunk.tokenCount + lineTokens > maxTokensPerChunk && 
-                        currentChunk.content.length > context.length) {
-                        
-                        currentChunk.endLine = i - 1;
-                        chunks.push({ ...currentChunk });
-                        
-                        // Start new chunk with overlap
-                        const overlapStart = Math.max(currentChunk.startLine, i - contextOverlap);
-                        const overlapContent = lines.slice(overlapStart, i).join('\n');
-                        
-                        currentChunk = {
-                            content: context + '\n\nPREVIOUS CONTEXT:\n' + overlapContent + '\n\nCONTINUING:\n',
-                            startLine: overlapStart,
-                            endLine: 0,
-                            tokenCount: this.estimateTokenCount(context + overlapContent)
-                        };
-                    }
-                    
-                    currentChunk.content += line + '\n';
-                    currentChunk.tokenCount += lineTokens;
-                    currentLine = i;
-                }
-                
-                // Add final chunk
-                if (currentChunk.content.length > context.length) {
-                    currentChunk.endLine = lines.length - 1;
-                    chunks.push(currentChunk);
-                }
-                
-                return chunks;
-            }
+    console.log(`[DEBUG] Creating chunks for ${fileName}, content length: ${content.length}`);
+    
+    const lines = content.split('\n');
+    const chunks = [];
+    const maxTokensPerChunk = Math.floor(this.maxTokens * 0.7); // More conservative limit
+    const contextOverlap = 20; // Reduced overlap
+    
+    let currentChunk = {
+        content: context + '\n\nCOBOL CODE:\n',
+        startLine: 0,
+        endLine: 0,
+        tokenCount: this.estimateTokenCount(context)
+    };
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const lineTokens = this.estimateTokenCount(line + '\n');
+        
+        // Check if adding this line would exceed the limit
+        if (currentChunk.tokenCount + lineTokens > maxTokensPerChunk && 
+            currentChunk.content.length > (context.length + 20)) {
+            
+            currentChunk.endLine = i - 1;
+            chunks.push({ ...currentChunk });
+            
+            console.log(`[DEBUG] Created chunk ${chunks.length}: lines ${currentChunk.startLine}-${currentChunk.endLine}, tokens: ${currentChunk.tokenCount}`);
+            
+            // Start new chunk with overlap
+            const overlapStart = Math.max(0, i - contextOverlap);
+            const overlapContent = lines.slice(overlapStart, i).join('\n');
+            
+            currentChunk = {
+                content: context + '\n\nPREVIOUS CONTEXT:\n' + overlapContent + '\n\nCONTINUING:\n',
+                startLine: i,
+                endLine: 0,
+                tokenCount: this.estimateTokenCount(context + overlapContent)
+            };
+        }
+        
+        currentChunk.content += line + '\n';
+        currentChunk.tokenCount += lineTokens;
+    }
+    
+    // Add final chunk
+    if (currentChunk.content.length > (context.length + 20)) {
+        currentChunk.endLine = lines.length - 1;
+        chunks.push(currentChunk);
+        console.log(`[DEBUG] Created final chunk ${chunks.length}: lines ${currentChunk.startLine}-${currentChunk.endLine}, tokens: ${currentChunk.tokenCount}`);
+    }
+    
+    console.log(`[DEBUG] Total chunks created: ${chunks.length}`);
+    return chunks;
+}
 
             // vLLM API call method - ENHANCED for your custom server
             async callvLLMAPI(prompt, isTest = false) {
@@ -1400,63 +1403,71 @@
             }
 
             async analyzeDependencies() {
-                const cobolFiles = this.uploadedFiles.filter(f => f.type === 'COBOL Program');
-                this.dependencies = {};
+    const cobolFiles = this.uploadedFiles.filter(f => f.type === 'COBOL Program');
+    this.dependencies = {};
 
-                for (const cobolFile of cobolFiles) {
-                    this.updateLoadingStatus(`Analyzing dependencies for ${cobolFile.name}...`);
-                    
-                    // FIXED: Use vLLM for ALL dependency analysis
-                    const dependencies = await this.getAIDependencies(cobolFile);
-                    
-                    this.dependencies[cobolFile.name] = dependencies;
-                    
-                    // Rate limiting between files
-                    if (cobolFiles.indexOf(cobolFile) < cobolFiles.length - 1) {
-                        await this.sleep(1000);
-                    }
-                }
-            }
-
+    for (const cobolFile of cobolFiles) {
+        this.updateLoadingStatus(`Analyzing dependencies for ${cobolFile.name}...`);
+        
+        console.log(`[DEBUG] Starting dependency analysis for ${cobolFile.name}`);
+        
+        // Use vLLM for dependency analysis
+        const dependencies = await this.getAIDependencies(cobolFile);
+        
+        console.log(`[DEBUG] vLLM dependency analysis complete for ${cobolFile.name}:`, dependencies);
+        
+        this.dependencies[cobolFile.name] = dependencies;
+        
+        // Rate limiting between files
+        if (cobolFiles.indexOf(cobolFile) < cobolFiles.length - 1) {
+            await this.sleep(1000);
+        }
+    }
+    
+    console.log('[DEBUG] All dependency analysis complete:', this.dependencies);
+}
             async getAIDependencies(cobolFile) {
-                const prompt = `
-            COBOL DEPENDENCY ANALYSIS
+    const prompt = `
+COBOL DEPENDENCY ANALYSIS
 
-            Analyze this COBOL program and identify ALL dependencies:
+Analyze this COBOL program and identify ALL dependencies:
 
-            File: ${cobolFile.name}
-            Content:
-            ${cobolFile.content}
+File: ${cobolFile.name}
+Content:
+${cobolFile.content}
 
-            ANALYSIS REQUIRED:
-            1. COPYBOOKS (COPY statements, includes)
-            2. CALLED PROGRAMS (CALL statements, subroutines)  
-            3. DB2 TABLES (EXEC SQL statements, table references)
-            4. FILE DEPENDENCIES (SELECT statements, DD names)
+ANALYSIS REQUIRED:
+1. COPYBOOKS (COPY statements, includes) - Look for "COPY" statements
+2. CALLED PROGRAMS (CALL statements, subroutines) - Look for "CALL" statements
+3. DB2 TABLES (EXEC SQL statements, table references) - Look for SQL table names
+4. FILE DEPENDENCIES (SELECT statements, DD names) - Look for file assignments
 
-            If NO dependencies are found in any category, explicitly state "NONE FOUND".
+If NO dependencies are found in any category, explicitly state "NONE FOUND".
 
-            Format response EXACTLY as:
-            COPYBOOKS: name1, name2 (or NONE FOUND)
-            PROGRAMS: prog1, prog2 (or NONE FOUND)
-            TABLES: table1, table2 (or NONE FOUND)
-            FILES: file1, file2 (or NONE FOUND)
-                `;
+Format response EXACTLY as:
+COPYBOOKS: name1, name2 (or NONE FOUND)
+PROGRAMS: prog1, prog2 (or NONE FOUND)
+TABLES: table1, table2 (or NONE FOUND)
+FILES: file1, file2 (or NONE FOUND)
+    `;
 
-                try {
-                    const response = await this.callvLLMAPI(prompt);
-                    return this.parseAIDependencyResponse(response);
-                } catch (error) {
-                    console.warn('AI dependency analysis failed:', error);
-                    return {
-                        copybooks: [],
-                        calledPrograms: [],
-                        db2Tables: [],
-                        jclJobs: [],
-                        missing: []
-                    };
-                }
-            }
+    try {
+        console.log(`[DEBUG] Sending dependency analysis request for ${cobolFile.name}`);
+        const response = await this.callvLLMAPI(prompt);
+        console.log(`[DEBUG] Received dependency response for ${cobolFile.name}:`, response);
+        
+        return this.parseAIDependencyResponse(response);
+    } catch (error) {
+        console.warn(`[DEBUG] AI dependency analysis failed for ${cobolFile.name}:`, error);
+        return {
+            copybooks: [],
+            calledPrograms: [],
+            db2Tables: [],
+            jclJobs: [],
+            missing: []
+        };
+    }
+}
 
             parseAIDependencyResponse(response) {
                 const dependencies = {
@@ -1539,26 +1550,67 @@ FILES: file1, file2
                 }
             }
 
-            parseAIDependencyResponse(response, dependencies) {
-                const lines = response.split('\n');
+            parseAIDependencyResponse(response) {
+    const dependencies = {
+        copybooks: [],
+        calledPrograms: [],
+        db2Tables: [],
+        jclJobs: [],
+        missing: []
+    };
+    
+    console.log('[DEBUG] Raw vLLM dependency response:', response);
+    
+    const lines = response.split('\n');
+    
+    lines.forEach(line => {
+        const upperLine = line.toUpperCase().trim();
+        
+        if (upperLine.includes('COPYBOOKS:')) {
+            // Handle both "COPYBOOKS: name1, name2" and "COPYBOOKS: NTATAGAS, NTATAGAC, NTATAGAD (or NONE FOUND)"
+            const colonIndex = line.indexOf(':');
+            if (colonIndex > -1) {
+                let content = line.substring(colonIndex + 1).trim();
                 
-                lines.forEach(line => {
-                    const upperLine = line.toUpperCase();
-                    if (upperLine.startsWith('COPYBOOKS:')) {
-                        const books = line.substring(line.indexOf(':') + 1).split(',')
-                            .map(s => s.trim()).filter(s => s && !dependencies.copybooks.includes(s));
-                        dependencies.copybooks.push(...books);
-                    } else if (upperLine.startsWith('PROGRAMS:')) {
-                        const progs = line.substring(line.indexOf(':') + 1).split(',')
-                            .map(s => s.trim()).filter(s => s && !dependencies.calledPrograms.includes(s));
-                        dependencies.calledPrograms.push(...progs);
-                    } else if (upperLine.startsWith('TABLES:')) {
-                        const tables = line.substring(line.indexOf(':') + 1).split(',')
-                            .map(s => s.trim()).filter(s => s && !dependencies.db2Tables.includes(s));
-                        dependencies.db2Tables.push(...tables);
-                    }
-                });
+                // Remove "(or NONE FOUND)" suffix if present
+                content = content.replace(/\s*\(or\s+NONE\s+FOUND\)\s*$/i, '');
+                
+                if (!content.includes('NONE FOUND') && content !== '' && !content.toLowerCase().includes('none')) {
+                    dependencies.copybooks = content.split(',').map(s => s.trim()).filter(s => s);
+                    console.log('[DEBUG] Found copybooks:', dependencies.copybooks);
+                }
             }
+        } else if (upperLine.includes('PROGRAMS:')) {
+            const colonIndex = line.indexOf(':');
+            if (colonIndex > -1) {
+                let content = line.substring(colonIndex + 1).trim();
+                content = content.replace(/\s*\(or\s+NONE\s+FOUND\)\s*$/i, '');
+                
+                if (!content.includes('NONE FOUND') && content !== '' && !content.toLowerCase().includes('none')) {
+                    dependencies.calledPrograms = content.split(',').map(s => s.trim()).filter(s => s);
+                    console.log('[DEBUG] Found programs:', dependencies.calledPrograms);
+                }
+            }
+        } else if (upperLine.includes('TABLES:')) {
+            const colonIndex = line.indexOf(':');
+            if (colonIndex > -1) {
+                let content = line.substring(colonIndex + 1).trim();
+                content = content.replace(/\s*\(or\s+NONE\s+FOUND\)\s*$/i, '');
+                
+                if (!content.includes('NONE FOUND') && content !== '' && !content.toLowerCase().includes('none')) {
+                    dependencies.db2Tables = content.split(',').map(s => s.trim()).filter(s => s);
+                    console.log('[DEBUG] Found tables:', dependencies.db2Tables);
+                }
+            }
+        }
+    });
+    
+    // Check which dependencies are missing from uploaded files
+    dependencies.missing = this.checkMissingDependencies(dependencies);
+    
+    console.log('[DEBUG] Final parsed dependencies:', dependencies);
+    return dependencies;
+}
 
             extractCopybooks(content) {
                 const copybooks = [];
@@ -1853,32 +1905,38 @@ Provide specific examples and line references where applicable.
             }
 
             async performChunkedCobolAnalysis(fileInfo, deps) {
-                // Create system context for chunking
-                const systemContext = `
+    console.log('[DEBUG] Starting chunked analysis for:', fileInfo.name);
+    
+    // Create system context for chunking
+    const systemContext = `
 COBOL PROGRAM ANALYSIS CONTEXT
 ==============================
 Program: ${fileInfo.name}
-Dependencies: ${deps.copybooks?.join(', ') || 'None'}
+Dependencies Found: ${deps.copybooks?.join(', ') || 'None'}
 Called Programs: ${deps.calledPrograms?.join(', ') || 'None'}
-Missing Dependencies: ${deps.missing?.length || 0}
 
 This is part of a larger COBOL program being analyzed in chunks.
-Focus on the specific sections in this chunk while noting cross-references.
-                `;
+Analyze the specific sections in this chunk while noting cross-references.
+    `;
 
-                const chunks = this.createIntelligentChunks(fileInfo.content, fileInfo.name, systemContext);
-                const chunkResults = [];
-                
-                // Analyze each chunk
-                for (let i = 0; i < chunks.length; i++) {
-                    this.updateLoadingStatus(`Analyzing ${fileInfo.name} - Chunk ${i + 1}/${chunks.length}...`);
-                    
-                    const chunkPrompt = `
+    const chunks = this.createIntelligentChunks(fileInfo.content, fileInfo.name, systemContext);
+    const chunkResults = [];
+    
+    console.log(`[DEBUG] Created ${chunks.length} chunks for analysis`);
+    
+    // Analyze each chunk
+    for (let i = 0; i < chunks.length; i++) {
+        this.updateLoadingStatus(`Analyzing ${fileInfo.name} - Chunk ${i + 1}/${chunks.length}...`);
+        
+        console.log(`[DEBUG] Processing chunk ${i + 1}, content length: ${chunks[i].content.length}`);
+        
+        const chunkPrompt = `
 You are analyzing chunk ${i + 1} of ${chunks.length} from COBOL program ${fileInfo.name}.
 
+CHUNK CONTENT:
 ${chunks[i].content}
 
-Analyze this chunk focusing on:
+Analyze this specific chunk focusing on:
 
 **SECTIONS IN CHUNK**
 - Identify COBOL divisions, sections, and paragraphs
@@ -1905,46 +1963,49 @@ Analyze this chunk focusing on:
 - Variables or paragraphs defined elsewhere
 - Integration points with other chunks
 
-Keep analysis concise but comprehensive for this specific chunk.
-                    `;
-                    
-                    try {
-                        const analysis = await this.callvLLMAPI(chunkPrompt);
-                        chunkResults.push({
-                            chunkIndex: i + 1,
-                            startLine: chunks[i].startLine,
-                            endLine: chunks[i].endLine,
-                            tokenCount: chunks[i].tokenCount,
-                            analysis: analysis
-                        });
-                        
-                        // Rate limiting between chunks
-                        if (i < chunks.length - 1) {
-                            await this.sleep(1500);
-                        }
-                        
-                    } catch (error) {
-                        console.error(`Chunk ${i + 1} analysis failed:`, error);
-                        chunkResults.push({
-                            chunkIndex: i + 1,
-                            startLine: chunks[i].startLine,
-                            endLine: chunks[i].endLine,
-                            tokenCount: chunks[i].tokenCount,
-                            analysis: `Chunk analysis failed: ${error.message}`,
-                            error: true
-                        });
-                    }
-                }
-                
-                // Synthesize results from all chunks
-                this.updateLoadingStatus(`Synthesizing analysis from ${chunks.length} chunks...`);
-                const synthesis = await this.synthesizeCobolAnalysis(fileInfo.name, deps, chunkResults);
-                
-                return {
-                    synthesis: synthesis,
-                    chunks: chunkResults
-                };
+Provide a comprehensive analysis of this specific chunk.
+        `;
+        
+        try {
+            console.log(`[DEBUG] Sending chunk ${i + 1} to vLLM...`);
+            const analysis = await this.callvLLMAPI(chunkPrompt);
+            console.log(`[DEBUG] Chunk ${i + 1} analysis completed, length: ${analysis.length}`);
+            
+            chunkResults.push({
+                chunkIndex: i + 1,
+                startLine: chunks[i].startLine,
+                endLine: chunks[i].endLine,
+                tokenCount: chunks[i].tokenCount,
+                analysis: analysis
+            });
+            
+            // Rate limiting between chunks
+            if (i < chunks.length - 1) {
+                await this.sleep(2000); // Increased delay
             }
+            
+        } catch (error) {
+            console.error(`[DEBUG] Chunk ${i + 1} analysis failed:`, error);
+            chunkResults.push({
+                chunkIndex: i + 1,
+                startLine: chunks[i].startLine,
+                endLine: chunks[i].endLine,
+                tokenCount: chunks[i].tokenCount,
+                analysis: `Chunk analysis failed: ${error.message}`,
+                error: true
+            });
+        }
+    }
+    
+    // Synthesize results from all chunks
+    this.updateLoadingStatus(`Synthesizing analysis from ${chunks.length} chunks...`);
+    const synthesis = await this.synthesizeCobolAnalysis(fileInfo.name, deps, chunkResults);
+    
+    return {
+        synthesis: synthesis,
+        chunks: chunkResults
+    };
+}
 
             async synthesizeCobolAnalysis(fileName, deps, chunkResults) {
                 const synthPrompt = `
