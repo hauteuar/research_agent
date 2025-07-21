@@ -1043,21 +1043,60 @@ class ModelServer:
         GenerationRequest._config = self.config
         
         # API Routes
-        @app.post("/generate", response_model=GenerationResponse)
-        async def generate_text(request: GenerationRequest):
-            """Generate text from prompt"""
-            request_id = str(uuid.uuid4())
-            
-            if self.config.request_logging:
-                logger.info(f"[{self.config.server_id}] Generation request {request_id}: {len(request.prompt)} chars, max_tokens={request.max_tokens}")
-            
-            if request.stream:
-                return StreamingResponse(
-                    self.generation_handler.generate(request, request_id),
-                    media_type="text/plain"
-                )
-            else:
-                return await self.generation_handler.generate(request, request_id)
+        @app.post("/generate")
+        async def generate_compatible(request: Union[dict, GenerationRequest]):
+            """Compatible generate endpoint for mainframe agent"""
+            try:
+                # Handle both dict and GenerationRequest formats
+                if isinstance(request, dict):
+                    # Convert dict to GenerationRequest
+                    prompt = request.get("prompt", "")
+                    max_tokens = request.get("max_tokens", 512)
+                    temperature = request.get("temperature", 0.7)
+                    
+                    gen_request = GenerationRequest(
+                        prompt=prompt,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        top_p=request.get("top_p", 0.9),
+                        stop=request.get("stop", None),
+                        stream=False
+                    )
+                else:
+                    gen_request = request
+                
+                request_id = str(uuid.uuid4())
+                
+                logger.info(f"[{self.config.server_id}] 🎯 Compatible generate request:")
+                logger.info(f"  Prompt: '{gen_request.prompt[:100]}...'")
+                logger.info(f"  Max tokens: {gen_request.max_tokens}")
+                logger.info(f"  Temperature: {gen_request.temperature}")
+                
+                # Generate response using your existing handler
+                response = await self.generation_handler.generate(gen_request, request_id)
+                
+                # Return in the simple format expected by mainframe agent
+                compatible_response = {
+                    "text": response.text,
+                    "choices": [{"text": response.text}],  # Alternative format
+                    "id": response.id,
+                    "model": response.model
+                }
+                
+                logger.info(f"[{self.config.server_id}] ✅ Returning {len(response.text)} characters")
+                
+                return compatible_response
+                
+            except Exception as e:
+                error_msg = f"Generation failed: {str(e)}"
+                logger.error(f"[{self.config.server_id}] ❌ {error_msg}")
+                
+                # Return error in expected format
+                return {
+                    "text": error_msg,
+                    "choices": [{"text": error_msg}],
+                    "error": str(e)
+                }
         
         @app.get("/health", response_model=HealthResponse)
         async def health_check():
