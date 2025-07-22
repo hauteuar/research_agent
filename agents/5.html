@@ -659,6 +659,21 @@
             font-weight: bold;
         }
         /* Additional styles for unused fields */
+        /* Enhanced field type styles */
+.usage-tag.tag-input { background: #2196F3; }
+.usage-tag.tag-output { background: #4CAF50; }
+.usage-tag.tag-calculated { background: #E91E63; }
+.usage-tag.tag-assigned { background: #FF9800; }
+.usage-tag.tag-validated { background: #9C27B0; }
+.usage-tag.tag-source { background: #795548; }
+.usage-tag.tag-referenced { background: #607D8B; }
+
+/* Field category colors */
+.field-card[style*="border-top-color: #1976D2"] { /* INPUT FIELD */ }
+.field-card[style*="border-top-color: #388E3C"] { /* CALCULATED FIELD */ }
+.field-card[style*="border-top-color: #F57C00"] { /* GROUP FIELD */ }
+.field-card[style*="border-top-color: #7B1FA2"] { /* RECORD FIELD */ }
+
 .usage-tag.tag-unused {
     background: #f44336 !important;
     color: white;
@@ -1044,6 +1059,35 @@
                         document.getElementById('componentSuggestions').style.display = 'none';
                     }
                 });
+
+                // Enhanced chat functionality - ADD this to your initializeEventListeners method
+document.getElementById('chatSendBtn').addEventListener('click', (e) => {
+    console.log('Chat send button clicked'); // Debug log
+    this.sendChatMessage();
+});
+
+document.getElementById('chatInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        console.log('Enter key pressed in chat'); // Debug log
+        this.sendChatMessage();
+    }
+});
+
+// Chat suggestions - enhance this section
+document.querySelectorAll('.chat-suggestion-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        const question = e.target.dataset.question;
+        console.log('Suggestion clicked:', question); // Debug log
+        const chatInput = document.getElementById('chatInput');
+        if (chatInput) {
+            chatInput.value = question;
+            this.sendChatMessage();
+        }
+    });
+});
+
+
             }
 
             initializeEnhancements() {
@@ -2214,72 +2258,50 @@ Provide comprehensive analysis with specific examples and actionable recommendat
         }
         // === SPECIALIZED ANALYSIS METHODS ===
         async performCopybookLifecycleAnalysis(componentName, componentInfo, allFiles) {
-            const copybookChunks = this.createCopybookSpecificChunks(allFiles, componentName);
+    this.updateLoadingStatus('📚 Starting chunked copybook lifecycle analysis...');
+    
+    // Create copybook-specific chunks with token management
+    const copybookChunks = this.createCopybookSpecificChunks(allFiles, componentName);
+    
+    let combinedAnalysis = '';
+    let fieldInventory = [];
+    let usagePatterns = [];
+    let businessRules = [];
+    
+    for (let i = 0; i < copybookChunks.length; i++) {
+        this.updateLoadingStatus(`Processing copybook chunk ${i + 1}/${copybookChunks.length}...`);
+        
+        const chunkPrompt = this.buildCopybookChunkPrompt(componentName, copybookChunks[i], i, copybookChunks.length);
+        
+        // Ensure chunk doesn't exceed token limits
+        const chunkTokens = this.estimateTokenCount(chunkPrompt);
+        if (chunkTokens > this.maxTokens * 0.8) {
+            console.warn(`Chunk ${i + 1} too large (${chunkTokens} tokens), splitting further...`);
+            const subChunks = this.splitLargeChunk(copybookChunks[i]);
             
-            const detailPrompt = `
-COMPREHENSIVE COPYBOOK LIFECYCLE ANALYSIS: ${componentName}
-
-INTELLIGENT CHUNKING APPLIED: ${copybookChunks.length} optimized chunks for copybook analysis
-
-COPYBOOK-SPECIFIC ANALYSIS FILES:
-${copybookChunks.map(chunk => chunk.files.map(f => `
-=== ${f.name} (${f.type}) ===
-${f.content}
-`).join('')).join('\n')}
-
-DETAILED COPYBOOK LIFECYCLE REQUIREMENTS:
-
-**1. COMPLETE FIELD INVENTORY & LIFECYCLE**
-For each field in ${componentName}:
-- Field definition: Level, name, PIC clause, OCCURS, REDEFINES
-- Data type and size analysis
-- Parent-child relationships in data structure
-- COMPLETE LIFECYCLE: Creation → Processing → Updates → Output → Archival
-
-**2. CROSS-PROGRAM USAGE PATTERNS**  
-Analyze ALL programs that use this copybook:
-- Field-level usage mapping (which fields used in which programs)
-- READ operations: Programs that reference fields for processing
-- WRITE operations: Programs that populate or modify fields
-- UNUSED FIELD DETECTION: Fields defined but never referenced
-- FREQUENCY ANALYSIS: How often each field is accessed
-
-**3. DATA FLOW LIFECYCLE TRACKING**
-For each field, trace complete data journey:
-- **INPUT STAGE**: Where does data originate? (files, DB2, user input, calculations)
-- **VALIDATION STAGE**: What validation rules apply? (format checks, business rules)
-- **PROCESSING STAGE**: How is data transformed, calculated, or manipulated?
-- **OUTPUT STAGE**: Where does data go? (output files, databases, reports)
-- **INTEGRATION STAGE**: How does data interface with external systems?
-- **ARCHIVAL STAGE**: How is data stored, archived, or purged?
-
-**4. FIELD CLASSIFICATION & BUSINESS RULES**
-Classify each field with business context:
-- KEY FIELDS: Identifiers, primary keys, lookup fields
-- TRANSACTION FIELDS: Amounts, dates, quantities, status codes  
-- REFERENCE FIELDS: Codes that link to other systems or tables
-- WORKING FIELDS: Temporary calculations, counters, flags
-- AUDIT FIELDS: Created/modified dates, user IDs, version control
-- UNUSED FIELDS: Defined but never referenced (candidates for removal)
-
-**5. PROGRAM INTEGRATION ANALYSIS**
-- Programs that would BREAK if copybook structure changes
-- Field dependencies between programs (data passed through linkage)
-- File I/O impact (which files use these fields)
-- Database integration (EXEC SQL references)
-
-**6. MODERNIZATION OPPORTUNITIES**
-- Database normalization candidates
-- API interface potential for external access  
-- Cloud migration considerations
-- Data quality improvement opportunities
-- Performance optimization possibilities
-
-Provide specific program names, line references, and actionable recommendations.
-            `;
-
-            return await this.callvLLMAPIWithRetry(detailPrompt, 'copybook_lifecycle');
+            for (let j = 0; j < subChunks.length; j++) {
+                this.updateLoadingStatus(`Processing copybook sub-chunk ${i + 1}.${j + 1}...`);
+                const subChunkPrompt = this.buildCopybookChunkPrompt(componentName, subChunks[j], i, copybookChunks.length, true);
+                const subChunkResult = await this.callvLLMAPIWithRetry(subChunkPrompt, 'copybook_subchunk');
+                combinedAnalysis += `\n--- Sub-chunk ${i + 1}.${j + 1} ---\n${subChunkResult}`;
+            }
+        } else {
+            const chunkResult = await this.callvLLMAPIWithRetry(chunkPrompt, 'copybook_chunk');
+            combinedAnalysis += `\n--- Chunk ${i + 1} ---\n${chunkResult}`;
         }
+        
+        if (i < copybookChunks.length - 1) {
+            await this.sleep(1000); // Brief pause between chunks
+        }
+    }
+    
+    // Final synthesis of all chunks
+    this.updateLoadingStatus('🔄 Synthesizing copybook analysis results...');
+    const synthesisPrompt = this.buildCopybookSynthesisPrompt(componentName, combinedAnalysis);
+    const finalAnalysis = await this.callvLLMAPIWithRetry(synthesisPrompt, 'copybook_synthesis');
+    
+    return finalAnalysis;
+}
 
         async performProgramFlowAnalysis(componentName, componentInfo, allFiles) {
             const programChunks = this.createProgramFlowChunks(allFiles, componentName);
@@ -2528,19 +2550,417 @@ Provide detailed flow diagrams, timing analysis, and optimization recommendation
 
         // === SPECIALIZED CHUNKING STRATEGIES ===
         createCopybookSpecificChunks(files, componentName) {
-            const chunks = [];
-            const targetTokensPerChunk = Math.floor(this.maxTokens * 0.3);
-            
-            const copybookFile = files.find(f => f.name.toUpperCase().includes(componentName.toUpperCase()));
-            const programFiles = files.filter(f => f.type === 'COBOL Program' && 
-                f.content.toUpperCase().includes(`COPY ${componentName.toUpperCase()}`));
-            const relatedFiles = files.filter(f => !programFiles.includes(f) && f !== copybookFile);
-            
-            this.createChunksWithSpecializedOverlap([copybookFile, ...programFiles, ...relatedFiles].filter(f => f), 
-                targetTokensPerChunk, 'copybook', chunks);
-            
-            return chunks;
+    const chunks = [];
+    const targetTokensPerChunk = Math.floor(this.maxTokens * 0.6); // Conservative limit
+    
+    console.log(`Creating copybook chunks with target ${targetTokensPerChunk} tokens each`);
+    
+    // Prioritize by relevance to copybook analysis
+    const copybookFile = files.find(f => 
+        f.name.toUpperCase().includes(componentName.toUpperCase()) && 
+        f.type === 'Copybook'
+    );
+    
+    const programFiles = files.filter(f => 
+        f.type === 'COBOL Program' && 
+        f.content.toUpperCase().includes(`COPY ${componentName.toUpperCase()}`)
+    );
+    
+    const relatedFiles = files.filter(f => 
+        !programFiles.includes(f) && 
+        f !== copybookFile &&
+        f.content.toUpperCase().includes(componentName.toUpperCase())
+    );
+    
+    const otherFiles = files.filter(f => 
+        !programFiles.includes(f) && 
+        f !== copybookFile && 
+        !relatedFiles.includes(f)
+    );
+    
+    // Always put the main copybook in first chunk if it exists
+    if (copybookFile) {
+        const copybookTokens = this.estimateTokenCount(copybookFile.content);
+        
+        if (copybookTokens > targetTokensPerChunk) {
+            // Split large copybook into sections
+            const copybookSections = this.splitCopybookIntoSections(copybookFile);
+            copybookSections.forEach((section, index) => {
+                chunks.push({
+                    files: [section],
+                    totalTokens: this.estimateTokenCount(section.content),
+                    chunkIndex: chunks.length,
+                    analysisType: 'copybook',
+                    focus: index === 0 ? 'field_definitions' : 'field_usage',
+                    isMainCopybook: true
+                });
+            });
+        } else {
+            chunks.push({
+                files: [copybookFile],
+                totalTokens: copybookTokens,
+                chunkIndex: 0,
+                analysisType: 'copybook',
+                focus: 'field_definitions',
+                isMainCopybook: true
+            });
         }
+    }
+    
+    // Create chunks for program files
+    this.createProgramChunksForCopybook(programFiles, targetTokensPerChunk, chunks, componentName);
+    
+    // Add related files if space allows
+    this.createRelatedFileChunks(relatedFiles, targetTokensPerChunk, chunks);
+    
+    console.log(`Created ${chunks.length} copybook chunks`);
+    return chunks;
+}
+
+splitCopybookIntoSections(copybookFile) {
+    const sections = [];
+    const lines = copybookFile.content.split('\n');
+    const targetLinesPerSection = 200; // Adjust based on typical line length
+    
+    let currentSection = [];
+    let currentLines = 0;
+    
+    lines.forEach((line, index) => {
+        currentSection.push(line);
+        currentLines++;
+        
+        // Split at logical boundaries (field definitions) or when reaching limit
+        const isFieldBoundary = line.match(/^\s*\d{2}\s+[A-Z]/);
+        const isAtLimit = currentLines >= targetLinesPerSection;
+        
+        if ((isFieldBoundary && currentLines > 100) || isAtLimit) {
+            if (currentSection.length > 0) {
+                sections.push({
+                    name: `${copybookFile.name}-section-${sections.length + 1}`,
+                    content: currentSection.join('\n'),
+                    type: copybookFile.type,
+                    size: currentSection.join('\n').length,
+                    originalFile: copybookFile.name,
+                    sectionIndex: sections.length
+                });
+                
+                // Keep some overlap for context
+                const overlapLines = currentSection.slice(-5);
+                currentSection = [...overlapLines];
+                currentLines = overlapLines.length;
+            }
+        }
+    });
+    
+    // Add final section if any content remains
+    if (currentSection.length > 5) { // More than just overlap
+        sections.push({
+            name: `${copybookFile.name}-section-${sections.length + 1}`,
+            content: currentSection.join('\n'),
+            type: copybookFile.type,
+            size: currentSection.join('\n').length,
+            originalFile: copybookFile.name,
+            sectionIndex: sections.length
+        });
+    }
+    
+    return sections;
+}
+buildCopybookChunkPrompt(componentName, chunk, chunkIndex, totalChunks, isSubChunk = false) {
+    const chunkTokens = this.estimateTokenCount(chunk.files.map(f => f.content).join('\n'));
+    const chunkType = isSubChunk ? 'SUB-CHUNK' : 'CHUNK';
+    
+    return `
+ENHANCED COPYBOOK LIFECYCLE ANALYSIS - ${chunkType} ${chunkIndex + 1}/${totalChunks}
+Component: ${componentName}
+Chunk Tokens: ~${chunkTokens} (Target: ${Math.floor(this.maxTokens * 0.6)})
+Focus: ${chunk.focus || 'general_analysis'}
+
+FILES IN THIS CHUNK:
+${chunk.files.map(f => `
+=== ${f.name} (${f.type}) ${f.originalFile ? '[Section of ' + f.originalFile + ']' : ''} ===
+${f.content}
+`).join('\n')}
+
+COPYBOOK ANALYSIS REQUIREMENTS FOR THIS CHUNK:
+
+${chunk.focus === 'field_definitions' ? `
+**PRIMARY FOCUS: FIELD DEFINITIONS**
+1. **FIELD INVENTORY** - Extract ALL field definitions:
+   - Level numbers, field names, PIC clauses
+   - OCCURS, REDEFINES, COMP usage
+   - Parent-child relationships
+   
+2. **DATA STRUCTURE ANALYSIS**:
+   - Group items vs elementary items
+   - Field sizes and data types
+   - Record layout and organization
+` : ''}
+
+${chunk.focus === 'field_usage' ? `
+**PRIMARY FOCUS: FIELD USAGE PATTERNS**
+1. **USAGE ANALYSIS** - How fields are used:
+   - READ operations and data input
+   - WRITE operations and data output
+   - MOVE, COMPUTE, and calculations
+   
+2. **CROSS-PROGRAM PATTERNS**:
+   - Which programs reference which fields
+   - Frequency of field access
+   - Unused or rarely used fields
+` : ''}
+
+**STRUCTURED OUTPUT REQUIRED:**
+- Use clear headers with **bold formatting**
+- Provide specific line references
+- Focus on NEW findings in this chunk
+- List field names with their characteristics
+
+${chunkIndex === totalChunks - 1 && !isSubChunk ? 
+'**FINAL CHUNK**: Provide summary conclusions for all analyzed content.' : 
+'**CONTINUING ANALYSIS**: More chunks follow - focus on this chunk\'s content.'}
+
+**TOKEN OPTIMIZATION**: Keep response focused and structured to stay within limits.
+    `;
+}
+
+buildCopybookSynthesisPrompt(componentName, combinedAnalysis) {
+    return `
+COPYBOOK LIFECYCLE SYNTHESIS: ${componentName}
+
+COMBINED ANALYSIS FROM ALL CHUNKS:
+${combinedAnalysis}
+
+SYNTHESIS REQUIREMENTS:
+
+**1. COMPLETE FIELD INVENTORY**
+Consolidate all field definitions found across chunks:
+- Total number of fields defined
+- Field categories (group, elementary, working)
+- Data types and sizes summary
+
+**2. USAGE PATTERN SUMMARY**
+Synthesize field usage across all programs:
+- Most frequently used fields
+- Unused or stale field identification
+- Input vs output vs calculated fields
+
+**3. LIFECYCLE SUMMARY**
+Overall data flow patterns:
+- Field creation and initialization
+- Processing and transformation patterns
+- Output and archival processes
+
+**4. BUSINESS IMPACT ASSESSMENT**
+- Critical fields for business operations
+- Fields suitable for cleanup/removal
+- Modernization opportunities
+
+**5. ACTIONABLE RECOMMENDATIONS**
+- Specific field optimization suggestions
+- Data structure improvement opportunities
+- Technical debt reduction possibilities
+
+**OUTPUT FORMAT**: Provide a comprehensive but concise summary with clear sections and specific field listings.
+
+**TOKEN LIMIT**: Keep synthesis focused - approximately 1000-1500 tokens maximum.
+    `;
+}
+splitLargeChunk(chunk) {
+    const subChunks = [];
+    const targetTokens = Math.floor(this.maxTokens * 0.5); // Even more conservative for sub-chunks
+    
+    chunk.files.forEach(file => {
+        const fileTokens = this.estimateTokenCount(file.content);
+        
+        if (fileTokens <= targetTokens) {
+            // File fits in one sub-chunk
+            subChunks.push({
+                files: [file],
+                totalTokens: fileTokens,
+                chunkIndex: subChunks.length,
+                analysisType: chunk.analysisType,
+                focus: chunk.focus,
+                isSubChunk: true
+            });
+        } else {
+            // Split file into smaller sections
+            const lines = file.content.split('\n');
+            const linesPerSubChunk = Math.floor(lines.length * targetTokens / fileTokens);
+            
+            for (let i = 0; i < lines.length; i += linesPerSubChunk) {
+                const subChunkLines = lines.slice(i, i + linesPerSubChunk);
+                const subChunkContent = subChunkLines.join('\n');
+                
+                subChunks.push({
+                    files: [{
+                        name: `${file.name}-part-${Math.floor(i / linesPerSubChunk) + 1}`,
+                        content: subChunkContent,
+                        type: file.type,
+                        originalFile: file.name
+                    }],
+                    totalTokens: this.estimateTokenCount(subChunkContent),
+                    chunkIndex: subChunks.length,
+                    analysisType: chunk.analysisType,
+                    focus: chunk.focus,
+                    isSubChunk: true
+                });
+            }
+        }
+    });
+    
+    return subChunks;
+}
+createProgramChunksForCopybook(programFiles, targetTokens, chunks, componentName) {
+    let currentChunk = [];
+    let currentTokens = 0;
+    
+    programFiles.forEach(file => {
+        const fileTokens = this.estimateTokenCount(file.content);
+        
+        if (currentTokens + fileTokens > targetTokens && currentChunk.length > 0) {
+            chunks.push({
+                files: [...currentChunk],
+                totalTokens: currentTokens,
+                chunkIndex: chunks.length,
+                analysisType: 'copybook',
+                focus: 'program_usage',
+                isMainCopybook: false
+            });
+            
+            currentChunk = [];
+            currentTokens = 0;
+        }
+        
+        if (fileTokens > targetTokens) {
+            // Large program file - split it
+            const programSections = this.splitProgramForCopybook(file, componentName);
+            programSections.forEach(section => {
+                chunks.push({
+                    files: [section],
+                    totalTokens: this.estimateTokenCount(section.content),
+                    chunkIndex: chunks.length,
+                    analysisType: 'copybook',
+                    focus: 'program_usage',
+                    isMainCopybook: false
+                });
+            });
+        } else {
+            currentChunk.push(file);
+            currentTokens += fileTokens;
+        }
+    });
+    
+    // Add final program chunk
+    if (currentChunk.length > 0) {
+        chunks.push({
+            files: currentChunk,
+            totalTokens: currentTokens,
+            chunkIndex: chunks.length,
+            analysisType: 'copybook',
+            focus: 'program_usage',
+            isMainCopybook: false
+        });
+    }
+}
+
+splitProgramForCopybook(programFile, componentName) {
+    const sections = [];
+    const lines = programFile.content.split('\n');
+    const upperComponentName = componentName.toUpperCase();
+    
+    // Find sections that reference the copybook
+    const relevantLineIndices = [];
+    lines.forEach((line, index) => {
+        if (line.toUpperCase().includes(upperComponentName) || 
+            line.toUpperCase().includes('COPY') ||
+            line.toUpperCase().includes('MOVE') ||
+            line.toUpperCase().includes('COMPUTE')) {
+            relevantLineIndices.push(index);
+        }
+    });
+    
+    // Create sections around relevant areas with context
+    const contextLines = 20;
+    let currentSection = [];
+    let lastEndIndex = 0;
+    
+    relevantLineIndices.forEach(relevantIndex => {
+        const startIndex = Math.max(lastEndIndex, relevantIndex - contextLines);
+        const endIndex = Math.min(lines.length, relevantIndex + contextLines);
+        
+        const sectionLines = lines.slice(startIndex, endIndex);
+        
+        if (currentSection.length === 0) {
+            currentSection = sectionLines;
+        } else {
+            currentSection.push(...sectionLines);
+        }
+        
+        lastEndIndex = endIndex;
+        
+        // If section is getting large, finalize it
+        if (currentSection.length > 300) {
+            sections.push({
+                name: `${programFile.name}-copybook-section-${sections.length + 1}`,
+                content: currentSection.join('\n'),
+                type: programFile.type,
+                originalFile: programFile.name,
+                sectionIndex: sections.length
+            });
+            currentSection = [];
+        }
+    });
+    
+    // Add final section
+    if (currentSection.length > 0) {
+        sections.push({
+            name: `${programFile.name}-copybook-section-${sections.length + 1}`,
+            content: currentSection.join('\n'),
+            type: programFile.type,
+            originalFile: programFile.name,
+            sectionIndex: sections.length
+        });
+    }
+    
+    return sections;
+}
+createRelatedFileChunks(relatedFiles, targetTokens, chunks) {
+    let currentChunk = [];
+    let currentTokens = 0;
+    
+    relatedFiles.forEach(file => {
+        const fileTokens = this.estimateTokenCount(file.content);
+        
+        if (currentTokens + fileTokens > targetTokens && currentChunk.length > 0) {
+            chunks.push({
+                files: [...currentChunk],
+                totalTokens: currentTokens,
+                chunkIndex: chunks.length,
+                analysisType: 'copybook',
+                focus: 'related_analysis',
+                isMainCopybook: false
+            });
+            
+            currentChunk = [];
+            currentTokens = 0;
+        }
+        
+        currentChunk.push(file);
+        currentTokens += fileTokens;
+    });
+    
+    if (currentChunk.length > 0) {
+        chunks.push({
+            files: currentChunk,
+            totalTokens: currentTokens,
+            chunkIndex: chunks.length,
+            analysisType: 'copybook',
+            focus: 'related_analysis',
+            isMainCopybook: false
+        });
+    }
+}
 
         createProgramFlowChunks(files, componentName) {
             const chunks = [];
@@ -2704,26 +3124,54 @@ Provide detailed flow diagrams, timing analysis, and optimization recommendation
 
         // === ENHANCED CHAT FUNCTIONALITY ===
         async sendChatMessage() {
-            const input = document.getElementById('chatInput');
-            const message = input.value.trim();
-            
-            if (!message || !this.currentAnalyzedComponent) {
-                return;
-            }
-            
-            this.addChatMessage('user', message);
-            input.value = '';
-            this.showChatTyping();
-            
-            try {
-                const response = await this.processEnhancedChatQuery(message);
-                this.hideChatTyping();
-                this.addChatMessage('assistant', response);
-            } catch (error) {
-                this.hideChatTyping();
-                this.addChatMessage('assistant', `I apologize, but I encountered an error processing your question: ${error.message}. Please try rephrasing or ask a different question about the analysis.`);
-            }
-        }
+    const input = document.getElementById('chatInput');
+    const sendBtn = document.getElementById('chatSendBtn');
+    const message = input.value.trim();
+    
+    console.log('Send chat message called:', message); // Debug log
+    
+    if (!message) {
+        this.showError('Please enter a message');
+        return;
+    }
+    
+    if (!this.currentAnalyzedComponent) {
+        this.showError('Please analyze a component first');
+        return;
+    }
+    
+    // Disable input while processing
+    input.disabled = true;
+    sendBtn.disabled = true;
+    sendBtn.textContent = '⏳ Processing...';
+    
+    // Add user message
+    this.addChatMessage('user', message);
+    input.value = '';
+    
+    // Show typing indicator
+    this.showChatTyping();
+    
+    try {
+        console.log('Processing chat query...'); // Debug log
+        const response = await this.processEnhancedChatQuery(message);
+        console.log('Got response:', response); // Debug log
+        
+        this.hideChatTyping();
+        this.addChatMessage('assistant', response);
+        
+    } catch (error) {
+        console.error('Chat error:', error); // Debug log
+        this.hideChatTyping();
+        this.addChatMessage('assistant', `I apologize, but I encountered an error processing your question: ${error.message}. Please try rephrasing or ask a different question about the analysis.`);
+    } finally {
+        // Re-enable input
+        input.disabled = false;
+        sendBtn.disabled = false;
+        sendBtn.textContent = '🚀 Send';
+        input.focus();
+    }
+}
 
         async processEnhancedChatQuery(question) {
             const analysisData = this.componentAnalysis[this.currentAnalyzedComponent];
@@ -2769,20 +3217,25 @@ Provide a comprehensive, helpful response based on the enhanced analysis:
         }
 
         addChatMessage(sender, content) {
-            const messagesContainer = document.getElementById('chatMessages');
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `chat-message ${sender}`;
-            
-            messageDiv.innerHTML = `
-                <div class="sender">${sender === 'user' ? 'You' : 'Enhanced Assistant'}</div>
-                <div class="content">${this.formatChatMessage(content)}</div>
-            `;
-            
-            messagesContainer.appendChild(messageDiv);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            
-            this.chatHistory.push({ sender, content, timestamp: new Date().toISOString() });
-        }
+    const messagesContainer = document.getElementById('chatMessages');
+    if (!messagesContainer) {
+        console.error('Chat messages container not found');
+        return;
+    }
+    
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `chat-message ${sender}`;
+    
+    messageDiv.innerHTML = `
+        <div class="sender">${sender === 'user' ? 'You' : 'Enhanced Assistant'}</div>
+        <div class="content">${this.formatChatMessage(content)}</div>
+    `;
+    
+    messagesContainer.appendChild(messageDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    
+    this.chatHistory.push({ sender, content, timestamp: new Date().toISOString() });
+}
 
         formatChatMessage(content) {
             return content
@@ -2794,22 +3247,55 @@ Provide a comprehensive, helpful response based on the enhanced analysis:
         }
 
         showChatTyping() {
-            const messagesContainer = document.getElementById('chatMessages');
-            const typingDiv = document.createElement('div');
-            typingDiv.className = 'chat-message assistant';
-            typingDiv.id = 'typingIndicator';
-            
-            typingDiv.innerHTML = `
-                <div class="sender">Enhanced Assistant</div>
-                <div class="content">
-                    <span style="opacity: 0.7;">Analyzing your question...</span>
-                    <span style="animation: blink 1s infinite;">●</span>
-                </div>
-            `;
-            
-            messagesContainer.appendChild(typingDiv);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }
+    const messagesContainer = document.getElementById('chatMessages');
+    if (!messagesContainer) return;
+    
+    // Remove existing typing indicator
+    this.hideChatTyping();
+    
+    const typingDiv = document.createElement('div');
+    typingDiv.className = 'chat-message assistant';
+    typingDiv.id = 'typingIndicator';
+    
+    typingDiv.innerHTML = `
+        <div class="sender">Enhanced Assistant</div>
+        <div class="content">
+            <span style="opacity: 0.7;">Analyzing your question</span>
+            <span style="animation: blink 1s infinite; margin-left: 5px;">●●●</span>
+        </div>
+    `;
+    
+    messagesContainer.appendChild(typingDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+hideChatTyping() {
+    const typingIndicator = document.getElementById('typingIndicator');
+    if (typingIndicator && typingIndicator.parentNode) {
+        typingIndicator.parentNode.removeChild(typingIndicator);
+    }
+}
+
+
+// Add this method to debug event listeners
+debugEventListeners() {
+    console.log('=== Debug Event Listeners ===');
+    
+    const chatSendBtn = document.getElementById('chatSendBtn');
+    const chatInput = document.getElementById('chatInput');
+    
+    console.log('Chat send button:', chatSendBtn);
+    console.log('Chat input:', chatInput);
+    console.log('Current analyzed component:', this.currentAnalyzedComponent);
+    
+    if (chatSendBtn) {
+        console.log('Send button disabled:', chatSendBtn.disabled);
+    }
+    
+    if (chatInput) {
+        console.log('Input disabled:', chatInput.disabled);
+    }
+}
 
         hideChatTyping() {
             const typingIndicator = document.getElementById('typingIndicator');
@@ -3070,41 +3556,73 @@ extractFieldsFromAnalysis(analysisText, componentType) {
         html += '<div class="field-matrix">';
         fields.forEach(field => {
             const typeColor = this.getFieldTypeColor(field.fieldType);
-            html += `
-                <div class="field-card" style="border-top-color: ${typeColor};">
-                    <div class="field-name">${field.name}</div>
-                    <div class="field-usage">
-                        <div style="margin-bottom: 8px; color: ${typeColor};">
-                            <strong>${field.fieldType}</strong> • ${field.lifecycle}
-                        </div>
-                        <div style="margin-bottom: 10px;">
-                            ${field.usageTypes.map(type => 
-                                `<span class="usage-tag tag-${type.toLowerCase()}">${type}</span>`
-                            ).join(' ')}
-                        </div>
-                        <div style="font-size: 11px; line-height: 1.4;">
-                            <strong>Programs:</strong> ${Array.isArray(field.programs) ? field.programs.join(', ') : field.programs}<br>
-                            <strong>Lifecycle Stage:</strong> ${field.lifecycleStage}<br>
-                            <strong>Business Impact:</strong> ${field.businessImpact}
-                            ${field.picture ? `<br><strong>Picture:</strong> ${field.picture}` : ''}
-                            ${field.level ? `<br><strong>Level:</strong> ${field.level}` : ''}
-            `;
+            // Replace the field card HTML generation section with this enhanced version:
+html += `
+    <div class="field-card" style="border-top-color: ${typeColor};">
+        <div class="field-name">${field.name}</div>
+        <div class="field-usage">
+            <div style="margin-bottom: 8px; color: ${typeColor};">
+                <strong>${field.fieldType}</strong> • ${field.lifecycle}
+            </div>
             
-            // Add unused fields list if this is an unused fields card
-            if (field.unusedFields && field.unusedFields.length > 0) {
-                html += `<br><strong>Unused Fields List:</strong><br>`;
-                html += `<div style="max-height: 100px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px; margin-top: 5px;">`;
-                field.unusedFields.forEach(unusedField => {
-                    html += `<div style="font-family: monospace; font-size: 10px; color: #ff9800; margin: 2px 0;">• ${unusedField}</div>`;
-                });
-                html += `</div>`;
-            }
+            <!-- Usage Statistics -->
+            <div style="margin-bottom: 10px; font-size: 10px; background: rgba(0,0,0,0.2); padding: 5px; border-radius: 3px;">
+                <strong>Usage:</strong> ${field.usageCount || 0} times | 
+                <strong>Source:</strong> ${field.sourceType || 'Definition'} |
+                <strong>Size:</strong> ${field.size || 'N/A'} | 
+                <strong>Type:</strong> ${field.dataType || 'N/A'}
+            </div>
             
-            html += `
-                        </div>
-                    </div>
-                </div>
-            `;
+            <!-- Usage Type Tags -->
+            <div style="margin-bottom: 10px;">
+                ${field.usageTypes.map(type => 
+                    `<span class="usage-tag tag-${type.toLowerCase()}">${type}</span>`
+                ).join(' ')}
+            </div>
+            
+            <!-- Detailed Information -->
+            <div style="font-size: 11px; line-height: 1.4;">
+                <strong>Programs:</strong> ${Array.isArray(field.programs) ? field.programs.join(', ') : field.programs}<br>
+                <strong>Lifecycle Stage:</strong> ${field.lifecycleStage}<br>
+                <strong>Business Impact:</strong> ${field.businessImpact}
+                ${field.picture ? `<br><strong>Picture:</strong> ${field.picture}` : ''}
+                ${field.level ? `<br><strong>Level:</strong> ${field.level}` : ''}
+                ${field.derivedFrom && field.derivedFrom.length > 0 ? `<br><strong>Derived From:</strong> ${field.derivedFrom.join(', ')}` : ''}
+`;
+
+// Add detailed operation breakdown if available
+if (field.fileOperations) {
+    if (field.fileOperations.input.length > 0) {
+        html += `<br><strong>Input Operations:</strong> ${field.fileOperations.input.length}`;
+    }
+    if (field.fileOperations.output.length > 0) {
+        html += `<br><strong>Output Operations:</strong> ${field.fileOperations.output.length}`;
+    }
+    if (field.fileOperations.calculations.length > 0) {
+        html += `<br><strong>Calculations:</strong> ${field.fileOperations.calculations.length}`;
+    }
+}
+
+// Add validation rules if any
+if (field.validationRules && field.validationRules.length > 0) {
+    html += `<br><strong>Validation Rules:</strong> ${field.validationRules.length} found`;
+}
+
+// Add unused fields list if this is an unused fields card
+if (field.unusedFields && field.unusedFields.length > 0) {
+    html += `<br><strong>Unused Fields List:</strong><br>`;
+    html += `<div style="max-height: 100px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px; margin-top: 5px;">`;
+    field.unusedFields.forEach(unusedField => {
+        html += `<div style="font-family: monospace; font-size: 10px; color: #ff9800; margin: 2px 0;">• ${unusedField}</div>`;
+    });
+    html += `</div>`;
+}
+
+html += `
+            </div>
+        </div>
+    </div>
+`;
         });
         html += '</div>';
     } else {
@@ -3391,38 +3909,66 @@ getDependencyTypeIcon(depType) {
         }
 
         displaySpecializedDependencyAnalysis(componentName, analysis) {
-            const container = document.getElementById('dependenciesContent');
-            
-            let html = `
-                <h3>🔗 Enhanced Dependency Analysis: ${componentName}</h3>
-                <p style="margin-bottom: 20px;">
-                    Complete dependency mapping with availability checking and risk assessment.
-                </p>
+    const container = document.getElementById('dependenciesContent');
+    
+    // Check if we already have dependency analysis results
+    if (this.componentAnalysis[componentName]?.dependencyReport) {
+        // Display existing results
+        this.displayDependencyResults(container, componentName, this.componentAnalysis[componentName].dependencyReport);
+        return;
+    }
+    
+    let html = `
+        <h3>🔗 Enhanced Dependency Analysis: ${componentName}</h3>
+        <p style="margin-bottom: 20px;">
+            Complete dependency mapping with availability checking and risk assessment.
+        </p>
+        
+        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; text-align: center;">
+            <button class="action-btn secondary-btn" id="checkDependenciesBtn" style="width: auto; padding: 12px 24px; margin: 0 auto; display: block;">
+                🔍 Check Component Dependencies
+            </button>
+            <p style="font-size: 12px; margin-top: 15px; opacity: 0.8;">
+                This will scan all uploaded files to identify dependencies and check availability
+            </p>
+        </div>
+    `;
+    
+    container.innerHTML = html;
+    
+    // Add event listener for dependency check
+    const checkBtn = document.getElementById('checkDependenciesBtn');
+    if (checkBtn) {
+        checkBtn.addEventListener('click', async () => {
+            try {
+                checkBtn.disabled = true;
+                checkBtn.textContent = '⏳ Analyzing Dependencies...';
                 
-                <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; text-align: center;">
-                    <button class="action-btn secondary-btn" id="checkDependenciesBtn" style="width: auto; padding: 12px 24px;">
-                        🔍 Check Component Dependencies
-                    </button>
-                    <p style="font-size: 12px; margin-top: 15px; opacity: 0.8;">
-                        This will scan all uploaded files to identify dependencies and check availability
-                    </p>
-                </div>
-            `;
-            
-            container.innerHTML = html;
-            
-            // Add event listener for dependency check
-            document.getElementById('checkDependenciesBtn').addEventListener('click', async () => {
-                try {
-                    const dependencyReport = await this.checkComponentDependencies(componentName);
-                    this.componentAnalysis[componentName].dependencyReport = dependencyReport;
-                    this.displayDependencyResults(container, componentName, dependencyReport);
-                    this.saveToStorage();
-                } catch (error) {
-                    console.error('Dependency check failed:', error);
+                console.log('Starting dependency check for:', componentName); // Debug log
+                
+                const dependencyReport = await this.checkComponentDependencies(componentName);
+                
+                console.log('Dependency report generated:', dependencyReport); // Debug log
+                
+                // Store the results
+                if (!this.componentAnalysis[componentName]) {
+                    this.componentAnalysis[componentName] = {};
                 }
-            });
-        }
+                this.componentAnalysis[componentName].dependencyReport = dependencyReport;
+                
+                // Display the results immediately
+                this.displayDependencyResults(container, componentName, dependencyReport);
+                this.saveToStorage();
+                
+            } catch (error) {
+                console.error('Dependency check failed:', error);
+                checkBtn.disabled = false;
+                checkBtn.textContent = '🔍 Check Component Dependencies';
+                this.showError(`Dependency analysis failed: ${error.message}`);
+            }
+        });
+    }
+}
 
         async checkComponentDependencies(componentName) {
             this.showLoading();
@@ -3559,22 +4105,347 @@ getDependencyTypeIcon(depType) {
 }
 
         extractCopybookFields(section, fields) {
-            const lines = section.split('\n');
-            lines.forEach(line => {
-                const fieldMatch = line.match(/([A-Z][A-Z0-9\-_]{2,})\s*.*PIC\s*([X9SV\(\)]+)/i);
-                if (fieldMatch) {
-                    fields.push({
-                        name: fieldMatch[1],
-                        fieldType: 'COPYBOOK FIELD',
-                        lifecycle: 'Definition → Usage → Processing',
-                        usageTypes: ['defined', 'referenced'],
-                        programs: this.extractProgramReferences(section),
-                        lifecycleStage: 'Active Definition',
-                        businessImpact: this.assessBusinessImpact(fieldMatch[1], section)
-                    });
-                }
+    const lines = section.split('\n');
+    const fieldDefinitions = new Map();
+    
+    // First pass: Extract all field definitions
+    lines.forEach((line, index) => {
+        const fieldMatch = line.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]{2,})\s+.*?PIC\s+([X9SV\(\)]+)/i);
+        if (fieldMatch) {
+            const level = parseInt(fieldMatch[1]);
+            const fieldName = fieldMatch[2];
+            const picture = fieldMatch[3];
+            
+            fieldDefinitions.set(fieldName, {
+                name: fieldName,
+                level: level,
+                picture: picture,
+                definitionLine: line.trim(),
+                lineNumber: index + 1,
+                isGroup: level < 49 && !picture.match(/[X9]/),
+                size: this.calculateFieldSize(picture),
+                dataType: this.determineDataType(picture)
             });
         }
+    });
+    
+    // Second pass: Analyze usage patterns across all uploaded files
+    fieldDefinitions.forEach((fieldDef, fieldName) => {
+        const usageAnalysis = this.analyzeFieldUsageAcrossFiles(fieldName);
+        
+        fields.push({
+            name: fieldName,
+            fieldType: this.determineFieldCategory(fieldDef, usageAnalysis),
+            lifecycle: this.generateFieldLifecycle(usageAnalysis),
+            usageTypes: usageAnalysis.usageTypes,
+            programs: usageAnalysis.programs,
+            lifecycleStage: usageAnalysis.isUnused ? 'Stale Definition' : 'Active',
+            businessImpact: this.assessFieldBusinessImpact(fieldName, usageAnalysis),
+            level: fieldDef.level,
+            picture: fieldDef.picture,
+            size: fieldDef.size,
+            dataType: fieldDef.dataType,
+            usageCount: usageAnalysis.totalUsages,
+            sourceType: usageAnalysis.sourceType,
+            derivedFrom: usageAnalysis.derivedFrom,
+            isUnused: usageAnalysis.isUnused,
+            validationRules: usageAnalysis.validationRules,
+            fileOperations: usageAnalysis.fileOperations
+        });
+    });
+}
+
+analyzeFieldUsageAcrossFiles(fieldName) {
+    const usageAnalysis = {
+        programs: [],
+        usageTypes: [],
+        totalUsages: 0,
+        sourceType: 'Unknown',
+        derivedFrom: [],
+        isUnused: true,
+        validationRules: [],
+        fileOperations: {
+            input: [],
+            output: [],
+            calculations: []
+        }
+    };
+    
+    this.uploadedFiles.forEach(file => {
+        const fileAnalysis = this.analyzeFieldInFile(fieldName, file);
+        
+        if (fileAnalysis.hasUsage) {
+            usageAnalysis.isUnused = false;
+            usageAnalysis.programs.push(file.name);
+            usageAnalysis.totalUsages += fileAnalysis.usageCount;
+            
+            // Merge usage types
+            fileAnalysis.usageTypes.forEach(type => {
+                if (!usageAnalysis.usageTypes.includes(type)) {
+                    usageAnalysis.usageTypes.push(type);
+                }
+            });
+            
+            // Analyze source type
+            if (fileAnalysis.isInput) {
+                usageAnalysis.sourceType = 'Input File';
+                usageAnalysis.fileOperations.input.push(...fileAnalysis.inputOperations);
+            }
+            
+            if (fileAnalysis.isDerived) {
+                usageAnalysis.sourceType = 'Derived/Calculated';
+                usageAnalysis.derivedFrom.push(...fileAnalysis.derivedSources);
+                usageAnalysis.fileOperations.calculations.push(...fileAnalysis.calculations);
+            }
+            
+            if (fileAnalysis.isOutput) {
+                usageAnalysis.fileOperations.output.push(...fileAnalysis.outputOperations);
+            }
+            
+            // Collect validation rules
+            usageAnalysis.validationRules.push(...fileAnalysis.validationRules);
+        }
+    });
+    
+    // Clean up duplicates
+    usageAnalysis.programs = [...new Set(usageAnalysis.programs)];
+    usageAnalysis.derivedFrom = [...new Set(usageAnalysis.derivedFrom)];
+    
+    return usageAnalysis;
+}
+
+analyzeFieldInFile(fieldName, file) {
+    const analysis = {
+        hasUsage: false,
+        usageCount: 0,
+        usageTypes: [],
+        isInput: false,
+        isDerived: false,
+        isOutput: false,
+        inputOperations: [],
+        outputOperations: [],
+        calculations: [],
+        derivedSources: [],
+        validationRules: []
+    };
+    
+    const lines = file.content.split('\n');
+    const upperFieldName = fieldName.toUpperCase();
+    
+    lines.forEach((line, index) => {
+        const upperLine = line.toUpperCase();
+        
+        if (upperLine.includes(upperFieldName)) {
+            analysis.hasUsage = true;
+            analysis.usageCount++;
+            
+            // Analyze different types of usage
+            this.analyzeLineForFieldUsage(line, upperFieldName, analysis, index + 1, file.name);
+        }
+    });
+    
+    return analysis;
+}
+
+analyzeLineForFieldUsage(line, fieldName, analysis, lineNumber, fileName) {
+    const upperLine = line.toUpperCase();
+    
+    // Input operations
+    if (upperLine.includes('READ') || upperLine.includes('ACCEPT')) {
+        analysis.isInput = true;
+        analysis.usageTypes.push('input');
+        analysis.inputOperations.push({
+            operation: 'READ/ACCEPT',
+            line: lineNumber,
+            file: fileName
+        });
+    }
+    
+    // Output operations  
+    if (upperLine.includes('WRITE') || upperLine.includes('DISPLAY')) {
+        analysis.isOutput = true;
+        analysis.usageTypes.push('output');
+        analysis.outputOperations.push({
+            operation: 'WRITE/DISPLAY',
+            line: lineNumber,
+            file: fileName
+        });
+    }
+    
+    // Derived/Calculated fields
+    if (upperLine.includes('COMPUTE') || upperLine.includes('ADD') || upperLine.includes('SUBTRACT') || 
+        upperLine.includes('MULTIPLY') || upperLine.includes('DIVIDE')) {
+        analysis.isDerived = true;
+        analysis.usageTypes.push('calculated');
+        
+        // Extract what it's derived from
+        const moveMatch = line.match(/(?:COMPUTE|ADD|SUBTRACT|MULTIPLY|DIVIDE)\s+([A-Z][A-Z0-9\-_]*)/i);
+        if (moveMatch) {
+            analysis.derivedSources.push(moveMatch[1]);
+        }
+        
+        analysis.calculations.push({
+            operation: this.extractOperation(upperLine),
+            line: lineNumber,
+            file: fileName
+        });
+    }
+    
+    // MOVE operations
+    if (upperLine.includes('MOVE')) {
+        const moveToMatch = line.match(/MOVE\s+([A-Z][A-Z0-9\-_]*)\s+TO\s+([A-Z][A-Z0-9\-_]*)/i);
+        if (moveToMatch) {
+            if (moveToMatch[2].toUpperCase() === fieldName) {
+                analysis.usageTypes.push('assigned');
+                analysis.derivedSources.push(moveToMatch[1]);
+            } else if (moveToMatch[1].toUpperCase() === fieldName) {
+                analysis.usageTypes.push('source');
+            }
+        }
+    }
+    
+    // Validation rules
+    if (upperLine.includes('IF') && upperLine.includes(fieldName)) {
+        const validationRule = this.extractValidationRule(line, fieldName);
+        if (validationRule) {
+            analysis.validationRules.push(validationRule);
+            analysis.usageTypes.push('validated');
+        }
+    }
+    
+    // Reference usage
+    if (!analysis.usageTypes.length) {
+        analysis.usageTypes.push('referenced');
+    }
+}
+
+extractOperation(line) {
+    if (line.includes('COMPUTE')) return 'COMPUTE';
+    if (line.includes('ADD')) return 'ADD';
+    if (line.includes('SUBTRACT')) return 'SUBTRACT';
+    if (line.includes('MULTIPLY')) return 'MULTIPLY';
+    if (line.includes('DIVIDE')) return 'DIVIDE';
+    return 'UNKNOWN';
+}
+
+extractValidationRule(line, fieldName) {
+    const ifMatch = line.match(/IF\s+([^THEN]+)/i);
+    if (ifMatch) {
+        return {
+            condition: ifMatch[1].trim(),
+            field: fieldName,
+            type: 'conditional'
+        };
+    }
+    return null;
+}
+
+determineFieldCategory(fieldDef, usageAnalysis) {
+    if (usageAnalysis.isUnused) {
+        return 'UNUSED FIELD';
+    }
+    
+    if (usageAnalysis.sourceType === 'Derived/Calculated') {
+        return 'CALCULATED FIELD';
+    }
+    
+    if (usageAnalysis.sourceType === 'Input File') {
+        return 'INPUT FIELD';
+    }
+    
+    if (fieldDef.level === 1 || fieldDef.level === 77) {
+        return 'RECORD FIELD';
+    }
+    
+    if (fieldDef.isGroup) {
+        return 'GROUP FIELD';
+    }
+    
+    return 'DATA FIELD';
+}
+
+generateFieldLifecycle(usageAnalysis) {
+    if (usageAnalysis.isUnused) {
+        return 'Defined → Never Used';
+    }
+    
+    const stages = [];
+    
+    if (usageAnalysis.sourceType === 'Input File') {
+        stages.push('Input');
+    } else {
+        stages.push('Defined');
+    }
+    
+    if (usageAnalysis.usageTypes.includes('validated')) {
+        stages.push('Validated');
+    }
+    
+    if (usageAnalysis.usageTypes.includes('calculated')) {
+        stages.push('Calculated');
+    }
+    
+    if (usageAnalysis.usageTypes.includes('assigned')) {
+        stages.push('Assigned');
+    }
+    
+    if (usageAnalysis.fileOperations.output.length > 0) {
+        stages.push('Output');
+    } else {
+        stages.push('Processed');
+    }
+    
+    return stages.join(' → ');
+}
+
+assessFieldBusinessImpact(fieldName, usageAnalysis) {
+    if (usageAnalysis.isUnused) {
+        return 'Low - Cleanup Candidate';
+    }
+    
+    if (usageAnalysis.totalUsages > 10) {
+        return 'High - Heavily Used';
+    }
+    
+    if (usageAnalysis.validationRules.length > 0) {
+        return 'High - Business Logic';
+    }
+    
+    if (usageAnalysis.sourceType === 'Input File') {
+        return 'High - Data Input';
+    }
+    
+    if (usageAnalysis.fileOperations.calculations.length > 0) {
+        return 'Medium - Calculated Value';
+    }
+    
+    return 'Medium - Standard Processing';
+}
+
+calculateFieldSize(picture) {
+    if (!picture) return 0;
+    
+    // Simple PIC size calculation
+    const numMatch = picture.match(/9+|\d+/);
+    const charMatch = picture.match(/X+/);
+    
+    if (numMatch) return numMatch[0].length;
+    if (charMatch) return charMatch[0].length;
+    
+    return picture.length;
+}
+
+determineDataType(picture) {
+    if (!picture) return 'Unknown';
+    
+    if (picture.includes('9')) return 'Numeric';
+    if (picture.includes('X')) return 'Alphanumeric';
+    if (picture.includes('S')) return 'Signed Numeric';
+    if (picture.includes('V')) return 'Decimal';
+    
+    return 'Text';
+}
+
 
         extractProgramFields(section, fields) {
             const lines = section.split('\n');
@@ -4028,15 +4899,106 @@ Provide component-specific dependency analysis with availability checking and ri
         }
 
         displayDependencyResults(container, componentName, depReport) {
-            container.innerHTML = `
-                <h3>🔗 Dependency Analysis Complete: ${componentName}</h3>
-                <p>Comprehensive dependency mapping completed with availability checking.</p>
-                <div style="background: rgba(76, 175, 80, 0.1); padding: 20px; border-radius: 10px; margin-top: 20px;">
-                    <h4 style="color: #FFD700;">📊 Dependency Summary</h4>
-                    <p>Analysis completed with intelligent chunking applied for optimal dependency scanning.</p>
+    console.log('Displaying dependency results:', depReport); // Debug log
+    
+    if (!depReport || !depReport.dependencies) {
+        container.innerHTML = `
+            <h3>🔗 Dependency Analysis: ${componentName}</h3>
+            <div style="background: rgba(244, 67, 54, 0.1); padding: 20px; border-radius: 10px; border-left: 4px solid #f44336;">
+                <p>❌ No dependency data available. Please try running the dependency check again.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    const deps = depReport.dependencies;
+    
+    let html = `
+        <h3>🔗 Complete Dependency Analysis: ${componentName}</h3>
+        <p style="margin-bottom: 20px;">
+            Comprehensive dependency mapping completed at ${new Date(depReport.timestamp).toLocaleString()}.
+        </p>
+        
+        <!-- Dependency Summary -->
+        <div style="background: rgba(76, 175, 80, 0.1); padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #4CAF50;">
+            <h4 style="color: #FFD700; margin-bottom: 15px;">📊 Dependency Summary</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; margin-bottom: 15px;">
+                <div style="text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${depReport.summary.totalDependencies}</div>
+                    <div style="font-size: 11px;">Total Dependencies</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #4CAF50;">${depReport.summary.presentDependencies}</div>
+                    <div style="font-size: 11px;">Present</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #f44336;">${depReport.summary.totalDependencies - depReport.summary.presentDependencies}</div>
+                    <div style="font-size: 11px;">Missing</div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Display each dependency type
+    let hasAnyDependencies = false;
+    
+    Object.keys(deps).forEach(depType => {
+        if (deps[depType] && deps[depType].length > 0) {
+            hasAnyDependencies = true;
+            const title = this.getDependencyTypeTitle(depType);
+            const icon = this.getDependencyTypeIcon(depType);
+            
+            html += `
+                <div class="lifecycle-flow" style="margin-bottom: 20px;">
+                    <h4 style="color: #FFD700; margin-bottom: 10px;">${icon} ${title}</h4>
+                    <div class="flow-stage">
+                        <div class="stage-content">
+                            <div class="stage-details">
+                                ${deps[depType].map(dep => {
+                                    const isPresent = this.uploadedFiles.some(f => 
+                                        f.content.toUpperCase().includes(dep.toUpperCase()) || 
+                                        f.name.toUpperCase().includes(dep.toUpperCase())
+                                    );
+                                    const statusColor = isPresent ? '#4CAF50' : '#f44336';
+                                    const statusIcon = isPresent ? '✅' : '❌';
+                                    
+                                    return `
+                                        <div style="display: flex; justify-content: space-between; align-items: center; margin: 5px 0; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 5px;">
+                                            <span style="font-family: monospace; color: white;">${dep}</span>
+                                            <span style="color: ${statusColor}; font-size: 12px; font-weight: bold;">
+                                                ${statusIcon} ${isPresent ? 'PRESENT' : 'MISSING'}
+                                            </span>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                    </div>
                 </div>
             `;
         }
+    });
+    
+    if (!hasAnyDependencies || depReport.summary.totalDependencies === 0) {
+        html += `
+            <div style="background: rgba(255, 193, 7, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #FFC107;">
+                <h4 style="color: #FFC107; margin-bottom: 10px;">ℹ️ No Dependencies Found</h4>
+                <p>No dependencies were detected for <strong>${componentName}</strong></p>
+                <p style="font-size: 12px; opacity: 0.8; margin-top: 10px;">
+                    This could indicate:
+                </p>
+                <ul style="text-align: left; max-width: 400px; margin: 10px auto; font-size: 12px;">
+                    <li>A standalone component with no external dependencies</li>
+                    <li>Dependencies not captured in the uploaded files</li>
+                    <li>Different naming conventions than expected</li>
+                </ul>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+    console.log('Dependency results displayed successfully'); // Debug log
+}
         
 
         // === INITIALIZATION AND CLEANUP ===
