@@ -658,6 +658,23 @@
             margin: 2px;
             font-weight: bold;
         }
+        /* Additional styles for unused fields */
+.usage-tag.tag-unused {
+    background: #f44336 !important;
+    color: white;
+}
+
+.usage-tag.tag-defined {
+    background: #4CAF50;
+}
+
+.usage-tag.tag-calculated {
+    background: #E91E63;
+}
+
+.usage-tag.tag-computed {
+    background: #E91E63;
+}
 
         .tag-read { background: #4CAF50; }
         .tag-write { background: #2196F3; }
@@ -1456,21 +1473,30 @@
             }
 
             switchTab(e) {
-                const targetTab = e.target.dataset.tab;
-                if (!targetTab) return;
-                
-                // Update tab buttons
-                document.querySelectorAll('.tab').forEach(tab => {
-                    tab.classList.remove('active');
-                });
-                e.target.classList.add('active');
-                
-                // Update tab content
-                document.querySelectorAll('.tab-content').forEach(content => {
-                    content.classList.remove('active');
-                });
-                document.getElementById(targetTab).classList.add('active');
-            }
+    const targetTab = e.target?.dataset?.tab || e.dataset?.tab;
+    if (!targetTab) return;
+    
+    // Update tab buttons
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    // Add active class to clicked tab
+    const clickedTab = e.target || e;
+    if (clickedTab.classList) {
+        clickedTab.classList.add('active');
+    }
+    
+    // Update tab content
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    
+    const targetContent = document.getElementById(targetTab);
+    if (targetContent) {
+        targetContent.classList.add('active');
+    }
+}
 
             // === UTILITY METHODS ===
             showLoading() { 
@@ -2793,33 +2819,146 @@ Provide a comprehensive, helpful response based on the enhanced analysis:
         }
 
         enableChat() {
-            document.getElementById('chatInput').disabled = false;
-            document.getElementById('chatSendBtn').disabled = false;
+    const chatInput = document.getElementById('chatInput');
+    const chatSendBtn = document.getElementById('chatSendBtn');
+    
+    if (chatInput && chatSendBtn) {
+        chatInput.disabled = false;
+        chatSendBtn.disabled = false;
+        
+        // Clear the "Enhanced chat enabled after component analysis" message
+        const existingMessages = document.querySelectorAll('.chat-message.assistant');
+        const lastMessage = existingMessages[existingMessages.length - 1];
+        if (lastMessage && lastMessage.textContent.includes('Enhanced chat enabled after component analysis')) {
+            lastMessage.remove();
+        }
+        
+        this.addChatMessage('assistant', 
+            `🎯 **Enhanced analysis complete for ${this.currentAnalyzedComponent}!** 
             
-            this.addChatMessage('assistant', 
-                `🎯 **Enhanced analysis complete for ${this.currentAnalyzedComponent}!** 
-                
 **Quality Metrics:**
-• Analysis Quality: ${this.componentAnalysis[this.currentAnalyzedComponent].qualityScore}/10
-• Completeness: ${this.componentAnalysis[this.currentAnalyzedComponent].completeness.score}%
-• Confidence: ${this.componentAnalysis[this.currentAnalyzedComponent].componentInfo.confidenceScore}/10
+- Analysis Quality: ${this.componentAnalysis[this.currentAnalyzedComponent]?.qualityScore || 'N/A'}/10
+- Completeness: ${this.componentAnalysis[this.currentAnalyzedComponent]?.completeness?.score || 'N/A'}%
+- Confidence: ${this.componentAnalysis[this.currentAnalyzedComponent]?.componentInfo?.confidenceScore || 'N/A'}/10
 
 **I can now provide detailed insights about:**
-• Field creation, usage, and lifecycle patterns
-• Program relationships and call chains  
-• Data flow and transformation logic
-• Business impact and modernization opportunities
-• Risk assessment for changes
-• Technical debt and optimization suggestions
+- Field creation, usage, and lifecycle patterns
+- Program relationships and call chains  
+- Data flow and transformation logic
+- Business impact and modernization opportunities
+- Risk assessment for changes
+- Technical debt and optimization suggestions
 
 **Try asking specific questions like:**
-• "How is the CUSTOMER-ID field populated?"
-• "Which programs would break if I change this?"
-• "What are the modernization opportunities?"
-• "Show me the complete data flow"
-                `
-            );
+- "How is the CUSTOMER-ID field populated?"
+- "Which programs would break if I change this?"
+- "What are the modernization opportunities?"
+- "Show me the complete data flow"
+- "List all unused fields"
+            `
+        );
+    }
+}
+
+// Enhanced field extraction with unused field detection
+extractUnusedFields(analysisText) {
+    const unusedInfo = { count: 0, fields: [] };
+    
+    // Look for patterns like "14 fields never referenced" or "unused fields"
+    const countMatch = analysisText.match(/(\d+)\s+fields?\s+(?:never\s+referenced|unused|not\s+used|stale)/i);
+    if (countMatch) {
+        unusedInfo.count = parseInt(countMatch[1]);
+    }
+    
+    // Extract field names from the analysis
+    const fieldMatches = analysisText.match(/\b[A-Z][A-Z0-9\-_]{2,}\b/g) || [];
+    const potentialFields = [...new Set(fieldMatches)].filter(field => 
+        !['COPY', 'CALL', 'MOVE', 'COMPUTE', 'PROGRAM', 'DIVISION', 'SECTION', 'WORKING', 'STORAGE', 'LINKAGE'].includes(field)
+    );
+    
+    // Look for specific unused field listings
+    const lines = analysisText.split('\n');
+    let inUnusedSection = false;
+    
+    lines.forEach(line => {
+        const upperLine = line.toUpperCase();
+        
+        if (upperLine.includes('UNUSED') && upperLine.includes('FIELD')) {
+            inUnusedSection = true;
+        } else if (upperLine.includes('**') && inUnusedSection) {
+            inUnusedSection = false;
         }
+        
+        if (inUnusedSection) {
+            const fieldMatch = line.match(/\b([A-Z][A-Z0-9\-_]{3,})\b/);
+            if (fieldMatch && !unusedInfo.fields.includes(fieldMatch[1])) {
+                unusedInfo.fields.push(fieldMatch[1]);
+            }
+        }
+    });
+    
+    // If we found a count but no specific fields, use potential fields
+    if (unusedInfo.count > 0 && unusedInfo.fields.length === 0) {
+        unusedInfo.fields = potentialFields.slice(0, unusedInfo.count);
+    }
+    
+    return unusedInfo;
+}
+
+extractFieldsFromAnalysis(analysisText, componentType) {
+    const fields = [];
+    const lines = analysisText.split('\n');
+    
+    lines.forEach(line => {
+        // Look for COBOL field definitions
+        const fieldDefMatch = line.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]{2,})\s+.*PIC\s+([X9SV\(\)]+)/i);
+        if (fieldDefMatch) {
+            fields.push({
+                name: fieldDefMatch[2],
+                fieldType: 'COPYBOOK FIELD',
+                lifecycle: 'Definition → Usage → Processing',
+                usageTypes: ['defined'],
+                programs: this.extractProgramReferences(line),
+                lifecycleStage: 'Active Definition',
+                businessImpact: this.assessBusinessImpact(fieldDefMatch[2], line),
+                level: fieldDefMatch[1],
+                picture: fieldDefMatch[3]
+            });
+        }
+        
+        // Look for MOVE operations
+        const moveMatch = line.match(/MOVE\s+([A-Z][A-Z0-9\-_]{2,})\s+TO\s+([A-Z][A-Z0-9\-_]{2,})/i);
+        if (moveMatch) {
+            fields.push({
+                name: moveMatch[2],
+                fieldType: 'PROGRAM VARIABLE',
+                lifecycle: 'Input → Processing → Output',
+                usageTypes: ['write', 'modified'],
+                programs: ['Current Program'],
+                lifecycleStage: 'Active Processing',
+                businessImpact: 'Medium'
+            });
+        }
+        
+        // Look for COMPUTE operations
+        const computeMatch = line.match(/COMPUTE\s+([A-Z][A-Z0-9\-_]{2,})/i);
+        if (computeMatch) {
+            fields.push({
+                name: computeMatch[1],
+                fieldType: 'CALCULATED FIELD',
+                lifecycle: 'Calculation → Storage → Output',
+                usageTypes: ['calculated', 'computed'],
+                programs: ['Current Program'],
+                lifecycleStage: 'Active Calculation',
+                businessImpact: 'High'
+            });
+        }
+    });
+    
+    return fields;
+}
+
+
         // === DISPLAY METHODS ===
         displayComponentAnalysis(componentName) {
             const analysis = this.componentAnalysis[componentName];
@@ -2913,59 +3052,296 @@ Provide a comprehensive, helpful response based on the enhanced analysis:
             container.innerHTML = html;
         }
 
-        displaySpecializedFieldMatrix(componentName, analysis) {
-            const container = document.getElementById('fieldMatrixContent');
-            const componentType = analysis.componentInfo.type;
-            
-            let html = `
-                <h3>📋 ${componentType} Field Matrix: ${componentName}</h3>
-                <p style="margin-bottom: 20px;">
-                    Specialized field analysis with intelligent ${componentType.toLowerCase()} chunking applied.
-                </p>
+ displaySpecializedFieldMatrix(componentName, analysis) {
+    const container = document.getElementById('fieldMatrixContent');
+    const componentType = analysis.componentInfo.type;
+    
+    let html = `
+        <h3>📋 ${componentType} Field Matrix: ${componentName}</h3>
+        <p style="margin-bottom: 20px;">
+            Specialized field analysis with intelligent ${componentType.toLowerCase()} chunking applied.
+        </p>
+    `;
+    
+    // Extract field information
+    const fields = this.extractSpecializedFieldInfo(analysis.analysis, componentType);
+    
+    if (fields.length > 0) {
+        html += '<div class="field-matrix">';
+        fields.forEach(field => {
+            const typeColor = this.getFieldTypeColor(field.fieldType);
+            html += `
+                <div class="field-card" style="border-top-color: ${typeColor};">
+                    <div class="field-name">${field.name}</div>
+                    <div class="field-usage">
+                        <div style="margin-bottom: 8px; color: ${typeColor};">
+                            <strong>${field.fieldType}</strong> • ${field.lifecycle}
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            ${field.usageTypes.map(type => 
+                                `<span class="usage-tag tag-${type.toLowerCase()}">${type}</span>`
+                            ).join(' ')}
+                        </div>
+                        <div style="font-size: 11px; line-height: 1.4;">
+                            <strong>Programs:</strong> ${Array.isArray(field.programs) ? field.programs.join(', ') : field.programs}<br>
+                            <strong>Lifecycle Stage:</strong> ${field.lifecycleStage}<br>
+                            <strong>Business Impact:</strong> ${field.businessImpact}
+                            ${field.picture ? `<br><strong>Picture:</strong> ${field.picture}` : ''}
+                            ${field.level ? `<br><strong>Level:</strong> ${field.level}` : ''}
             `;
             
-            // Add type-specific field information
-            const fields = this.extractSpecializedFieldInfo(analysis.analysis, componentType);
-            
-            if (fields.length > 0) {
-                html += '<div class="field-matrix">';
-                fields.forEach(field => {
-                    const typeColor = this.getFieldTypeColor(field.fieldType);
-                    html += `
-                        <div class="field-card" style="border-top-color: ${typeColor};">
-                            <div class="field-name">${field.name}</div>
-                            <div class="field-usage">
-                                <div style="margin-bottom: 8px; color: ${typeColor};">
-                                    <strong>${field.fieldType}</strong> • ${field.lifecycle}
-                                </div>
-                                <div style="margin-bottom: 10px;">
-                                    ${field.usageTypes.map(type => 
-                                        `<span class="usage-tag tag-${type.toLowerCase()}">${type}</span>`
-                                    ).join(' ')}
-                                </div>
-                                <div style="font-size: 11px; line-height: 1.4;">
-                                    <strong>Programs:</strong> ${field.programs.join(', ')}<br>
-                                    <strong>Lifecycle Stage:</strong> ${field.lifecycleStage}<br>
-                                    <strong>Business Impact:</strong> ${field.businessImpact}
-                                </div>
-                            </div>
-                        </div>
-                    `;
+            // Add unused fields list if this is an unused fields card
+            if (field.unusedFields && field.unusedFields.length > 0) {
+                html += `<br><strong>Unused Fields List:</strong><br>`;
+                html += `<div style="max-height: 100px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px; margin-top: 5px;">`;
+                field.unusedFields.forEach(unusedField => {
+                    html += `<div style="font-family: monospace; font-size: 10px; color: #ff9800; margin: 2px 0;">• ${unusedField}</div>`;
                 });
-                html += '</div>';
-            } else {
-                html += `
-                    <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; text-align: center;">
-                        <p>Specialized ${componentType.toLowerCase()} field analysis in progress...</p>
-                        <p style="font-size: 12px; opacity: 0.8; margin-top: 10px;">
-                            Enhanced chunking applied for optimal ${componentType.toLowerCase()} analysis.
-                        </p>
-                    </div>
-                `;
+                html += `</div>`;
             }
             
-            container.innerHTML = html;
+            html += `
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        html += '</div>';
+    } else {
+        html += `
+            <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; text-align: center;">
+                <p>No fields extracted from analysis. This might indicate:</p>
+                <ul style="text-align: left; max-width: 400px; margin: 15px auto; line-height: 1.6;">
+                    <li>Component is not a copybook or doesn't contain field definitions</li>
+                    <li>Analysis didn't capture field-level details</li>
+                    <li>Field information is in a different format than expected</li>
+                </ul>
+                <p style="font-size: 12px; opacity: 0.8; margin-top: 15px;">
+                    Try analyzing a copybook component or check the Enhanced Lifecycle tab for detailed analysis.
+                </p>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+}
+
+async checkComponentDependencies(componentName) {
+    this.showLoading();
+    this.updateLoadingStatus('🔍 Scanning for dependencies...');
+    
+    try {
+        const dependencies = {
+            copybooks: this.findCopybooks(componentName),
+            calledPrograms: this.findCalledPrograms(componentName),
+            callingPrograms: this.findCallingPrograms(componentName),
+            jclDatasets: this.findJCLDatasets(componentName),
+            fileReferences: this.findFileReferences(componentName)
+        };
+        
+        const dependencyReport = {
+            componentName: componentName,
+            timestamp: new Date().toISOString(),
+            dependencies: dependencies,
+            summary: {
+                totalDependencies: Object.values(dependencies).flat().length,
+                presentDependencies: Object.values(dependencies).flat().filter(dep => 
+                    this.uploadedFiles.some(f => 
+                        f.content.toUpperCase().includes(dep.toUpperCase()) || 
+                        f.name.toUpperCase().includes(dep.toUpperCase())
+                    )
+                ).length
+            }
+        };
+        
+        this.hideLoading();
+        this.showSuccess(`Dependency analysis complete for ${componentName}`);
+        
+        return dependencyReport;
+        
+    } catch (error) {
+        this.hideLoading();
+        this.showError(`Dependency analysis failed: ${error.message}`);
+        throw error;
+    }
+}
+
+findCopybooks(componentName) {
+    const copybooks = [];
+    this.uploadedFiles.forEach(file => {
+        const matches = file.content.match(/COPY\s+([A-Z][A-Z0-9\-_]+)/gi);
+        if (matches) {
+            matches.forEach(match => {
+                const copybookName = match.replace(/COPY\s+/i, '').trim();
+                if (!copybooks.includes(copybookName)) {
+                    copybooks.push(copybookName);
+                }
+            });
         }
+    });
+    return copybooks.slice(0, 10);
+}
+
+findCalledPrograms(componentName) {
+    const programs = [];
+    this.uploadedFiles.forEach(file => {
+        const matches = file.content.match(/CALL\s+['"]*([A-Z][A-Z0-9\-_]+)['"]/gi);
+        if (matches) {
+            matches.forEach(match => {
+                const programName = match.replace(/CALL\s+['"]*([A-Z][A-Z0-9\-_]+)['"]/i, '$1').trim();
+                if (!programs.includes(programName)) {
+                    programs.push(programName);
+                }
+            });
+        }
+    });
+    return programs.slice(0, 10);
+}
+
+findCallingPrograms(componentName) {
+    const programs = [];
+    this.uploadedFiles.forEach(file => {
+        if (file.content.toUpperCase().includes(`CALL ${componentName.toUpperCase()}`)) {
+            programs.push(file.name);
+        }
+    });
+    return programs;
+}
+
+findJCLDatasets(componentName) {
+    const datasets = [];
+    this.uploadedFiles.forEach(file => {
+        const matches = file.content.match(/DSN=([A-Z][A-Z0-9\.\-_]+)/gi);
+        if (matches) {
+            matches.forEach(match => {
+                const datasetName = match.replace(/DSN=/i, '').trim();
+                if (!datasets.includes(datasetName)) {
+                    datasets.push(datasetName);
+                }
+            });
+        }
+    });
+    return datasets.slice(0, 10);
+}
+
+findFileReferences(componentName) {
+    const files = [];
+    this.uploadedFiles.forEach(file => {
+        const matches = file.content.match(/SELECT\s+([A-Z][A-Z0-9\-_]+)\s+ASSIGN/gi);
+        if (matches) {
+            matches.forEach(match => {
+                const fileName = match.replace(/SELECT\s+([A-Z][A-Z0-9\-_]+)\s+ASSIGN/i, '$1').trim();
+                if (!files.includes(fileName)) {
+                    files.push(fileName);
+                }
+            });
+        }
+    });
+    return files.slice(0, 10);
+}
+
+displayDependencyResults(container, componentName, depReport) {
+    const deps = depReport.dependencies;
+    
+    let html = `
+        <h3>🔗 Complete Dependency Analysis: ${componentName}</h3>
+        <p style="margin-bottom: 20px;">
+            Comprehensive dependency mapping with availability checking and risk assessment.
+        </p>
+        
+        <!-- Dependency Summary -->
+        <div style="background: rgba(76, 175, 80, 0.1); padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #4CAF50;">
+            <h4 style="color: #FFD700; margin-bottom: 15px;">📊 Dependency Summary</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; margin-bottom: 15px;">
+                <div style="text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${depReport.summary.totalDependencies}</div>
+                    <div style="font-size: 11px;">Total Dependencies</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #4CAF50;">${depReport.summary.presentDependencies}</div>
+                    <div style="font-size: 11px;">Present</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #f44336;">${depReport.summary.totalDependencies - depReport.summary.presentDependencies}</div>
+                    <div style="font-size: 11px;">Missing</div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Display each dependency type
+    Object.keys(deps).forEach(depType => {
+        if (deps[depType].length > 0) {
+            const title = this.getDependencyTypeTitle(depType);
+            const icon = this.getDependencyTypeIcon(depType);
+            
+            html += `
+                <div class="lifecycle-flow">
+                    <h4 style="color: #FFD700; margin-bottom: 10px;">${icon} ${title}</h4>
+                    <div class="flow-stage">
+                        <div class="stage-content">
+                            <div class="stage-details">
+                                ${deps[depType].map(dep => {
+                                    const isPresent = this.uploadedFiles.some(f => 
+                                        f.content.toUpperCase().includes(dep.toUpperCase()) || 
+                                        f.name.toUpperCase().includes(dep.toUpperCase())
+                                    );
+                                    const statusColor = isPresent ? '#4CAF50' : '#f44336';
+                                    const statusIcon = isPresent ? '✅' : '❌';
+                                    
+                                    return `
+                                        <div style="display: flex; justify-content: space-between; align-items: center; margin: 5px 0; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 5px;">
+                                            <span style="font-family: monospace;">${dep}</span>
+                                            <span style="color: ${statusColor}; font-size: 12px; font-weight: bold;">
+                                                ${statusIcon} ${isPresent ? 'PRESENT' : 'MISSING'}
+                                            </span>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    });
+    
+    if (depReport.summary.totalDependencies === 0) {
+        html += `
+            <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; text-align: center;">
+                <p>No dependencies found for ${componentName}</p>
+                <p style="font-size: 12px; opacity: 0.8; margin-top: 10px;">
+                    This could indicate a standalone component or dependencies not captured in the analysis.
+                </p>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+}
+
+getDependencyTypeTitle(depType) {
+    const titles = {
+        copybooks: 'Copybook Dependencies',
+        calledPrograms: 'Called Programs',
+        callingPrograms: 'Calling Programs', 
+        jclDatasets: 'JCL Datasets',
+        fileReferences: 'File References'
+    };
+    return titles[depType] || depType;
+}
+
+getDependencyTypeIcon(depType) {
+    const icons = {
+        copybooks: '📚',
+        calledPrograms: '📞',
+        callingPrograms: '📲',
+        jclDatasets: '💾',
+        fileReferences: '📁'
+    };
+    return icons[depType] || '🔗';
+}
+
 
         displaySpecializedUsageAnalysis(componentName, analysis) {
             const container = document.getElementById('usageContent');
@@ -3131,31 +3507,56 @@ Provide a comprehensive, helpful response based on the enhanced analysis:
         }
 
         getFieldTypeColor(fieldType) {
-            const colors = {
-                'COPYBOOK FIELD': '#4CAF50',
-                'PROGRAM VARIABLE': '#2196F3', 
-                'TRACKED FIELD': '#FF9800',
-                'JCL PARAMETER': '#9C27B0'
-            };
-            return colors[fieldType] || '#FFD700';
-        }
+    const colors = {
+        'COPYBOOK FIELD': '#4CAF50',
+        'PROGRAM VARIABLE': '#2196F3', 
+        'TRACKED FIELD': '#FF9800',
+        'JCL PARAMETER': '#9C27B0',
+        'CALCULATED FIELD': '#E91E63',
+        'UNUSED FIELDS': '#f44336'
+    };
+    return colors[fieldType] || '#FFD700';
+}
 
         extractSpecializedFieldInfo(analysisText, componentType) {
-            const fields = [];
-            const sections = analysisText.split('**');
-            
-            sections.forEach(section => {
-                if (componentType === 'COPYBOOK' && section.includes('FIELD INVENTORY')) {
-                    this.extractCopybookFields(section, fields);
-                } else if (componentType === 'PROGRAM' && section.includes('DATA PROCESSING')) {
-                    this.extractProgramFields(section, fields);
-                } else if (componentType === 'FIELD' && section.includes('LIFECYCLE')) {
-                    this.extractFieldLifecycle(section, fields);
-                }
-            });
-            
-            return fields.slice(0, 8);
+    const fields = [];
+    
+    // Extract unused fields information
+    const unusedFieldsInfo = this.extractUnusedFields(analysisText);
+    
+    const sections = analysisText.split('**');
+    
+    sections.forEach(section => {
+        if (componentType === 'COPYBOOK' && (section.includes('FIELD INVENTORY') || section.includes('COMPLETE FIELD'))) {
+            this.extractCopybookFields(section, fields);
+        } else if (componentType === 'PROGRAM' && (section.includes('DATA PROCESSING') || section.includes('WORKING STORAGE'))) {
+            this.extractProgramFields(section, fields);
+        } else if (componentType === 'FIELD' && section.includes('LIFECYCLE')) {
+            this.extractFieldLifecycle(section, fields);
         }
+    });
+    
+    // If no fields found, try alternative extraction methods
+    if (fields.length === 0) {
+        fields.push(...this.extractFieldsFromAnalysis(analysisText, componentType));
+    }
+    
+    // Add unused fields information
+    if (unusedFieldsInfo.count > 0) {
+        fields.push({
+            name: `UNUSED FIELDS (${unusedFieldsInfo.count})`,
+            fieldType: 'UNUSED FIELDS',
+            lifecycle: 'Defined but Never Referenced',
+            usageTypes: ['defined', 'unused'],
+            programs: ['None'],
+            lifecycleStage: 'Stale Definition',
+            businessImpact: 'Low - Cleanup Candidate',
+            unusedFields: unusedFieldsInfo.fields
+        });
+    }
+    
+    return fields.slice(0, 12); // Increased limit to show more fields
+}
 
         extractCopybookFields(section, fields) {
             const lines = section.split('\n');
