@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mainframe Research Agent - vLLM Integration</title>
+    <title>Enhanced Component-Specific Mainframe Analysis</title>
     <style>
         * {
             margin: 0;
@@ -37,93 +37,232 @@
         .header h1 {
             font-size: 2.8rem;
             margin-bottom: 10px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
             background: linear-gradient(45deg, #FFD700, #FFA500);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
         }
 
         .main-grid {
             display: grid;
             grid-template-columns: 520px 1fr;
             gap: 25px;
-            height: auto;
             min-height: 80vh;
         }
 
-        .control-panel {
+        .control-panel, .analysis-workspace {
             background: rgba(255, 255, 255, 0.15);
             backdrop-filter: blur(15px);
             border-radius: 20px;
             padding: 25px;
             border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .control-panel {
             height: fit-content;
             max-height: 85vh;
             overflow-y: auto;
         }
 
         .analysis-workspace {
-            background: rgba(255, 255, 255, 0.15);
-            backdrop-filter: blur(15px);
-            border-radius: 20px;
-            padding: 25px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
             min-height: 80vh;
             overflow-y: auto;
         }
 
-        .api-section {
+        /* Component-specific styles */
+        .component-search-section {
             margin-bottom: 25px;
             padding: 20px;
-            background: rgba(0, 0, 0, 0.2);
+            background: rgba(76, 175, 80, 0.2);
             border-radius: 15px;
             border-left: 4px solid #4CAF50;
         }
 
-        .disclaimer-section {
-            margin-bottom: 25px;
-            padding: 15px;
-            background: rgba(255, 165, 0, 0.2);
-            border-radius: 15px;
-            border-left: 4px solid #FF9800;
-            border: 1px solid rgba(255, 165, 0, 0.3);
-        }
-
-        .upload-section {
-            margin-bottom: 25px;
-        }
-
-        .upload-area {
-            border: 3px dashed rgba(255, 255, 255, 0.5);
-            border-radius: 15px;
-            padding: 40px;
-            text-align: center;
-            transition: all 0.3s ease;
-            cursor: pointer;
-            background: rgba(255, 255, 255, 0.05);
-            min-height: 120px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-        }
-
-        .upload-area:hover {
-            border-color: rgba(255, 255, 255, 0.8);
+        .component-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
             background: rgba(255, 255, 255, 0.1);
-            transform: translateY(-2px);
+            color: white;
+            font-size: 14px;
+            margin-bottom: 10px;
+            transition: all 0.3s ease;
         }
 
-        .upload-area.dragover {
-            border-color: #4CAF50;
-            background: rgba(76, 175, 80, 0.2);
-            transform: scale(1.02);
+        .component-input:focus {
+            outline: none;
+            border-color: #FFD700;
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
         }
 
-        .file-input {
+        .component-input::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .component-suggestions {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            max-height: 150px;
+            overflow-y: auto;
             display: none;
+            border: 1px solid rgba(255, 255, 255, 0.2);
         }
 
+        .suggestion-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            transition: all 0.3s ease;
+            font-size: 13px;
+        }
+
+        .suggestion-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateX(3px);
+        }
+
+        .suggestion-item:last-child {
+            border-bottom: none;
+        }
+        
+        .lifecycle-flow {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 15px;
+            border-left: 4px solid #2196F3;
+            transition: all 0.3s ease;
+        }
+
+        .lifecycle-flow:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+        }
+
+        .flow-stage {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 15px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .flow-stage:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .stage-icon {
+            font-size: 20px;
+            margin-right: 15px;
+            min-width: 30px;
+            text-align: center;
+        }
+
+        .stage-content {
+            flex: 1;
+        }
+
+        .stage-title {
+            font-weight: bold;
+            color: #FFD700;
+            margin-bottom: 5px;
+            font-size: 16px;
+        }
+
+        .stage-details {
+            font-size: 13px;
+            opacity: 0.9;
+            line-height: 1.5;
+        }
+        
+        .field-matrix {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .field-card {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 8px;
+            border-top: 3px solid #FFD700;
+            transition: all 0.3s ease;
+        }
+
+        .field-card:hover {
+            transform: translateY(-2px);
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .field-name {
+            font-weight: bold;
+            color: #FFD700;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .field-usage {
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        
+        .usage-tag {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            margin: 2px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .tag-create {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .tag-update {
+            background: #FF9800;
+            color: white;
+        }
+
+        .tag-read {
+            background: #2196F3;
+            color: white;
+        }
+
+        .tag-unused {
+            background: #f44336;
+            color: white;
+        }
+
+        .tag-reference {
+            background: #9C27B0;
+            color: white;
+        }
+
+        .tag-working {
+            background: #607D8B;
+            color: white;
+        }
+
+        .tag-control {
+            background: #795548;
+            color: white;
+        }
+
+        .tag-key {
+            background: #E91E63;
+            color: white;
+        }
+        
+        /* Form styles */
         .section-title {
             color: #FFD700;
             font-size: 1.2rem;
@@ -212,96 +351,14 @@
             box-shadow: 0 6px 20px rgba(33, 150, 243, 0.4);
         }
 
-        .uploaded-files {
-            margin-top: 15px;
+        .component-btn {
+            background: linear-gradient(45deg, #4CAF50, #45a049);
         }
 
-        .file-item {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 10px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            transition: all 0.3s ease;
+        .component-btn:hover {
+            box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
         }
-
-        .file-item.dependency-missing {
-            border-left: 4px solid #FF9800;
-            background: rgba(255, 152, 0, 0.15);
-        }
-
-        .file-item.dependency-satisfied {
-            border-left: 4px solid #4CAF50;
-            background: rgba(76, 175, 80, 0.15);
-        }
-
-        .file-item.stored {
-            border-left: 4px solid #2196F3;
-            background: rgba(33, 150, 243, 0.15);
-        }
-
-        .file-item:hover {
-            background: rgba(255, 255, 255, 0.15);
-            transform: translateX(3px);
-        }
-
-        .file-info {
-            flex: 1;
-        }
-
-        .file-name {
-            font-weight: bold;
-            margin-bottom: 3px;
-            color: #FFD700;
-            font-size: 14px;
-        }
-
-        .file-details {
-            font-size: 11px;
-            opacity: 0.8;
-        }
-
-        .dependency-indicator {
-            font-size: 10px;
-            padding: 2px 6px;
-            border-radius: 4px;
-            margin-top: 3px;
-            display: inline-block;
-        }
-
-        .dependency-indicator.missing {
-            background: rgba(255, 152, 0, 0.3);
-            color: #FFE0B3;
-        }
-
-        .dependency-indicator.satisfied {
-            background: rgba(76, 175, 80, 0.3);
-            color: #CCFFCC;
-        }
-
-        .dependency-indicator.stored {
-            background: rgba(33, 150, 243, 0.3);
-            color: #BBDEFB;
-        }
-
-        .remove-btn {
-            background: #ff4444;
-            color: white;
-            border: none;
-            padding: 6px 10px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 11px;
-            transition: all 0.3s ease;
-        }
-
-        .remove-btn:hover {
-            background: #cc0000;
-            transform: scale(1.1);
-        }
-
+        
         .tabs {
             display: flex;
             margin-bottom: 20px;
@@ -348,70 +405,7 @@
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
         }
-
-        .lifecycle-card {
-            background: rgba(0, 0, 0, 0.3);
-            padding: 20px;
-            border-radius: 12px;
-            margin-bottom: 15px;
-            border-left: 4px solid #4CAF50;
-            transition: all 0.3s ease;
-        }
-
-        .lifecycle-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
-        }
-
-        .lifecycle-stage {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 12px;
-            border-left: 3px solid #FFD700;
-        }
-
-        .stage-title {
-            font-weight: bold;
-            color: #FFD700;
-            margin-bottom: 6px;
-            font-size: 1rem;
-        }
-
-        .stage-details {
-            font-size: 13px;
-            line-height: 1.5;
-            white-space: pre-wrap;
-            font-family: 'Courier New', monospace;
-        }
-
-        .data-stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-
-        .stat-card {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 12px;
-            border-radius: 8px;
-            text-align: center;
-            border-top: 3px solid #FFD700;
-        }
-
-        .stat-number {
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: #FFD700;
-        }
-
-        .stat-label {
-            font-size: 11px;
-            opacity: 0.8;
-            margin-top: 4px;
-        }
-
+        
         .api-status {
             display: flex;
             align-items: center;
@@ -423,10 +417,16 @@
             font-weight: 500;
         }
 
+        .api-status.connected {
+            background: rgba(76, 175, 80, 0.2);
+            color: #ccffcc;
+            border: 1px solid rgba(76, 175, 80, 0.5);
+        }
+
         .api-status.disconnected {
             background: rgba(244, 67, 54, 0.2);
-            border: 1px solid rgba(244, 67, 54, 0.5);
             color: #ffcccc;
+            border: 1px solid rgba(244, 67, 54, 0.5);
         }
 
         .api-status.connecting {
@@ -434,18 +434,7 @@
             border: 1px solid rgba(255, 152, 0, 0.5);
             color: #ffe0b3;
         }
-
-        .api-status.connected {
-            background: rgba(76, 175, 80, 0.2);
-            border: 1px solid rgba(76, 175, 80, 0.5);
-            color: #ccffcc;
-        }
-
-        .upload-section.disabled {
-            opacity: 0.5;
-            pointer-events: none;
-        }
-
+        
         .loading {
             display: none;
             text-align: center;
@@ -470,57 +459,104 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-
-        .error {
-            background: rgba(255, 0, 0, 0.2);
-            border: 1px solid rgba(255, 0, 0, 0.5);
-            color: #ffcccc;
+        
+        .error, .success, .warning {
             padding: 12px;
             border-radius: 8px;
             margin-bottom: 15px;
+            font-weight: 500;
+        }
+
+        .error {
+            background: rgba(255, 0, 0, 0.2);
+            color: #ffcccc;
+            border: 1px solid rgba(255, 0, 0, 0.5);
         }
 
         .success {
             background: rgba(0, 255, 0, 0.2);
-            border: 1px solid rgba(0, 255, 0, 0.5);
             color: #ccffcc;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 15px;
+            border: 1px solid rgba(0, 255, 0, 0.5);
         }
 
         .warning {
             background: rgba(255, 193, 7, 0.2);
-            border: 1px solid rgba(255, 193, 7, 0.5);
             color: #fff3cd;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 15px;
+            border: 1px solid rgba(255, 193, 7, 0.5);
         }
 
-        .search-box {
+        .upload-area {
+            border: 2px dashed rgba(255, 255, 255, 0.5);
+            border-radius: 10px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .upload-area:hover {
+            border-color: rgba(255, 255, 255, 0.8);
             background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 20px;
-            padding: 10px 16px;
-            color: white;
-            width: 100%;
-            margin-bottom: 15px;
-            font-size: 13px;
+            transform: translateY(-2px);
         }
 
-        .search-box::placeholder {
-            color: rgba(255, 255, 255, 0.6);
+        .upload-area.dragover {
+            border-color: #4CAF50;
+            background: rgba(76, 175, 80, 0.2);
+            transform: scale(1.02);
         }
 
-        .storage-info {
-            background: rgba(33, 150, 243, 0.2);
-            border: 1px solid rgba(33, 150, 243, 0.5);
-            color: #BBDEFB;
+        .file-list {
+            margin-top: 15px;
+        }
+
+        .file-item {
+            background: rgba(255, 255, 255, 0.1);
             padding: 10px;
-            border-radius: 8px;
-            margin-bottom: 15px;
-            font-size: 12px;
+            margin: 5px 0;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+
+        .file-item:hover {
+            background: rgba(255, 255, 255, 0.15);
+            transform: translateX(3px);
+        }
+
+        .file-info {
+            flex: 1;
+        }
+
+        .file-name {
+            font-weight: bold;
+            color: #FFD700;
+            font-size: 14px;
+        }
+
+        .file-details {
+            font-size: 11px;
+            opacity: 0.8;
+            margin-top: 2px;
+        }
+
+        .remove-btn {
+            background: #ff4444;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.3s ease;
+        }
+
+        .remove-btn:hover {
+            background: #cc0000;
+            transform: scale(1.1);
         }
 
         @media (max-width: 1400px) {
@@ -535,144 +571,85 @@
                 gap: 20px;
             }
         }
-
-        .token-info {
-            background: rgba(156, 39, 176, 0.2);
-            border: 1px solid rgba(156, 39, 176, 0.5);
-            color: #E1BEE7;
-            padding: 10px;
-            border-radius: 8px;
-            margin-bottom: 15px;
-            font-size: 12px;
-        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🔬 Mainframe Research Agent</h1>
-            <p>Local vLLM integration with intelligent chunking for 8K token limit</p>
+            <h1>🔬 Component-Specific Mainframe Analysis</h1>
+            <p>Targeted analysis of individual components with complete data lifecycle tracking</p>
         </div>
 
         <div class="main-grid">
             <!-- Control Panel -->
             <div class="control-panel">
-                <!-- Important Disclaimer -->
-                <div class="disclaimer-section">
-                    <h2 class="section-title">⚠️ Important Guidelines</h2>
-                    <div style="font-size: 13px; line-height: 1.6;">
-                        <strong style="color: #FFD700;">For COBOL Programs:</strong><br>
-                        • Upload all COPYBOOKS used by the program<br>
-                        • Include DCLGEN files for DB2 tables<br>
-                        • Upload called programs for complete flow<br>
-                        • Consider uploading related JCL jobs<br><br>
-                        
-                        <strong style="color: #FF9800;">For Complete Analysis:</strong><br>
-                        • JCL jobs help track program execution flow<br>
-                        • PROC libraries show job dependencies<br>
-                        • We cannot automatically track JCL references<br>
-                        • Upload JCLs manually for comprehensive analysis
+                <!-- Component Search Section -->
+                <div class="component-search-section">
+                    <h2 class="section-title">🎯 Component Analysis</h2>
+                    <div class="form-group">
+                        <label for="componentName">Enter Component Name:</label>
+                        <input type="text" id="componentName" class="component-input" 
+                               placeholder="e.g., CUSTOMER-RECORD, ACCOUNT-COPY, PAYROLL-PROC">
+                        <div id="componentSuggestions" class="component-suggestions"></div>
                     </div>
-                </div>
-
-                <!-- Storage Info -->
-                <div class="storage-info">
-                    <strong>📦 Persistent Storage Active</strong><br>
-                    Analysis results saved to browser storage.<br>
-                    <span id="storageStats">No stored analyses yet</span>
-                </div>
-
-                <!-- Token Usage Info -->
-                <div class="token-info">
-                    <strong>🔢 Token Management</strong><br>
-                    Max: 8K tokens per request | Auto-chunking for large files<br>
-                    <span id="tokenStats">Ready for analysis</span>
+                    <button class="action-btn component-btn" id="analyzeComponentBtn" disabled>
+                        🔍 Analyze Component Lifecycle
+                    </button>
+                    <div style="font-size: 12px; margin-top: 10px; opacity: 0.8; line-height: 1.4;">
+                        <strong>💡 Analyze:</strong><br>
+                        • Copybook fields and their complete lifecycle<br>
+                        • Program call chains and data flow<br>
+                        • JCL job execution and file dependencies<br>
+                        • Field usage patterns across all programs
+                    </div>
                 </div>
 
                 <!-- vLLM API Setup -->
-                <div class="api-section">
+                <div style="margin-bottom: 25px; padding: 20px; background: rgba(0, 0, 0, 0.2); border-radius: 15px; border-left: 4px solid #4CAF50;">
                     <h2 class="section-title">🚀 vLLM Server Setup</h2>
                     <div class="form-group">
-                        <label for="vllmEndpoint">vLLM Server Endpoint:</label>
+                        <label for="vllmEndpoint">Server Endpoint:</label>
                         <input type="text" id="vllmEndpoint" placeholder="http://localhost:8000" value="http://localhost:8000">
                     </div>
                     <div class="form-group">
-                        <label for="maxTokens">Max Tokens per Request:</label>
-                        <input type="number" id="maxTokens" value="8000" min="1000" max="32000">
-                    </div>
-                    <div class="form-group">
-                        <label for="temperature">Temperature:</label>
-                        <input type="number" id="temperature" value="0.1" min="0" max="2" step="0.1">
+                        <label for="maxTokens">Max Tokens:</label>
+                        <input type="number" id="maxTokens" value="4000" min="1000" max="8000">
                     </div>
                     <button class="action-btn validate-btn" id="validateApiBtn">
-                        🔐 Test vLLM Connection
+                        🔐 Test Connection
                     </button>
                     <div class="api-status disconnected" id="apiStatus">
-                        <span>🔴</span>
-                        Enter server details and test connection
+                        <span>🔴</span> Enter server details and test connection
                     </div>
                 </div>
 
-                <!-- Upload Section -->
-                <div class="upload-section disabled" id="uploadSection">
+                <!-- File Upload Section -->
+                <div style="margin-bottom: 25px;">
                     <h2 class="section-title">📁 Upload Mainframe Files</h2>
-                    
                     <div class="upload-area" id="uploadArea">
                         <div>
-                            <h3 style="margin-bottom: 8px;">📤 Drop your files here</h3>
-                            <p style="font-size: 14px;">COBOL (.cbl), Copybooks (.cpy), JCL (.jcl), DCLGEN (.ddl)</p>
+                            <h3 style="margin-bottom: 8px;">📤 Drop files here</h3>
+                            <p style="font-size: 14px;">COBOL (.cbl), Copybooks (.cpy), JCL (.jcl)</p>
                             <p style="font-size: 11px; margin-top: 8px; opacity: 0.7;">
-                                Upload all dependencies for complete analysis
+                                Upload all related files for complete analysis
                             </p>
                         </div>
-                        <input type="file" class="file-input" id="fileInput" multiple accept=".cbl,.cob,.cpy,.copybook,.ddl,.sql,.jcl,.txt,.proc">
+                        <input type="file" id="fileInput" multiple accept=".cbl,.cob,.cpy,.copybook,.jcl,.txt,.proc" style="display: none;">
                     </div>
-
-                    <div class="uploaded-files" id="uploadedFiles"></div>
+                    <div id="uploadedFiles" class="file-list"></div>
                 </div>
 
-                <!-- Analysis Configuration -->
-                <div class="upload-section disabled" id="configSection">
-                    <h3 class="section-title">⚙️ Analysis Configuration</h3>
-                    
-                    <div class="form-group">
-                        <label for="projectName">📋 Project/System Name:</label>
-                        <input type="text" id="projectName" placeholder="e.g., Customer Management System" value="">
-                    </div>
-
-                    <div class="form-group">
-                        <label for="db2Schema">🗄️ DB2 Schema (optional):</label>
-                        <textarea id="db2Schema" rows="3" placeholder="Paste DB2 CREATE TABLE statements for comparison..."></textarea>
-                    </div>
-
-                    <button class="action-btn" id="dependencyCheckBtn" disabled>
-                        🔍 Check Dependencies
+                <!-- Quick Actions -->
+                <div>
+                    <h3 class="section-title">⚡ Quick Actions</h3>
+                    <button class="action-btn secondary-btn" id="bulkAnalyzeBtn" disabled>
+                        📊 Analyze Top Components
                     </button>
-
-                    <button class="action-btn secondary-btn" id="analyzeBtn" disabled>
-                        🚀 Start Complete Analysis
-                    </button>
-                </div>
-
-                <!-- Storage Management -->
-                <div class="upload-section">
-                    <h3 class="section-title">📦 Storage Management</h3>
-                    
-                    <button class="action-btn secondary-btn" id="clearStorageBtn">
-                        🗑️ Clear All Stored Data
-                    </button>
-                    
-                    <button class="action-btn secondary-btn" id="exportBtn">
+                    <button class="action-btn secondary-btn" id="exportBtn" disabled>
                         📤 Export Analysis Results
                     </button>
-
-                    <div class="form-group">
-                        <label for="semanticSearch">🔍 Semantic Search:</label>
-                        <input type="text" id="semanticSearch" placeholder="Search for similar files or patterns...">
-                    </div>
-                    
-                    <button class="action-btn secondary-btn" id="searchBtn" disabled>
-                        🔎 Search Stored Analyses
+                    <button class="action-btn secondary-btn" id="clearBtn">
+                        🗑️ Clear All Data
                     </button>
                 </div>
             </div>
@@ -680,161 +657,148 @@
             <!-- Analysis Workspace -->
             <div class="analysis-workspace">
                 <div class="tabs">
-                    <button class="tab active" data-tab="overview">📊 Overview</button>
+                    <button class="tab active" data-tab="lifecycle">🔄 Component Lifecycle</button>
+                    <button class="tab" data-tab="fieldmatrix">📋 Field Matrix</button>
+                    <button class="tab" data-tab="usage">📈 Usage Analysis</button>
                     <button class="tab" data-tab="dependencies">🔗 Dependencies</button>
-                    <button class="tab" data-tab="controlflow">🔄 Control Flow</button>
-                    <button class="tab" data-tab="lifecycle">📋 Data Lifecycle</button>
-                    <button class="tab" data-tab="comparison">⚖️ DB2 Comparison</button>
-                    <button class="tab" data-tab="search">🔍 Semantic Search</button>
-                    <button class="tab" data-tab="insights">💡 Insights</button>
                 </div>
 
-                <div id="overview" class="tab-content active">
-                    <div id="welcomeMessage">
-                        <h3>Welcome to Local vLLM Mainframe Research Agent</h3>
-                        <p style="margin-bottom: 20px;">Upload complete mainframe modules for AI analysis using your local vLLM server.</p>
+                <!-- Tab Contents -->
+                <div id="lifecycle" class="tab-content active">
+                    <div id="lifecycleContent">
+                        <h3>🎯 Component Lifecycle Analysis</h3>
+                        <p style="margin-bottom: 20px; line-height: 1.6;">
+                            Enter a component name to see its complete data flow and lifecycle across all uploaded programs, copybooks, and JCL files.
+                        </p>
                         
-                        <div class="data-stats">
-                            <div class="stat-card">
-                                <div class="stat-number" id="fileCount">0</div>
-                                <div class="stat-label">Files Uploaded</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number" id="cobolCount">0</div>
-                                <div class="stat-label">COBOL Programs</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number" id="copybookCount">0</div>
-                                <div class="stat-label">Copybooks</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number" id="storedCount">0</div>
-                                <div class="stat-label">Stored Analyses</div>
-                            </div>
-                        </div>
-                        
-                        <div style="margin-top: 25px;">
-                            <h4>🎯 Local vLLM Features:</h4>
-                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-top: 15px;">
-                                <div class="lifecycle-stage">
-                                    <div class="stage-title">🔗 Smart Chunking</div>
-                                    <div class="stage-details">Automatically splits large files to fit 8K token limit while preserving context</div>
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #FFD700;">
+                            <h4 style="color: #FFD700; margin-bottom: 15px;">🎯 What you can analyze:</h4>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                                <div>
+                                    <strong style="color: #4CAF50;">📚 Copybooks:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Complete field usage across programs</li>
+                                        <li>• Field creation and modification tracking</li>
+                                        <li>• Unused/stale field detection</li>
+                                        <li>• Data transformation analysis</li>
+                                    </ul>
                                 </div>
-                                <div class="lifecycle-stage">
-                                    <div class="stage-title">🚀 Local Processing</div>
-                                    <div class="stage-details">Uses your local vLLM server for privacy and control over analysis</div>
+                                <div>
+                                    <strong style="color: #2196F3;">💾 Programs:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Call chains and execution flow</li>
+                                        <li>• Parameter passing analysis</li>
+                                        <li>• Data input/output mapping</li>
+                                        <li>• Business logic extraction</li>
+                                    </ul>
                                 </div>
-                                <div class="lifecycle-stage">
-                                    <div class="stage-title">💾 Persistent Storage</div>
-                                    <div class="stage-details">Stores results locally for semantic search and reuse</div>
+                                <div>
+                                    <strong style="color: #FF9800;">🏷️ Fields:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Creation to deletion lifecycle</li>
+                                        <li>• Cross-program usage patterns</li>
+                                        <li>• Validation and business rules</li>
+                                        <li>• Reference vs update operations</li>
+                                    </ul>
                                 </div>
-                                <div class="lifecycle-stage">
-                                    <div class="stage-title">🔍 Dependency Tracking</div>
-                                    <div class="stage-details">Detects missing copybooks and called programs before analysis</div>
+                                <div>
+                                    <strong style="color: #9C27B0;">⚙️ JCL Jobs:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Execution flow and dependencies</li>
+                                        <li>• File processing patterns</li>
+                                        <li>• Program invocation sequences</li>
+                                        <li>• Data file lifecycles</li>
+                                    </ul>
                                 </div>
                             </div>
                         </div>
 
-                        <div style="margin-top: 25px;">
-                            <div class="lifecycle-card">
-                                <h4>📋 vLLM Setup Requirements:</h4>
-                                <div style="line-height: 1.8;">
-                                    <strong style="color: #4CAF50;">1. Server Configuration:</strong><br>
-                                    • vLLM server running with /generate endpoint<br>
-                                    • Recommended: Llama 3.1 8B or larger model<br>
-                                    • Default endpoint: http://localhost:8000<br><br>
-                                    
-                                    <strong style="color: #FF9800;">2. Token Management:</strong><br>
-                                    • 8K token limit automatically handled<br>
-                                    • Large files split into intelligent chunks<br>
-                                    • Context preserved across chunks<br><br>
-                                    
-                                    <strong style="color: #2196F3;">3. Analysis Features:</strong><br>
-                                    • Complete COBOL program flow analysis<br>
-                                    • Copybook data lifecycle mapping<br>
-                                    • DB2 schema comparison capabilities
-                                </div>
-                            </div>
+                        <div style="margin-top: 25px; background: rgba(33, 150, 243, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #2196F3;">
+                            <h4 style="color: #2196F3; margin-bottom: 10px;">🚀 Getting Started:</h4>
+                            <ol style="line-height: 1.8; padding-left: 20px;">
+                                <li>Upload your COBOL programs, copybooks, and JCL files</li>
+                                <li>Test your vLLM server connection</li>
+                                <li>Enter a component name (suggestions will appear as you type)</li>
+                                <li>Click "Analyze Component Lifecycle" for detailed analysis</li>
+                                <li>Explore different tabs to see field matrices, usage patterns, and dependencies</li>
+                            </ol>
                         </div>
                     </div>
-                    
-                    <div id="analysisOverview" style="display: none;"></div>
+                </div>
+
+                <div id="fieldmatrix" class="tab-content">
+                    <div id="fieldMatrixContent">
+                        <h3>📋 Field Usage Matrix</h3>
+                        <p style="margin-bottom: 20px;">
+                            Field-level analysis showing how each field is used across different programs.
+                        </p>
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                            <p style="text-align: center; opacity: 0.8;">
+                                Select a component from the control panel to see detailed field usage patterns here.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="usage" class="tab-content">
+                    <div id="usageContent">
+                        <h3>📈 Cross-Program Usage Analysis</h3>
+                        <p style="margin-bottom: 20px;">
+                            Detailed statistics and usage patterns across all uploaded programs.
+                        </p>
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                            <p style="text-align: center; opacity: 0.8;">
+                                Usage patterns and statistics will appear here after component analysis.
+                            </p>
+                        </div>
+                    </div>
                 </div>
 
                 <div id="dependencies" class="tab-content">
-                    <h3>🔗 Dependency Analysis</h3>
                     <div id="dependenciesContent">
-                        <p>Upload COBOL files and click "Check Dependencies" to see missing files and requirements...</p>
+                        <h3>🔗 Component Dependencies</h3>
+                        <p style="margin-bottom: 20px;">
+                            Component relationships, dependencies, and integration points.
+                        </p>
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                            <p style="text-align: center; opacity: 0.8;">
+                                Dependency analysis will appear here after selecting a component.
+                            </p>
+                        </div>
                     </div>
                 </div>
 
-                <div id="controlflow" class="tab-content">
-                    <h3>🔄 Complete Control Flow</h3>
-                    <div id="controlFlowContent">
-                        <p>Complete control flow analysis will appear here after dependency validation...</p>
-                    </div>
-                </div>
-
-                <div id="lifecycle" class="tab-content">
-                    <h3>📋 Data Lifecycle Analysis</h3>
-                    <div id="lifecycleContent">
-                        <p>Comprehensive data lifecycle analysis will appear here...</p>
-                    </div>
-                </div>
-
-                <div id="comparison" class="tab-content">
-                    <h3>⚖️ DB2 Schema Comparison</h3>
-                    <div id="comparisonContent">
-                        <p>DB2 schema comparison and field mapping will appear here...</p>
-                    </div>
-                </div>
-
-                <div id="search" class="tab-content">
-                    <h3>🔍 Semantic Search Results</h3>
-                    <input type="text" class="search-box" id="searchInput" placeholder="🔍 Search stored analyses for similar patterns...">
-                    <div id="searchContent">
-                        <p>Use the semantic search above to find similar files, patterns, or code structures across all stored analyses...</p>
-                    </div>
-                </div>
-                <div id="insights" class="tab-content">
-                    <h3>💡 Enterprise Insights</h3>
-                    <div id="insightsContent">
-                        <p>AI-powered insights and recommendations will appear here after analysis...</p>
-                    </div>
-                </div>
-
+                <!-- Loading Indicator -->
                 <div class="loading" id="loadingIndicator">
                     <div class="spinner"></div>
-                    <h3>🤖 Local vLLM is analyzing...</h3>
+                    <h3>🤖 Analyzing Component...</h3>
                     <p id="loadingStatus">Initializing analysis...</p>
                 </div>
             </div>
         </div>
     </div>
-
     <script>
-        class LocalvLLMMainframeAgent {
+        class ComponentSpecificAnalyzer {
             constructor() {
                 this.uploadedFiles = [];
                 this.analysisResults = {};
-                this.dependencies = {};
+                this.componentAnalysis = {};
+                this.componentSuggestions = [];
                 this.serverValidated = false;
                 this.vllmEndpoint = 'http://localhost:8000';
-                this.maxTokens = 8000;
-                this.temperature = 0.1;
-                this.storageKey = 'mainframe_vllm_analyses';
+                this.maxTokens = 4000;
+                this.storageKey = 'component_specific_analysis';
+                
                 this.initializeEventListeners();
                 this.loadStoredData();
-                this.updateStorageStats();
             }
 
             initializeEventListeners() {
-                // Server validation
-                document.getElementById('validateApiBtn').addEventListener('click', this.validatevLLMConnection.bind(this));
+                // API validation
+                document.getElementById('validateApiBtn').addEventListener('click', this.validateConnection.bind(this));
                 document.getElementById('vllmEndpoint').addEventListener('input', this.onEndpointChange.bind(this));
                 document.getElementById('maxTokens').addEventListener('input', this.onSettingsChange.bind(this));
-                document.getElementById('temperature').addEventListener('input', this.onSettingsChange.bind(this));
-
+                
                 // File upload handlers
                 const uploadArea = document.getElementById('uploadArea');
                 const fileInput = document.getElementById('fileInput');
@@ -842,89 +806,91 @@
                 uploadArea.addEventListener('click', () => {
                     if (this.serverValidated) fileInput.click();
                 });
+                uploadArea.addEventListener('drop', this.handleFileDrop.bind(this));
                 uploadArea.addEventListener('dragover', this.handleDragOver.bind(this));
                 uploadArea.addEventListener('dragleave', this.handleDragLeave.bind(this));
-                uploadArea.addEventListener('drop', this.handleFileDrop.bind(this));
                 fileInput.addEventListener('change', this.handleFileSelect.bind(this));
 
-                // Analysis buttons
-                document.getElementById('dependencyCheckBtn').addEventListener('click', this.checkDependencies.bind(this));
-                document.getElementById('analyzeBtn').addEventListener('click', this.startCompleteAnalysis.bind(this));
+                // Component analysis
+                document.getElementById('componentName').addEventListener('input', this.onComponentInput.bind(this));
+                document.getElementById('analyzeComponentBtn').addEventListener('click', this.analyzeComponent.bind(this));
                 
-                // Storage management
-                document.getElementById('clearStorageBtn').addEventListener('click', this.clearStorage.bind(this));
+                // Quick actions
+                document.getElementById('bulkAnalyzeBtn').addEventListener('click', this.bulkAnalyze.bind(this));
                 document.getElementById('exportBtn').addEventListener('click', this.exportResults.bind(this));
-                document.getElementById('searchBtn').addEventListener('click', this.performSemanticSearch.bind(this));
-                document.getElementById('searchInput').addEventListener('input', this.onSearchInput.bind(this));
+                document.getElementById('clearBtn').addEventListener('click', this.clearAllData.bind(this));
 
                 // Tab navigation
                 document.querySelectorAll('.tab').forEach(tab => {
                     tab.addEventListener('click', this.switchTab.bind(this));
                 });
+
+                // Hide suggestions when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (!e.target.closest('.component-search-section')) {
+                        document.getElementById('componentSuggestions').style.display = 'none';
+                    }
+                });
             }
 
             onEndpointChange() {
-                const endpoint = document.getElementById('vllmEndpoint').value.trim();
-                if (this.serverValidated && this.vllmEndpoint !== endpoint) {
-                    this.setServerConnectionStatus('disconnected', 'Endpoint changed - Test connection');
-                    this.serverValidated = false;
-                    this.disableUploadAndAnalysis();
-                }
+                this.serverValidated = false;
+                this.updateConnectionStatus('disconnected', 'Endpoint changed - Test connection');
+                this.validateForm();
             }
 
             onSettingsChange() {
-                this.maxTokens = parseInt(document.getElementById('maxTokens').value) || 8000;
-                this.temperature = parseFloat(document.getElementById('temperature').value) || 0.1;
-                this.updateTokenStats();
+                this.maxTokens = parseInt(document.getElementById('maxTokens').value) || 4000;
             }
 
-            updateTokenStats() {
-                document.getElementById('tokenStats').textContent = 
-                    `Max: ${this.maxTokens} tokens | Temp: ${this.temperature}`;
-            }
-
-            async validatevLLMConnection() {
+            async validateConnection() {
                 const endpoint = document.getElementById('vllmEndpoint').value.trim();
-                
                 if (!endpoint) {
-                    this.showError('Please enter a vLLM server endpoint');
+                    this.showError('Please enter vLLM endpoint');
                     return;
                 }
 
-                // Validate URL format
-                try {
-                    new URL(endpoint);
-                } catch {
-                    this.showError('Invalid URL format. Use http://localhost:8000');
-                    return;
-                }
+                this.updateConnectionStatus('connecting', 'Testing connection...');
 
-                this.setServerConnectionStatus('connecting', 'Testing vLLM connection...');
-                
                 try {
-                    // Test with a simple generation request
-                    const testPrompt = "Respond with 'vLLM connection successful' if you can see this message.";
-                    const response = await this.callvLLMAPI(testPrompt, true);
+                    new URL(endpoint); // Validate URL format
                     
-                    if (response && response.includes('successful')) {
-                        this.serverValidated = true;
-                        this.vllmEndpoint = endpoint;
-                        this.setServerConnectionStatus('connected', `Connected to ${endpoint}`);
-                        this.enableUploadAndAnalysis();
-                        this.showSuccess('vLLM server connection validated!');
+                    const response = await fetch(`${endpoint}/generate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            prompt: "Test connection. Respond with 'Connected successfully'",
+                            max_tokens: 10,
+                            temperature: 0.1
+                        }),
+                        signal: AbortSignal.timeout(10000)
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        const responseText = data.text || data.choices?.[0]?.text || JSON.stringify(data);
+                        
+                        if (responseText.toLowerCase().includes('connect')) {
+                            this.serverValidated = true;
+                            this.vllmEndpoint = endpoint;
+                            this.updateConnectionStatus('connected', `Connected to ${endpoint}`);
+                            this.showSuccess('vLLM connection validated!');
+                        } else {
+                            throw new Error('Unexpected response format');
+                        }
                     } else {
-                        throw new Error('Unexpected response from server');
+                        throw new Error(`HTTP ${response.status}`);
                     }
-                    
                 } catch (error) {
                     this.serverValidated = false;
-                    this.setServerConnectionStatus('disconnected', `Connection failed: ${error.message}`);
-                    this.disableUploadAndAnalysis();
-                    this.showError(`vLLM Connection Failed: ${error.message}`);
+                    this.updateConnectionStatus('disconnected', `Connection failed: ${error.message}`);
+                    this.showError(`Connection failed: ${error.message}`);
                 }
+                
+                this.validateForm();
             }
 
-            setServerConnectionStatus(status, message) {
+            updateConnectionStatus(status, message) {
                 const statusElement = document.getElementById('apiStatus');
                 const statusClasses = ['disconnected', 'connecting', 'connected'];
                 
@@ -937,373 +903,9 @@
                     'connected': '🟢'
                 };
                 
-                statusElement.innerHTML = `
-                    <span>${indicators[status]}</span>
-                    ${message}
-                `;
+                statusElement.innerHTML = `<span>${indicators[status]}</span> ${message}`;
             }
 
-            enableUploadAndAnalysis() {
-                document.getElementById('uploadSection').classList.remove('disabled');
-                document.getElementById('configSection').classList.remove('disabled');
-                this.validateForm();
-            }
-
-            disableUploadAndAnalysis() {
-                document.getElementById('uploadSection').classList.add('disabled');
-                document.getElementById('configSection').classList.add('disabled');
-                document.getElementById('analyzeBtn').disabled = true;
-                document.getElementById('dependencyCheckBtn').disabled = true;
-            }
-
-            // Storage Management Methods
-            loadStoredData() {
-                try {
-                    const stored = localStorage.getItem(this.storageKey);
-                    if (stored) {
-                        const data = JSON.parse(stored);
-                        this.storedAnalyses = data.analyses || {};
-                        this.storedProjects = data.projects || {};
-                    } else {
-                        this.storedAnalyses = {};
-                        this.storedProjects = {};
-                    }
-                } catch (error) {
-                    console.error('Error loading stored data:', error);
-                    this.storedAnalyses = {};
-                    this.storedProjects = {};
-                }
-            }
-
-            saveAnalysisToStorage(projectName, analysisData) {
-                try {
-                    const timestamp = new Date().toISOString();
-                    const projectKey = `${projectName}_${timestamp}`;
-                    
-                    this.storedAnalyses[projectKey] = {
-                        projectName,
-                        timestamp,
-                        files: this.uploadedFiles.map(f => ({
-                            name: f.name,
-                            type: f.type,
-                            size: f.size
-                        })),
-                        analysis: analysisData,
-                        dependencies: this.dependencies
-                    };
-
-                    if (!this.storedProjects[projectName]) {
-                        this.storedProjects[projectName] = [];
-                    }
-                    this.storedProjects[projectName].push(projectKey);
-
-                    const dataToStore = {
-                        analyses: this.storedAnalyses,
-                        projects: this.storedProjects,
-                        lastUpdated: timestamp
-                    };
-                    
-                    localStorage.setItem(this.storageKey, JSON.stringify(dataToStore));
-                    this.updateStorageStats();
-                    
-                    this.showSuccess(`Analysis saved locally under project: ${projectName}`);
-                } catch (error) {
-                    console.error('Error saving to storage:', error);
-                    this.showError('Failed to save analysis to storage');
-                }
-            }
-
-            updateStorageStats() {
-                const analysisCount = Object.keys(this.storedAnalyses || {}).length;
-                const projectCount = Object.keys(this.storedProjects || {}).length;
-                
-                document.getElementById('storageStats').textContent = 
-                    `${analysisCount} analyses across ${projectCount} projects stored`;
-                    
-                document.getElementById('storedCount').textContent = analysisCount;
-                document.getElementById('searchBtn').disabled = analysisCount === 0;
-            }
-
-            clearStorage() {
-                if (confirm('Are you sure you want to clear all stored analysis data? This cannot be undone.')) {
-                    localStorage.removeItem(this.storageKey);
-                    this.storedAnalyses = {};
-                    this.storedProjects = {};
-                    this.updateStorageStats();
-                    this.showSuccess('All stored data cleared');
-                }
-            }
-
-            exportResults() {
-                const exportData = {
-                    analyses: this.storedAnalyses,
-                    projects: this.storedProjects,
-                    exportDate: new Date().toISOString(),
-                    version: '1.0'
-                };
-
-                const blob = new Blob([JSON.stringify(exportData, null, 2)], {
-                    type: 'application/json'
-                });
-                
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `mainframe_vllm_analyses_${new Date().toISOString().split('T')[0]}.json`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                
-                this.showSuccess('Analysis data exported successfully');
-            }
-
-            // Token estimation and chunking methods
-            estimateTokenCount(text) {
-                // More accurate token estimation for Llama models
-                // Approximate 3.5-4 characters per token for code
-                const codeRatio = (text.match(/[{}();,]/g) || []).length / text.length;
-                const avgCharsPerToken = codeRatio > 0.1 ? 4 : 3.5;
-                return Math.ceil(text.length / avgCharsPerToken);
-            }
-            createIntelligentChunks(content, fileName, context = '') {
-                console.log(`[DEBUG] Creating chunks for ${fileName}, content length: ${content.length}`);
-                
-                const lines = content.split('\n');
-                const chunks = [];
-                const maxTokensPerChunk = Math.floor(this.maxTokens * 0.7); // More conservative limit
-                const contextOverlap = 20; // Reduced overlap
-                
-                let currentChunk = {
-                    content: context + '\n\nCOBOL CODE:\n',
-                    startLine: 0,
-                    endLine: 0,
-                    tokenCount: this.estimateTokenCount(context)
-                };
-                
-                for (let i = 0; i < lines.length; i++) {
-                    const line = lines[i];
-                    const lineTokens = this.estimateTokenCount(line + '\n');
-                    
-                    // Check if adding this line would exceed the limit
-                    if (currentChunk.tokenCount + lineTokens > maxTokensPerChunk && 
-                        currentChunk.content.length > (context.length + 20)) {
-                        
-                        currentChunk.endLine = i - 1;
-                        chunks.push({ ...currentChunk });
-                        
-                        console.log(`[DEBUG] Created chunk ${chunks.length}: lines ${currentChunk.startLine}-${currentChunk.endLine}, tokens: ${currentChunk.tokenCount}`);
-                        
-                        // Start new chunk with overlap
-                        const overlapStart = Math.max(0, i - contextOverlap);
-                        const overlapContent = lines.slice(overlapStart, i).join('\n');
-                        
-                        currentChunk = {
-                            content: context + '\n\nPREVIOUS CONTEXT:\n' + overlapContent + '\n\nCONTINUING:\n',
-                            startLine: i,
-                            endLine: 0,
-                            tokenCount: this.estimateTokenCount(context + overlapContent)
-                        };
-                    }
-                    
-                    currentChunk.content += line + '\n';
-                    currentChunk.tokenCount += lineTokens;
-                }
-                
-                // Add final chunk
-                if (currentChunk.content.length > (context.length + 20)) {
-                    currentChunk.endLine = lines.length - 1;
-                    chunks.push(currentChunk);
-                    console.log(`[DEBUG] Created final chunk ${chunks.length}: lines ${currentChunk.startLine}-${currentChunk.endLine}, tokens: ${currentChunk.tokenCount}`);
-                }
-                
-                console.log(`[DEBUG] Total chunks created: ${chunks.length}`);
-                return chunks;
-            }
-
-            // vLLM API call method - ENHANCED for your custom server
-            async callvLLMAPI(prompt, isTest = false) {
-                const requestBody = {
-                    prompt: prompt,
-                    max_tokens: isTest ? 50 : Math.floor(this.maxTokens * 0.5),
-                    temperature: this.temperature,
-                    stop: ["</analysis>", "###", "---END---"]
-                };
-
-                try {
-                    console.log(`[DEBUG] Calling ${this.vllmEndpoint}/generate with:`, {
-                        promptLength: prompt.length,
-                        maxTokens: requestBody.max_tokens,
-                        temperature: requestBody.temperature
-                    });
-
-                    const response = await fetch(`${this.vllmEndpoint}/generate`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(requestBody),
-                        signal: AbortSignal.timeout(120000) // 2 minute timeout
-                    });
-
-                    console.log(`[DEBUG] Response status: ${response.status}`);
-
-                    if (!response.ok) {
-                        const errorText = await response.text().catch(() => 'Unknown error');
-                        console.error(`[DEBUG] Error response:`, errorText);
-                        throw new Error(`HTTP ${response.status}: ${errorText}`);
-                    }
-
-                    const data = await response.json();
-                    console.log(`[DEBUG] Response data type:`, typeof data);
-                    console.log(`[DEBUG] Response keys:`, Object.keys(data));
-                    
-                    // Enhanced response format handling for your custom server
-                    let generatedText = '';
-                    
-                    if (data.text) {
-                        // Your server's primary format
-                        generatedText = data.text.trim();
-                        console.log(`[DEBUG] Using data.text: ${generatedText.substring(0, 100)}...`);
-                    } else if (data.choices && data.choices[0] && data.choices[0].text) {
-                        // Alternative format
-                        generatedText = data.choices[0].text.trim();
-                        console.log(`[DEBUG] Using data.choices[0].text: ${generatedText.substring(0, 100)}...`);
-                    } else if (typeof data === 'string') {
-                        // Direct string response
-                        generatedText = data.trim();
-                        console.log(`[DEBUG] Using direct string: ${generatedText.substring(0, 100)}...`);
-                    } else if (data.error) {
-                        // Error in response
-                        throw new Error(`Server error: ${data.error}`);
-                    } else {
-                        // Unknown format - try to extract any text
-                        console.warn('[DEBUG] Unexpected response format:', data);
-                        
-                        // Try to find text in various possible locations
-                        const possibleTexts = [
-                            data.response,
-                            data.result,
-                            data.output,
-                            data.generated_text,
-                            data.content
-                        ];
-                        
-                        for (const text of possibleTexts) {
-                            if (typeof text === 'string' && text.trim()) {
-                                generatedText = text.trim();
-                                console.log(`[DEBUG] Found text in alternative field: ${generatedText.substring(0, 100)}...`);
-                                break;
-                            }
-                        }
-                        
-                        if (!generatedText) {
-                            // Last resort - stringify the whole response
-                            generatedText = JSON.stringify(data);
-                            console.warn(`[DEBUG] Using stringified response as fallback`);
-                        }
-                    }
-
-                    if (!generatedText || generatedText.length === 0) {
-                        throw new Error('No text generated by model');
-                    }
-
-                    // Check if response looks like an error message
-                    if (generatedText.toLowerCase().includes('generation failed') || 
-                        generatedText.toLowerCase().includes('error:') ||
-                        generatedText.toLowerCase().includes('failed:')) {
-                        throw new Error(`Model generation error: ${generatedText}`);
-                    }
-
-                    console.log(`[DEBUG] Successfully extracted ${generatedText.length} characters`);
-                    return generatedText;
-
-                } catch (error) {
-                    console.error(`[DEBUG] API call failed:`, error);
-                    
-                    if (error.name === 'AbortError') {
-                        throw new Error('Request timed out - try reducing file size or max tokens');
-                    }
-                    throw new Error(`vLLM API error: ${error.message}`);
-                }
-            }
-
-            // MISSING FUNCTION - performSingleCobolAnalysis
-            async performSingleCobolAnalysis(fileInfo, deps) {
-                const prompt = `
-You are an expert COBOL analyst. Analyze this complete COBOL program for comprehensive understanding.
-
-PROGRAM: ${fileInfo.name}
-DEPENDENCIES:
-- Copybooks: ${deps.copybooks?.join(', ') || 'None'}
-- Called Programs: ${deps.calledPrograms?.join(', ') || 'None'}
-- DB2 Tables: ${deps.db2Tables?.join(', ') || 'None'}
-- Missing: ${deps.missing?.length || 0} dependencies
-
-COMPLETE PROGRAM:
-${fileInfo.content}
-
-COMPREHENSIVE ANALYSIS REQUIRED:
-
-**PROGRAM ARCHITECTURE**
-- Overall program structure and organization
-- Division breakdown (Identification, Environment, Data, Procedure)
-- Working storage layout and data organization
-- File control and database connections
-
-**CONTROL FLOW ANALYSIS**
-- Main program execution path from start to finish
-- All PERFORM statements and their targets
-- CALL statements with parameter analysis
-- Conditional logic and decision trees
-- Loop structures and iteration patterns
-- Error handling and exception paths
-
-**DATA OPERATIONS**
-- Variable usage patterns and data flow
-- File I/O operations and record processing
-- Database operations (EXEC SQL statements)
-- Data transformations and calculations
-- Field validations and business rules
-
-**BUSINESS LOGIC**
-- Core business processes implemented
-- Transaction handling and processing logic
-- Validation rules and data integrity checks
-- Integration points with external systems
-- Business calculations and algorithms
-
-**DEPENDENCY IMPACT**
-- How missing dependencies affect functionality
-- Critical vs non-critical missing components
-- Potential runtime errors from missing files
-- Integration completeness assessment
-
-**MODERNIZATION ASSESSMENT**
-- Code complexity and maintainability score
-- Areas suitable for refactoring
-- Database modernization opportunities
-- API and service interface potential
-- Performance optimization possibilities
-
-**TECHNICAL DEBT**
-- Code quality issues and anti-patterns
-- Redundant or obsolete code sections
-- Documentation and commenting adequacy
-- Testing and validation gaps
-
-Provide specific examples and actionable recommendations for each area.
-                `;
-
-                try {
-                    const analysis = await this.callvLLMAPI(prompt);
-                    return analysis;
-                } catch (error) {
-                    console.error('Single COBOL analysis failed:', error);
-                    throw new Error(`COBOL analysis failed: ${error.message}`);
-                }
-            }
-            // File handling methods
             handleDragOver(e) {
                 e.preventDefault();
                 document.getElementById('uploadArea').classList.add('dragover');
@@ -1326,42 +928,62 @@ Provide specific examples and actionable recommendations for each area.
                 this.processFiles(files);
             }
 
-            processFiles(files) {
-                files.forEach(file => {
-                    if (this.isValidFile(file)) {
-                        this.uploadedFiles.push({
-                            file: file,
-                            name: file.name,
-                            size: file.size,
-                            type: this.getFileType(file.name),
-                            content: null
-                        });
+            async processFiles(files) {
+                this.showLoading();
+                this.updateLoadingStatus('Processing uploaded files...');
+
+                try {
+                    for (const file of files) {
+                        if (this.isValidFile(file)) {
+                            const content = await this.readFileContent(file);
+                            this.uploadedFiles.push({
+                                name: file.name,
+                                type: this.getFileType(file.name),
+                                content: content,
+                                size: file.size
+                            });
+                        }
                     }
-                });
-                this.updateFileList();
-                this.validateForm();
-                this.updateStats();
+                    
+                    this.updateFileList();
+                    this.updateComponentSuggestions();
+                    this.validateForm();
+                    
+                    this.hideLoading();
+                    this.showSuccess(`Processed ${files.length} file(s) successfully`);
+                } catch (error) {
+                    this.hideLoading();
+                    this.showError(`File processing failed: ${error.message}`);
+                }
             }
 
             isValidFile(file) {
-                const validExtensions = ['.cbl', '.cob', '.cpy', '.copybook', '.ddl', '.sql', '.jcl', '.txt', '.proc'];
-                const extension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
-                return validExtensions.includes(extension) || file.type.includes('text');
+                const validExtensions = ['.cbl', '.cob', '.cpy', '.copybook', '.jcl', '.txt', '.proc'];
+                const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+                return validExtensions.includes(ext) || file.type.includes('text');
             }
 
             getFileType(filename) {
                 const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
                 const typeMap = {
                     '.cbl': 'COBOL Program',
-                    '.cob': 'COBOL Program',
+                    '.cob': 'COBOL Program', 
                     '.cpy': 'Copybook',
                     '.copybook': 'Copybook',
-                    '.ddl': 'DCLGEN/DDL',
-                    '.sql': 'SQL Script',
                     '.jcl': 'JCL Job',
-                    '.proc': 'JCL Procedure'
+                    '.proc': 'JCL Procedure',
+                    '.txt': 'Text File'
                 };
-                return typeMap[ext] || 'Text File';
+                return typeMap[ext] || 'Unknown';
+            }
+
+            readFileContent(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => resolve(e.target.result);
+                    reader.onerror = (e) => reject(new Error('Failed to read file'));
+                    reader.readAsText(file);
+                });
             }
 
             updateFileList() {
@@ -1371,36 +993,26 @@ Provide specific examples and actionable recommendations for each area.
                     return;
                 }
 
-                container.innerHTML = '<h3 class="section-title">📄 Uploaded Files:</h3>';
-                this.uploadedFiles.forEach((fileInfo, index) => {
-                    const fileDiv = document.createElement('div');
-                    fileDiv.className = 'file-item';
-                    
-                    // Estimate tokens for this file
-                    const estimatedTokens = this.estimateTokenCount(fileInfo.content || 'Loading...');
-                    const willNeedChunking = estimatedTokens > this.maxTokens * 0.8;
-                    
-                    fileDiv.innerHTML = `
-                        <div class="file-info">
-                            <div class="file-name">${fileInfo.name}</div>
-                            <div class="file-details">
-                                ${fileInfo.type} • ${this.formatFileSize(fileInfo.size)}
-                                ${fileInfo.content ? ` • ~${Math.round(estimatedTokens)}k tokens` : ''}
-                                ${willNeedChunking ? ' • Will be chunked' : ''}
+                let html = '<h4 style="margin: 15px 0 10px 0; color: #FFD700;">📄 Uploaded Files:</h4>';
+                this.uploadedFiles.forEach((file, index) => {
+                    html += `
+                        <div class="file-item">
+                            <div class="file-info">
+                                <div class="file-name">${file.name}</div>
+                                <div class="file-details">${file.type} • ${this.formatFileSize(file.size)}</div>
                             </div>
+                            <button class="remove-btn" onclick="analyzer.removeFile(${index})">×</button>
                         </div>
-                        <button class="remove-btn" onclick="agent.removeFile(${index})">✕</button>
                     `;
-                    container.appendChild(fileDiv);
                 });
+                container.innerHTML = html;
             }
 
             removeFile(index) {
                 this.uploadedFiles.splice(index, 1);
                 this.updateFileList();
+                this.updateComponentSuggestions();
                 this.validateForm();
-                this.updateStats();
-                this.dependencies = {};
             }
 
             formatFileSize(bytes) {
@@ -1411,1447 +1023,1185 @@ Provide specific examples and actionable recommendations for each area.
                 return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
             }
 
+            updateComponentSuggestions() {
+                const suggestions = new Set();
+                
+                this.uploadedFiles.forEach(file => {
+                    // Add file names (without extensions)
+                    const baseName = file.name.replace(/\.(cbl|cob|cpy|copybook|jcl|txt|proc)$/i, '');
+                    suggestions.add(baseName);
+                    
+                    // Extract copybook names from COPY statements
+                    const copyMatches = file.content.match(/COPY\s+([A-Z0-9\-_]+)/gi);
+                    if (copyMatches) {
+                        copyMatches.forEach(match => {
+                            const copybook = match.replace(/COPY\s+/i, '').trim();
+                            if (copybook.length > 2) suggestions.add(copybook);
+                        });
+                    }
+                    
+                    // Extract program names from CALL statements
+                    const callMatches = file.content.match(/CALL\s+['"]([A-Z0-9\-_]+)['"]|CALL\s+([A-Z0-9\-_]+)/gi);
+                    if (callMatches) {
+                        callMatches.forEach(match => {
+                            const program = match.replace(/CALL\s+['"]?/i, '').replace(/['"].*/, '').trim();
+                            if (program.length > 2) suggestions.add(program);
+                        });
+                    }
+                    
+                    // Extract field names from copybooks (simplified)
+                    if (file.type === 'Copybook') {
+                        const fieldMatches = file.content.match(/^\s*\d{2}\s+([A-Z0-9\-_]+)/gm);
+                        if (fieldMatches) {
+                            fieldMatches.forEach(match => {
+                                const field = match.replace(/^\s*\d{2}\s+/, '').trim();
+                                if (field.length > 3 && !field.includes('PIC') && !field.includes('OCCURS')) {
+                                    suggestions.add(field);
+                                }
+                            });
+                        }
+                    }
+                });
+                
+                this.componentSuggestions = Array.from(suggestions).sort();
+                console.log(`Found ${this.componentSuggestions.length} component suggestions`);
+            }
+
+            onComponentInput() {
+                const input = document.getElementById('componentName').value.trim().toUpperCase();
+                const suggestions = document.getElementById('componentSuggestions');
+                
+                if (input.length < 2) {
+                    suggestions.style.display = 'none';
+                    this.validateForm();
+                    return;
+                }
+                
+                const matches = this.componentSuggestions
+                    .filter(s => s.toUpperCase().includes(input))
+                    .slice(0, 10);
+                
+                if (matches.length > 0) {
+                    suggestions.innerHTML = matches.map(match => 
+                        `<div class="suggestion-item" onclick="analyzer.selectSuggestion('${match}')">${match}</div>`
+                    ).join('');
+                    suggestions.style.display = 'block';
+                } else {
+                    suggestions.style.display = 'none';
+                }
+                
+                this.validateForm();
+            }
+
+            selectSuggestion(suggestion) {
+                document.getElementById('componentName').value = suggestion;
+                document.getElementById('componentSuggestions').style.display = 'none';
+                this.validateForm();
+            }
+
             validateForm() {
                 const hasFiles = this.uploadedFiles.length > 0;
-                document.getElementById('analyzeBtn').disabled = !this.serverValidated || !hasFiles;
-                document.getElementById('dependencyCheckBtn').disabled = !this.serverValidated || !hasFiles;
+                const hasComponent = document.getElementById('componentName').value.trim().length > 0;
+                const hasConnection = this.serverValidated;
+                
+                document.getElementById('analyzeComponentBtn').disabled = !(hasFiles && hasComponent && hasConnection);
+                document.getElementById('bulkAnalyzeBtn').disabled = !(hasFiles && hasConnection);
+                document.getElementById('exportBtn').disabled = Object.keys(this.componentAnalysis).length === 0;
             }
-
-            updateStats() {
-                document.getElementById('fileCount').textContent = this.uploadedFiles.length;
-                document.getElementById('cobolCount').textContent = this.getCobolCount();
-                document.getElementById('copybookCount').textContent = this.getCopybookCount();
-                this.updateStorageStats();
-            }
-
-            getCobolCount() {
-                return this.uploadedFiles.filter(f => f.type === 'COBOL Program').length;
-            }
-
-            getCopybookCount() {
-                return this.uploadedFiles.filter(f => f.type === 'Copybook').length;
-            }
-
-            async readFileContents() {
-                const readPromises = this.uploadedFiles.map(fileInfo => {
-                    return new Promise((resolve, reject) => {
-                        const reader = new FileReader();
-                        reader.onload = (e) => {
-                            fileInfo.content = e.target.result;
-                            resolve();
-                        };
-                        reader.onerror = reject;
-                        reader.readAsText(fileInfo.file);
-                    });
-                });
-
-                await Promise.all(readPromises);
-                this.updateFileList(); // Refresh with token counts
-            }
-
-            // Dependency checking methods
-            async checkDependencies() {
-                if (this.uploadedFiles.length === 0) {
-                    this.showError('Please upload files first');
-                    return;
-                }
+            async analyzeComponent() {
+                const componentName = document.getElementById('componentName').value.trim();
+                if (!componentName) return;
 
                 this.showLoading();
-                this.updateLoadingStatus('Reading file contents...');
+                this.updateLoadingStatus(`Analyzing component: ${componentName}`);
 
                 try {
-                    await this.readFileContents();
+                    // Step 1: Identify what type of component this is
+                    this.updateLoadingStatus('Identifying component type and locations...');
+                    const componentInfo = await this.identifyComponent(componentName);
                     
-                    this.updateLoadingStatus('Analyzing dependencies with vLLM...');
-                    await this.analyzeDependencies();
-                    
-                    this.hideLoading();
-                    this.displayDependencies();
-                    this.switchTab({ target: { dataset: { tab: 'dependencies' } } });
-                    this.validateAnalysisReadiness();
-                } catch (error) {
-                    this.hideLoading();
-                    this.showError(`Dependency check failed: ${error.message}`);
-                }
-            }
-
-            async analyzeDependencies() {
-                const cobolFiles = this.uploadedFiles.filter(f => f.type === 'COBOL Program');
-                this.dependencies = {};
-
-                for (const cobolFile of cobolFiles) {
-                    this.updateLoadingStatus(`Analyzing dependencies for ${cobolFile.name}...`);
-                    
-                    console.log(`[DEBUG] Starting dependency analysis for ${cobolFile.name}`);
-                    
-                    // Use vLLM for dependency analysis
-                    const dependencies = await this.getAIDependencies(cobolFile);
-                    
-                    console.log(`[DEBUG] vLLM dependency analysis complete for ${cobolFile.name}:`, dependencies);
-                    
-                    this.dependencies[cobolFile.name] = dependencies;
-                    
-                    // Rate limiting between files
-                    if (cobolFiles.indexOf(cobolFile) < cobolFiles.length - 1) {
-                        await this.sleep(1000);
+                    if (componentInfo.type === 'NOT_FOUND') {
+                        throw new Error(`Component "${componentName}" not found in uploaded files`);
                     }
-                }
-                
-                console.log('[DEBUG] All dependency analysis complete:', this.dependencies);
-            }
-
-            async getAIDependencies(cobolFile) {
-                const prompt = `
-COBOL DEPENDENCY ANALYSIS
-
-Analyze this COBOL program and identify ALL dependencies:
-
-File: ${cobolFile.name}
-Content:
-${cobolFile.content}
-
-ANALYSIS REQUIRED:
-1. COPYBOOKS (COPY statements, includes) - Look for "COPY" statements
-2. CALLED PROGRAMS (CALL statements, subroutines) - Look for "CALL" statements
-3. DB2 TABLES (EXEC SQL statements, table references) - Look for SQL table names
-4. FILE DEPENDENCIES (SELECT statements, DD names) - Look for file assignments
-
-If NO dependencies are found in any category, explicitly state "NONE FOUND".
-
-Format response EXACTLY as:
-COPYBOOKS: name1, name2 (or NONE FOUND)
-PROGRAMS: prog1, prog2 (or NONE FOUND)
-TABLES: table1, table2 (or NONE FOUND)
-FILES: file1, file2 (or NONE FOUND)
-                `;
-
-                try {
-                    console.log(`[DEBUG] Sending dependency analysis request for ${cobolFile.name}`);
-                    const response = await this.callvLLMAPI(prompt);
-                    console.log(`[DEBUG] Received dependency response for ${cobolFile.name}:`, response);
                     
-                    return this.parseAIDependencyResponse(response);
-                } catch (error) {
-                    console.warn(`[DEBUG] AI dependency analysis failed for ${cobolFile.name}:`, error);
-                    return {
-                        copybooks: [],
-                        calledPrograms: [],
-                        db2Tables: [],
-                        jclJobs: [],
-                        missing: []
+                    // Step 2: Perform targeted analysis based on component type
+                    this.updateLoadingStatus(`Performing ${componentInfo.type} analysis...`);
+                    const analysis = await this.performComponentAnalysis(componentName, componentInfo);
+                    
+                    // Step 3: Store results
+                    this.componentAnalysis[componentName] = {
+                        timestamp: new Date().toISOString(),
+                        componentInfo: componentInfo,
+                        analysis: analysis
                     };
-                }
-            }
-
-            parseAIDependencyResponse(response) {
-                const dependencies = {
-                    copybooks: [],
-                    calledPrograms: [],
-                    db2Tables: [],
-                    jclJobs: [],
-                    missing: []
-                };
-                
-                console.log('[DEBUG] Raw vLLM dependency response:', response);
-                
-                const lines = response.split('\n');
-                
-                lines.forEach(line => {
-                    const upperLine = line.toUpperCase().trim();
                     
-                    if (upperLine.includes('COPYBOOKS:')) {
-                        const colonIndex = line.indexOf(':');
-                        if (colonIndex > -1) {
-                            let content = line.substring(colonIndex + 1).trim();
-                            content = content.replace(/\s*\(or\s+NONE\s+FOUND\)\s*$/i, '');
-                            
-                            if (!content.includes('NONE FOUND') && content !== '' && !content.toLowerCase().includes('none')) {
-                                dependencies.copybooks = content.split(',').map(s => s.trim()).filter(s => s);
-                                console.log('[DEBUG] Found copybooks:', dependencies.copybooks);
-                            }
-                        }
-                    } else if (upperLine.includes('PROGRAMS:')) {
-                        const colonIndex = line.indexOf(':');
-                        if (colonIndex > -1) {
-                            let content = line.substring(colonIndex + 1).trim();
-                            content = content.replace(/\s*\(or\s+NONE\s+FOUND\)\s*$/i, '');
-                            
-                            if (!content.includes('NONE FOUND') && content !== '' && !content.toLowerCase().includes('none')) {
-                                dependencies.calledPrograms = content.split(',').map(s => s.trim()).filter(s => s);
-                                console.log('[DEBUG] Found programs:', dependencies.calledPrograms);
-                            }
-                        }
-                    } else if (upperLine.includes('TABLES:')) {
-                        const colonIndex = line.indexOf(':');
-                        if (colonIndex > -1) {
-                            let content = line.substring(colonIndex + 1).trim();
-                            content = content.replace(/\s*\(or\s+NONE\s+FOUND\)\s*$/i, '');
-                            
-                            if (!content.includes('NONE FOUND') && content !== '' && !content.toLowerCase().includes('none')) {
-                                dependencies.db2Tables = content.split(',').map(s => s.trim()).filter(s => s);
-                                console.log('[DEBUG] Found tables:', dependencies.db2Tables);
-                            }
-                        }
-                    }
-                });
-                
-                // Check which dependencies are missing from uploaded files
-                dependencies.missing = this.checkMissingDependencies(dependencies);
-                
-                console.log('[DEBUG] Final parsed dependencies:', dependencies);
-                return dependencies;
-            }
-
-            checkMissingDependencies(dependencies) {
-                const missing = [];
-                const uploadedNames = this.uploadedFiles.map(f => f.name.toUpperCase());
-                
-                dependencies.copybooks.forEach(copybook => {
-                    const copybookFile = `${copybook}.CPY`;
-                    if (!uploadedNames.includes(copybookFile)) {
-                        missing.push({ type: 'COPYBOOK', name: copybook, file: copybookFile });
-                    }
-                });
-                
-                dependencies.calledPrograms.forEach(program => {
-                    const programFile = `${program}.CBL`;
-                    if (!uploadedNames.includes(programFile)) {
-                        missing.push({ type: 'PROGRAM', name: program, file: programFile });
-                    }
-                });
-                
-                dependencies.db2Tables.forEach(table => {
-                    const dclgenFile = `${table}.DDL`;
-                    if (!uploadedNames.includes(dclgenFile)) {
-                        missing.push({ type: 'DCLGEN', name: table, file: dclgenFile });
-                    }
-                });
-                
-                return missing;
-            }
-
-            displayDependencies() {
-                const container = document.getElementById('dependenciesContent');
-                
-                if (Object.keys(this.dependencies).length === 0) {
-                    container.innerHTML = '<p>No COBOL programs found for dependency analysis.</p>';
-                    return;
-                }
-
-                let html = '';
-                
-                Object.entries(this.dependencies).forEach(([fileName, deps]) => {
-                    const hasMissing = deps.missing.length > 0;
-                    
-                    html += `
-                        <div class="lifecycle-card">
-                            <h4>📋 ${fileName}</h4>
-                            
-                            <div class="data-stats">
-                                <div class="stat-card">
-                                    <div class="stat-number">${deps.copybooks.length}</div>
-                                    <div class="stat-label">Copybooks</div>
-                                </div>
-                                <div class="stat-card">
-                                    <div class="stat-number">${deps.calledPrograms.length}</div>
-                                    <div class="stat-label">Called Programs</div>
-                                </div>
-                                <div class="stat-card">
-                                    <div class="stat-number">${deps.db2Tables.length}</div>
-                                    <div class="stat-label">DB2 Tables</div>
-                                </div>
-                                <div class="stat-card">
-                                    <div class="stat-number" style="color: ${hasMissing ? '#FF6B6B' : '#4CAF50'}">${deps.missing.length}</div>
-                                    <div class="stat-label">Missing</div>
-                                </div>
-                            </div>
-                    `;
-
-                    if (deps.missing.length > 0) {
-                        html += `
-                            <div class="warning">
-                                <strong>⚠️ Missing Dependencies:</strong><br>
-                                ${deps.missing.map(m => `• ${m.type}: ${m.file}`).join('<br>')}
-                            </div>
-                        `;
-                    }
-
-                    html += `</div>`;
-                });
-
-                container.innerHTML = html;
-            }
-
-            validateAnalysisReadiness() {
-                let totalMissing = 0;
-                Object.values(this.dependencies).forEach(deps => {
-                    totalMissing += deps.missing.length;
-                });
-
-                if (totalMissing > 0) {
-                    this.showWarning(`${totalMissing} dependencies missing. Analysis will be incomplete.`);
-                    document.getElementById('analyzeBtn').innerHTML = '⚠️ Analyze (Incomplete)';
-                } else {
-                    this.showSuccess('All dependencies satisfied! Ready for complete analysis.');
-                    document.getElementById('analyzeBtn').innerHTML = '🚀 Start Complete Analysis';
-                }
-            }
-
-            // Complete analysis methods
-            async startCompleteAnalysis() {
-                if (!this.serverValidated || this.uploadedFiles.length === 0) {
-                    this.showError('Please validate server connection and upload files first');
-                    return;
-                }
-
-                const projectName = document.getElementById('projectName').value.trim() || 'Unnamed_Project';
-                
-                this.showLoading();
-                
-                try {
-                    if (!this.dependencies || Object.keys(this.dependencies).length === 0) {
-                        this.updateLoadingStatus('Checking dependencies...');
-                        await this.analyzeDependencies();
-                    }
-
-                    this.analysisResults = {};
-                    
-                    for (const fileInfo of this.uploadedFiles) {
-                        this.updateLoadingStatus(`Analyzing ${fileInfo.name}...`);
-                        
-                        if (fileInfo.type === 'COBOL Program') {
-                            await this.analyzeCobolProgram(fileInfo);
-                        } else if (fileInfo.type === 'Copybook') {
-                            await this.analyzeCopybook(fileInfo);
-                        } else if (fileInfo.type === 'JCL Job') {
-                            await this.analyzeJCL(fileInfo);
-                        }
-                        
-                        // Rate limiting between files
-                        await this.sleep(2000);
-                    }
-                    
-                    // Perform DB2 comparison if schema provided
-                    const db2Schema = document.getElementById('db2Schema').value.trim();
-                    if (db2Schema) {
-                        this.updateLoadingStatus('Comparing with DB2 schema...');
-                        await this.performDB2Comparison(db2Schema);
-                    }
-                    
-                    // Save to persistent storage
-                    this.updateLoadingStatus('Saving to persistent storage...');
-                    this.saveAnalysisToStorage(projectName, this.analysisResults);
+                    // Step 4: Display results
+                    this.displayComponentAnalysis(componentName);
+                    this.saveToStorage();
                     
                     this.hideLoading();
-                    this.displayResults();
-                    this.showSuccess('Complete analysis finished and saved locally!');
+                    this.showSuccess(`Analysis complete for component: ${componentName}`);
+                    this.validateForm();
                     
                 } catch (error) {
                     this.hideLoading();
                     this.showError(`Analysis failed: ${error.message}`);
+                    console.error('Component analysis error:', error);
                 }
             }
 
-            async analyzeCobolProgram(fileInfo) {
-                const deps = this.dependencies[fileInfo.name] || {};
-                
-                try {
-                    const estimatedTokens = this.estimateTokenCount(fileInfo.content);
-                    
-                    if (estimatedTokens <= this.maxTokens * 0.8) {
-                        // Single analysis for files that fit in token limit
-                        const analysis = await this.performSingleCobolAnalysis(fileInfo, deps);
-                        this.analysisResults[fileInfo.name] = {
-                            type: 'cobol',
-                            analysis: analysis,
-                            dependencies: deps,
-                            timestamp: new Date().toISOString(),
-                            chunked: false,
-                            tokenCount: estimatedTokens
-                        };
-                    } else {
-                        // Chunked analysis for large files
-                        this.updateLoadingStatus(`Large file detected (~${Math.round(estimatedTokens/1000)}K tokens) - Using intelligent chunking...`);
-                        const analysis = await this.performChunkedCobolAnalysis(fileInfo, deps);
-                        this.analysisResults[fileInfo.name] = {
-                            type: 'cobol',
-                            analysis: analysis.synthesis,
-                            chunkResults: analysis.chunks,
-                            dependencies: deps,
-                            timestamp: new Date().toISOString(),
-                            chunked: true,
-                            totalChunks: analysis.chunks.length,
-                            tokenCount: estimatedTokens
-                        };
-                    }
-                } catch (error) {
-                    this.analysisResults[fileInfo.name] = {
-                        type: 'cobol',
-                        analysis: `COBOL analysis failed: ${error.message}`,
-                        dependencies: deps,
-                        timestamp: new Date().toISOString(),
-                        chunked: false,
-                        error: true
-                    };
-                }
-            }
-            async performChunkedCobolAnalysis(fileInfo, deps) {
-                console.log('[DEBUG] Starting chunked analysis for:', fileInfo.name);
-                
-                // Create system context for chunking
-                const systemContext = `
-COBOL PROGRAM ANALYSIS CONTEXT
-==============================
-Program: ${fileInfo.name}
-Dependencies Found: ${deps.copybooks?.join(', ') || 'None'}
-Called Programs: ${deps.calledPrograms?.join(', ') || 'None'}
-
-This is part of a larger COBOL program being analyzed in chunks.
-Analyze the specific sections in this chunk while noting cross-references.
-                `;
-
-                const chunks = this.createIntelligentChunks(fileInfo.content, fileInfo.name, systemContext);
-                const chunkResults = [];
-                
-                console.log(`[DEBUG] Created ${chunks.length} chunks for analysis`);
-                
-                // Analyze each chunk
-                for (let i = 0; i < chunks.length; i++) {
-                    this.updateLoadingStatus(`Analyzing ${fileInfo.name} - Chunk ${i + 1}/${chunks.length}...`);
-                    
-                    console.log(`[DEBUG] Processing chunk ${i + 1}, content length: ${chunks[i].content.length}`);
-                    
-                    const chunkPrompt = `
-You are analyzing chunk ${i + 1} of ${chunks.length} from COBOL program ${fileInfo.name}.
-
-CHUNK CONTENT:
-${chunks[i].content}
-
-Analyze this specific chunk focusing on:
-
-**SECTIONS IN CHUNK**
-- Identify COBOL divisions, sections, and paragraphs
-- Note data definitions and working storage items
-
-**CONTROL FLOW**
-- PERFORM statements and their targets
-- CALL statements with parameters  
-- Conditional logic and decision points
-- Loop structures
-
-**DATA OPERATIONS**
-- Variable usage and data flow
-- File operations and database access
-- Calculations and transformations
-
-**BUSINESS LOGIC**
-- Business processes in this chunk
-- Validation rules and constraints
-- Core algorithms
-
-**CROSS-REFERENCES**
-- References to code sections not in this chunk
-- Variables or paragraphs defined elsewhere
-- Integration points with other chunks
-
-Provide a comprehensive analysis of this specific chunk.
-                    `;
-                    
-                    try {
-                        console.log(`[DEBUG] Sending chunk ${i + 1} to vLLM...`);
-                        const analysis = await this.callvLLMAPI(chunkPrompt);
-                        console.log(`[DEBUG] Chunk ${i + 1} analysis completed, length: ${analysis.length}`);
-                        
-                        chunkResults.push({
-                            chunkIndex: i + 1,
-                            startLine: chunks[i].startLine,
-                            endLine: chunks[i].endLine,
-                            tokenCount: chunks[i].tokenCount,
-                            analysis: analysis
-                        });
-                        
-                        // Rate limiting between chunks
-                        if (i < chunks.length - 1) {
-                            await this.sleep(2000);
-                        }
-                        
-                    } catch (error) {
-                        console.error(`[DEBUG] Chunk ${i + 1} analysis failed:`, error);
-                        chunkResults.push({
-                            chunkIndex: i + 1,
-                            startLine: chunks[i].startLine,
-                            endLine: chunks[i].endLine,
-                            tokenCount: chunks[i].tokenCount,
-                            analysis: `Chunk analysis failed: ${error.message}`,
-                            error: true
-                        });
-                    }
-                }
-                
-                // Synthesize results from all chunks
-                this.updateLoadingStatus(`Synthesizing analysis from ${chunks.length} chunks...`);
-                const synthesis = await this.synthesizeCobolAnalysis(fileInfo.name, deps, chunkResults);
-                
-                return {
-                    synthesis: synthesis,
-                    chunks: chunkResults
-                };
-            }
-
-            async synthesizeCobolAnalysis(fileName, deps, chunkResults) {
-                const synthPrompt = `
-COBOL PROGRAM SYNTHESIS
-
-Combine analysis from ${chunkResults.length} chunks to create a unified comprehensive analysis for ${fileName}.
-
-CHUNK SUMMARIES:
-${chunkResults.map((chunk, i) => `
-Chunk ${chunk.chunkIndex} (Lines ${chunk.startLine}-${chunk.endLine}):
-${chunk.analysis.substring(0, 800)}...
-`).join('\n---\n')}
-
-DEPENDENCIES:
-- Copybooks: ${deps.copybooks?.join(', ') || 'None'}
-- Called Programs: ${deps.calledPrograms?.join(', ') || 'None'}
-- Missing: ${deps.missing?.length || 0} dependencies
-
-Create a unified analysis covering:
-
-**COMPLETE PROGRAM ARCHITECTURE**
-- Integrated view of all divisions and sections
-- Overall program structure and flow
-- Data organization across all chunks
-
-**UNIFIED CONTROL FLOW**  
-- Complete execution path from start to finish
-- All PERFORM chains and call sequences
-- Integrated business process flow
-
-**COMPREHENSIVE DATA ANALYSIS**
-- Complete variable usage patterns
-- End-to-end data transformations
-- Integrated file and database operations
-
-**BUSINESS LOGIC SYNTHESIS**
-- Complete business processes
-- Integrated validation and calculation logic
-- End-to-end business workflows
-
-**INTEGRATION ASSESSMENT**
-- Complete dependency analysis
-- Interface and integration points
-- Impact of missing dependencies
-
-**MODERNIZATION ROADMAP**
-- Overall complexity assessment
-- Priority areas for modernization
-- Complete migration considerations
-
-Eliminate redundancies and provide a cohesive, unified analysis.
-                `;
-
-                try {
-                    return await this.callvLLMAPI(synthPrompt);
-                } catch (error) {
-                    console.error('Synthesis failed:', error);
-                    return `Synthesis failed: ${error.message}\n\nIndividual chunk results available:\n` +
-                           chunkResults.map((c, i) => `Chunk ${i + 1}: ${c.analysis.substring(0, 500)}...`).join('\n\n');
-                }
-            }
-
-            async performChunkedCopybookAnalysis(fileInfo) {
-                // Create system context for copybook chunking
-                const systemContext = `
-COPYBOOK ANALYSIS CONTEXT
-=========================
-Copybook: ${fileInfo.name}
-Total Size: ${fileInfo.content.length} characters
-
-This is part of a larger COBOL copybook being analyzed in chunks.
-Focus on the data structure definitions in this chunk while noting relationships to other sections.
-                `;
-
-                const chunks = this.createIntelligentCopybookChunks(fileInfo.content, fileInfo.name, systemContext);
-                const chunkResults = [];
-                
-                console.log(`[DEBUG] Created ${chunks.length} chunks for copybook analysis`);
-                
-                // Analyze each chunk
-                for (let i = 0; i < chunks.length; i++) {
-                    this.updateLoadingStatus(`Analyzing ${fileInfo.name} - Chunk ${i + 1}/${chunks.length}...`);
-                    
-                    console.log(`[DEBUG] Processing copybook chunk ${i + 1}, content length: ${chunks[i].content.length}`);
-                    
-                    const chunkPrompt = `
-You are analyzing chunk ${i + 1} of ${chunks.length} from COBOL copybook ${fileInfo.name}.
-
-CHUNK CONTENT:
-${chunks[i].content}
-
-Analyze this specific chunk focusing on:
-
-**DATA STRUCTURE IN CHUNK**
-- Field definitions and level numbers
-- Data types and PIC clauses
-- REDEFINES and OCCURS clauses
-- Group fields and elementary items
-
-**FIELD CLASSIFICATION**
-- Business purpose of each field
-- Data types and formats
-- Field relationships and dependencies
-- Key fields and identifiers
-
-**DATA PATTERNS**
-- Repeating groups and arrays
-- Alternative data views (REDEFINES)
-- Conditional field usage
-- Data validation requirements
-
-**BUSINESS MEANING**
-- What business data this chunk represents
-- How fields relate to business processes
-- Integration and interface requirements
-- Data quality and validation needs
-
-**CROSS-REFERENCES**
-- Fields that reference other copybook sections
-- Dependencies on fields not in this chunk
-- Group relationships spanning chunks
-
-Provide a comprehensive analysis of the data structures in this specific chunk.
-                    `;
-                    
-                    try {
-                        console.log(`[DEBUG] Sending copybook chunk ${i + 1} to vLLM...`);
-                        const analysis = await this.callvLLMAPI(chunkPrompt);
-                        console.log(`[DEBUG] Copybook chunk ${i + 1} analysis completed, length: ${analysis.length}`);
-                        
-                        chunkResults.push({
-                            chunkIndex: i + 1,
-                            startLine: chunks[i].startLine,
-                            endLine: chunks[i].endLine,
-                            tokenCount: chunks[i].tokenCount,
-                            analysis: analysis
-                        });
-                        
-                        // Rate limiting between chunks
-                        if (i < chunks.length - 1) {
-                            await this.sleep(2000);
-                        }
-                        
-                    } catch (error) {
-                        console.error(`[DEBUG] Copybook chunk ${i + 1} analysis failed:`, error);
-                        chunkResults.push({
-                            chunkIndex: i + 1,
-                            startLine: chunks[i].startLine,
-                            endLine: chunks[i].endLine,
-                            tokenCount: chunks[i].tokenCount,
-                            analysis: `Chunk analysis failed: ${error.message}`,
-                            error: true
-                        });
-                    }
-                }
-                
-                // Synthesize results from all chunks
-                this.updateLoadingStatus(`Synthesizing copybook analysis from ${chunks.length} chunks...`);
-                const synthesis = await this.synthesizeCopybookAnalysis(fileInfo.name, chunkResults);
-                
-                return {
-                    synthesis: synthesis,
-                    chunks: chunkResults
-                };
-            }
-
-            createIntelligentCopybookChunks(content, fileName, context = '') {
-                console.log(`[DEBUG] Creating copybook chunks for ${fileName}, content length: ${content.length}`);
-                
-                const lines = content.split('\n');
-                const chunks = [];
-                const maxTokensPerChunk = Math.floor(this.maxTokens * 0.7);
-                const contextOverlap = 15;
-                
-                let currentChunk = {
-                    content: context + '\n\nCOPYBOOK DATA STRUCTURE:\n',
-                    startLine: 0,
-                    endLine: 0,
-                    tokenCount: this.estimateTokenCount(context)
-                };
-                
-                for (let i = 0; i < lines.length; i++) {
-                    const line = lines[i].trim();
-                    const lineTokens = this.estimateTokenCount(line + '\n');
-                    
-                    // Detect COBOL level numbers (01, 05, 10, etc.)
-                    const levelMatch = line.match(/^\s*(\d{2})\s+/);
-                    if (levelMatch) {
-                        const level = parseInt(levelMatch[1]);
-                        
-                        // Try to chunk at logical boundaries (01 or 05 levels)
-                        if ((level <= 5) && currentChunk.tokenCount > maxTokensPerChunk * 0.5 && 
-                            currentChunk.content.length > (context.length + 50)) {
-                            
-                            currentChunk.endLine = i - 1;
-                            chunks.push({ ...currentChunk });
-                            
-                            console.log(`[DEBUG] Created copybook chunk ${chunks.length}: lines ${currentChunk.startLine}-${currentChunk.endLine}, tokens: ${currentChunk.tokenCount}`);
-                            
-                            const overlapStart = Math.max(0, i - contextOverlap);
-                            const overlapContent = lines.slice(overlapStart, i).join('\n');
-                            
-                            currentChunk = {
-                                content: context + '\n\nPREVIOUS STRUCTURE:\n' + overlapContent + '\n\nCONTINUING:\n',
-                                startLine: i,
-                                endLine: 0,
-                                tokenCount: this.estimateTokenCount(context + overlapContent)
-                            };
-                        }
-                    }
-                    
-                    if (currentChunk.tokenCount + lineTokens > maxTokensPerChunk && 
-                        currentChunk.content.length > (context.length + 50)) {
-                        
-                        currentChunk.endLine = i - 1;
-                        chunks.push({ ...currentChunk });
-                        
-                        console.log(`[DEBUG] Created copybook chunk ${chunks.length} (token limit): lines ${currentChunk.startLine}-${currentChunk.endLine}, tokens: ${currentChunk.tokenCount}`);
-                        
-                        const overlapStart = Math.max(0, i - contextOverlap);
-                        const overlapContent = lines.slice(overlapStart, i).join('\n');
-                        
-                        currentChunk = {
-                            content: context + '\n\nPREVIOUS STRUCTURE:\n' + overlapContent + '\n\nCONTINUING:\n',
-                            startLine: i,
-                            endLine: 0,
-                            tokenCount: this.estimateTokenCount(context + overlapContent)
-                        };
-                    }
-                    
-                    currentChunk.content += lines[i] + '\n';
-                    currentChunk.tokenCount += lineTokens;
-                }
-                
-                if (currentChunk.content.length > (context.length + 50)) {
-                    currentChunk.endLine = lines.length - 1;
-                    chunks.push(currentChunk);
-                    console.log(`[DEBUG] Created final copybook chunk ${chunks.length}: lines ${currentChunk.startLine}-${currentChunk.endLine}, tokens: ${currentChunk.tokenCount}`);
-                }
-                
-                console.log(`[DEBUG] Total copybook chunks created: ${chunks.length}`);
-                return chunks;
-            }
-            async synthesizeCopybookAnalysis(fileName, chunkResults) {
-                const synthPrompt = `
-COPYBOOK SYNTHESIS
-
-Combine analysis from ${chunkResults.length} chunks to create a unified comprehensive analysis for copybook ${fileName}.
-
-CHUNK SUMMARIES:
-${chunkResults.map((chunk, i) => `
-Chunk ${chunk.chunkIndex} (Lines ${chunk.startLine}-${chunk.endLine}):
-${chunk.analysis.substring(0, 800)}...
-`).join('\n---\n')}
-
-Create a unified copybook analysis covering:
-
-**COMPLETE DATA STRUCTURE**
-- Integrated view of all field definitions
-- Complete field hierarchy and organization
-- Overall data model and relationships
-- All REDEFINES and alternative views
-
-**UNIFIED FIELD CLASSIFICATION**
-- Complete business data categorization
-- All key fields and identifiers
-- Integrated data lifecycle analysis
-- Complete validation requirements
-
-**COMPREHENSIVE BUSINESS ANALYSIS**
-- Complete business context and usage
-- Integrated transaction processing view
-- Complete compliance and regulatory picture
-- Full integration requirements
-
-**MODERNIZATION STRATEGY**
-- Complete database design implications
-- Integrated API and service opportunities
-- Complete data quality assessment
-- Overall modernization roadmap
-
-**DATA QUALITY AND GOVERNANCE**
-- Complete field validation requirements
-- Integrated data quality assessment
-- Full referential integrity analysis
-- Complete governance recommendations
-
-Eliminate redundancies and provide a cohesive, unified copybook analysis that represents the complete data structure.
-                `;
-
-                try {
-                    return await this.callvLLMAPI(synthPrompt);
-                } catch (error) {
-                    console.error('Copybook synthesis failed:', error);
-                    return `Synthesis failed: ${error.message}\n\nIndividual chunk results available:\n` +
-                           chunkResults.map((c, i) => `Chunk ${i + 1}: ${c.analysis.substring(0, 500)}...`).join('\n\n');
-                }
-            }
-
-            async performSingleCopybookAnalysis(fileInfo) {
+            async identifyComponent(componentName) {
                 const prompt = `
-You are an expert in COBOL data structures. Analyze this copybook for complete data lifecycle.
+COMPONENT IDENTIFICATION AND MAPPING
 
-COPYBOOK: ${fileInfo.name}
-CONTENT:
-${fileInfo.content}
+Component Name: ${componentName}
 
-COMPREHENSIVE ANALYSIS REQUIRED:
+Analyze these files to identify where and how this component appears:
 
-**FIELD STRUCTURE**
-- Complete field hierarchy and organization
-- Data types, lengths, and COBOL formats (PIC clauses)
-- REDEFINES analysis and alternate data views
-- OCCURS clauses for table structures
-- COMP fields and storage considerations
+FILES:
+${this.uploadedFiles.map(f => `
+=== ${f.name} (${f.type}) ===
+${f.content.substring(0, 3000)}${f.content.length > 3000 ? '\n... (truncated)' : ''}
+`).join('\n')}
 
-**BUSINESS DATA CLASSIFICATION**
-- INPUT FIELDS: External data, user inputs, interfaces
-- DERIVED FIELDS: Calculated or transformed values  
-- KEY FIELDS: Identifiers, primary/foreign keys
-- CONTROL FIELDS: Status indicators, flags, counters
-- AUDIT FIELDS: Timestamps, user tracking, versions
+IDENTIFICATION TASKS:
+1. **Component Type**: Is this a copybook name, program name, field name, or JCL job?
+2. **File Locations**: Which files contain references to this component?
+3. **Usage Context**: How is it used in each file (COPY statement, CALL, field reference, etc.)?
+4. **Related Components**: What other components does it interact with?
 
-**DATA LIFECYCLE ANALYSIS**
-- Field creation and initialization points
-- Data transformation and calculation logic
-- Usage patterns and access frequency
-- Validation rules and business constraints
-- Data flow and integration requirements
-
-**BUSINESS CONTEXT**
-- Transaction processing requirements
-- Reporting and analytics usage
-- Compliance and regulatory needs
-- Integration with external systems
-- Performance and storage considerations
-
-**QUALITY ASSESSMENT**
-- Mandatory vs optional field analysis
-- Data format validation requirements
-- Potential data quality issues
-- Referential integrity considerations
-
-**MODERNIZATION OPPORTUNITIES**
-- Fields suitable for normalization
-- Redundant or duplicate elements
-- Database design implications
-- API and service interface potential
-
-Provide specific field examples and business context for key data elements.
+Format response EXACTLY as:
+COMPONENT_TYPE: [COPYBOOK|PROGRAM|FIELD|JCL_JOB|NOT_FOUND]
+FOUND_IN: file1.ext, file2.ext
+USAGE_CONTEXT: Brief description of how it's used
+RELATED_COMPONENTS: component1, component2
                 `;
 
-                return await this.callvLLMAPI(prompt);
+                const response = await this.callvLLMAPI(prompt);
+                return this.parseComponentInfo(response);
             }
 
-            async analyzeCopybook(fileInfo) {
-                try {
-                    const estimatedTokens = this.estimateTokenCount(fileInfo.content);
-                    
-                    if (estimatedTokens <= this.maxTokens * 0.8) {
-                        // Single analysis for files that fit in token limit
-                        const analysis = await this.performSingleCopybookAnalysis(fileInfo);
-                        this.analysisResults[fileInfo.name] = {
-                            type: 'copybook',
-                            analysis: analysis,
-                            timestamp: new Date().toISOString(),
-                            chunked: false,
-                            tokenCount: estimatedTokens
-                        };
-                    } else {
-                        // Chunked analysis for large copybooks
-                        this.updateLoadingStatus(`Large copybook detected (~${Math.round(estimatedTokens/1000)}K tokens) - Using intelligent chunking...`);
-                        const analysis = await this.performChunkedCopybookAnalysis(fileInfo);
-                        this.analysisResults[fileInfo.name] = {
-                            type: 'copybook',
-                            analysis: analysis.synthesis,
-                            chunkResults: analysis.chunks,
-                            timestamp: new Date().toISOString(),
-                            chunked: true,
-                            totalChunks: analysis.chunks.length,
-                            tokenCount: estimatedTokens
-                        };
+            parseComponentInfo(response) {
+                const info = {
+                    type: 'NOT_FOUND',
+                    foundIn: [],
+                    usageContext: '',
+                    relatedComponents: []
+                };
+
+                const lines = response.split('\n');
+                lines.forEach(line => {
+                    line = line.trim();
+                    if (line.includes('COMPONENT_TYPE:')) {
+                        info.type = line.split(':')[1]?.trim() || 'NOT_FOUND';
+                    } else if (line.includes('FOUND_IN:')) {
+                        const filesStr = line.split(':')[1]?.trim() || '';
+                        info.foundIn = filesStr.split(',').map(s => s.trim()).filter(s => s);
+                    } else if (line.includes('USAGE_CONTEXT:')) {
+                        info.usageContext = line.split(':')[1]?.trim() || '';
+                    } else if (line.includes('RELATED_COMPONENTS:')) {
+                        const componentsStr = line.split(':')[1]?.trim() || '';
+                        info.relatedComponents = componentsStr.split(',').map(s => s.trim()).filter(s => s);
                     }
-                } catch (error) {
-                    this.analysisResults[fileInfo.name] = {
-                        type: 'copybook',
-                        analysis: `Copybook analysis failed: ${error.message}`,
-                        timestamp: new Date().toISOString(),
-                        chunked: false,
-                        error: true
-                    };
-                }
+                });
+
+                console.log('Parsed component info:', info);
+                return info;
             }
 
-            async analyzeJCL(fileInfo) {
-                const prompt = `
-You are an expert in JCL job control and mainframe operations. Analyze this JCL job.
-
-JCL JOB: ${fileInfo.name}
-CONTENT:
-${fileInfo.content}
-
-ANALYSIS REQUIRED:
-
-**JOB STRUCTURE**
-- Job steps and execution sequence
-- Programs executed in each step
-- DD statements and file allocations
-- Conditional execution logic (IF/THEN)
-
-**PROGRAM EXECUTION FLOW**
-- Order of program execution
-- Dependencies between steps
-- Parameter passing between steps
-- Return code handling
-
-**FILE DEPENDENCIES**
-- Input files and datasets required
-- Output files and datasets created
-- Temporary datasets and work files
-- Catalog and uncatalog operations
-
-**SYSTEM RESOURCES**
-- Memory and storage requirements
-- Processing time estimates
-- System dependencies and requirements
-- Resource allocation and limits
-
-**INTEGRATION ANALYSIS**
-- Integration with uploaded COBOL programs
-- Data flow between job steps
-- Error handling and recovery procedures
-- Scheduling and dependency requirements
-
-**OPERATIONAL CONSIDERATIONS**
-- Job scheduling requirements
-- Monitoring and alerting needs
-- Performance optimization opportunities
-- Maintenance and support requirements
-
-Focus on how this JCL integrates with the COBOL programs in the analysis.
-                `;
-
-                try {
-                    const analysis = await this.callvLLMAPI(prompt);
-                    this.analysisResults[fileInfo.name] = {
-                        type: 'jcl',
-                        analysis: analysis,
-                        timestamp: new Date().toISOString(),
-                        tokenCount: this.estimateTokenCount(fileInfo.content)
-                    };
-                } catch (error) {
-                    this.analysisResults[fileInfo.name] = {
-                        type: 'jcl',
-                        analysis: `JCL analysis failed: ${error.message}`,
-                        timestamp: new Date().toISOString(),
-                        error: true
-                    };
-                }
-            }
-
-            async performDB2Comparison(db2Schema) {
-                const copybookFiles = this.uploadedFiles.filter(f => f.type === 'Copybook');
+            async performComponentAnalysis(componentName, componentInfo) {
+                let analysisPrompt = '';
                 
-                if (copybookFiles.length === 0) {
-                    return;
+                switch (componentInfo.type) {
+                    case 'COPYBOOK':
+                        analysisPrompt = this.buildCopybookAnalysisPrompt(componentName, componentInfo);
+                        break;
+                    case 'FIELD':
+                        analysisPrompt = this.buildFieldAnalysisPrompt(componentName, componentInfo);
+                        break;
+                    case 'PROGRAM':
+                        analysisPrompt = this.buildProgramAnalysisPrompt(componentName, componentInfo);
+                        break;
+                    case 'JCL_JOB':
+                        analysisPrompt = this.buildJCLAnalysisPrompt(componentName, componentInfo);
+                        break;
+                    default:
+                        throw new Error(`Unsupported component type: ${componentInfo.type}`);
                 }
 
-                const prompt = `
-You are an expert in DB2 database design and COBOL-DB2 integration. Compare copybook structures with DB2 schema.
+                return await this.callvLLMAPI(analysisPrompt);
+            }
 
-COPYBOOKS:
-${copybookFiles.map(f => `
-${f.name}:
+            buildCopybookAnalysisPrompt(componentName, componentInfo) {
+                const relevantFiles = this.uploadedFiles.filter(f => 
+                    componentInfo.foundIn.some(fileName => f.name.includes(fileName)) ||
+                    f.content.includes(componentName) ||
+                    f.type === 'COBOL Program'
+                );
+
+                return `
+COPYBOOK LIFECYCLE ANALYSIS: ${componentName}
+
+Analyze the complete lifecycle of copybook "${componentName}" across all programs:
+
+RELEVANT FILES:
+${relevantFiles.map(f => `
+=== ${f.name} (${f.type}) ===
 ${f.content}
-`).join('\n---\n')}
+`).join('\n')}
 
-DB2 SCHEMA:
-${db2Schema}
+COMPREHENSIVE COPYBOOK ANALYSIS:
 
-COMPREHENSIVE COMPARISON REQUIRED:
+**1. FIELD INVENTORY**
+- List ALL fields defined in this copybook with their PIC clauses and descriptions
+- Identify group fields vs elementary fields  
+- Note REDEFINES and OCCURS clauses
+- Field hierarchy and data structure organization
 
-**FIELD MAPPING ANALYSIS**
-- Complete field-to-column mapping table
-- Unmapped copybook fields identification
-- Unmapped DB2 columns identification
-- Field name variations and aliases
+**2. CROSS-PROGRAM USAGE**
+For each program that uses this copybook, identify:
+- Which fields are READ (used as input/reference)
+- Which fields are UPDATED/WRITTEN (modified by MOVE statements)
+- Which fields are NEVER USED (stale/unused fields)
+- Field usage frequency and patterns
 
-**DATA TYPE TRANSFORMATION**
-- COBOL PIC clauses to DB2 data types
-- COMP-3/PACKED-DECIMAL conversions
-- Binary field (COMP) mappings
-- Date/time format differences
-- Character field length variations
+**3. DATA LIFECYCLE FLOW**
+For each field in the copybook, trace the complete lifecycle:
+- **CREATION**: Where/how is the field first populated? (INPUT files, user entry, calculations)
+- **UPDATES**: Which programs modify this field and how?
+- **REFERENCES**: Which programs read this field for processing?
+- **TRANSFORMATIONS**: How is data converted, calculated, or formatted?
+- **OUTPUT**: Where does the field data go? (files, DB2, reports, other programs)
+- **PURGING**: Where/when is the data deleted, archived, or cleared?
 
-**PRECISION AND SCALE ANALYSIS**
-- Numeric precision compatibility
-- Scale differences and data loss risks
-- Rounding and truncation implications
-- Overflow/underflow risk assessment
+**4. FIELD CLASSIFICATION**
+Classify each field as:
+- INPUT_ONLY: Only populated from external sources, never modified internally
+- OUTPUT_ONLY: Only written to external targets, never read internally  
+- WORKING: Used for calculations, transformations, temporary storage
+- CONTROL: Status flags, counters, indicators, processing controls
+- UNUSED: Defined but never referenced in any uploaded program
+- KEY_FIELD: Used for lookups, joins, indexing, or identification
 
-**STRUCTURAL MAPPING**
-- Group fields to individual columns
-- REDEFINES handling in relational model
-- OCCURS clause normalization requirements
-- Nested structure flattening needs
+**5. STALE FIELD DETECTION**
+- List fields that are defined but NEVER used in any program
+- Fields that are only populated but never referenced
+- Fields with outdated or obsolete business purposes
+- Recommended fields for removal or consolidation
 
-**MIGRATION STRATEGY**
-- Field-by-field conversion requirements
-- Custom transformation logic needed
-- Data validation rules implementation
-- Error handling for conversion failures
+**6. BUSINESS IMPACT ANALYSIS**
+- Programs that would break if this copybook changed
+- Critical fields vs optional fields
+- Data quality issues and validation gaps
+- Performance impact of field usage patterns
 
-**BUSINESS IMPACT**
-- Fields lost in migration
-- New DB2 capabilities gained
-- Application modification requirements
-- Reporting and analytics impact
-
-**IMPLEMENTATION PLAN**
-- Recommended migration sequence
-- Testing and validation approach
-- Performance impact considerations
-- Risk mitigation strategies
-
-Provide specific examples and DDL suggestions where applicable.
+Provide specific examples with program names and line references where possible.
                 `;
+            }
 
+            buildFieldAnalysisPrompt(componentName, componentInfo) {
+                const relevantFiles = this.uploadedFiles.filter(f => 
+                    f.content.includes(componentName)
+                );
+
+                return `
+FIELD LIFECYCLE ANALYSIS: ${componentName}
+
+Analyze the complete lifecycle of field "${componentName}" across all uploaded files:
+
+RELEVANT FILES:
+${relevantFiles.map(f => `
+=== ${f.name} (${f.type}) ===
+${f.content}
+`).join('\n')}
+
+COMPREHENSIVE FIELD ANALYSIS:
+
+**1. FIELD DEFINITION**
+- Where is this field defined? (copybook name, program name)
+- Data type, length, and format (PIC clause)
+- Parent group structure and level number
+- Any REDEFINES or alternate definitions
+
+**2. COMPLETE DATA FLOW LIFECYCLE**
+Trace the field through its entire lifecycle:
+
+**CREATION/INPUT STAGE:**
+- How is this field initially populated?
+- External data sources (input files, DB2, user entry)
+- Default values or initialization logic
+- Input validation rules and constraints
+
+**PROCESSING/TRANSFORMATION STAGE:**
+- Which programs READ this field for processing?
+- Which programs WRITE/UPDATE this field?
+- Calculations, computations, or transformations applied
+- Business logic and validation rules that use this field
+- Conditional processing based on field values
+
+**OUTPUT/STORAGE STAGE:**
+- Where is the field data written or stored?
+- File outputs, database updates, report generation
+- Data formatting or conversion on output
+- Integration with external systems
+
+**ARCHIVAL/CLEANUP STAGE:**
+- Archival processes that affect this field
+- Data retention policies and cleanup procedures
+- When and how is the field data purged?
+
+**3. USAGE PATTERN ANALYSIS**
+- READ operations: List all programs that reference this field
+- WRITE operations: List all programs that modify this field  
+- CALCULATION operations: Programs that use field in computations
+- VALIDATION operations: Programs that check or validate field values
+- CONDITIONAL operations: Programs that make decisions based on field values
+- UNUSED patterns: Programs that include but don't actually use the field
+
+**4. CROSS-PROGRAM DEPENDENCIES**
+- Programs that depend on this field being populated
+- Programs that must execute BEFORE this field is populated
+- Programs that must execute AFTER this field is updated
+- JCL job execution order dependencies related to this field
+
+**5. DATA QUALITY AND VALIDATION**
+- Validation rules and business constraints
+- Error handling procedures for this field
+- Data consistency checks across programs
+- Potential data quality issues or risks
+
+**6. BUSINESS IMPACT ASSESSMENT**
+- Business processes that critically depend on this field
+- Impact analysis if field was removed or changed
+- Compliance, regulatory, or audit requirements
+- Integration points with external systems
+
+**7. MODERNIZATION OPPORTUNITIES**
+- Is this field suitable for database normalization?
+- Can this field be consolidated with similar fields?
+- API or service interface potential
+- Opportunities for automation or optimization
+
+Provide specific program names, line numbers, and code examples where the field is used.
+                `;
+            }
+
+            buildProgramAnalysisPrompt(componentName, componentInfo) {
+                const relevantFiles = this.uploadedFiles.filter(f => 
+                    componentInfo.foundIn.some(fileName => f.name.includes(fileName)) ||
+                    f.content.includes(componentName)
+                );
+
+                return `
+PROGRAM LIFECYCLE ANALYSIS: ${componentName}
+
+Analyze how program "${componentName}" is used and integrated across the system:
+
+RELEVANT FILES:
+${relevantFiles.map(f => `
+=== ${f.name} (${f.type}) ===
+${f.content}
+`).join('\n')}
+
+COMPREHENSIVE PROGRAM ANALYSIS:
+
+**1. PROGRAM IDENTIFICATION AND PURPOSE**
+- Program type and main business function
+- Input parameters and linkage section analysis
+- Main processing logic and business purpose
+- Program classification (batch, online, utility, etc.)
+
+**2. EXECUTION FLOW AND DEPENDENCIES**
+- Which programs or JCL jobs CALL this program?
+- What programs does this program CALL?
+- Parameter passing and data sharing mechanisms
+- Execution sequence and timing dependencies
+
+**3. DATA DEPENDENCIES AND I/O**
+- Copybooks included and used by this program
+- Input files and datasets read by this program
+- Output files and datasets written by this program
+- Database tables accessed (EXEC SQL statements)
+- Temporary files or work areas used
+
+**4. BUSINESS PROCESSING ANALYSIS**
+- Core business logic and processing rules
+- Data transformations and calculations performed
+- Validation and error handling procedures
+- Business workflows and process integration
+
+**5. INTEGRATION POINTS**
+- Programs that depend on this program's execution
+- Data passed TO this program (inputs)
+- Data passed FROM this program (outputs)
+- Shared data areas, files, or database records
+- External system interfaces
+
+**6. ERROR HANDLING AND RECOVERY**
+- Error conditions and exception handling
+- Recovery procedures and restart capabilities
+- Notification and alerting mechanisms
+- Data integrity and consistency measures
+
+**7. PERFORMANCE AND RESOURCE USAGE**
+- Processing time and resource requirements
+- File I/O patterns and efficiency
+- Database access patterns
+- Memory and storage utilization
+
+**8. MAINTENANCE AND SUPPORT**
+- Code quality and maintainability assessment
+- Documentation and commenting adequacy
+- Testing and validation procedures
+- Change impact analysis
+
+**9. MODERNIZATION OPPORTUNITIES**
+- Areas suitable for refactoring or optimization
+- Database modernization opportunities
+- API or service interface potential
+- Automation and process improvement opportunities
+
+Provide specific examples with file names, line numbers, and code snippets where relevant.
+                `;
+            }
+
+            buildJCLAnalysisPrompt(componentName, componentInfo) {
+                const relevantFiles = this.uploadedFiles.filter(f => 
+                    componentInfo.foundIn.some(fileName => f.name.includes(fileName)) ||
+                    f.content.includes(componentName) ||
+                    f.type === 'JCL Job'
+                );
+
+                return `
+JCL JOB LIFECYCLE ANALYSIS: ${componentName}
+
+Analyze the execution flow and dependencies of JCL job "${componentName}":
+
+RELEVANT FILES:
+${relevantFiles.map(f => `
+=== ${f.name} (${f.type}) ===
+${f.content}
+`).join('\n')}
+
+COMPREHENSIVE JCL ANALYSIS:
+
+**1. JOB STRUCTURE AND ORGANIZATION**
+- Job steps and execution sequence
+- Programs executed in each step  
+- DD statements and file allocations
+- Conditional execution logic (IF/THEN/ELSE)
+- PROC calls and parameter substitution
+
+**2. DATA FLOW AND FILE MANAGEMENT**
+- Input files and datasets required before job execution
+- Output files and datasets created during execution
+- Temporary work files and intermediate datasets
+- Data passed between job steps
+- File cleanup and housekeeping procedures
+
+**3. PROGRAM EXECUTION SEQUENCE**
+- Which COBOL programs are executed and in what order?
+- Parameter passing between job steps (PARM values)
+- Return code handling and conditional execution
+- Dependencies between program executions
+- Error recovery and restart procedures
+
+**4. FILE AND DATA DEPENDENCIES**
+- Files that must exist before this job can run
+- Files created by this job that other jobs depend on
+- Database connections and table access
+- Backup and recovery file handling
+- Archive and retention procedures
+
+**5. SYSTEM INTEGRATION AND SCHEDULING**
+- Jobs that must run BEFORE this job (predecessors)
+- Jobs that depend on this job's completion (successors)  
+- Scheduling requirements and timing constraints
+- Resource requirements and system dependencies
+- Integration with job scheduling systems
+
+**6. ERROR HANDLING AND RECOVERY**
+- Error detection and notification procedures
+- Restart and recovery capabilities
+- Cleanup procedures on job failure
+- Rollback and data integrity measures
+- Alerting and monitoring integration
+
+**7. RESOURCE MANAGEMENT**
+- Memory and storage requirements
+- Processing time estimates and SLA requirements
+- System resource allocation and limits
+- Performance monitoring and optimization
+- Cost and resource efficiency analysis
+
+**8. BUSINESS PROCESS INTEGRATION**
+- Business processes supported by this job
+- Critical vs non-critical job classification
+- Impact analysis if job fails or is delayed
+- Integration with business workflows
+- Compliance and audit requirements
+
+
+
+Provide specific step names, file references, program names, and execution dependencies.
+                `;
+            }
+async callvLLMAPI(prompt) {
                 try {
-                    const comparison = await this.callvLLMAPI(prompt);
-                    this.analysisResults['DB2_COMPARISON'] = {
-                        type: 'comparison',
-                        analysis: comparison,
-                        timestamp: new Date().toISOString()
-                    };
-                } catch (error) {
-                    this.analysisResults['DB2_COMPARISON'] = {
-                        type: 'comparison',
-                        analysis: `DB2 comparison failed: ${error.message}`,
-                        timestamp: new Date().toISOString(),
-                        error: true
-                    };
-                }
-            }
+                    const response = await fetch(`${this.vllmEndpoint}/generate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            prompt: prompt,
+                            max_tokens: this.maxTokens,
+                            temperature: 0.1,
+                            stop: ["###", "---END---", "</analysis>"]
+                        }),
+                        signal: AbortSignal.timeout(120000) // 2 minute timeout
+                    });
 
-            // Search functionality
-            onSearchInput() {
-                const searchTerm = document.getElementById('searchInput').value.trim();
-                document.getElementById('searchBtn').disabled = searchTerm.length < 3;
-            }
-
-            performSemanticSearch() {
-                const searchTerm = document.getElementById('searchInput').value.trim();
-                if (searchTerm.length < 3) return;
-
-                this.showLoading();
-                this.updateLoadingStatus('Performing semantic search...');
-
-                const results = [];
-                
-                Object.entries(this.storedAnalyses).forEach(([key, analysis]) => {
-                    const searchableContent = `
-                        ${analysis.projectName}
-                        ${analysis.files.map(f => f.name).join(' ')}
-                        ${JSON.stringify(analysis.analysis)}
-                        ${JSON.stringify(analysis.dependencies)}
-                    `.toLowerCase();
-                    
-                    if (searchableContent.includes(searchTerm.toLowerCase())) {
-                        const relevanceScore = this.calculateRelevance(searchableContent, searchTerm.toLowerCase());
-                        results.push({
-                            key,
-                            analysis,
-                            relevance: relevanceScore
-                        });
+                    if (!response.ok) {
+                        const errorText = await response.text().catch(() => 'Unknown error');
+                        throw new Error(`HTTP ${response.status}: ${errorText}`);
                     }
-                });
 
-                results.sort((a, b) => b.relevance - a.relevance);
+                    const data = await response.json();
+                    const responseText = data.text || data.choices?.[0]?.text || JSON.stringify(data);
+                    
+                    if (!responseText) {
+                        throw new Error('No response text generated');
+                    }
 
-                this.hideLoading();
-                this.displaySearchResults(results, searchTerm);
-                this.switchTab({ target: { dataset: { tab: 'search' } } });
-            }
-
-            calculateRelevance(content, searchTerm) {
-                const terms = searchTerm.split(' ');
-                let score = 0;
-                
-                terms.forEach(term => {
-                    const matches = (content.match(new RegExp(term, 'g')) || []).length;
-                    score += matches;
-                });
-                
-                return score;
-            }
-
-            displaySearchResults(results, searchTerm) {
-                const container = document.getElementById('searchContent');
-                
-                if (results.length === 0) {
-                    container.innerHTML = `
-                        <div class="lifecycle-card">
-                            <h4>No Results Found</h4>
-                            <p>No stored analyses match "${searchTerm}". Try different keywords or analyze more files.</p>
-                        </div>
-                    `;
-                    return;
+                    return responseText.trim();
+                } catch (error) {
+                    if (error.name === 'AbortError') {
+                        throw new Error('Request timed out - try reducing file size or max tokens');
+                    }
+                    throw new Error(`vLLM API error: ${error.message}`);
                 }
+            }
 
+            displayComponentAnalysis(componentName) {
+                const analysis = this.componentAnalysis[componentName];
+                
+                // Update all tabs with the analysis
+                this.displayLifecycleAnalysis(componentName, analysis);
+                this.displayFieldMatrix(componentName, analysis);
+                this.displayUsageAnalysis(componentName, analysis);
+                this.displayDependencyAnalysis(componentName, analysis);
+                
+                // Switch to lifecycle tab to show results
+                this.switchTab({ target: { dataset: { tab: 'lifecycle' } } });
+            }
+
+            displayLifecycleAnalysis(componentName, analysis) {
+                const container = document.getElementById('lifecycleContent');
+                const componentInfo = analysis.componentInfo;
+                
                 let html = `
-                    <div class="lifecycle-card">
-                        <h4>🔍 Search Results for "${searchTerm}"</h4>
-                        <p>Found ${results.length} matching analyses:</p>
-                    </div>
+                    <div class="lifecycle-flow"><h3 style="color: #FFD700; margin-bottom: 15px;">🎯 Component Analysis: ${componentName}</h3>
+                        <div style="margin-bottom: 20px; padding: 15px; background: rgba(255, 255, 255, 0.05); border-radius: 8px;">
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                                <div>
+                                    <strong style="color: #4CAF50;">Type:</strong><br>
+                                    <span style="font-size: 18px;">${this.getTypeIcon(componentInfo.type)} ${componentInfo.type}</span>
+                                </div>
+                                <div>
+                                    <strong style="color: #2196F3;">Found in:</strong><br>
+                                    ${componentInfo.foundIn.join(', ') || 'Multiple files'}
+                                </div>
+                                <div>
+                                    <strong style="color: #FF9800;">Context:</strong><br>
+                                    ${componentInfo.usageContext || 'Cross-program usage'}
+                                </div>
+                                <div>
+                                    <strong style="color: #9C27B0;">Related:</strong><br>
+                                    ${componentInfo.relatedComponents.slice(0, 3).join(', ') || 'Various components'}
+                                </div>
+                            </div>
+                        </div>
                 `;
 
-                results.forEach((result, index) => {
-                    const analysis = result.analysis;
+                // Parse and display analysis sections
+                const sections = this.extractAnalysisSections(analysis.analysis);
+                
+                sections.forEach((section, index) => {
+                    const icon = this.getSectionIcon(section.title);
+                    const isEvenSection = index % 2 === 0;
+                    const sectionColor = isEvenSection ? 'rgba(76, 175, 80, 0.1)' : 'rgba(33, 150, 243, 0.1)';
+                    
                     html += `
-                        <div class="lifecycle-card">
-                            <h4>${index + 1}. ${analysis.projectName}</h4>
-                            <div class="data-stats" style="margin-bottom: 15px;">
-                                <div class="stat-card">
-                                    <div class="stat-number">${analysis.files.length}</div>
-                                    <div class="stat-label">Files</div>
-                                </div>
-                                <div class="stat-card">
-                                    <div class="stat-number">${result.relevance}</div>
-                                    <div class="stat-label">Relevance</div>
-                                </div>
-                                <div class="stat-card">
-                                    <div class="stat-number">${new Date(analysis.timestamp).toLocaleDateString()}</div>
-                                    <div class="stat-label">Date</div>
-                                </div>
-                            </div>
-                            <div style="margin-bottom: 15px;">
-                                <strong>Files:</strong> ${analysis.files.map(f => f.name).join(', ')}
-                            </div>
-                            <div class="stage-details" style="max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 10px; border-radius: 6px;">
-                                ${this.extractSearchPreview(analysis.analysis, searchTerm)}
+                        <div class="flow-stage" style="background: ${sectionColor};">
+                            <div class="stage-icon">${icon}</div>
+                            <div class="stage-content">
+                                <div class="stage-title">${section.title}</div>
+                                <div class="stage-details">${section.content}</div>
                             </div>
                         </div>
                     `;
                 });
 
+                // Add summary footer
+                html += `
+                    <div style="margin-top: 20px; padding: 15px; background: rgba(255, 215, 0, 0.1); border-radius: 8px; border-left: 4px solid #FFD700;">
+                        <h4 style="color: #FFD700; margin-bottom: 10px;">📊 Analysis Summary</h4>
+                        <div style="font-size: 13px; line-height: 1.6;">
+                            <strong>Analysis completed for:</strong> ${componentName}<br>
+                            <strong>Component type:</strong> ${componentInfo.type}<br>
+                            <strong>Files analyzed:</strong> ${this.uploadedFiles.length}<br>
+                            <strong>Generated:</strong> ${new Date().toLocaleString()}
+                        </div>
+                    </div>
+                </div>`;
+                
                 container.innerHTML = html;
             }
 
-            extractSearchPreview(analysisData, searchTerm) {
-                const allText = JSON.stringify(analysisData, null, 2);
-                const terms = searchTerm.toLowerCase().split(' ');
+            displayFieldMatrix(componentName, analysis) {
+                const container = document.getElementById('fieldMatrixContent');
                 
-                let preview = '';
-                const lines = allText.split('\n');
+                // Extract field information from the analysis
+                const fields = this.extractFieldInfo(analysis.analysis, componentName);
+                
+                let html = `
+                    <h3>📋 Field Usage Matrix: ${componentName}</h3>
+                    <p style="margin-bottom: 20px;">
+                        Detailed field-level analysis showing usage patterns across programs.
+                    </p>
+                `;
+                
+                if (fields.length > 0) {
+                    html += '<div class="field-matrix">';
+                    fields.forEach(field => {
+                        html += `
+                            <div class="field-card">
+                                <div class="field-name">${field.name}</div>
+                                <div class="field-usage">
+                                    <div style="margin-bottom: 8px;">${field.description}</div>
+                                    <div style="margin-bottom: 10px;">
+                                        ${field.usageTypes.map(type => 
+                                            `<span class="usage-tag tag-${type.toLowerCase().replace('_', '')}">${type}</span>`
+                                        ).join(' ')}
+                                    </div>
+                                    <div style="font-size: 11px;">
+                                        <strong>Programs:</strong> ${field.programs.join(', ')}<br>
+                                        <strong>Data Type:</strong> ${field.dataType || 'Unknown'}<br>
+                                        <strong>Usage Count:</strong> ${field.usageCount || 'Multiple'}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    html += '</div>';
+                } else {
+                    html += `
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; text-align: center;">
+                            <p>No detailed field information available for this component.</p>
+                            <p style="font-size: 12px; opacity: 0.8; margin-top: 10px;">
+                                This may be a program or JCL job rather than a data structure component.
+                            </p>
+                        </div>
+                    `;
+                }
+                
+                container.innerHTML = html;
+            }
+
+            displayUsageAnalysis(componentName, analysis) {
+                const container = document.getElementById('usageContent');
+                
+                // Extract usage statistics
+                const stats = this.extractUsageStats(analysis.analysis);
+                
+                let html = `
+                    <h3>📈 Usage Analysis: ${componentName}</h3>
+                    <p style="margin-bottom: 20px;">
+                        Cross-program usage patterns and statistics.
+                    </p>
+                `;
+
+                // Usage statistics summary
+                if (stats.length > 0) {
+                    html += `
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 25px;">
+                    `;
+                    
+                    stats.forEach(stat => {
+                        html += `
+                            <div style="background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-top: 3px solid #FFD700;">
+                                <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${stat.value}</div>
+                                <div style="font-size: 11px; opacity: 0.8; margin-top: 4px;">${stat.label}</div>
+                            </div>
+                        `;
+                    });
+                    
+                    html += '</div>';
+                }
+
+                // Detailed analysis
+                html += `
+                    <div style="background: rgba(0,0,0,0.2); padding: 20px; border-radius: 10px; line-height: 1.6;">
+                        <h4 style="color: #FFD700; margin-bottom: 15px;">Detailed Usage Analysis</h4>
+                        <div style="font-size: 14px;">
+                            ${this.formatAnalysisText(analysis.analysis)}
+                        </div>
+                    </div>
+                `;
+                
+                container.innerHTML = html;
+            }
+
+            displayDependencyAnalysis(componentName, analysis) {
+                const container = document.getElementById('dependenciesContent');
+                const componentInfo = analysis.componentInfo;
+                
+                let html = `
+                    <h3>🔗 Dependencies: ${componentName}</h3>
+                    <p style="margin-bottom: 20px;">
+                        Component relationships, dependencies, and integration points.
+                    </p>
+                `;
+
+                // Dependency flow
+                html += `
+                    <div class="lifecycle-flow">
+                        <div class="flow-stage">
+                            <div class="stage-icon">📤</div>
+                            <div class="stage-content">
+                                <div class="stage-title">Component Dependencies</div>
+                                <div class="stage-details">
+                                    <strong>Related Components:</strong> ${componentInfo.relatedComponents.join(', ') || 'None identified'}<br>
+                                    <strong>Found in Files:</strong> ${componentInfo.foundIn.join(', ') || 'Multiple locations'}<br>
+                                    <strong>Usage Context:</strong> ${componentInfo.usageContext || 'Various contexts'}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="flow-stage">
+                            <div class="stage-icon">🔄</div>
+                            <div class="stage-content">
+                                <div class="stage-title">Integration Points</div>
+                                <div class="stage-details">
+                                    <strong>Programs Analyzed:</strong> ${this.uploadedFiles.filter(f => f.type === 'COBOL Program').length}<br>
+                                    <strong>Copybooks Analyzed:</strong> ${this.uploadedFiles.filter(f => f.type === 'Copybook').length}<br>
+                                    <strong>JCL Jobs Analyzed:</strong> ${this.uploadedFiles.filter(f => f.type === 'JCL Job').length}<br>
+                                    <strong>Total Files:</strong> ${this.uploadedFiles.length}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="flow-stage">
+                            <div class="stage-icon">⚡</div>
+                            <div class="stage-content">
+                                <div class="stage-title">Impact Assessment</div>
+                                <div class="stage-details">
+                                    <strong>Component Type:</strong> ${componentInfo.type}<br>
+                                    <strong>Analysis Scope:</strong> Complete lifecycle analysis<br>
+                                    <strong>Risk Level:</strong> ${this.calculateRiskLevel(componentInfo)}<br>
+                                    <strong>Modification Impact:</strong> ${this.assessModificationImpact(componentInfo)}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                container.innerHTML = html;
+            }
+
+            // Helper methods for display
+            getTypeIcon(type) {
+                const icons = {
+                    'COPYBOOK': '📚',
+                    'PROGRAM': '💾', 
+                    'FIELD': '🏷️',
+                    'JCL_JOB': '⚙️',
+                    'NOT_FOUND': '❓'
+                };
+                return icons[type] || '📌';
+            }
+
+            getSectionIcon(title) {
+                const iconMap = {
+                    'FIELD INVENTORY': '📋',
+                    'CROSS-PROGRAM USAGE': '🔄', 
+                    'DATA LIFECYCLE FLOW': '🌊',
+                    'FIELD CLASSIFICATION': '🏷️',
+                    'STALE FIELD DETECTION': '🚨',
+                    'BUSINESS IMPACT ANALYSIS': '💼',
+                    'FIELD DEFINITION': '📝',
+                    'COMPLETE DATA FLOW LIFECYCLE': '🔄',
+                    'USAGE PATTERN ANALYSIS': '📈',
+                    'CROSS-PROGRAM DEPENDENCIES': '🔗',
+                    'DATA QUALITY AND VALIDATION': '✅',
+                    'BUSINESS IMPACT ASSESSMENT': '💼',
+                    'MODERNIZATION OPPORTUNITIES': '🚀',
+                    'PROGRAM IDENTIFICATION AND PURPOSE': '🎯',
+                    'EXECUTION FLOW AND DEPENDENCIES': '🔄',
+                    'DATA DEPENDENCIES AND I/O': '💾',
+                    'BUSINESS PROCESSING ANALYSIS': '⚙️',
+                    'INTEGRATION POINTS': '🔗',
+                    'ERROR HANDLING AND RECOVERY': '🛡️',
+                    'JOB STRUCTURE AND ORGANIZATION': '📊',
+                    'DATA FLOW AND FILE MANAGEMENT': '📁',
+                    'PROGRAM EXECUTION SEQUENCE': '🔢',
+                    'SYSTEM INTEGRATION AND SCHEDULING': '⏰'
+                };
+                
+                return iconMap[title.toUpperCase()] || '📌';
+            }
+
+            extractAnalysisSections(analysisText) {
+                const sections = [];
+                const lines = analysisText.split('\n');
+                let currentSection = null;
                 
                 lines.forEach(line => {
-                    const lowerLine = line.toLowerCase();
-                    if (terms.some(term => lowerLine.includes(term))) {
-                        preview += line.trim() + '<br>';
+                    line = line.trim();
+                    
+                    // Look for section headers (marked with **)
+                    if (line.match(/^\*\*\d+\.\s/) || line.match(/^\*\*[A-Z]/)) {
+                        // Save previous section
+                        if (currentSection) {
+                            sections.push(currentSection);
+                        }
+                        
+                        // Start new section
+                        currentSection = {
+                            title: line.replace(/^\*\*\d+\.\s*/, '').replace(/\*\*$/, '').trim(),
+                            content: ''
+                        };
+                    } else if (currentSection && line.length > 0 && !line.startsWith('**')) {
+                        // Add content to current section
+                        if (currentSection.content) {
+                            currentSection.content += '<br>';
+                        }
+                        currentSection.content += line;
                     }
                 });
-
-                return preview.substring(0, 500) + (preview.length > 500 ? '...' : '');
-            }
-
-            // Display results methods
-            displayResults() {
-                this.updateOverviewTab();
-                this.displayControlFlowResults();
-                this.displayLifecycleResults();
-                this.displayComparisonResults();
-                this.displayInsights();
-                this.updateStats();
-            }
-
-            updateOverviewTab() {
-                document.getElementById('welcomeMessage').style.display = 'none';
-                document.getElementById('analysisOverview').style.display = 'block';
                 
-                const container = document.getElementById('analysisOverview');
-                const projectName = document.getElementById('projectName').value || 'Unnamed Project';
+                // Add final section
+                if (currentSection) {
+                    sections.push(currentSection);
+                }
                 
-                // Calculate token usage statistics
-                let totalTokens = 0;
-                let chunkedFiles = 0;
-                Object.values(this.analysisResults).forEach(result => {
-                    if (result.tokenCount) totalTokens += result.tokenCount;
-                    if (result.chunked) chunkedFiles++;
-                });
+                return sections;
+            }
+
+            extractFieldInfo(analysisText, componentName) {
+                const fields = [];
+                const lines = analysisText.split('\n');
                 
-                let html = `
-                    <div class="lifecycle-card">
-                        <h3>📊 vLLM Analysis Complete: ${projectName}</h3>
-                        <div class="data-stats">
-                            <div class="stat-card">
-                                <div class="stat-number">${this.uploadedFiles.length}</div>
-                                <div class="stat-label">Files Analyzed</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number">${Math.round(totalTokens/1000)}K</div>
-                                <div class="stat-label">Total Tokens</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number">${chunkedFiles}</div>
-                                <div class="stat-label">Chunked Files</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number">${new Date().toLocaleTimeString()}</div>
-                                <div class="stat-label">Completed</div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-
-                // Add analysis results summary
-                html += `
-                    <div class="lifecycle-card">
-                        <h4>📄 Analysis Results Summary</h4>
-                `;
-
-                this.uploadedFiles.forEach(file => {
-                    const result = this.analysisResults[file.name];
-                    const status = result ? (result.error ? 'Error' : 'Complete') : 'Pending';
-                    const statusColor = result ? (result.error ? '#FF6B6B' : '#4CAF50') : '#FF9800';
-                    
-                    html += `
-                        <div class="lifecycle-stage">
-                            <div class="stage-title">${file.name} (${file.type})</div>
-                            <div class="stage-details">
-                                Status: <span style="color: ${statusColor}">${status}</span><br>
-                                ${result?.tokenCount ? `Tokens: ~${Math.round(result.tokenCount/1000)}K` : ''}<br>
-                                ${result?.chunked ? `Chunked: ${result.totalChunks} chunks` : 'Single analysis'}
-                            </div>
-                        </div>
-                    `;
-                });
-
-                html += `</div>`;
-                container.innerHTML = html;
-            }
-
-            displayControlFlowResults() {
-                const container = document.getElementById('controlFlowContent');
-                const cobolResults = Object.entries(this.analysisResults)
-                    .filter(([name, result]) => result.type === 'cobol');
-
-                if (cobolResults.length === 0) {
-                    container.innerHTML = '<p>No COBOL programs analyzed yet. Upload .cbl or .cob files for control flow analysis.</p>';
-                    return;
-                }
-
-                let html = '';
-                cobolResults.forEach(([filename, result]) => {
-                    const deps = result.dependencies || {};
-                    const hasMissing = deps.missing && deps.missing.length > 0;
-                    const isChunked = result.chunked;
-                    
-                    html += `
-                        <div class="lifecycle-card">
-                            <h4>🔄 ${filename}</h4>
-                            ${hasMissing ? `<div class="warning">⚠️ Analysis may be incomplete due to ${deps.missing.length} missing dependencies</div>` : ''}
-                            ${isChunked ? `<div class="token-info">📄 Large file analyzed in ${result.totalChunks} chunks</div>` : ''}
-                            ${result.error ? `<div class="error">❌ Analysis failed - see error details</div>` : ''}
-                            <div class="stage-details" style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px;">
-                                ${result.analysis.replace(/\n/g, '<br>').replace(/\*\*/g, '<strong>').replace(/\*\*/g, '</strong>')}
-                            </div>
-                        </div>
-                    `;
-                });
-
-                container.innerHTML = html;
-            }
-
-            displayLifecycleResults() {
-                const container = document.getElementById('lifecycleContent');
-                const copybookResults = Object.entries(this.analysisResults)
-                    .filter(([name, result]) => result.type === 'copybook');
-
-                if (copybookResults.length === 0) {
-                    container.innerHTML = '<p>No copybooks analyzed yet. Upload .cpy files for data lifecycle analysis.</p>';
-                    return;
-                }
-
-                let html = '';
-                copybookResults.forEach(([filename, result]) => {
-                    html += `
-                        <div class="lifecycle-card">
-                            <h4>📋 ${filename}</h4>
-                            ${result.error ? `<div class="error">❌ Analysis failed - see error details</div>` : ''}
-                            <div class="stage-details" style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px;">
-                                ${result.analysis.replace(/\n/g, '<br>').replace(/\*\*/g, '<strong>').replace(/\*\*/g, '</strong>')}
-                            </div>
-                        </div>
-                    `;
-                });
-
-                container.innerHTML = html;
-            }
-
-            displayComparisonResults() {
-                const container = document.getElementById('comparisonContent');
-                const comparisonResult = this.analysisResults['DB2_COMPARISON'];
-
-                if (!comparisonResult) {
-                    container.innerHTML = '<p>No DB2 comparison performed. Add DB2 schema in the configuration section and re-run analysis.</p>';
-                    return;
-                }
-
-                let html = `
-                    <div class="lifecycle-card">
-                        <h4>🗄️ DB2 Schema Comparison & Migration Analysis</h4>
-                        ${comparisonResult.error ? `<div class="error">❌ Comparison failed - see error details</div>` : ''}
-                        <div class="stage-details" style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px;">
-                            ${comparisonResult.analysis.replace(/\n/g, '<br>').replace(/\*\*/g, '<strong>').replace(/\*\*/g, '</strong>')}
-                        </div>
-                    </div>
-                `;
-
-                container.innerHTML = html;
-            }
-
-            displayInsights() {
-                const container = document.getElementById('insightsContent');
-                
-                if (Object.keys(this.analysisResults).length === 0) {
-                    container.innerHTML = '<p>Upload and analyze files to see AI-powered insights using your local vLLM server.</p>';
-                    return;
-                }
-
-                const cobolCount = Object.values(this.analysisResults).filter(r => r.type === 'cobol').length;
-                const copybookCount = Object.values(this.analysisResults).filter(r => r.type === 'copybook').length;
-                const hasDB2Comparison = !!this.analysisResults['DB2_COMPARISON'];
-                const storedCount = Object.keys(this.storedAnalyses).length;
-                const errorCount = Object.values(this.analysisResults).filter(r => r.error).length;
-                const chunkedCount = Object.values(this.analysisResults).filter(r => r.chunked).length;
-
-                let html = `
-                    <div class="lifecycle-card">
-                        <h4>🤖 vLLM Analysis Insights</h4>
-                        <div style="line-height: 1.8;">
-                `;
-
-                html += `
-                        <strong style="color: #4CAF50;">🚀 Local Processing Summary:</strong><br>
-                        • Analyzed ${this.uploadedFiles.length} files using local vLLM server<br>
-                        • ${chunkedCount} large files automatically chunked for 8K token limit<br>
-                        • ${errorCount} analysis errors encountered<br>
-                        • All processing kept private on your local infrastructure<br><br>
-                `;
-
-                if (cobolCount > 0) {
-                    html += `
-                        <strong style="color: #2196F3;">🔄 COBOL Program Analysis:</strong><br>
-                        • Analyzed ${cobolCount} COBOL program(s) with dependency tracking<br>
-                        • Mapped program flow including PERFORM chains and CALL sequences<br>
-                        • Identified business logic patterns and integration points<br>
-                        • Assessed maintainability and modernization opportunities<br><br>
-                    `;
-                }
-
-                if (copybookCount > 0) {
-                    html += `
-                        <strong style="color: #FF9800;">📋 Data Structure Intelligence:</strong><br>
-                        • Analyzed ${copybookCount} copybook(s) for comprehensive data lifecycle<br>
-                        • Classified fields by business purpose and usage frequency<br>
-                        • Mapped data transformations and integration requirements<br>
-                        • Identified modernization opportunities for data structures<br><br>
-                    `;
-                }
-
-                if (hasDB2Comparison) {
-                    html += `
-                        <strong style="color: #9C27B0;">🗄️ DB2 Migration Intelligence:</strong><br>
-                        • Performed detailed schema comparison and field mapping<br>
-                        • Identified data type conversions and transformation requirements<br>
-                        • Assessed migration risks and complexity factors<br>
-                        • Generated actionable migration strategy recommendations<br><br>
-                    `;
-                }
-
-                html += `
-                        <strong style="color: #E91E63;">📦 Storage & Performance:</strong><br>
-                        • Analysis results stored locally for future reference<br>
-                        • ${storedCount} total analyses available for semantic search<br>
-                        • Token-efficient chunking preserved analysis quality<br>
-                        • Export capabilities for enterprise documentation<br><br>
+                // Look for field definitions and usage patterns
+                lines.forEach((line, index) => {
+                    // Simple pattern matching for field information
+                    const fieldMatch = line.match(/([A-Z][A-Z0-9\-_]{2,})\s*[:\-]\s*(.+)/);
+                    if (fieldMatch && fieldMatch[1].length > 3) {
+                        const fieldName = fieldMatch[1];
+                        const description = fieldMatch[2] || 'Field analysis';
                         
-                        <strong style="color: #FFD700;">💡 Recommendations:</strong><br>
-                        • Review chunked analyses for comprehensive understanding<br>
-                        • Address missing dependencies before production migration<br>
-                        • Use semantic search to find similar patterns across projects<br>
-                        • Consider gradual modernization approach based on complexity<br>
-                        • Leverage local vLLM for ongoing maintenance and updates
-                    `;
-
-                html += `
-                        </div>
-                    </div>
-                    
-                    <div class="lifecycle-card">
-                        <h4>📈 vLLM Performance Metrics</h4>
-                        <div class="data-stats">
-                            <div class="stat-card">
-                                <div class="stat-number">${this.calculateComplexityScore()}</div>
-                                <div class="stat-label">Complexity Score</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number">${chunkedCount}</div>
-                                <div class="stat-label">Chunked Files</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number">${this.calculateSuccessRate()}%</div>
-                                <div class="stat-label">Success Rate</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number">${storedCount}</div>
-                                <div class="stat-label">Stored Analyses</div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-
-                container.innerHTML = html;
-            }
-
-            calculateComplexityScore() {
-                let score = 0;
-                Object.values(this.dependencies).forEach(deps => {
-                    score += (deps.copybooks?.length || 0) * 1;
-                    score += (deps.calledPrograms?.length || 0) * 2;
-                    score += (deps.db2Tables?.length || 0) * 1.5;
-                    score += (deps.missing?.length || 0) * 3;
+                        // Determine usage types based on context
+                        const usageTypes = [];
+                        const context = lines.slice(Math.max(0, index-2), index+3).join(' ').toLowerCase();
+                        
+                        if (context.includes('read') || context.includes('input') || context.includes('reference')) {
+                            usageTypes.push('read');
+                        }
+                        if (context.includes('update') || context.includes('write') || context.includes('move')) {
+                            usageTypes.push('update');
+                        }
+                        if (context.includes('unused') || context.includes('stale')) {
+                            usageTypes.push('unused');
+                        }
+                        if (context.includes('key') || context.includes('identifier')) {
+                            usageTypes.push('key');
+                        }
+                        if (context.includes('working') || context.includes('calculation')) {
+                            usageTypes.push('working');
+                        }
+                        if (context.includes('control') || context.includes('flag')) {
+                            usageTypes.push('control');
+                        }
+                        
+                        if (usageTypes.length === 0) {
+                            usageTypes.push('reference');
+                        }
+                        
+                        fields.push({
+                            name: fieldName,
+                            description: description.substring(0, 100) + (description.length > 100 ? '...' : ''),
+                            usageTypes: [...new Set(usageTypes)],
+                            programs: this.extractProgramNames(context),
+                            dataType: this.extractDataType(context),
+                            usageCount: usageTypes.length
+                        });
+                    }
                 });
-                return Math.min(100, Math.round(score / Math.max(1, this.uploadedFiles.length)));
+                
+                // Limit and deduplicate
+                const uniqueFields = fields.filter((field, index, self) => 
+                    index === self.findIndex(f => f.name === field.name)
+                ).slice(0, 12);
+                
+                return uniqueFields;
             }
 
-            calculateSuccessRate() {
-                if (Object.keys(this.analysisResults).length === 0) return 100;
-                const errorCount = Object.values(this.analysisResults).filter(r => r.error).length;
-                const totalCount = Object.keys(this.analysisResults).length;
-                return Math.round(((totalCount - errorCount) / totalCount) * 100);
+            extractProgramNames(context) {
+                const programs = [];
+                const matches = context.match(/([A-Z][A-Z0-9\-_]{3,})\.(cbl|cob)/gi);
+                if (matches) {
+                    matches.forEach(match => {
+                        programs.push(match.replace(/\.(cbl|cob)/i, ''));
+                    });
+                }
+                return programs.length > 0 ? programs : ['Various'];
             }
 
-            // Utility methods
+            extractDataType(context) {
+                if (context.includes('pic') || context.includes('picture')) {
+                    if (context.includes('9')) return 'Numeric';
+                    if (context.includes('x')) return 'Alphanumeric';
+                    if (context.includes('s9')) return 'Signed Numeric';
+                }
+                if (context.includes('comp') || context.includes('binary')) return 'Binary';
+                return 'Text';
+            }
+
+            extractUsageStats(analysisText) {
+                const stats = [];
+                
+                // Count different types of mentions
+                const readCount = (analysisText.match(/read|input|reference/gi) || []).length;
+                const writeCount = (analysisText.match(/write|update|move|modify/gi) || []).length;
+                const unusedCount = (analysisText.match(/unused|stale|never/gi) || []).length;
+                const programCount = (analysisText.match(/program[s]?/gi) || []).length;
+                
+                if (readCount > 0) stats.push({ label: 'Read Operations', value: readCount });
+                if (writeCount > 0) stats.push({ label: 'Write Operations', value: writeCount });
+                if (unusedCount > 0) stats.push({ label: 'Unused References', value: unusedCount });
+                if (programCount > 0) stats.push({ label: 'Program References', value: programCount });
+                
+                return stats;
+            }
+
+            formatAnalysisText(text) {
+                return text
+                    .replace(/\n/g, '<br>')
+                    .replace(/\*\*([^*]+)\*\*/g, '<strong style="color: #FFD700;">$1</strong>')
+                    .replace(/- ([^<\n]+)/g, '• $1')
+                    .replace(/^\s*\d+\.\s*/gm, '<br><strong>$&</strong>');
+            }
+
+            calculateRiskLevel(componentInfo) {
+                const fileCount = componentInfo.foundIn.length;
+                const relatedCount = componentInfo.relatedComponents.length;
+                
+                if (fileCount > 5 || relatedCount > 10) return 'High';
+                if (fileCount > 2 || relatedCount > 5) return 'Medium';
+                return 'Low';
+            }
+
+            assessModificationImpact(componentInfo) {
+                const type = componentInfo.type;
+                const fileCount = componentInfo.foundIn.length;
+                
+                if (type === 'COPYBOOK' && fileCount > 3) return 'High - Multiple programs affected';
+                if (type === 'FIELD' && fileCount > 2) return 'Medium - Cross-program impact';
+                if (type === 'PROGRAM') return 'Medium - Call chain impact';
+                if (type === 'JCL_JOB') return 'Low - Job-specific impact';
+                
+                return 'Low - Limited impact';
+            }
+            async bulkAnalyze() {
+                if (this.componentSuggestions.length === 0) {
+                    this.showError('No components found to analyze. Upload files first.');
+                    return;
+                }
+
+                this.showLoading();
+                this.updateLoadingStatus('Starting bulk analysis...');
+                
+                try {
+                    // Select top components based on frequency and importance
+                    const topComponents = this.componentSuggestions
+                        .filter(comp => comp.length > 3) // Filter out short names
+                        .slice(0, 5); // Analyze top 5 components
+                    
+                    let analysisCount = 0;
+                    
+                    for (const component of topComponents) {
+                        try {
+                            this.updateLoadingStatus(`Analyzing component ${analysisCount + 1}/${topComponents.length}: ${component}`);
+                            
+                            const componentInfo = await this.identifyComponent(component);
+                            
+                            if (componentInfo.type !== 'NOT_FOUND') {
+                                const analysis = await this.performComponentAnalysis(component, componentInfo);
+                                
+                                this.componentAnalysis[component] = {
+                                    timestamp: new Date().toISOString(),
+                                    componentInfo: componentInfo,
+                                    analysis: analysis
+                                };
+                                
+                                analysisCount++;
+                                
+                                // Rate limiting between analyses
+                                if (analysisCount < topComponents.length) {
+                                    await this.sleep(2000);
+                                }
+                            }
+                        } catch (error) {
+                            console.warn(`Failed to analyze component ${component}:`, error);
+                            // Continue with next component
+                        }
+                    }
+                    
+                    this.saveToStorage();
+                    this.hideLoading();
+                    
+                    if (analysisCount > 0) {
+                        this.showSuccess(`Bulk analysis complete! Analyzed ${analysisCount} components.`);
+                        // Display the first analyzed component
+                        const firstComponent = Object.keys(this.componentAnalysis)[0];
+                        if (firstComponent) {
+                            document.getElementById('componentName').value = firstComponent;
+                            this.displayComponentAnalysis(firstComponent);
+                        }
+                    } else {
+                        this.showWarning('No components could be analyzed. Check your files and try individual analysis.');
+                    }
+                    
+                    this.validateForm();
+                    
+                } catch (error) {
+                    this.hideLoading();
+                    this.showError(`Bulk analysis failed: ${error.message}`);
+                }
+            }
+
+            exportResults() {
+                if (Object.keys(this.componentAnalysis).length === 0) {
+                    this.showError('No analysis results to export');
+                    return;
+                }
+
+                const exportData = {
+                    metadata: {
+                        exportDate: new Date().toISOString(),
+                        version: '1.0',
+                        totalComponents: Object.keys(this.componentAnalysis).length,
+                        totalFiles: this.uploadedFiles.length,
+                        fileTypes: [...new Set(this.uploadedFiles.map(f => f.type))]
+                    },
+                    uploadedFiles: this.uploadedFiles.map(f => ({
+                        name: f.name,
+                        type: f.type,
+                        size: f.size
+                    })),
+                    componentAnalyses: this.componentAnalysis
+                };
+
+                try {
+                    const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+                        type: 'application/json'
+                    });
+                    
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `component_analysis_${new Date().toISOString().split('T')[0]}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    
+                    this.showSuccess('Analysis results exported successfully');
+                } catch (error) {
+                    this.showError(`Export failed: ${error.message}`);
+                }
+            }
+
+            clearAllData() {
+                if (confirm('Are you sure you want to clear all uploaded files and analysis results? This cannot be undone.')) {
+                    // Clear uploaded files
+                    this.uploadedFiles = [];
+                    this.componentAnalysis = {};
+                    this.componentSuggestions = [];
+                    
+                    // Clear UI
+                    document.getElementById('uploadedFiles').innerHTML = '';
+                    document.getElementById('componentName').value = '';
+                    document.getElementById('componentSuggestions').style.display = 'none';
+                    
+                    // Reset analysis content
+                    document.getElementById('lifecycleContent').innerHTML = `
+                        <h3>🎯 Component Lifecycle Analysis</h3>
+                        <p style="margin-bottom: 20px;">Upload files and enter a component name to begin analysis.</p>
+                    `;
+                    
+                    document.getElementById('fieldMatrixContent').innerHTML = `
+                        <h3>📋 Field Usage Matrix</h3>
+                        <p>Field-level analysis will appear here after component analysis.</p>
+                    `;
+                    
+                    document.getElementById('usageContent').innerHTML = `
+                        <h3>📈 Cross-Program Usage Analysis</h3>
+                        <p>Usage patterns and statistics will appear here.</p>
+                    `;
+                    
+                    document.getElementById('dependenciesContent').innerHTML = `
+                        <h3>🔗 Component Dependencies</h3>
+                        <p>Dependency analysis will appear here.</p>
+                    `;
+                    
+                    // Clear storage
+                    localStorage.removeItem(this.storageKey);
+                    
+                    this.validateForm();
+                    this.showSuccess('All data cleared successfully');
+                }
+            }
+
+            loadStoredData() {
+                try {
+                    const stored = localStorage.getItem(this.storageKey);
+                    if (stored) {
+                        const data = JSON.parse(stored);
+                        this.componentAnalysis = data.componentAnalyses || {};
+                        console.log(`Loaded ${Object.keys(this.componentAnalysis).length} stored analyses`);
+                    }
+                } catch (error) {
+                    console.error('Error loading stored data:', error);
+                    this.componentAnalysis = {};
+                }
+            }
+
+            saveToStorage() {
+                try {
+                    const dataToStore = {
+                        componentAnalyses: this.componentAnalysis,
+                        lastUpdated: new Date().toISOString()
+                    };
+                    localStorage.setItem(this.storageKey, JSON.stringify(dataToStore));
+                    console.log(`Saved ${Object.keys(this.componentAnalysis).length} analyses to storage`);
+                } catch (error) {
+                    console.error('Error saving to storage:', error);
+                }
+            }
+
             switchTab(e) {
                 const targetTab = e.target.dataset.tab;
                 
+                // Remove active class from all tabs and contents
                 document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
-                e.target.classList.add('active');
-                
                 document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+                
+                // Add active class to clicked tab and corresponding content
+                e.target.classList.add('active');
                 document.getElementById(targetTab).classList.add('active');
             }
 
+            // Utility methods
             sleep(ms) {
                 return new Promise(resolve => setTimeout(resolve, ms));
             }
@@ -2869,44 +2219,43 @@ Provide specific examples and DDL suggestions where applicable.
             }
 
             showError(message) {
-                const errorDiv = document.createElement('div');
-                errorDiv.className = 'error';
-                errorDiv.innerHTML = `<strong>Error:</strong> ${message}`;
-                
-                const container = document.querySelector('.analysis-workspace');
-                container.insertBefore(errorDiv, container.firstChild);
-                
-                setTimeout(() => errorDiv.remove(), 5000);
+                this.showMessage('error', message, 5000);
             }
 
             showSuccess(message) {
-                const successDiv = document.createElement('div');
-                successDiv.className = 'success';
-                successDiv.innerHTML = `<strong>Success:</strong> ${message}`;
-                
-                const container = document.querySelector('.analysis-workspace');
-                container.insertBefore(successDiv, container.firstChild);
-                
-                setTimeout(() => successDiv.remove(), 3000);
+                this.showMessage('success', message, 3000);
             }
 
             showWarning(message) {
-                const warningDiv = document.createElement('div');
-                warningDiv.className = 'warning';
-                warningDiv.innerHTML = `<strong>Warning:</strong> ${message}`;
+                this.showMessage('warning', message, 4000);
+            }
+
+            showMessage(type, message, duration = 3000) {
+                // Remove existing messages of the same type
+                document.querySelectorAll(`.${type}`).forEach(el => el.remove());
+                
+                const div = document.createElement('div');
+                div.className = type;
+                div.innerHTML = `<strong>${type.charAt(0).toUpperCase() + type.slice(1)}:</strong> ${message}`;
                 
                 const container = document.querySelector('.analysis-workspace');
-                container.insertBefore(warningDiv, container.firstChild);
+                container.insertBefore(div, container.firstChild);
                 
-                setTimeout(() => warningDiv.remove(), 4000);
+                // Auto-remove after duration
+                setTimeout(() => {
+                    if (div.parentNode) {
+                        div.remove();
+                    }
+                }, duration);
             }
         }
 
-        // Initialize the vLLM mainframe research agent
-        const agent = new LocalvLLMMainframeAgent();
+        // Initialize the component analyzer when the page loads
+        const analyzer = new ComponentSpecificAnalyzer();
         
-        // Auto-update token stats on load
-        agent.updateTokenStats();
+        // Add some helpful console information
+        console.log('🔬 Component-Specific Mainframe Analyzer initialized');
+        console.log('💡 Upload COBOL, copybook, and JCL files to begin analysis');
     </script>
 </body>
 </html>
