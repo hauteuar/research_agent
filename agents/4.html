@@ -1353,8 +1353,680 @@ Provide a comprehensive, helpful response based on the enhanced analysis:
             
             sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-            // Placeholder for all remaining methods - they follow the same pattern as the original
-            // but with enhanced features and validation throughout
+            // === SPECIALIZED ANALYSIS IMPLEMENTATIONS ===
+            
+            async performDetailedAnalysis(componentName, componentInfo, initialAnalysis, allFiles) {
+                // Specialized analysis based on component type
+                switch (componentInfo.type) {
+                    case 'COPYBOOK':
+                        return await this.performCopybookLifecycleAnalysis(componentName, componentInfo, allFiles);
+                    case 'PROGRAM':
+                        return await this.performProgramFlowAnalysis(componentName, componentInfo, allFiles);
+                    case 'FIELD':
+                        return await this.performFieldLifecycleAnalysis(componentName, componentInfo, allFiles);
+                    case 'JCL_JOB':
+                        return await this.performJCLFlowAnalysis(componentName, componentInfo, allFiles);
+                    default:
+                        return await this.performGenericDetailedAnalysis(componentName, componentInfo, initialAnalysis, allFiles);
+                }
+            }
+
+            async performCopybookLifecycleAnalysis(componentName, componentInfo, allFiles) {
+                // Intelligent chunking specifically for copybook analysis
+                const copybookChunks = this.createCopybookSpecificChunks(allFiles, componentName);
+                
+                const detailPrompt = `
+COMPREHENSIVE COPYBOOK LIFECYCLE ANALYSIS: ${componentName}
+
+INTELLIGENT CHUNKING APPLIED: ${copybookChunks.length} optimized chunks for copybook analysis
+
+COPYBOOK-SPECIFIC ANALYSIS FILES:
+${copybookChunks.map(chunk => chunk.files.map(f => `
+=== ${f.name} (${f.type}) ===
+${f.content}
+`).join('')).join('\n')}
+
+DETAILED COPYBOOK LIFECYCLE REQUIREMENTS:
+
+**1. COMPLETE FIELD INVENTORY & LIFECYCLE**
+For each field in ${componentName}:
+- Field definition: Level, name, PIC clause, OCCURS, REDEFINES
+- Data type and size analysis
+- Parent-child relationships in data structure
+- COMPLETE LIFECYCLE: Creation → Processing → Updates → Output → Archival
+
+**2. CROSS-PROGRAM USAGE PATTERNS**  
+Analyze ALL programs that use this copybook:
+- Field-level usage mapping (which fields used in which programs)
+- READ operations: Programs that reference fields for processing
+- WRITE operations: Programs that populate or modify fields
+- UNUSED FIELD DETECTION: Fields defined but never referenced
+- FREQUENCY ANALYSIS: How often each field is accessed
+
+**3. DATA FLOW LIFECYCLE TRACKING**
+For each field, trace complete data journey:
+- **INPUT STAGE**: Where does data originate? (files, DB2, user input, calculations)
+- **VALIDATION STAGE**: What validation rules apply? (format checks, business rules)
+- **PROCESSING STAGE**: How is data transformed, calculated, or manipulated?
+- **OUTPUT STAGE**: Where does data go? (output files, databases, reports)
+- **INTEGRATION STAGE**: How does data interface with external systems?
+- **ARCHIVAL STAGE**: How is data stored, archived, or purged?
+
+**4. FIELD CLASSIFICATION & BUSINESS RULES**
+Classify each field with business context:
+- KEY FIELDS: Identifiers, primary keys, lookup fields
+- TRANSACTION FIELDS: Amounts, dates, quantities, status codes  
+- REFERENCE FIELDS: Codes that link to other systems or tables
+- WORKING FIELDS: Temporary calculations, counters, flags
+- AUDIT FIELDS: Created/modified dates, user IDs, version control
+- UNUSED FIELDS: Defined but never referenced (candidates for removal)
+
+**5. PROGRAM INTEGRATION ANALYSIS**
+- Programs that would BREAK if copybook structure changes
+- Field dependencies between programs (data passed through linkage)
+- File I/O impact (which files use these fields)
+- Database integration (EXEC SQL references)
+
+**6. MODERNIZATION OPPORTUNITIES**
+- Database normalization candidates
+- API interface potential for external access  
+- Cloud migration considerations
+- Data quality improvement opportunities
+- Performance optimization possibilities
+
+Provide specific program names, line references, and actionable recommendations.
+                `;
+
+                return await this.callvLLMAPIWithRetry(detailPrompt, 'copybook_lifecycle');
+            }
+
+            async performProgramFlowAnalysis(componentName, componentInfo, allFiles) {
+                // Intelligent chunking for program flow analysis
+                const programChunks = this.createProgramFlowChunks(allFiles, componentName);
+                
+                const flowPrompt = `
+COMPREHENSIVE PROGRAM FLOW ANALYSIS: ${componentName}
+
+PROGRAM FLOW CHUNKING: ${programChunks.length} optimized chunks for flow analysis
+
+PROGRAM FLOW ANALYSIS FILES:
+${programChunks.map(chunk => chunk.files.map(f => `
+=== ${f.name} (${f.type}) ===  
+${f.content}
+`).join('')).join('\n')}
+
+DETAILED PROGRAM FLOW REQUIREMENTS:
+
+**1. COMPLETE PROGRAM EXECUTION FLOW**
+Map the entire execution path of ${componentName}:
+- ENTRY POINT: How is program invoked? (JCL call, online transaction, program call)
+- INITIALIZATION: What setup occurs? (file opens, DB2 connections, variable initialization)
+- MAIN PROCESSING LOOP: Core business logic flow with decision points
+- ERROR HANDLING: Exception processing and recovery procedures  
+- CLEANUP: File closes, commit/rollback, resource cleanup
+- EXIT POINTS: Normal and abnormal termination paths
+
+**2. CALL CHAIN ANALYSIS**
+- CALLING PROGRAMS: What programs invoke ${componentName}? Include JCL jobs.
+- CALLED PROGRAMS: What subprograms does ${componentName} call?
+- PARAMETER PASSING: Data passed in (LINKAGE SECTION) and out (return codes)
+- EXECUTION SEQUENCE: Order of program calls and dependencies
+- CONDITIONAL CALLS: When are different programs called based on logic?
+
+**3. DATA PROCESSING FLOW**  
+- INPUT DATA SOURCES: Files, databases, parameters, user input
+- DATA TRANSFORMATIONS: Calculations, formatting, validations performed
+- BUSINESS LOGIC: Decision trees, processing rules, algorithms
+- DATA OUTPUTS: Files written, database updates, reports generated
+- WORKING STORAGE USAGE: How temporary data flows through the program
+
+**4. FILE I/O AND DATABASE OPERATIONS**
+- INPUT FILES: What files are read, in what sequence?
+- OUTPUT FILES: What files are written, when, and with what data?
+- DATABASE OPERATIONS: EXEC SQL statements, table access patterns
+- FILE STATUS HANDLING: Error checking and exception processing
+- TRANSACTION BOUNDARIES: COMMIT/ROLLBACK logic
+
+**5. INTEGRATION AND DEPENDENCIES**
+- COPYBOOK USAGE: Which copybooks are included and how fields are used
+- EXTERNAL INTERFACES: Calls to external systems, APIs, or services  
+- JCL INTEGRATION: How program fits into job stream execution
+- SHARED RESOURCES: Files, datasets, or data accessed by multiple programs
+- TIMING DEPENDENCIES: Programs that must run before/after this one
+
+**6. PERFORMANCE AND OPTIMIZATION ANALYSIS**
+- PROCESSING EFFICIENCY: Loops, sorts, searches that could be optimized
+- RESOURCE USAGE: Memory, CPU, I/O patterns
+- BOTTLENECK IDENTIFICATION: Slow operations or inefficient algorithms
+- SCALABILITY CONSIDERATIONS: How program handles volume increases
+
+**7. BUSINESS IMPACT AND MODERNIZATION**
+- BUSINESS PROCESSES SUPPORTED: What business functions does this program enable?
+- CRITICAL PATH ANALYSIS: Impact if program fails or is unavailable
+- MODERNIZATION OPPORTUNITIES: Cloud migration, API development, automation
+- TECHNICAL DEBT: Legacy code patterns that need updating
+
+Provide detailed flow diagrams, specific line references, and actionable insights.
+                `;
+
+                return await this.callvLLMAPIWithRetry(flowPrompt, 'program_flow');
+            }
+
+            async performFieldLifecycleAnalysis(componentName, componentInfo, allFiles) {
+                const fieldChunks = this.createFieldSpecificChunks(allFiles, componentName);
+                
+                const fieldPrompt = `
+COMPLETE FIELD LIFECYCLE ANALYSIS: ${componentName}
+
+FIELD-SPECIFIC CHUNKING: ${fieldChunks.length} chunks optimized for field tracking
+
+FIELD LIFECYCLE ANALYSIS FILES:
+${fieldChunks.map(chunk => chunk.files.map(f => `
+=== ${f.name} (${f.type}) ===
+${f.content}
+`).join('')).join('\n')}
+
+COMPREHENSIVE FIELD LIFECYCLE REQUIREMENTS:
+
+**1. FIELD DEFINITION AND STRUCTURE**
+Complete definition analysis for field ${componentName}:
+- DEFINITION LOCATION: Which copybook(s) define this field?
+- DATA SPECIFICATION: PIC clause, length, type, COMP usage
+- STRUCTURE CONTEXT: Parent group, level number, position in record
+- ALTERNATE DEFINITIONS: Any REDEFINES or multiple definitions
+
+**2. COMPLETE DATA LIFECYCLE JOURNEY**
+Trace ${componentName} through its entire lifecycle:
+
+**CREATION/BIRTH STAGE:**
+- How is field initially populated? (input files, user entry, calculations)
+- Default values or initialization logic
+- Data source systems and interfaces
+- Input validation and formatting rules
+
+**PROCESSING/TRANSFORMATION STAGE:**  
+- Programs that READ field for business logic
+- Programs that MODIFY or UPDATE field values
+- Calculations, computations, or transformations applied
+- Business rules and validation logic
+- Conditional processing based on field values
+
+**PROPAGATION/INTEGRATION STAGE:**
+- How field data moves between programs
+- File-to-file data transfers involving this field
+- Database updates and retrievals
+- Interface with external systems
+
+**OUTPUT/CONSUMPTION STAGE:**
+- Reports that display this field
+- Files that output this field
+- Database tables that store this field
+- External systems that consume this data
+
+**ARCHIVAL/END-OF-LIFE STAGE:**
+- Backup and archive processes affecting this field
+- Data retention policies and timeframes  
+- Purge and cleanup procedures
+- Historical data management
+
+**3. CROSS-PROGRAM USAGE MAPPING**
+- READER PROGRAMS: All programs that reference field for input/processing
+- WRITER PROGRAMS: All programs that populate or modify the field
+- VALIDATOR PROGRAMS: Programs that check or validate field values
+- TRANSFORMER PROGRAMS: Programs that convert or calculate field values
+- USAGE FREQUENCY: How often field is accessed across all programs
+
+**4. DATA QUALITY AND VALIDATION ANALYSIS**
+- FORMAT VALIDATION: What format rules apply to this field?
+- BUSINESS VALIDATION: Business logic that validates field values
+- RANGE CHECKING: Minimum/maximum values, allowed ranges
+- CROSS-FIELD VALIDATION: Dependencies on other fields for validation
+- ERROR HANDLING: What happens when field contains invalid data?
+
+**5. INTEGRATION AND DEPENDENCY MAPPING**
+- DEPENDENT FIELDS: Other fields that depend on this field's value
+- LOOKUP RELATIONSHIPS: Is this field used for lookups or joins?
+- FOREIGN KEY RELATIONSHIPS: Links to other tables or files
+- CALCULATED DEPENDENCIES: Fields calculated from this field's value
+
+**6. BUSINESS IMPACT AND CONTEXT**
+- BUSINESS MEANING: What does this field represent in business terms?
+- CRITICALITY: How critical is this field to business operations?
+- COMPLIANCE REQUIREMENTS: Any regulatory or audit requirements
+- CHANGE IMPACT: What would happen if field definition changed?
+
+**7. MODERNIZATION AND OPTIMIZATION**
+- NORMALIZATION OPPORTUNITIES: Should field be in a separate table?
+- API POTENTIAL: Could field be exposed via APIs for external access?
+- PERFORMANCE OPTIMIZATION: Indexing, caching, or access improvements
+- DATA GOVERNANCE: Master data management opportunities
+
+Provide specific program names, line numbers, and detailed usage examples.
+                `;
+
+                return await this.callvLLMAPIWithRetry(fieldPrompt, 'field_lifecycle');
+            }
+
+            async performJCLFlowAnalysis(componentName, componentInfo, allFiles) {
+                const jclChunks = this.createJCLFlowChunks(allFiles, componentName);
+                
+                const jclPrompt = `
+COMPREHENSIVE JCL JOB FLOW ANALYSIS: ${componentName}
+
+JCL FLOW CHUNKING: ${jclChunks.length} chunks optimized for job flow analysis
+
+JCL FLOW ANALYSIS FILES:
+${jclChunks.map(chunk => chunk.files.map(f => `
+=== ${f.name} (${f.type}) ===
+${f.content}
+`).join('')).join('\n')}
+
+DETAILED JCL JOB FLOW REQUIREMENTS:
+
+**1. COMPLETE JOB EXECUTION FLOW**
+Map entire execution flow of job ${componentName}:
+- JOB INITIALIZATION: Job card parameters, priority, resource requirements
+- STEP SEQUENCE: All job steps in execution order with dependencies
+- PROGRAM EXECUTION: Which programs run in each step
+- CONDITIONAL EXECUTION: IF/THEN/ELSE logic and step skipping
+- ERROR RECOVERY: RESTART capabilities and error handling steps
+
+**2. DATA FLOW AND FILE LIFECYCLE**
+- INPUT FILES: All datasets required before job execution
+- PROCESSING FILES: Intermediate datasets created and used between steps
+- OUTPUT FILES: Final datasets produced by the job
+- TEMPORARY FILES: Work datasets created and deleted during execution
+- FILE DEPENDENCIES: Which steps depend on files from previous steps
+
+**3. PROGRAM CALL CHAIN AND FLOW**
+- PROGRAM EXECUTION SEQUENCE: Order programs are called within job
+- PARAMETER PASSING: PARM values passed to programs
+- RETURN CODE HANDLING: How RC affects subsequent step execution  
+- STEP DEPENDENCIES: Which steps must complete before others can start
+- PARALLEL PROCESSING: Steps that can run concurrently
+
+**4. SYSTEM INTEGRATION AND SCHEDULING**
+- PREDECESSOR JOBS: Jobs that must complete before this job runs
+- SUCCESSOR JOBS: Jobs that depend on this job's completion
+- SCHEDULING REQUIREMENTS: Time windows, frequency, dependencies
+- RESOURCE REQUIREMENTS: CPU, memory, storage, special devices
+- SYSTEM INTERFACES: External systems or databases accessed
+
+**5. ERROR HANDLING AND RECOVERY**
+- ERROR DETECTION: How job detects and handles failures
+- RESTART PROCEDURES: Checkpoint/restart capabilities
+- NOTIFICATION LOGIC: Alerting and escalation procedures  
+- ROLLBACK PROCEDURES: How to undo partial processing
+- DATA INTEGRITY: Ensuring consistency during failures
+
+**6. PERFORMANCE AND RESOURCE ANALYSIS**
+- PROCESSING TIME: Expected runtime and SLA requirements
+- RESOURCE UTILIZATION: CPU, memory, storage consumption
+- I/O PATTERNS: File access patterns and optimization opportunities
+- BOTTLENECK IDENTIFICATION: Steps that limit overall throughput
+- SCALABILITY: How job handles increasing data volumes
+
+**7. BUSINESS PROCESS INTEGRATION**
+- BUSINESS FUNCTIONS: What business processes does this job support?
+- CRITICAL PATH: Is this job on critical business processing path?
+- IMPACT ANALYSIS: Business impact if job fails or is delayed
+- MODERNIZATION OPPORTUNITIES: Cloud migration, automation potential
+- COST OPTIMIZATION: Resource efficiency improvements
+
+**8. DATA GOVERNANCE AND COMPLIANCE**
+- DATA LINEAGE: Complete data flow from source to target
+- AUDIT REQUIREMENTS: Logging, tracking, compliance needs
+- RETENTION POLICIES: How long data is kept and archived
+- SECURITY CONSIDERATIONS: Data access controls and encryption
+- BACKUP AND RECOVERY: Data protection and disaster recovery
+
+Provide detailed flow diagrams, timing analysis, and optimization recommendations.
+                `;
+
+                return await this.callvLLMAPIWithRetry(jclPrompt, 'jcl_flow');
+            }
+
+            // === SPECIALIZED CHUNKING STRATEGIES ===
+
+            createCopybookSpecificChunks(files, componentName) {
+                // Intelligent chunking optimized for copybook analysis
+                const chunks = [];
+                const targetTokensPerChunk = Math.floor(this.maxTokens * 0.3);
+                
+                // Prioritize by relevance to copybook analysis
+                const copybookFile = files.find(f => f.name.toUpperCase().includes(componentName.toUpperCase()));
+                const programFiles = files.filter(f => f.type === 'COBOL Program' && 
+                    f.content.toUpperCase().includes(`COPY ${componentName.toUpperCase()}`));
+                const relatedFiles = files.filter(f => !programFiles.includes(f) && f !== copybookFile);
+                
+                // Create chunks with copybook-specific overlap
+                this.createChunksWithSpecializedOverlap([copybookFile, ...programFiles, ...relatedFiles].filter(f => f), 
+                    targetTokensPerChunk, 'copybook', chunks);
+                
+                return chunks;
+            }
+
+            createProgramFlowChunks(files, componentName) {
+                // Intelligent chunking optimized for program flow analysis  
+                const chunks = [];
+                const targetTokensPerChunk = Math.floor(this.maxTokens * 0.35);
+                
+                // Prioritize by program flow relevance
+                const mainProgram = files.find(f => f.name.toUpperCase().includes(componentName.toUpperCase()));
+                const callingPrograms = files.filter(f => f.content.toUpperCase().includes(`CALL ${componentName.toUpperCase()}`));
+                const jclFiles = files.filter(f => f.type === 'JCL Job' && 
+                    f.content.toUpperCase().includes(componentName.toUpperCase()));
+                const copybookFiles = files.filter(f => f.type === 'Copybook');
+                const otherFiles = files.filter(f => ![mainProgram, ...callingPrograms, ...jclFiles, ...copybookFiles].includes(f));
+                
+                this.createChunksWithSpecializedOverlap([mainProgram, ...callingPrograms, ...jclFiles, ...copybookFiles, ...otherFiles].filter(f => f), 
+                    targetTokensPerChunk, 'program', chunks);
+                
+                return chunks;
+            }
+
+            createFieldSpecificChunks(files, componentName) {
+                // Intelligent chunking optimized for field lifecycle tracking
+                const chunks = [];
+                const targetTokensPerChunk = Math.floor(this.maxTokens * 0.25);
+                
+                // Prioritize files by field usage relevance
+                const definingCopybooks = files.filter(f => f.type === 'Copybook' && 
+                    f.content.toUpperCase().includes(componentName.toUpperCase()));
+                const referencingPrograms = files.filter(f => f.type === 'COBOL Program' && 
+                    f.content.toUpperCase().includes(componentName.toUpperCase()));
+                const otherFiles = files.filter(f => !definingCopybooks.includes(f) && !referencingPrograms.includes(f));
+                
+                this.createChunksWithSpecializedOverlap([...definingCopybooks, ...referencingPrograms, ...otherFiles], 
+                    targetTokensPerChunk, 'field', chunks);
+                
+                return chunks;
+            }
+
+            createJCLFlowChunks(files, componentName) {
+                // Intelligent chunking optimized for JCL flow analysis
+                const chunks = [];
+                const targetTokensPerChunk = Math.floor(this.maxTokens * 0.4);
+                
+                // Prioritize by JCL flow relevance
+                const mainJCL = files.find(f => f.name.toUpperCase().includes(componentName.toUpperCase()));
+                const calledPrograms = this.extractProgramsFromJCL(mainJCL?.content || '');
+                const relatedPrograms = files.filter(f => f.type === 'COBOL Program' && 
+                    calledPrograms.some(prog => f.name.toUpperCase().includes(prog.toUpperCase())));
+                const otherJCL = files.filter(f => f.type === 'JCL Job' && f !== mainJCL);
+                const otherFiles = files.filter(f => f !== mainJCL && !relatedPrograms.includes(f) && !otherJCL.includes(f));
+                
+                this.createChunksWithSpecializedOverlap([mainJCL, ...relatedPrograms, ...otherJCL, ...otherFiles].filter(f => f), 
+                    targetTokensPerChunk, 'jcl', chunks);
+                
+                return chunks;
+            }
+
+            createChunksWithSpecializedOverlap(prioritizedFiles, targetTokens, analysisType, chunks) {
+                let currentChunk = [];
+                let currentTokens = 0;
+                let overlapContent = '';
+                
+                prioritizedFiles.forEach((file, index) => {
+                    const fileTokens = this.estimateTokenCount(file.content);
+                    
+                    if (currentTokens + fileTokens > targetTokens && currentChunk.length > 0) {
+                        chunks.push({
+                            files: [...currentChunk],
+                            totalTokens: currentTokens,
+                            overlapContext: overlapContent,
+                            chunkIndex: chunks.length,
+                            analysisType: analysisType
+                        });
+                        
+                        // Create specialized overlap based on analysis type
+                        overlapContent = this.createSpecializedOverlap(currentChunk, analysisType);
+                        currentChunk = [];
+                        currentTokens = this.estimateTokenCount(overlapContent);
+                    }
+                    
+                    currentChunk.push(file);
+                    currentTokens += fileTokens;
+                });
+                
+                // Add final chunk
+                if (currentChunk.length > 0) {
+                    chunks.push({
+                        files: currentChunk,
+                        totalTokens: currentTokens,
+                        overlapContext: overlapContent,
+                        chunkIndex: chunks.length,
+                        analysisType: analysisType
+                    });
+                }
+            }
+
+            createSpecializedOverlap(files, analysisType) {
+                let overlapContent = '';
+                
+                files.forEach(file => {
+                    const lines = file.content.split('\n');
+                    let relevantLines = [];
+                    
+                    switch (analysisType) {
+                        case 'copybook':
+                            relevantLines = lines.filter(line => {
+                                const upper = line.toUpperCase();
+                                return upper.match(/^\s*\d{2}\s+[A-Z]/) || // Field definitions
+                                       upper.includes('PIC ') ||
+                                       upper.includes('OCCURS ') ||
+                                       upper.includes('REDEFINES ');
+                            });
+                            break;
+                            
+                        case 'program':
+                            relevantLines = lines.filter(line => {
+                                const upper = line.toUpperCase();
+                                return upper.includes('CALL ') ||
+                                       upper.includes('PERFORM ') ||
+                                       upper.includes('IF ') ||
+                                       upper.includes('PROCEDURE DIVISION') ||
+                                       upper.includes('COPY ');
+                            });
+                            break;
+                            
+                        case 'field':
+                            relevantLines = lines.filter(line => {
+                                const upper = line.toUpperCase();
+                                return upper.includes('MOVE ') ||
+                                       upper.includes('COMPUTE ') ||
+                                       upper.match(/^\s*\d{2}\s+[A-Z]/) ||
+                                       upper.includes('IF ');
+                            });
+                            break;
+                            
+                        case 'jcl':
+                            relevantLines = lines.filter(line => {
+                                const upper = line.toUpperCase();
+                                return upper.includes('//') ||
+                                       upper.includes('EXEC ') ||
+                                       upper.includes('DD ') ||
+                                       upper.includes('PARM=');
+                            });
+                            break;
+                    }
+                    
+                    if (relevantLines.length > 0) {
+                        overlapContent += `\n=== ${analysisType.toUpperCase()} CONTEXT from ${file.name} ===\n`;
+                        overlapContent += relevantLines.slice(0, 15).join('\n'); // Limit overlap size
+                    }
+                });
+                
+                return overlapContent;
+            }
+
+            extractProgramsFromJCL(jclContent) {
+                const programs = [];
+                const lines = jclContent.split('\n');
+                
+                lines.forEach(line => {
+                    const execMatch = line.match(/EXEC\s+PGM=([A-Z0-9\-_]+)/i);
+                    if (execMatch) {
+                        programs.push(execMatch[1]);
+                    }
+                });
+                
+                return programs;
+            }
+
+            // Enhanced display methods with specialized information
+            displayComponentAnalysis(componentName) {
+                const analysis = this.componentAnalysis[componentName];
+                
+                // Update all tabs with specialized analysis
+                this.displayLifecycleAnalysisEnhanced(componentName, analysis);
+                this.displaySpecializedFieldMatrix(componentName, analysis);
+                this.displaySpecializedUsageAnalysis(componentName, analysis);
+                this.displaySpecializedDependencyAnalysis(componentName, analysis);
+                
+                this.switchTab({ target: { dataset: { tab: 'lifecycle' } } });
+            }
+
+            displaySpecializedFieldMatrix(componentName, analysis) {
+                const container = document.getElementById('fieldMatrixContent');
+                const componentType = analysis.componentInfo.type;
+                
+                let html = `
+                    <h3>📋 ${componentType} Field Matrix: ${componentName}</h3>
+                    <p style="margin-bottom: 20px;">
+                        Specialized field analysis with intelligent ${componentType.toLowerCase()} chunking applied.
+                    </p>
+                `;
+                
+                // Add type-specific field information
+                const fields = this.extractSpecializedFieldInfo(analysis.analysis, componentType);
+                
+                if (fields.length > 0) {
+                    html += '<div class="field-matrix">';
+                    fields.forEach(field => {
+                        const typeColor = this.getFieldTypeColor(field.fieldType);
+                        html += `
+                            <div class="field-card" style="border-top-color: ${typeColor};">
+                                <div class="field-name">${field.name}</div>
+                                <div class="field-usage">
+                                    <div style="margin-bottom: 8px; color: ${typeColor};">
+                                        <strong>${field.fieldType}</strong> • ${field.lifecycle}
+                                    </div>
+                                    <div style="margin-bottom: 10px;">
+                                        ${field.usageTypes.map(type => 
+                                            `<span class="usage-tag tag-${type.toLowerCase()}">${type}</span>`
+                                        ).join(' ')}
+                                    </div>
+                                    <div style="font-size: 11px; line-height: 1.4;">
+                                        <strong>Programs:</strong> ${field.programs.join(', ')}<br>
+                                        <strong>Lifecycle Stage:</strong> ${field.lifecycleStage}<br>
+                                        <strong>Business Impact:</strong> ${field.businessImpact}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    html += '</div>';
+                } else {
+                    html += `
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; text-align: center;">
+                            <p>Specialized ${componentType.toLowerCase()} field analysis in progress...</p>
+                            <p style="font-size: 12px; opacity: 0.8; margin-top: 10px;">
+                                Enhanced chunking applied for optimal ${componentType.toLowerCase()} analysis.
+                            </p>
+                        </div>
+                    `;
+                }
+                
+                container.innerHTML = html;
+            }
+
+            extractSpecializedFieldInfo(analysisText, componentType) {
+                const fields = [];
+                const sections = analysisText.split('**');
+                
+                // Extract fields based on component type
+                sections.forEach(section => {
+                    if (componentType === 'COPYBOOK' && section.includes('FIELD INVENTORY')) {
+                        // Extract copybook field definitions
+                        this.extractCopybookFields(section, fields);
+                    } else if (componentType === 'PROGRAM' && section.includes('DATA PROCESSING')) {
+                        // Extract program data usage
+                        this.extractProgramFields(section, fields);
+                    } else if (componentType === 'FIELD' && section.includes('LIFECYCLE')) {
+                        // Extract field lifecycle info
+                        this.extractFieldLifecycle(section, fields);
+                    }
+                });
+                
+                return fields.slice(0, 8); // Limit display
+            }
+
+            extractCopybookFields(section, fields) {
+                const lines = section.split('\n');
+                lines.forEach(line => {
+                    const fieldMatch = line.match(/([A-Z][A-Z0-9\-_]{2,})\s*.*PIC\s*([X9SV\(\)]+)/i);
+                    if (fieldMatch) {
+                        fields.push({
+                            name: fieldMatch[1],
+                            fieldType: 'COPYBOOK FIELD',
+                            lifecycle: 'Definition → Usage → Processing',
+                            usageTypes: ['defined', 'referenced'],
+                            programs: this.extractProgramReferences(section),
+                            lifecycleStage: 'Active Definition',
+                            businessImpact: this.assessBusinessImpact(fieldMatch[1], section)
+                        });
+                    }
+                });
+            }
+
+            extractProgramFields(section, fields) {
+                const lines = section.split('\n');
+                lines.forEach(line => {
+                    if (line.includes('MOVE') || line.includes('COMPUTE')) {
+                        const fieldMatch = line.match(/([A-Z][A-Z0-9\-_]{3,})/);
+                        if (fieldMatch) {
+                            fields.push({
+                                name: fieldMatch[1],
+                                fieldType: 'PROGRAM VARIABLE',
+                                lifecycle: 'Processing → Transformation → Output',
+                                usageTypes: ['processed', 'transformed'],
+                                programs: ['Current Program'],
+                                lifecycleStage: 'Active Processing',
+                                businessImpact: 'Medium'
+                            });
+                        }
+                    }
+                });
+            }
+
+            extractFieldLifecycle(section, fields) {
+                // Extract detailed field lifecycle information
+                const fieldName = section.match(/FIELD.*?([A-Z][A-Z0-9\-_]+)/i)?.[1];
+                if (fieldName) {
+                    fields.push({
+                        name: fieldName,
+                        fieldType: 'TRACKED FIELD',
+                        lifecycle: 'Complete Lifecycle Tracked',
+                        usageTypes: ['created', 'processed', 'output'],
+                        programs: this.extractProgramReferences(section),
+                        lifecycleStage: 'Full Lifecycle Analysis',
+                        businessImpact: 'High'
+                    });
+                }
+            }
+
+            getFieldTypeColor(fieldType) {
+                const colors = {
+                    'COPYBOOK FIELD': '#4CAF50',
+                    'PROGRAM VARIABLE': '#2196F3', 
+                    'TRACKED FIELD': '#FF9800',
+                    'JCL PARAMETER': '#9C27B0'
+                };
+                return colors[fieldType] || '#FFD700';
+            }
+
+            // Continue with all other existing methods...
         }
 
         // Initialize the complete enhanced analyzer
