@@ -1,0 +1,1146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Mainframe Analyzer - System Flow</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(15px);
+            border-radius: 20px;
+            padding: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 25px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #FFD700, #FFA500);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .flow-container {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 30px;
+        }
+
+        .phase-section {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 15px;
+            padding: 25px;
+            border-left: 5px solid;
+        }
+
+        .phase-upload { border-left-color: #4CAF50; }
+        .phase-process { border-left-color: #2196F3; }
+        .phase-analyze { border-left-color: #FF9800; }
+        .phase-llm { border-left-color: #9C27B0; }
+        .phase-result { border-left-color: #f44336; }
+
+        .phase-title {
+            font-size: 1.8rem;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .timeline {
+            position: relative;
+            padding-left: 30px;
+        }
+
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 10px;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: linear-gradient(to bottom, #FFD700, #FFA500);
+        }
+
+        .timeline-item {
+            position: relative;
+            margin-bottom: 25px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 20px;
+            margin-left: 20px;
+        }
+
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: -35px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 15px;
+            height: 15px;
+            background: #FFD700;
+            border-radius: 50%;
+            border: 3px solid #FFA500;
+            box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+        }
+
+        .step-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .step-title {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #FFD700;
+        }
+
+        .step-duration {
+            background: rgba(255, 215, 0, 0.2);
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 11px;
+            color: #FFD700;
+        }
+
+        .step-details {
+            font-size: 14px;
+            line-height: 1.6;
+            margin-bottom: 15px;
+        }
+
+        .substeps {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .substep {
+            background: rgba(255, 255, 255, 0.03);
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 3px solid;
+        }
+
+        .substep-function { border-left-color: #4CAF50; }
+        .substep-llm { border-left-color: #9C27B0; }
+        .substep-process { border-left-color: #2196F3; }
+        .substep-result { border-left-color: #FF9800; }
+
+        .substep-title {
+            font-weight: bold;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        .substep-desc {
+            font-size: 12px;
+            opacity: 0.9;
+            line-height: 1.4;
+        }
+
+        .llm-call-box {
+            background: rgba(156, 39, 176, 0.1);
+            border: 2px solid #9C27B0;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+
+        .llm-call-title {
+            color: #9C27B0;
+            font-weight: bold;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .llm-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+            font-size: 12px;
+        }
+
+        .llm-detail {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 8px;
+            border-radius: 5px;
+            text-align: center;
+        }
+
+        .code-flow {
+            background: rgba(0, 0, 0, 0.4);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            margin: 10px 0;
+            border-left: 4px solid #4CAF50;
+        }
+
+        .flow-arrow {
+            text-align: center;
+            font-size: 2rem;
+            color: #FFD700;
+            margin: 20px 0;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .metric-card {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            border-top: 3px solid #FFD700;
+        }
+
+        .metric-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #FFD700;
+            margin-bottom: 5px;
+        }
+
+        .metric-label {
+            font-size: 11px;
+            opacity: 0.8;
+        }
+
+        .gantt-section {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 15px;
+            padding: 25px;
+            margin-top: 30px;
+        }
+
+        .gantt-title {
+            font-size: 1.5rem;
+            color: #FFD700;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .gantt-timeline {
+            display: grid;
+            grid-template-columns: 200px repeat(12, 1fr);
+            gap: 2px;
+            margin-bottom: 15px;
+        }
+
+        .gantt-header {
+            background: rgba(255, 215, 0, 0.2);
+            padding: 8px;
+            text-align: center;
+            border-radius: 5px;
+            font-size: 10px;
+            color: #FFD700;
+            font-weight: bold;
+        }
+
+        .gantt-row {
+            display: grid;
+            grid-template-columns: 200px repeat(12, 1fr);
+            gap: 2px;
+            margin-bottom: 8px;
+            align-items: center;
+        }
+
+        .gantt-label {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 8px;
+            border-radius: 5px;
+            font-size: 11px;
+            font-weight: bold;
+            color: #FFD700;
+            text-align: left;
+        }
+
+        .gantt-cell {
+            height: 25px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 3px;
+            position: relative;
+        }
+
+        .gantt-bar {
+            height: 15px;
+            border-radius: 7px;
+            margin: 5px 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 8px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.7);
+        }
+
+        .bar-upload { background: linear-gradient(45deg, #4CAF50, #45a049); }
+        .bar-process { background: linear-gradient(45deg, #2196F3, #1976D2); }
+        .bar-analyze { background: linear-gradient(45deg, #FF9800, #F57C00); }
+        .bar-llm { background: linear-gradient(45deg, #9C27B0, #7B1FA2); }
+        .bar-result { background: linear-gradient(45deg, #f44336, #d32f2f); }
+
+        .feature-matrix {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+
+        .feature-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 20px;
+            border-top: 4px solid;
+        }
+
+        .feature-token { border-top-color: #4CAF50; }
+        .feature-validation { border-top-color: #2196F3; }
+        .feature-progressive { border-top-color: #FF9800; }
+        .feature-chat { border-top-color: #9C27B0; }
+
+        .feature-title {
+            font-size: 1.1rem;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #FFD700;
+        }
+
+        .feature-steps {
+            list-style: none;
+            padding: 0;
+        }
+
+        .feature-steps li {
+            padding: 5px 0;
+            font-size: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .feature-steps li:last-child {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔄 Enhanced Mainframe Analyzer - Complete System Flow</h1>
+            <p>From File Upload to LLM Analysis - Every Step Mapped</p>
+        </div>
+
+        <!-- Gantt Chart Overview -->
+        <div class="gantt-section">
+            <div class="gantt-title">📊 Complete Analysis Timeline</div>
+            
+            <div class="gantt-timeline">
+                <div class="gantt-header">Process Phase</div>
+                <div class="gantt-header">0-5s<br>Upload</div>
+                <div class="gantt-header">5-10s<br>Validate</div>
+                <div class="gantt-header">10-15s<br>Process</div>
+                <div class="gantt-header">15-25s<br>Chunk</div>
+                <div class="gantt-header">25-35s<br>Identify</div>
+                <div class="gantt-header">35-60s<br>Analyze</div>
+                <div class="gantt-header">60-90s<br>Detail</div>
+                <div class="gantt-header">90-95s<br>Validate</div>
+                <div class="gantt-header">95-98s<br>Assemble</div>
+                <div class="gantt-header">98-99s<br>Store</div>
+                <div class="gantt-header">99-100s<br>Display</div>
+                <div class="gantt-header">100s+<br>Chat</div>
+            </div>
+
+            <div class="gantt-row">
+                <div class="gantt-label">File Upload & Processing</div>
+                <div class="gantt-cell"><div class="gantt-bar bar-upload">Upload</div></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-upload">Parse</div></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-process">Detect</div></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+            </div>
+
+            <div class="gantt-row">
+                <div class="gantt-label">Token Management</div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-process">Estimate</div></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-process">Optimize</div></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-process">Monitor</div></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-process">Track</div></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-process">Update</div></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+            </div>
+
+            <div class="gantt-row">
+                <div class="gantt-label">LLM API Calls</div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-llm">ID Call</div></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-llm">Chunk 1-N</div></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-llm">Detail</div></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-llm">Validate</div></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-llm">Chat</div></div>
+            </div>
+
+            <div class="gantt-row">
+                <div class="gantt-label">Progressive Analysis</div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-analyze">Stage 1</div></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-analyze">Stage 2</div></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-analyze">Stage 3</div></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-analyze">Stage 4</div></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+            </div>
+
+            <div class="gantt-row">
+                <div class="gantt-label">Result Processing</div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-result">Score</div></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-result">Format</div></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-result">Store</div></div>
+                <div class="gantt-cell"><div class="gantt-bar bar-result">Display</div></div>
+                <div class="gantt-cell"></div>
+            </div>
+        </div>
+
+        <!-- Detailed Flow Phases -->
+        <div class="flow-container">
+            
+            <!-- Phase 1: File Upload -->
+            <div class="phase-section phase-upload">
+                <div class="phase-title">
+                    <span>📁</span>
+                    <span>Phase 1: File Upload & Initial Processing</span>
+                </div>
+                
+                <div class="timeline">
+                    <div class="timeline-item">
+                        <div class="step-header">
+                            <div class="step-title">1.1 File Upload Handler</div>
+                            <div class="step-duration">0-2 seconds</div>
+                        </div>
+                        <div class="step-details">
+                            User uploads COBOL (.cbl), Copybook (.cpy), or JCL (.jcl) files via drag-and-drop or file selection
+                        </div>
+                        
+                        <div class="code-flow">
+handleFileSelect(e) → processFiles(files) → readFile(file) → detectFileType(fileName, content)</div>
+                        
+                        <div class="substeps">
+                            <div class="substep substep-function">
+                                <div class="substep-title">🔧 Function: handleFileSelect()</div>
+                                <div class="substep-desc">Captures file selection event, validates server connection, passes to processFiles()</div>
+                            </div>
+                            <div class="substep substep-function">
+                                <div class="substep-title">🔧 Function: readFile()</div>
+                                <div class="substep-desc">Uses FileReader API to read file contents as text, handles errors gracefully</div>
+                            </div>
+                            <div class="substep substep-function">
+                                <div class="substep-title">🔧 Function: detectFileType()</div>
+                                <div class="substep-desc">Analyzes filename and content patterns to identify: COBOL Program, Copybook, JCL Job, JCL Procedure</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="timeline-item">
+                        <div class="step-header">
+                            <div class="step-title">1.2 File Object Creation</div>
+                            <div class="step-duration">2-3 seconds</div>
+                        </div>
+                        <div class="step-details">
+                            Creates structured file objects with metadata and stores in uploadedFiles array
+                        </div>
+                        
+                        <div class="code-flow">
+fileObj = {
+  name: file.name,
+  content: content,
+  size: file.size,
+  type: fileType,
+  uploadDate: new Date().toISOString(),
+  id: Date.now() + Math.random()
+}</div>
+                        
+                        <div class="substeps">
+                            <div class="substep substep-process">
+                                <div class="substep-title">📊 Storage: uploadedFiles.push()</div>
+                                <div class="substep-desc">Adds file object to main array, triggers UI update</div>
+                            </div>
+                            <div class="substep substep-process">
+                                <div class="substep-title">🔄 Update: displayUploadedFiles()</div>
+                                <div class="substep-desc">Refreshes file list UI with upload details and remove buttons</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="timeline-item">
+                        <div class="step-header">
+                            <div class="step-title">1.3 Component Suggestion Generation</div>
+                            <div class="step-duration">3-5 seconds</div>
+                        </div>
+                        <div class="step-details">
+                            Scans uploaded files to extract potential component names for analysis suggestions
+                        </div>
+                        
+                        <div class="code-flow">updateComponentSuggestions() → extractFieldNames() → extractCopybookNames() → extractProgramNames()</div>
+                        
+                        <div class="substeps">
+                            <div class="substep substep-process">
+                                <div class="substep-title">🔍 Pattern Matching: Field Names</div>
+                                <div class="substep-desc">Regex: /^\s*\d{2}\s+([A-Z][A-Z0-9\-_]{2,})/ extracts COBOL field definitions</div>
+                            </div>
+                            <div class="substep substep-process">
+                                <div class="substep-title">🔍 Pattern Matching: Copybooks</div>
+                                <div class="substep-desc">Regex: /COPY\s+([A-Z][A-Z0-9\-_]{2,})/ finds copybook references</div>
+                            </div>
+                            <div class="substep substep-process">
+                                <div class="substep-title">🔍 Pattern Matching: Programs</div>
+                                <div class="substep-desc">Regex: /PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]{2,})/ identifies program IDs</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flow-arrow">↓</div>
+
+            <!-- Phase 2: Component Analysis Initialization -->
+            <div class="phase-section phase-process">
+                <div class="phase-title">
+                    <span>🎯</span>
+                    <span>Phase 2: Component Analysis Initialization</span>
+                </div>
+                
+                <div class="timeline">
+                    <div class="timeline-item">
+                        <div class="step-header">
+                            <div class="step-title">2.1 User Component Selection</div>
+                            <div class="step-duration">User Input</div>
+                        </div>
+                        <div class="step-details">
+                            User enters component name or selects from suggestions, triggering analysis pipeline
+                        </div>
+                        
+                        <div class="code-flow">analyzeComponent() → validateForm() → runProgressiveAnalysis(componentName)</div>
+                        
+                        <div class="substeps">
+                            <div class="substep substep-function">
+                                <div class="substep-title">✅ Validation: Form Check</div>
+                                <div class="substep-desc">Ensures files uploaded, component name entered, API connection validated</div>
+                            </div>
+                            <div class="substep substep-function">
+                                <div class="substep-title">🚀 Initialize: Analysis Pipeline</div>
+                                <div class="substep-desc">Sets up loading indicators, disables chat, resets progress to 0%</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="timeline-item">
+                        <div class="step-header">
+                            <div class="step-title">2.2 Token Management Setup</div>
+                            <div class="step-duration">5-10 seconds</div>
+                        </div>
+                        <div class="step-details">
+                            Initializes intelligent token management system for optimal LLM usage
+                        </div>
+                        
+                        <div class="code-flow">
+this.averageCharsPerToken = 4;
+this.tokenSafetyMargin = 0.8;
+this.maxTokens = parseInt(document.getElementById('maxTokens').value);
+availableTokens = Math.floor(this.maxTokens * this.tokenSafetyMargin);</div>
+                        
+                        <div class="substeps">
+                            <div class="substep substep-process">
+                                <div class="substep-title">📊 Token Estimation</div>
+                                <div class="substep-desc">estimateTokenCount(text) = Math.ceil(text.length / 4) - calculates approximate tokens</div>
+                            </div>
+                            <div class="substep substep-process">
+                                <div class="substep-title">🎚️ Token Display</div>
+                                <div class="substep-desc">updateTokenDisplay() shows real-time usage with color-coded warnings</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="timeline-item">
+                        <div class="step-header">
+                            <div class="step-title">2.3 Analysis Stage Setup</div>
+                            <div class="step-duration">1 second</div>
+                        </div>
+                        <div class="step-details">
+                            Defines the 4-stage progressive analysis pipeline with time allocation
+                        </div>
+                        
+                        <div class="code-flow">
+this.analysisStages = [
+    { name: 'Component Identification', weight: 20 },
+    { name: 'Initial Analysis', weight: 40 },
+    { name: 'Detailed Processing', weight: 30 },
+    { name: 'Validation & Assembly', weight: 10 }
+];</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flow-arrow">↓</div>
+
+            <!-- Phase 3: Progressive Analysis Pipeline -->
+            <div class="phase-section phase-analyze">
+                <div class="phase-title">
+                    <span>🔄</span>
+                    <span>Phase 3: Progressive Analysis Pipeline (4 Stages)</span>
+                </div>
+                
+                <div class="timeline">
+                    <!-- Stage 1 -->
+                    <div class="timeline-item">
+                        <div class="step-header">
+                            <div class="step-title">Stage 1: Enhanced Component Identification (20%)</div>
+                            <div class="step-duration">15-25 seconds</div>
+                        </div>
+                        <div class="step-details">
+                            Identifies and locates the target component across all uploaded files
+                        </div>
+                        
+                        <div class="code-flow">
+filterRelevantFiles(componentName) → optimizeContentForTokens() → identifyComponentEnhanced()
+→ LLM API CALL → parseEnhancedComponentInfo()</div>
+                        
+                        <div class="llm-call-box">
+                            <div class="llm-call-title">
+                                <span>🤖</span>
+                                <span>LLM API Call #1: Component Identification</span>
+                            </div>
+                            <div class="llm-details">
+                                <div class="llm-detail">
+                                    <strong>Endpoint:</strong><br>
+                                    POST /generate
+                                </div>
+                                <div class="llm-detail">
+                                    <strong>Tokens Used:</strong><br>
+                                    ~30% of available (1200/4000)
+                                </div>
+                                <div class="llm-detail">
+                                    <strong>Response Format:</strong><br>
+                                    COMPONENT_TYPE, FOUND_IN, CONFIDENCE_SCORE
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="substeps">
+                            <div class="substep substep-function">
+                                <div class="substep-title">🔍 Function: filterRelevantFiles()</div>
+                                <div class="substep-desc">Filters files containing component name or related patterns</div>
+                            </div>
+                            <div class="substep substep-function">
+                                <div class="substep-title">⚡ Function: optimizeContentForTokens()</div>
+                                <div class="substep-desc">Intelligently truncates content while preserving critical sections</div>
+                            </div>
+                            <div class="substep substep-llm">
+                                <div class="substep-title">🤖 LLM Call: identifyComponentEnhanced()</div>
+                                <div class="substep-desc">Sends optimized content to LLM for component identification and classification</div>
+                            </div>
+                            <div class="substep substep-result">
+                                <div class="substep-title">📋 Result: parseEnhancedComponentInfo()</div>
+                                <div class="substep-desc">Parses structured response into componentInfo object with type, location, confidence</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Stage 2 -->
+                    <div class="timeline-item">
+                        <div class="step-header">
+                            <div class="step-title">Stage 2: Multi-Chunk Progressive Analysis (40%)</div>
+                            <div class="step-duration">25-60 seconds</div>
+                        </div>
+                        <div class="step-details">
+                            Processes files in optimized chunks with overlapping context windows
+                        </div>
+                        
+                        <div class="code-flow">
+createOverlappingChunks() → processAnalysisChunks() 
+→ MULTIPLE LLM API CALLS (1 per chunk) → mergeAnalysisResults()</div>
+                        
+                        <div class="llm-call-box">
+                            <div class="llm-call-title">
+                                <span>🤖</span>
+                                <span>LLM API Calls #2-N: Chunk Analysis (Multiple Calls)</span>
+                            </div>
+                            <div class="llm-details">
+                                <div class="llm-detail">
+                                    <strong>Call Pattern:</strong><br>
+                                    1 call per chunk (typically 2-5 chunks)
+                                </div>
+                                <div class="llm-detail">
+                                    <strong>Tokens Per Call:</strong><br>
+                                    ~40% of available (1600/4000)
+                                </div>
+                                <div class="llm-detail">
+                                    <strong>Context Preservation:</strong><br>
+                                    Overlap content + previous findings
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="substeps">
+                            <div class="substep substep-function">
+                                <div class="substep-title">✂️ Function: createOverlappingChunks()</div>
+                                <div class="substep-desc">Splits files into manageable chunks with 20-line overlaps for context</div>
+                            </div>
+                            <div class="substep substep-function">
+                                <div class="substep-title">🔄 Loop: processAnalysisChunks()</div>
+                                <div class="substep-desc">Iterates through chunks, calling LLM for each with progressive context</div>
+                            </div>
+                            <div class="substep substep-llm">
+                                <div class="substep-title">🤖 Multiple LLM Calls</div>
+                                <div class="substep-desc">Each chunk gets specialized analysis prompt with focus area and context</div>
+                            </div>
+                            <div class="substep substep-result">
+                                <div class="substep-title">🔗 Function: mergeAnalysisResults()</div>
+                                <div class="substep-desc">Combines chunk results while avoiding duplication</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Stage 3 -->
+                    <div class="timeline-item">
+                        <div class="step-header">
+                            <div class="step-title">Stage 3: Detailed Enhancement Processing (30%)</div>
+                            <div class="step-duration">60-90 seconds</div>
+                        </div>
+                        <div class="step-details">
+                            Performs specialized analysis based on component type (COPYBOOK/PROGRAM/FIELD/JCL)
+                        </div>
+                        
+                        <div class="code-flow">
+performDetailedAnalysis() → [componentType-specific function] → SPECIALIZED LLM CALL → type-specific parsing</div>
+                        
+                        <div class="llm-call-box">
+                            <div class="llm-call-title">
+                                <span>🤖</span>
+                                <span>LLM API Call #N+1: Specialized Detailed Analysis</span>
+                            </div>
+                            <div class="llm-details">
+                                <div class="llm-detail">
+                                    <strong>Analysis Type:</strong><br>
+                                    Copybook/Program/Field/JCL specific
+                                </div>
+                                <div class="llm-detail">
+                                    <strong>Tokens Used:</strong><br>
+                                    ~60% of available (2400/4000)
+                                </div>
+                                <div class="llm-detail">
+                                    <strong>Specialization:</strong><br>
+                                    Lifecycle, dependencies, business rules
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="substeps">
+                            <div class="substep substep-function">
+                                <div class="substep-title">📚 performCopybookLifecycleAnalysis()</div>
+                                <div class="substep-desc">Field definitions, usage patterns, cross-program references</div>
+                            </div>
+                            <div class="substep substep-function">
+                                <div class="substep-title">💻 performProgramFlowAnalysis()</div>
+                                <div class="substep-desc">Execution flow, call chains, I/O operations, business logic</div>
+                            </div>
+                            <div class="substep substep-function">
+                                <div class="substep-title">🏷️ performFieldLifecycleAnalysis()</div>
+                                <div class="substep-desc">Creation, processing, transformation, output lifecycle</div>
+                            </div>
+                            <div class="substep substep-function">
+                                <div class="substep-title">📋 performJCLFlowAnalysis()</div>
+                                <div class="substep-desc">Job execution, data flow, program calls, dependencies</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Stage 4 -->
+                    <div class="timeline-item">
+                        <div class="step-header">
+                            <div class="step-title">Stage 4: Validation & Quality Assessment (10%)</div>
+                            <div class="step-duration">90-95 seconds</div>
+                        </div>
+                        <div class="step-details">
+                            Validates results, calculates quality metrics, and generates recommendations
+                        </div>
+                        
+                        <div class="code-flow">
+validateAndAssembleResults() → calculateQualityScore() → assessCompleteness() → generateRecommendations()</div>
+                        
+                        <div class="substeps">
+                            <div class="substep substep-result">
+                                <div class="substep-title">🎯 Quality Score (1-10)</div>
+                                <div class="substep-desc">Based on confidence, analysis depth, structure, business context</div>
+                            </div>
+                            <div class="substep substep-result">
+                                <div class="substep-title">📊 Completeness Score (%)</div>
+                                <div class="substep-desc">Tracks: component found, location mapped, usage analyzed, impact assessed</div>
+                            </div>
+                            <div class="substep substep-result">
+                                <div class="substep-title">💡 Recommendations</div>
+                                <div class="substep-desc">Generates actionable suggestions based on analysis findings</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flow-arrow">↓</div>
+
+            <!-- Phase 4: Result Processing -->
+            <div class="phase-section phase-result">
+                <div class="phase-title">
+                    <span>📊</span>
+                    <span>Phase 4: Result Processing & Display</span>
+                </div>
+                
+                <div class="timeline">
+                    <div class="timeline-item">
+                        <div class="step-header">
+                            <div class="step-title">4.1 Result Assembly & Storage</div>
+                            <div class="step-duration">95-98 seconds</div>
+                        </div>
+                        <div class="step-details">
+                            Combines all analysis results into final structured format and stores locally
+                        </div>
+                        
+                        <div class="code-flow">
+finalResults = {
+    timestamp, componentInfo, analysis, qualityScore, 
+    completeness, recommendations
+}
+this.componentAnalysis[componentName] = finalResults;
+saveToStorage();</div>
+                        
+                        <div class="substeps">
+                            <div class="substep substep-result">
+                                <div class="substep-title">📦 Result Structure</div>
+                                <div class="substep-desc">Combines componentInfo, analysis text, metrics, and recommendations</div>
+                            </div>
+                            <div class="substep substep-result">
+                                <div class="substep-title">💾 Local Storage</div>
+                                <div class="substep-desc">Saves to localStorage for persistence across sessions</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="timeline-item">
+                        <div class="step-header">
+                            <div class="step-title">4.2 UI Display Generation</div>
+                            <div class="step-duration">98-99 seconds</div>
+                        </div>
+                        <div class="step-details">
+                            Generates specialized displays for different tabs based on component type
+                        </div>
+                        
+                        <div class="code-flow">
+displayComponentAnalysis() → displayLifecycleAnalysisEnhanced() → 
+displaySpecializedFieldMatrix() → displaySpecializedUsageAnalysis() → 
+displaySpecializedDependencyAnalysis()</div>
+                        
+                        <div class="substeps">
+                            <div class="substep substep-result">
+                                <div class="substep-title">🔄 Lifecycle Tab</div>
+                                <div class="substep-desc">Quality metrics, component info, full analysis text with formatting</div>
+                            </div>
+                            <div class="substep substep-result">
+                                <div class="substep-title">📋 Field Matrix Tab</div>
+                                <div class="substep-desc">Field usage patterns, lifecycle stages, usage type classifications</div>
+                            </div>
+                            <div class="substep substep-result">
+                                <div class="substep-title">📈 Usage Analysis Tab</div>
+                                <div class="substep-desc">Usage statistics, patterns visualization, frequency analysis</div>
+                            </div>
+                            <div class="substep substep-result">
+                                <div class="substep-title">🔗 Dependencies Tab</div>
+                                <div class="substep-desc">Dependency check button, availability analysis, relationship mapping</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="timeline-item">
+                        <div class="step-header">
+                            <div class="step-title">4.3 Chat System Activation</div>
+                            <div class="step-duration">99-100 seconds</div>
+                        </div>
+                        <div class="step-details">
+                            Enables interactive chat with context-aware responses based on analysis results
+                        </div>
+                        
+                        <div class="code-flow">
+enableChat() → this.currentAnalyzedComponent = componentName → 
+addChatMessage('assistant', welcome_message)</div>
+                        
+                        <div class="substeps">
+                            <div class="substep substep-result">
+                                <div class="substep-title">💬 Chat Activation</div>
+                                <div class="substep-desc">Enables input field and send button, sets current component context</div>
+                            </div>
+                            <div class="substep substep-result">
+                                <div class="substep-title">🎯 Context Setting</div>
+                                <div class="substep-desc">Stores analysis results for chat queries, displays quality metrics</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flow-arrow">↓</div>
+
+            <!-- Phase 5: Interactive Chat -->
+            <div class="phase-section phase-llm">
+                <div class="phase-title">
+                    <span>💬</span>
+                    <span>Phase 5: Interactive Chat System</span>
+                </div>
+                
+                <div class="timeline">
+                    <div class="timeline-item">
+                        <div class="step-header">
+                            <div class="step-title">5.1 Chat Query Processing</div>
+                            <div class="step-duration">On-demand</div>
+                        </div>
+                        <div class="step-details">
+                            Processes user questions with full context from previous analysis
+                        </div>
+                        
+                        <div class="code-flow">
+sendChatMessage() → processEnhancedChatQuery(question) → LLM API CALL → addChatMessage()</div>
+                        
+                        <div class="llm-call-box">
+                            <div class="llm-call-title">
+                                <span>🤖</span>
+                                <span>LLM API Call: Interactive Chat (On-demand)</span>
+                            </div>
+                            <div class="llm-details">
+                                <div class="llm-detail">
+                                    <strong>Context:</strong><br>
+                                    Full analysis results + user question
+                                </div>
+                                <div class="llm-detail">
+                                    <strong>Response Type:</strong><br>
+                                    Conversational, detailed, actionable
+                                </div>
+                                <div class="llm-detail">
+                                    <strong>Features:</strong><br>
+                                    Real-time, context-aware, interactive
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="substeps">
+                            <div class="substep substep-function">
+                                <div class="substep-title">💬 Function: sendChatMessage()</div>
+                                <div class="substep-desc">Validates input, disables UI, adds user message to chat</div>
+                            </div>
+                            <div class="substep substep-llm">
+                                <div class="substep-title">🤖 Enhanced Chat Query</div>
+                                <div class="substep-desc">Sends analysis context + question to LLM for detailed response</div>
+                            </div>
+                            <div class="substep substep-result">
+                                <div class="substep-title">📝 Response Formatting</div>
+                                <div class="substep-desc">Formats response with markdown, code highlighting, structured lists</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Feature Enhancement Matrix -->
+        <div class="feature-matrix">
+            <div class="feature-card feature-token">
+                <div class="feature-title">🧠 Smart Token Management</div>
+                <ul class="feature-steps">
+                    <li>1. estimateTokenCount() - Calculate tokens from content length</li>
+                    <li>2. updateTokenDisplay() - Real-time usage tracking with color coding</li>
+                    <li>3. optimizeContentForTokens() - Intelligent content truncation</li>
+                    <li>4. intelligentTruncate() - Priority-based content preservation</li>
+                    <li>5. Monitor throughout all LLM calls</li>
+                </ul>
+            </div>
+
+            <div class="feature-card feature-validation">
+                <div class="feature-title">✅ Advanced Validation</div>
+                <ul class="feature-steps">
+                    <li>1. validateResponse() - Check response quality and format</li>
+                    <li>2. calculateQualityScore() - Score 1-10 based on multiple factors</li>
+                    <li>3. assessCompleteness() - Track analysis coverage percentage</li>
+                    <li>4. callvLLMAPIWithRetry() - Automatic retry on validation failure</li>
+                    <li>5. generateRecommendations() - Actionable suggestions</li>
+                </ul>
+            </div>
+
+            <div class="feature-card feature-progressive">
+                <div class="feature-title">🔄 Progressive Analysis</div>
+                <ul class="feature-steps">
+                    <li>1. runProgressiveAnalysis() - 4-stage pipeline execution</li>
+                    <li>2. updateProgress() - Visual progress tracking</li>
+                    <li>3. updateLoadingStatus() - Stage-specific status messages</li>
+                    <li>4. sleep() intervals - Prevent API rate limiting</li>
+                    <li>5. Checkpoint recovery for interrupted analysis</li>
+                </ul>
+            </div>
+
+            <div class="feature-card feature-chat">
+                <div class="feature-title">💬 Interactive Chat</div>
+                <ul class="feature-steps">
+                    <li>1. enableChat() - Activate after successful analysis</li>
+                    <li>2. Context preservation - Full analysis results available</li>
+                    <li>3. processEnhancedChatQuery() - Context-aware responses</li>
+                    <li>4. formatChatMessage() - Rich text formatting</li>
+                    <li>5. Suggested questions - Guide user exploration</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Performance Metrics -->
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-value">4-8</div>
+                <div class="metric-label">LLM API Calls Total</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">60-100s</div>
+                <div class="metric-label">Complete Analysis Time</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">80%</div>
+                <div class="metric-label">Token Safety Margin</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">4</div>
+                <div class="metric-label">Analysis Stages</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">1-10</div>
+                <div class="metric-label">Quality Score Range</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">0-100%</div>
+                <div class="metric-label">Completeness Score</div>
+            </div>
+        </div>
+
+        <!-- LLM Call Summary -->
+        <div class="phase-section phase-llm" style="margin-top: 30px;">
+            <div class="phase-title">
+                <span>🤖</span>
+                <span>Complete LLM API Call Summary</span>
+            </div>
+            
+            <div class="timeline">
+                <div class="timeline-item">
+                    <div class="step-header">
+                        <div class="step-title">LLM Call Pattern Overview</div>
+                        <div class="step-duration">Per Analysis Session</div>
+                    </div>
+                    <div class="step-details">
+                        Complete breakdown of all LLM API interactions during a single component analysis
+                    </div>
+                    
+                    <div class="code-flow">
+<strong>Call #1:</strong> identifyComponentEnhanced() - Component identification & classification
+<strong>Calls #2-N:</strong> processAnalysisChunks() - Multi-chunk progressive analysis (2-5 calls typically)
+<strong>Call #N+1:</strong> performDetailedAnalysis() - Specialized component-type analysis
+<strong>Chat Calls:</strong> processEnhancedChatQuery() - Interactive queries (on-demand)
+                    </div>
+                    
+                    <div class="substeps">
+                        <div class="substep substep-llm">
+                            <div class="substep-title">🎯 Call #1: Component ID</div>
+                            <div class="substep-desc">Endpoint: POST /generate | Tokens: ~1200 | Purpose: Find and classify component</div>
+                        </div>
+                        <div class="substep substep-llm">
+                            <div class="substep-title">🔄 Calls #2-N: Chunk Analysis</div>
+                            <div class="substep-desc">Endpoint: POST /generate | Tokens: ~1600 each | Purpose: Progressive detailed analysis</div>
+                        </div>
+                        <div class="substep substep-llm">
+                            <div class="substep-title">🔍 Call #N+1: Specialized</div>
+                            <div class="substep-desc">Endpoint: POST /generate | Tokens: ~2400 | Purpose: Component-type specific deep dive</div>
+                        </div>
+                        <div class="substep substep-llm">
+                            <div class="substep-title">💬 Chat Calls: Interactive</div>
+                            <div class="substep-desc">Endpoint: POST /generate | Tokens: Variable | Purpose: User questions with full context</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

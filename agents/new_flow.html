@@ -1,0 +1,1063 @@
+<!DOCTYPE html><html><head>
+      <title>new_flow</title>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      
+      <link rel="stylesheet" href="file:///c:\Users\Admin\.vscode\extensions\shd101wyy.markdown-preview-enhanced-0.8.18\crossnote\dependencies\katex\katex.min.css">
+      
+      
+      <script type="text/javascript" src="file:///c:\Users\Admin\.vscode\extensions\shd101wyy.markdown-preview-enhanced-0.8.18\crossnote\dependencies\mermaid\mermaid.min.js" charset="UTF-8"></script>
+      
+      
+      <style>
+      code[class*=language-],pre[class*=language-]{color:#333;background:0 0;font-family:Consolas,"Liberation Mono",Menlo,Courier,monospace;text-align:left;white-space:pre;word-spacing:normal;word-break:normal;word-wrap:normal;line-height:1.4;-moz-tab-size:8;-o-tab-size:8;tab-size:8;-webkit-hyphens:none;-moz-hyphens:none;-ms-hyphens:none;hyphens:none}pre[class*=language-]{padding:.8em;overflow:auto;border-radius:3px;background:#f5f5f5}:not(pre)>code[class*=language-]{padding:.1em;border-radius:.3em;white-space:normal;background:#f5f5f5}.token.blockquote,.token.comment{color:#969896}.token.cdata{color:#183691}.token.doctype,.token.macro.property,.token.punctuation,.token.variable{color:#333}.token.builtin,.token.important,.token.keyword,.token.operator,.token.rule{color:#a71d5d}.token.attr-value,.token.regex,.token.string,.token.url{color:#183691}.token.atrule,.token.boolean,.token.code,.token.command,.token.constant,.token.entity,.token.number,.token.property,.token.symbol{color:#0086b3}.token.prolog,.token.selector,.token.tag{color:#63a35c}.token.attr-name,.token.class,.token.class-name,.token.function,.token.id,.token.namespace,.token.pseudo-class,.token.pseudo-element,.token.url-reference .token.variable{color:#795da3}.token.entity{cursor:help}.token.title,.token.title .token.punctuation{font-weight:700;color:#1d3e81}.token.list{color:#ed6a43}.token.inserted{background-color:#eaffea;color:#55a532}.token.deleted{background-color:#ffecec;color:#bd2c00}.token.bold{font-weight:700}.token.italic{font-style:italic}.language-json .token.property{color:#183691}.language-markup .token.tag .token.punctuation{color:#333}.language-css .token.function,code.language-css{color:#0086b3}.language-yaml .token.atrule{color:#63a35c}code.language-yaml{color:#183691}.language-ruby .token.function{color:#333}.language-markdown .token.url{color:#795da3}.language-makefile .token.symbol{color:#795da3}.language-makefile .token.variable{color:#183691}.language-makefile .token.builtin{color:#0086b3}.language-bash .token.keyword{color:#0086b3}pre[data-line]{position:relative;padding:1em 0 1em 3em}pre[data-line] .line-highlight-wrapper{position:absolute;top:0;left:0;background-color:transparent;display:block;width:100%}pre[data-line] .line-highlight{position:absolute;left:0;right:0;padding:inherit 0;margin-top:1em;background:hsla(24,20%,50%,.08);background:linear-gradient(to right,hsla(24,20%,50%,.1) 70%,hsla(24,20%,50%,0));pointer-events:none;line-height:inherit;white-space:pre}pre[data-line] .line-highlight:before,pre[data-line] .line-highlight[data-end]:after{content:attr(data-start);position:absolute;top:.4em;left:.6em;min-width:1em;padding:0 .5em;background-color:hsla(24,20%,50%,.4);color:#f4f1ef;font:bold 65%/1.5 sans-serif;text-align:center;vertical-align:.3em;border-radius:999px;text-shadow:none;box-shadow:0 1px #fff}pre[data-line] .line-highlight[data-end]:after{content:attr(data-end);top:auto;bottom:.4em}html body{font-family:'Helvetica Neue',Helvetica,'Segoe UI',Arial,freesans,sans-serif;font-size:16px;line-height:1.6;color:#333;background-color:#fff;overflow:initial;box-sizing:border-box;word-wrap:break-word}html body>:first-child{margin-top:0}html body h1,html body h2,html body h3,html body h4,html body h5,html body h6{line-height:1.2;margin-top:1em;margin-bottom:16px;color:#000}html body h1{font-size:2.25em;font-weight:300;padding-bottom:.3em}html body h2{font-size:1.75em;font-weight:400;padding-bottom:.3em}html body h3{font-size:1.5em;font-weight:500}html body h4{font-size:1.25em;font-weight:600}html body h5{font-size:1.1em;font-weight:600}html body h6{font-size:1em;font-weight:600}html body h1,html body h2,html body h3,html body h4,html body h5{font-weight:600}html body h5{font-size:1em}html body h6{color:#5c5c5c}html body strong{color:#000}html body del{color:#5c5c5c}html body a:not([href]){color:inherit;text-decoration:none}html body a{color:#08c;text-decoration:none}html body a:hover{color:#00a3f5;text-decoration:none}html body img{max-width:100%}html body>p{margin-top:0;margin-bottom:16px;word-wrap:break-word}html body>ol,html body>ul{margin-bottom:16px}html body ol,html body ul{padding-left:2em}html body ol.no-list,html body ul.no-list{padding:0;list-style-type:none}html body ol ol,html body ol ul,html body ul ol,html body ul ul{margin-top:0;margin-bottom:0}html body li{margin-bottom:0}html body li.task-list-item{list-style:none}html body li>p{margin-top:0;margin-bottom:0}html body .task-list-item-checkbox{margin:0 .2em .25em -1.8em;vertical-align:middle}html body .task-list-item-checkbox:hover{cursor:pointer}html body blockquote{margin:16px 0;font-size:inherit;padding:0 15px;color:#5c5c5c;background-color:#f0f0f0;border-left:4px solid #d6d6d6}html body blockquote>:first-child{margin-top:0}html body blockquote>:last-child{margin-bottom:0}html body hr{height:4px;margin:32px 0;background-color:#d6d6d6;border:0 none}html body table{margin:10px 0 15px 0;border-collapse:collapse;border-spacing:0;display:block;width:100%;overflow:auto;word-break:normal;word-break:keep-all}html body table th{font-weight:700;color:#000}html body table td,html body table th{border:1px solid #d6d6d6;padding:6px 13px}html body dl{padding:0}html body dl dt{padding:0;margin-top:16px;font-size:1em;font-style:italic;font-weight:700}html body dl dd{padding:0 16px;margin-bottom:16px}html body code{font-family:Menlo,Monaco,Consolas,'Courier New',monospace;font-size:.85em;color:#000;background-color:#f0f0f0;border-radius:3px;padding:.2em 0}html body code::after,html body code::before{letter-spacing:-.2em;content:'\00a0'}html body pre>code{padding:0;margin:0;word-break:normal;white-space:pre;background:0 0;border:0}html body .highlight{margin-bottom:16px}html body .highlight pre,html body pre{padding:1em;overflow:auto;line-height:1.45;border:#d6d6d6;border-radius:3px}html body .highlight pre{margin-bottom:0;word-break:normal}html body pre code,html body pre tt{display:inline;max-width:initial;padding:0;margin:0;overflow:initial;line-height:inherit;word-wrap:normal;background-color:transparent;border:0}html body pre code:after,html body pre code:before,html body pre tt:after,html body pre tt:before{content:normal}html body blockquote,html body dl,html body ol,html body p,html body pre,html body ul{margin-top:0;margin-bottom:16px}html body kbd{color:#000;border:1px solid #d6d6d6;border-bottom:2px solid #c7c7c7;padding:2px 4px;background-color:#f0f0f0;border-radius:3px}@media print{html body{background-color:#fff}html body h1,html body h2,html body h3,html body h4,html body h5,html body h6{color:#000;page-break-after:avoid}html body blockquote{color:#5c5c5c}html body pre{page-break-inside:avoid}html body table{display:table}html body img{display:block;max-width:100%;max-height:100%}html body code,html body pre{word-wrap:break-word;white-space:pre}}.markdown-preview{width:100%;height:100%;box-sizing:border-box}.markdown-preview ul{list-style:disc}.markdown-preview ul ul{list-style:circle}.markdown-preview ul ul ul{list-style:square}.markdown-preview ol{list-style:decimal}.markdown-preview ol ol,.markdown-preview ul ol{list-style-type:lower-roman}.markdown-preview ol ol ol,.markdown-preview ol ul ol,.markdown-preview ul ol ol,.markdown-preview ul ul ol{list-style-type:lower-alpha}.markdown-preview .newpage,.markdown-preview .pagebreak{page-break-before:always}.markdown-preview pre.line-numbers{position:relative;padding-left:3.8em;counter-reset:linenumber}.markdown-preview pre.line-numbers>code{position:relative}.markdown-preview pre.line-numbers .line-numbers-rows{position:absolute;pointer-events:none;top:1em;font-size:100%;left:0;width:3em;letter-spacing:-1px;border-right:1px solid #999;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none}.markdown-preview pre.line-numbers .line-numbers-rows>span{pointer-events:none;display:block;counter-increment:linenumber}.markdown-preview pre.line-numbers .line-numbers-rows>span:before{content:counter(linenumber);color:#999;display:block;padding-right:.8em;text-align:right}.markdown-preview .mathjax-exps .MathJax_Display{text-align:center!important}.markdown-preview:not([data-for=preview]) .code-chunk .code-chunk-btn-group{display:none}.markdown-preview:not([data-for=preview]) .code-chunk .status{display:none}.markdown-preview:not([data-for=preview]) .code-chunk .output-div{margin-bottom:16px}.markdown-preview .md-toc{padding:0}.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link{display:inline;padding:.25rem 0}.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link div,.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link p{display:inline}.markdown-preview .md-toc .md-toc-link-wrapper.highlighted .md-toc-link{font-weight:800}.scrollbar-style::-webkit-scrollbar{width:8px}.scrollbar-style::-webkit-scrollbar-track{border-radius:10px;background-color:transparent}.scrollbar-style::-webkit-scrollbar-thumb{border-radius:5px;background-color:rgba(150,150,150,.66);border:4px solid rgba(150,150,150,.66);background-clip:content-box}html body[for=html-export]:not([data-presentation-mode]){position:relative;width:100%;height:100%;top:0;left:0;margin:0;padding:0;overflow:auto}html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{position:relative;top:0;min-height:100vh}@media screen and (min-width:914px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{padding:2em calc(50% - 457px + 2em)}}@media screen and (max-width:914px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{padding:2em}}@media screen and (max-width:450px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{font-size:14px!important;padding:1em}}@media print{html body[for=html-export]:not([data-presentation-mode]) #sidebar-toc-btn{display:none}}html body[for=html-export]:not([data-presentation-mode]) #sidebar-toc-btn{position:fixed;bottom:8px;left:8px;font-size:28px;cursor:pointer;color:inherit;z-index:99;width:32px;text-align:center;opacity:.4}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] #sidebar-toc-btn{opacity:1}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc{position:fixed;top:0;left:0;width:300px;height:100%;padding:32px 0 48px 0;font-size:14px;box-shadow:0 0 4px rgba(150,150,150,.33);box-sizing:border-box;overflow:auto;background-color:inherit}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar{width:8px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar-track{border-radius:10px;background-color:transparent}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar-thumb{border-radius:5px;background-color:rgba(150,150,150,.66);border:4px solid rgba(150,150,150,.66);background-clip:content-box}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc a{text-decoration:none}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc{padding:0 16px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link{display:inline;padding:.25rem 0}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link div,html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link p{display:inline}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper.highlighted .md-toc-link{font-weight:800}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{left:300px;width:calc(100% - 300px);padding:2em calc(50% - 457px - 300px / 2);margin:0;box-sizing:border-box}@media screen and (max-width:1274px){html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{padding:2em}}@media screen and (max-width:450px){html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{width:100%}}html body[for=html-export]:not([data-presentation-mode]):not([html-show-sidebar-toc]) .markdown-preview{left:50%;transform:translateX(-50%)}html body[for=html-export]:not([data-presentation-mode]):not([html-show-sidebar-toc]) .md-sidebar-toc{display:none}
+/* Please visit the URL below for more information: */
+/*   https://shd101wyy.github.io/markdown-preview-enhanced/#/customize-css */
+
+      </style>
+      <!-- The content below will be included at the end of the <head> element. --><script type="text/javascript">
+  document.addEventListener("DOMContentLoaded", function () {
+    // your code here
+  });
+</script></head><body for="html-export">
+    
+    
+      <div class="crossnote markdown-preview  ">
+      
+<h1 id="enhanced-mainframe-analyzer---complete-documentation">Enhanced Mainframe Analyzer - Complete Documentation </h1>
+<h2 id="overview">Overview </h2>
+<p>The Enhanced Mainframe Analyzer is a comprehensive tool designed to analyze mainframe systems, track file lifecycles, identify field usage patterns, and map program flows. It uses intelligent token management and progressive analysis to handle large mainframe codebases efficiently.</p>
+<h2 id="table-of-contents">Table of Contents </h2>
+<ol>
+<li><a href="#core-features">Core Features</a></li>
+<li><a href="#file-lifecycle-analysis">File Lifecycle Analysis</a></li>
+<li><a href="#field-usage-tracking">Field Usage Tracking</a></li>
+<li><a href="#program-flow-analysis">Program Flow Analysis</a></li>
+<li><a href="#unused-code-detection">Unused Code Detection</a></li>
+<li><a href="#real-world-example">Real-World Example: Restricted Asset File (TMS79RAU)</a></li>
+<li><a href="#technical-architecture">Technical Architecture</a></li>
+<li><a href="#usage-examples">Usage Examples</a></li>
+</ol>
+<hr>
+<h2 id="core-features">Core Features </h2>
+<h3 id="-smart-token-management">🧠 Smart Token Management </h3>
+<ul>
+<li><strong>Real-time token usage tracking</strong> - Monitors how much processing capacity is being used</li>
+<li><strong>Intelligent content optimization</strong> - Focuses on the most important code sections first</li>
+<li><strong>Overlapping context windows</strong> - Maintains understanding across different file sections</li>
+<li><strong>Automatic chunking strategies</strong> - Breaks large files into manageable pieces intelligently</li>
+</ul>
+<h3 id="-advanced-validation">✅ Advanced Validation </h3>
+<ul>
+<li><strong>Response quality assessment</strong> - Scores analysis completeness from 1 to 10</li>
+<li><strong>Completeness scoring</strong> - Tracks what percentage of the analysis is complete</li>
+<li><strong>Structured format validation</strong> - Ensures results are presented consistently</li>
+<li><strong>Automatic retry mechanisms</strong> - Tries again if something fails</li>
+</ul>
+<h3 id="-progressive-analysis">🔄 Progressive Analysis </h3>
+<ul>
+<li><strong>Multi-stage processing pipeline</strong> - Breaks analysis into 4 manageable stages</li>
+<li><strong>Checkpoint-based recovery</strong> - Can resume if interrupted</li>
+<li><strong>Context preservation</strong> - Maintains relationships between different files</li>
+<li><strong>Incremental result assembly</strong> - Builds comprehensive analysis step by step</li>
+</ul>
+<h3 id="-interactive-chat">💬 Interactive Chat </h3>
+<ul>
+<li><strong>Context-aware responses</strong> - Answers based on your actual analysis results</li>
+<li><strong>Deep component insights</strong> - Provides detailed explanations about your code</li>
+<li><strong>Suggested questions</strong> - Guides you to ask relevant questions</li>
+<li><strong>Real-time analysis queries</strong> - Lets you explore your results dynamically</li>
+</ul>
+<hr>
+<h2 id="file-lifecycle-analysis">File Lifecycle Analysis </h2>
+<h3 id="purpose">Purpose </h3>
+<p>Track how files are created, updated, referenced, and used throughout the mainframe system lifecycle.</p>
+<h3 id="key-capabilities">Key Capabilities </h3>
+<h4 id="1-file-creation-tracking">1. <strong>File Creation Tracking</strong> </h4>
+<p>The system examines COBOL copybooks, JCL jobs, and COBOL programs to understand:</p>
+<ul>
+<li>How files are originally defined and created</li>
+<li>What VSAM parameters and access methods are used</li>
+<li>Complete timeline of when files were established</li>
+<li>What other files they depend on</li>
+</ul>
+<h4 id="2-update-pattern-analysis">2. <strong>Update Pattern Analysis</strong> </h4>
+<p>The system tracks:</p>
+<ul>
+<li>Which programs modify file contents and how often</li>
+<li>What triggers updates to happen</li>
+<li>What conditions must be met before updates occur</li>
+<li>What data validation rules are applied during updates</li>
+</ul>
+<h4 id="3-reference-mapping">3. <strong>Reference Mapping</strong> </h4>
+<p>The system identifies:</p>
+<ul>
+<li>Which programs read from files and how often</li>
+<li>What lookup operations happen against the files</li>
+<li>How files reference each other</li>
+<li>The chain of dependencies between different files</li>
+</ul>
+<h4 id="4-usage-classification">4. <strong>Usage Classification</strong> </h4>
+<p>Files are categorized as:</p>
+<ul>
+<li><strong>INPUT FILES</strong>: Where source data enters the system</li>
+<li><strong>PROCESSING FILES</strong>: Temporary working storage during processing</li>
+<li><strong>OUTPUT FILES</strong>: Where final results are stored</li>
+<li><strong>REFERENCE FILES</strong>: Used for lookups and validation</li>
+<li><strong>ARCHIVE FILES</strong>: Historical data storage</li>
+</ul>
+<h3 id="example-analysis-output">Example Analysis Output </h3>
+<p><strong>File Analysis Results for TMS79RAU (Restricted Asset File)</strong></p>
+<ul>
+<li>File Type: VSAM Key-Sequenced Dataset</li>
+<li>Primary Key: ASSET-ID (10 characters)</li>
+<li>Record Length: 150 characters</li>
+<li>Created by: RAU001 Asset Creation Program</li>
+<li>Updated by: RAU002 Asset Update Program and RAU005 Status Change Program</li>
+<li>Referenced by: ORD001, ORD002, ORD003 Order Processing Programs</li>
+<li>Current Status: Active in Production</li>
+<li>Business Importance: High - Critical for order processing workflow</li>
+</ul>
+<hr>
+<h2 id="field-usage-tracking">Field Usage Tracking </h2>
+<h3 id="comprehensive-field-analysis">Comprehensive Field Analysis </h3>
+<p>The analyzer tracks individual fields through their complete lifecycle from definition to final use.</p>
+<h4 id="1-field-definition-analysis">1. <strong>Field Definition Analysis</strong> </h4>
+<p>The system extracts from copybooks:</p>
+<ul>
+<li>Field names and their hierarchical level numbers in COBOL</li>
+<li>Picture clauses that define data types and lengths</li>
+<li>OCCURS clauses that create repeating groups or arrays</li>
+<li>REDEFINES relationships where fields share the same storage</li>
+<li>COMP usage clauses for storage optimization</li>
+</ul>
+<h4 id="2-usage-pattern-classification">2. <strong>Usage Pattern Classification</strong> </h4>
+<p>Each field gets tagged with how it's used:</p>
+<ul>
+<li>🟢 <strong>DEFINED</strong> - Field is declared in a copybook</li>
+<li>🔵 <strong>INPUT</strong> - Field receives data from external sources</li>
+<li>🟡 <strong>CALCULATED</strong> - Field value is computed from other fields</li>
+<li>🟠 <strong>ASSIGNED</strong> - Field gets value via MOVE operations</li>
+<li>🟣 <strong>VALIDATED</strong> - Field is checked against business rules</li>
+<li>🔴 <strong>UNUSED</strong> - Field is defined but never referenced anywhere</li>
+</ul>
+<h4 id="3-cross-program-tracking">3. <strong>Cross-Program Tracking</strong> </h4>
+<p>The system tracks field usage across:</p>
+<ul>
+<li>COBOL programs that read the field for processing</li>
+<li>Programs that modify or update the field</li>
+<li>Validation routines that check the field against business rules</li>
+<li>Reports that display the field to users</li>
+<li>Interfaces that transmit the field to other systems</li>
+</ul>
+<h3 id="field-lifecycle-states">Field Lifecycle States </h3>
+<p>Fields progress through these stages:<br>
+<strong>Defined</strong> → <strong>Initialized</strong> → <strong>Validated</strong> → <strong>Processed</strong> → <strong>Updated</strong> → <strong>Referenced</strong> → <strong>Archived</strong></p>
+<p>Some fields may become <strong>Unused/Stale</strong> and become <strong>Cleanup Candidates</strong></p>
+<h3 id="real-example-tms79rau-fields">Real Example: TMS79RAU Fields </h3>
+<p><strong>Field Analysis: ASSET-ID (Primary Key)</strong></p>
+<ul>
+<li>Definition: Level 01 field, 10 characters long, alphanumeric</li>
+<li>How it's used: INPUT, VALIDATED, REFERENCED across multiple programs</li>
+<li>Programs that use it: RAU001 for creation, RAU002 for updates, ORD001 through ORD006 for lookups</li>
+<li>Lifecycle: Data Input → Validation → Processing → Reference by other programs</li>
+<li>Business Importance: High - This is the primary identifier for all assets</li>
+<li>Usage Statistics: Referenced 47 times across 6 different programs</li>
+</ul>
+<p><strong>Field Analysis: RESTRICTED-STATUS</strong></p>
+<ul>
+<li>Definition: Level 01 field, 1 character, can only be 'Y' for Yes or 'N' for No</li>
+<li>How it's used: INPUT, CALCULATED, VALIDATED by business logic</li>
+<li>Programs that use it: RAU002 for updates, ORD001-ORD006 to check before allowing orders</li>
+<li>Lifecycle: Data Input → Business Logic → Validation → Decision Point for order processing</li>
+<li>Business Importance: Critical - Controls whether orders can be placed for this asset</li>
+<li>Usage Statistics: Referenced 23 times across 8 different programs</li>
+</ul>
+<p><strong>Field Analysis: LAST-UPDATE-DATE</strong></p>
+<ul>
+<li>Definition: Level 01 field, 8 numeric digits for date (YYYYMMDD format)</li>
+<li>How it's used: CALCULATED (system-generated), ASSIGNED automatically</li>
+<li>Programs that use it: RAU002 generates it automatically, RPT001 uses it for reporting</li>
+<li>Lifecycle: System Generated → Stored in record → Used in Reports</li>
+<li>Business Importance: Medium - Provides audit trail of when records were changed</li>
+<li>Usage Statistics: Referenced 5 times across 3 programs</li>
+</ul>
+<p><strong>Field Analysis: LEGACY-CODE (Example of unused field)</strong></p>
+<ul>
+<li>Definition: Level 01 field, 5 characters, alphanumeric</li>
+<li>How it's used: UNUSED - defined but never referenced anywhere</li>
+<li>Programs that use it: None - appears to be left over from older system version</li>
+<li>Lifecycle: Defined → Never Used → Candidate for Cleanup</li>
+<li>Business Importance: Low - Historical artifact that can likely be removed</li>
+<li>Usage Statistics: 0 references found in any program</li>
+</ul>
+<hr>
+<h2 id="program-flow-analysis">Program Flow Analysis </h2>
+<h3 id="complete-program-execution-flow">Complete Program Execution Flow </h3>
+<h4 id="1-entry-point-analysis">1. <strong>Entry Point Analysis</strong> </h4>
+<p>The system identifies how programs start running:</p>
+<ul>
+<li>JCL job step execution from batch jobs</li>
+<li>CICS transaction calls from online screens</li>
+<li>Program-to-program calls from other COBOL programs</li>
+<li>Online screen transactions initiated by users</li>
+</ul>
+<h4 id="2-processing-flow-mapping">2. <strong>Processing Flow Mapping</strong> </h4>
+<p>The system maps the complete execution path:</p>
+<ul>
+<li>Initialization routines that set up the program</li>
+<li>Main processing loops that do the core work</li>
+<li>Decision points and business logic that control flow</li>
+<li>Error handling procedures for when things go wrong</li>
+<li>Cleanup and termination routines that finish the program</li>
+</ul>
+<h4 id="3-call-chain-analysis">3. <strong>Call Chain Analysis</strong> </h4>
+<p>The system tracks program relationships:</p>
+<ul>
+<li><strong>Calling programs</strong> - What programs invoke this program</li>
+<li><strong>Called programs</strong> - What programs this program invokes</li>
+<li>Parameter passing between programs and what data is shared</li>
+<li>Return code handling and how success/failure is communicated</li>
+<li>Conditional execution paths based on different scenarios</li>
+</ul>
+<h3 id="program-flow-example-asset-management-system">Program Flow Example: Asset Management System </h3>
+<p><strong>Main Program Analysis: RAU001 (Asset Creation)</strong></p>
+<p><strong>How the program starts:</strong></p>
+<ul>
+<li>Started by JCL Job called ASSETCRT for batch processing</li>
+<li>Started by CICS Transaction TMS1 for online processing</li>
+<li>Receives parameters: ASSET-ID, CUSIP, SEDOL identifiers</li>
+</ul>
+<p><strong>Processing Flow Steps:</strong></p>
+<ol>
+<li>Initialize working storage areas and variables</li>
+<li>Validate that input parameters are in correct format</li>
+<li>Check TMS79RAU file to make sure ASSET-ID doesn't already exist</li>
+<li>Validate that CUSIP identifier follows proper format rules</li>
+<li>Set RESTRICTED-STATUS field based on business rules</li>
+<li>Write new record to TMS79RAU file</li>
+<li>Log transaction details in audit file for compliance</li>
+<li>Return success or error code to calling program</li>
+</ol>
+<p><strong>Programs this program calls:</strong></p>
+<ul>
+<li>VAL001: Validates CUSIP identifier format</li>
+<li>VAL002: Validates SEDOL identifier format</li>
+<li>AUD001: Handles audit logging</li>
+<li>ERR001: Handles error processing and messages</li>
+</ul>
+<p><strong>File Dependencies:</strong></p>
+<ul>
+<li>Reads from: TMS79RAU (to check for duplicates)</li>
+<li>Writes to: TMS79RAU (creates new record)</li>
+<li>References: CUSIP-MASTER (for validation)</li>
+<li>Updates: AUDIT-LOG (for transaction tracking)</li>
+</ul>
+<hr>
+<h2 id="unused-code-detection">Unused Code Detection </h2>
+<h3 id="comprehensive-cleanup-analysis">Comprehensive Cleanup Analysis </h3>
+<h4 id="1-unused-field-detection">1. <strong>Unused Field Detection</strong> </h4>
+<p>The system identifies fields that are:</p>
+<ul>
+<li>Defined in copybooks but never referenced in any program</li>
+<li>Referenced only in obsolete programs that are no longer used</li>
+<li>Part of legacy data structures that are no longer needed</li>
+<li>Duplicated across multiple copybooks unnecessarily</li>
+</ul>
+<h4 id="2-dead-code-identification">2. <strong>Dead Code Identification</strong> </h4>
+<p>The system finds program segments that are:</p>
+<ul>
+<li>Unreachable due to logic changes over time</li>
+<li>Part of commented-out functionality that was disabled</li>
+<li>Legacy error handling that's no longer relevant</li>
+<li>Duplicate routines that exist in multiple programs</li>
+</ul>
+<h4 id="3-orphaned-file-detection">3. <strong>Orphaned File Detection</strong> </h4>
+<p>The system locates files that are:</p>
+<ul>
+<li>Defined in the system but never accessed by any program</li>
+<li>Only written to but never read (data goes nowhere)</li>
+<li>Part of discontinued business processes</li>
+<li>Backup or archive files that are no longer maintained</li>
+</ul>
+<h3 id="cleanup-recommendations">Cleanup Recommendations </h3>
+<p><strong>High Priority Cleanup (Safe to Remove)</strong></p>
+<ul>
+<li>Fields that are defined but have zero references anywhere</li>
+<li>Programs that are not called by any active job or transaction</li>
+<li>Files that show no read or write activity for 12+ months</li>
+</ul>
+<p><strong>Medium Priority Review (Needs Investigation)</strong></p>
+<ul>
+<li>Fields that have only 1-2 references (may be obsolete)</li>
+<li>Programs that are called only by batch jobs that rarely run</li>
+<li>Files that are accessed only by reporting programs</li>
+</ul>
+<p><strong>Low Priority Monitoring (Keep but Monitor)</strong></p>
+<ul>
+<li>Fields that are used only in error handling routines</li>
+<li>Programs that are called only in exceptional circumstances</li>
+<li>Files that are used for regulatory compliance or audit purposes</li>
+</ul>
+<hr>
+<h2 id="real-world-example-restricted-asset-file-tms79rau">Real-World Example: Restricted Asset File (TMS79RAU) </h2>
+<h3 id="file-structure-and-purpose">File Structure and Purpose </h3>
+<p>The TMS79RAU file is a critical component in the asset management system. It controls which financial assets are restricted from trading due to compliance or risk management rules.</p>
+<h4 id="file-definition-structure">File Definition Structure </h4>
+<p>The file contains these fields:</p>
+<ul>
+<li><strong>ASSET-ID</strong>: 10-character primary key that uniquely identifies each asset</li>
+<li><strong>CUSIP</strong>: 9-character CUSIP identifier (Committee on Uniform Securities Identification Procedures)</li>
+<li><strong>SEDOL</strong>: 7-character SEDOL identifier (Stock Exchange Daily Official List)</li>
+<li><strong>ISIN</strong>: 12-character ISIN code (International Securities Identification Number)</li>
+<li><strong>RESTRICTED-STATUS</strong>: 1-character flag ('Y' for restricted, 'N' for not restricted)</li>
+<li><strong>RESTRICTION-TYPE</strong>: 3-character code indicating type of restriction</li>
+<li><strong>EFFECTIVE-DATE</strong>: 8-digit date when restriction becomes active (YYYYMMDD)</li>
+<li><strong>EXPIRY-DATE</strong>: 8-digit date when restriction expires (YYYYMMDD)</li>
+<li><strong>LAST-UPDATE-DATE</strong>: 8-digit date when record was last changed (system-maintained)</li>
+<li><strong>LAST-UPDATE-USER</strong>: 8-character user ID of person who made the last change</li>
+</ul>
+<h3 id="complete-lifecycle-flow">Complete Lifecycle Flow </h3>
+<h4 id="1-creation-phase">1. <strong>Creation Phase</strong> </h4>
+<p><strong>Screen Used: TMS01 (Asset Restriction Entry)</strong></p>
+<ul>
+<li><strong>Program: RAU001</strong></li>
+<li><strong>Function:</strong> Create new restricted asset records in the system</li>
+<li><strong>Validation:</strong> Checks CUSIP/SEDOL format, ensures no duplicates exist</li>
+<li><strong>Business Rules:</strong> Effective date must be today or later, expiry date must be after effective date</li>
+</ul>
+<p><strong>Step-by-Step Process:</strong></p>
+<ol>
+<li>User enters asset identifiers on the TMS01 screen</li>
+<li>RAU001 program validates that input formats are correct</li>
+<li>Program checks TMS79RAU file to see if restriction already exists</li>
+<li>Program validates identifiers against master asset file</li>
+<li>Program creates new restriction record with all details</li>
+<li>System updates audit trail with transaction details</li>
+</ol>
+<h4 id="2-update-phase">2. <strong>Update Phase</strong> </h4>
+<p><strong>Screen Used: TMS02 (Asset Restriction Update)</strong></p>
+<ul>
+<li><strong>Program: RAU002</strong></li>
+<li><strong>Function:</strong> Modify existing restriction details</li>
+<li><strong>Validation:</strong> Confirms record exists, checks user has authorization</li>
+<li><strong>Business Rules:</strong> Cannot modify restrictions that have already expired</li>
+</ul>
+<p><strong>Step-by-Step Process:</strong></p>
+<ol>
+<li>User searches by ASSET-ID or CUSIP on TMS02 screen</li>
+<li>RAU002 program reads current record from TMS79RAU file</li>
+<li>Screen displays current values for user to modify</li>
+<li>Program validates changes against established business rules</li>
+<li>Program updates record with new values</li>
+<li>System automatically sets LAST-UPDATE-DATE and LAST-UPDATE-USER fields</li>
+</ol>
+<h4 id="3-reference-phase-order-processing">3. <strong>Reference Phase (Order Processing)</strong> </h4>
+<p><strong>Order Screen Integration:</strong></p>
+<ul>
+<li><strong>ORD001: Order Entry</strong> - checks restriction status before accepting any order</li>
+<li><strong>ORD002: Order Modification</strong> - re-validates restriction status when orders change</li>
+<li><strong>ORD003: Order Execution</strong> - performs final restriction check before execution</li>
+<li><strong>ORD004: Order Reporting</strong> - includes restriction status in all reports</li>
+<li><strong>ORD005: Order History</strong> - tracks any restriction violations that occurred</li>
+<li><strong>ORD006: Order Analytics</strong> - analyzes impact of restrictions on trading volume</li>
+</ul>
+<p><strong>Reference Programs:</strong></p>
+<ul>
+<li><strong>REF001:</strong> Provides real-time restriction lookup for online systems</li>
+<li><strong>REF002:</strong> Handles batch restriction validation for large order files</li>
+<li><strong>REF003:</strong> Generates restriction reports for compliance team</li>
+</ul>
+<h3 id="field-usage-analysis-results">Field Usage Analysis Results </h3>
+<p><strong>Analysis Summary for TMS79RAU File:</strong></p>
+<p><strong>Highly Used Fields (10 or more references):</strong></p>
+<ul>
+<li><strong>ASSET-ID:</strong> Used 47 times across 8 different programs - primary identifier</li>
+<li><strong>RESTRICTED-STATUS:</strong> Used 23 times across 6 programs - core business logic field</li>
+<li><strong>CUSIP:</strong> Used 19 times across 5 programs - important secondary identifier</li>
+</ul>
+<p><strong>Moderately Used Fields (5-10 references):</strong></p>
+<ul>
+<li><strong>EFFECTIVE-DATE:</strong> Used 8 times across 4 programs - important for date logic</li>
+<li><strong>EXPIRY-DATE:</strong> Used 7 times across 3 programs - controls when restrictions end</li>
+<li><strong>SEDOL:</strong> Used 6 times across 3 programs - alternative identifier</li>
+</ul>
+<p><strong>Lightly Used Fields (1-4 references):</strong></p>
+<ul>
+<li><strong>RESTRICTION-TYPE:</strong> Used 4 times across 2 programs - classification field</li>
+<li><strong>LAST-UPDATE-DATE:</strong> Used 3 times across 2 programs - audit information</li>
+<li><strong>LAST-UPDATE-USER:</strong> Used 2 times across 1 program - audit information</li>
+</ul>
+<p><strong>Unused Fields (0 references - cleanup candidates):</strong></p>
+<ul>
+<li><strong>ISIN:</strong> Defined in the file structure but never referenced in any program</li>
+</ul>
+<h3 id="program-dependencies">Program Dependencies </h3>
+<p><strong>Programs Using TMS79RAU File:</strong></p>
+<p><strong>Primary Maintenance Programs:</strong></p>
+<ul>
+<li><strong>RAU001:</strong> Creates new restrictions (writes new records to file)</li>
+<li><strong>RAU002:</strong> Updates existing restrictions (reads and updates records)</li>
+<li><strong>RAU003:</strong> Deletes expired restrictions (reads and deletes records)</li>
+</ul>
+<p><strong>Reference Programs (Read-Only Access):</strong></p>
+<ul>
+<li><strong>ORD001-ORD006:</strong> Order processing programs that check restrictions</li>
+<li><strong>REF001-REF003:</strong> Reporting and lookup programs</li>
+</ul>
+<p><strong>Batch Programs:</strong></p>
+<ul>
+<li><strong>BAT001:</strong> Daily restriction report for compliance team</li>
+<li><strong>BAT002:</strong> Automated cleanup of expired restrictions</li>
+<li><strong>BAT003:</strong> Monthly restriction audit report for management</li>
+</ul>
+<p><strong>Integration Points:</strong></p>
+<ul>
+<li><strong>Feeds data to:</strong> Risk management system for portfolio analysis</li>
+<li><strong>Receives data from:</strong> Compliance management system for new restrictions</li>
+<li><strong>Synchronizes with:</strong> Master asset database for identifier validation</li>
+</ul>
+<hr>
+<h2 id="technical-architecture">Technical Architecture </h2>
+<h3 id="token-management-system">Token Management System </h3>
+<p><strong>Intelligent Token Optimization Process:</strong><br>
+The system estimates that roughly 4 characters equal 1 token on average. It uses only 80% of available tokens as a safety margin. The system prioritizes critical code sections like COPY statements, CALL statements, and EXEC statements. It implements overlapping context windows so that information isn't lost when processing large files in chunks.</p>
+<p><strong>Chunking Strategy:</strong><br>
+Primary files that contain the searched component get highest priority. Secondary files are grouped by how relevant they are. The system maintains a 20-line overlap between chunks to preserve context. Large files are split at logical boundaries like procedure divisions or copybook sections rather than arbitrary points.</p>
+<h3 id="progressive-analysis-pipeline">Progressive Analysis Pipeline </h3>
+<p><strong>Stage 1: Component Identification (20% of total time)</strong></p>
+<ul>
+<li>Locates the target component across all uploaded files</li>
+<li>Determines what type of component it is (COPYBOOK, PROGRAM, FIELD, or JCL)</li>
+<li>Maps initial relationships and dependencies with other components</li>
+<li>Assigns confidence score based on how many matches are found</li>
+</ul>
+<p><strong>Stage 2: Multi-Chunk Analysis (40% of total time)</strong></p>
+<ul>
+<li>Processes files in optimized chunks to stay within token limits</li>
+<li>Maintains context across chunk boundaries using overlap techniques</li>
+<li>Builds comprehensive usage patterns by analyzing all references</li>
+<li>Tracks relationships between programs and how they interact</li>
+</ul>
+<p><strong>Stage 3: Detailed Enhancement Processing (30% of total time)</strong></p>
+<ul>
+<li>Performs specialized analysis based on the component type identified</li>
+<li>Takes deep dive into business logic and data flow patterns</li>
+<li>Identifies opportunities for optimization and improvement</li>
+<li>Assesses potential for modernization efforts</li>
+</ul>
+<p><strong>Stage 4: Validation &amp; Quality Assessment (10% of total time)</strong></p>
+<ul>
+<li>Validates that analysis is complete and makes sense</li>
+<li>Scores quality metrics on a 1-10 scale based on multiple factors</li>
+<li>Generates actionable recommendations for next steps</li>
+<li>Produces final consolidated report with all findings</li>
+</ul>
+<h3 id="quality-metrics">Quality Metrics </h3>
+<p><strong>Analysis Quality Score (1-10 scale):</strong></p>
+<ul>
+<li>Base score comes from component confidence level (how sure we are we found it)</li>
+<li>Depth bonus awarded for comprehensive analysis with many details</li>
+<li>Structure bonus given for well-formatted, organized output</li>
+<li>Business context bonus added for practical insights that help decision-making</li>
+</ul>
+<p><strong>Completeness Score (percentage):</strong></p>
+<ul>
+<li>Component identified and located in files</li>
+<li>Usage patterns mapped across programs</li>
+<li>Dependencies documented and understood</li>
+<li>Business impact assessed and explained</li>
+<li>Recommendations provided for next steps</li>
+</ul>
+<p><strong>Confidence Score (1-10 scale):</strong></p>
+<ul>
+<li>Based on number of matches found across files</li>
+<li>File type relevance to the search (copybooks score higher for field searches)</li>
+<li>Quality of context around matches (clear usage vs. just mentions)</li>
+<li>Cross-validation across multiple files (consistency check)</li>
+</ul>
+<hr>
+<h2 id="usage-examples">Usage Examples </h2>
+<h3 id="example-1-analyzing-a-copybook">Example 1: Analyzing a Copybook </h3>
+<p><strong>What you enter:</strong> Component name "CUSTOMER-RECORD"<br>
+<strong>Files uploaded:</strong> CUSTCOPY.cpy, CUST001.cbl, CUST002.cbl, CUSTRPT.cbl</p>
+<p><strong>Analysis Results:</strong></p>
+<ul>
+<li><strong>Component Type:</strong> COPYBOOK (data structure definition)</li>
+<li><strong>Found In:</strong> CUSTCOPY.cpy at line 15, CUST001.cbl at line 23, CUST002.cbl at line 31</li>
+<li><strong>Field Count:</strong> 23 individual fields identified within the copybook</li>
+<li><strong>Usage Programs:</strong> CUST001 handles create/read/update/delete operations, CUST002 performs validation, CUSTRPT generates reports</li>
+<li><strong>Unused Fields:</strong> 3 legacy fields identified that can be cleaned up</li>
+<li><strong>Quality Score:</strong> 9 out of 10 (high confidence, comprehensive analysis)</li>
+<li><strong>Business Impact:</strong> High importance because this is customer master data</li>
+</ul>
+<h3 id="example-2-tracking-field-lifecycle">Example 2: Tracking Field Lifecycle </h3>
+<p><strong>What you enter:</strong> Field name "CUSTOMER-STATUS"<br>
+<strong>Analysis Results:</strong></p>
+<p><strong>Field Definition:</strong> Level 05 field, 2 characters, can contain 'AC' (Active), 'IN' (Inactive), 'SU' (Suspended), or 'CL' (Closed)</p>
+<p><strong>Lifecycle Stages the field goes through:</strong></p>
+<ol>
+<li><strong>Creation:</strong> User enters value via CICS screen CUST01</li>
+<li><strong>Validation:</strong> Business rules program CUSTVAL checks if value is valid</li>
+<li><strong>Processing:</strong> Status change program CUSTUPD modifies value based on business events</li>
+<li><strong>Reference:</strong> Order processing programs ORD001-ORD005 check status before allowing transactions</li>
+<li><strong>Reporting:</strong> Status summary program CUSTRPT includes field in management reports</li>
+<li><strong>Archive:</strong> Historical tracking program CUSTARCH preserves old values for audit</li>
+</ol>
+<p><strong>Usage Statistics:</strong></p>
+<ul>
+<li><strong>Total References:</strong> 34 times across 8 different programs</li>
+<li><strong>Input Operations:</strong> 3 programs allow users to enter or change this field</li>
+<li><strong>Update Operations:</strong> 2 programs can modify the field automatically</li>
+<li><strong>Reference Operations:</strong> 6 programs read the field to make business decisions</li>
+<li><strong>Validation Rules:</strong> 5 different business rules check this field</li>
+<li><strong>Business Impact:</strong> Critical - controls all customer interactions and transactions</li>
+</ul>
+<h3 id="example-3-program-flow-analysis">Example 3: Program Flow Analysis </h3>
+<p><strong>What you enter:</strong> Program name "CUST001"<br>
+<strong>Flow Analysis Results:</strong></p>
+<p><strong>How the program can be started:</strong></p>
+<ul>
+<li><strong>JCL Job:</strong> CUSTMNT job for batch processing of customer changes</li>
+<li><strong>CICS Transaction:</strong> CST1 transaction for online customer maintenance</li>
+</ul>
+<p><strong>Step-by-step processing flow:</strong></p>
+<ol>
+<li>Initialize working storage areas and set up variables</li>
+<li>Read customer input parameters from calling program or screen</li>
+<li>Validate customer data by calling CUSTVAL validation program</li>
+<li>Check for existing customer by reading CUSTOMER-MASTER file</li>
+<li>Apply business rules by calling CUSTRULE business logic program</li>
+<li>Update customer record by writing to CUSTOMER-MASTER file</li>
+<li>Log transaction by calling CUSTAUDT audit program</li>
+<li>Return completion status to calling program or screen</li>
+</ol>
+<p><strong>Program Dependencies:</strong></p>
+<ul>
+<li><strong>Reads from:</strong> CUSTOMER-MASTER file, PRODUCT-MASTER file for validation</li>
+<li><strong>Writes to:</strong> CUSTOMER-MASTER file with updates, AUDIT-LOG file for tracking</li>
+<li><strong>Calls:</strong> CUSTVAL for validation, CUSTRULE for business logic, CUSTAUDT for audit</li>
+<li><strong>Called by:</strong> CUSTBATCH batch program, CICS transaction CST1 for online</li>
+</ul>
+<p><strong>Performance Information:</strong></p>
+<ul>
+<li><strong>Average execution time:</strong> 0.23 seconds per transaction</li>
+<li><strong>Database operations:</strong> 3 read operations, 1 write operation per execution</li>
+<li><strong>Error rate:</strong> 0.02% - highly reliable program with good error handling</li>
+</ul>
+<hr>
+<h2 id="benefits-and-value-proposition">Benefits and Value Proposition </h2>
+<h3 id="for-system-analysis">For System Analysis </h3>
+<ul>
+<li><strong>Complete Visibility:</strong> See the entire component lifecycle across all programs in your system</li>
+<li><strong>Impact Assessment:</strong> Understand what will be affected before making any changes</li>
+<li><strong>Dependency Mapping:</strong> Visualize how different components relate to each other</li>
+<li><strong>Quality Insights:</strong> Identify areas that need attention or cleanup</li>
+</ul>
+<h3 id="for-modernization-projects">For Modernization Projects </h3>
+<ul>
+<li><strong>Legacy Assessment:</strong> Identify unused code that can be safely removed</li>
+<li><strong>Complexity Analysis:</strong> Understand how interdependent your systems are</li>
+<li><strong>Migration Planning:</strong> Map out which components should be modernized first</li>
+<li><strong>Risk Mitigation:</strong> Avoid breaking critical business processes during changes</li>
+</ul>
+<h3 id="for-maintenance-teams">For Maintenance Teams </h3>
+<ul>
+<li><strong>Documentation Generation:</strong> Create comprehensive system documentation automatically</li>
+<li><strong>Change Impact Analysis:</strong> Assess how modifications will ripple through the system</li>
+<li><strong>Code Quality Improvement:</strong> Identify cleanup opportunities and technical debt</li>
+<li><strong>Knowledge Transfer:</strong> Help new team members understand how legacy systems work</li>
+</ul>
+<hr>
+<h2 id="complete-system-flow-diagrams">Complete System Flow Diagrams </h2>
+<h3 id="overall-system-architecture-flow">Overall System Architecture Flow </h3>
+<div class="mermaid">graph TD
+    A[User Uploads Files] --&gt; B[File Processing &amp; Validation]
+    B --&gt; C[Component Selection]
+    C --&gt; D[Start Analysis Pipeline]
+    D --&gt; E[Stage 1: Component Identification]
+    E --&gt; F[LLM API Call #1&lt;br/&gt;~1200 tokens]
+    F --&gt; G[Stage 2: Multi-Chunk Analysis]
+    G --&gt; H[LLM API Calls #2-N&lt;br/&gt;~1600 tokens each]
+    H --&gt; I[Stage 3: Specialized Analysis]
+    I --&gt; J[LLM API Call #N+1&lt;br/&gt;~2400 tokens]
+    J --&gt; K[Stage 4: Validation &amp; Assembly]
+    K --&gt; L[Generate Results Display]
+    L --&gt; M[Enable Interactive Chat]
+    M --&gt; N[Chat LLM Calls&lt;br/&gt;On-demand]
+    
+    style F fill:#9C27B0,color:#fff
+    style H fill:#9C27B0,color:#fff
+    style J fill:#9C27B0,color:#fff
+    style N fill:#9C27B0,color:#fff
+</div><h3 id="detailed-analysis-pipeline-flow">Detailed Analysis Pipeline Flow </h3>
+<div class="mermaid">graph TD
+    A[analyzeComponent clicked] --&gt; B{Form Valid?}
+    B --&gt;|No| C[Show Error Message]
+    B --&gt;|Yes| D[Show Loading Screen]
+    D --&gt; E[runProgressiveAnalysis]
+    E --&gt; F[Stage 1: Component ID&lt;br/&gt;20% Progress]
+    F --&gt; G[filterRelevantFiles]
+    G --&gt; H[optimizeContentForTokens]
+    H --&gt; I[LLM Call: identifyComponentEnhanced]
+    I --&gt; J[parseEnhancedComponentInfo]
+    J --&gt; K{Component Found?}
+    K --&gt;|No| L[Throw Error: Not Found]
+    K --&gt;|Yes| M[Stage 2: Multi-Chunk&lt;br/&gt;40% Progress]
+    M --&gt; N[createOverlappingChunks]
+    N --&gt; O[processAnalysisChunks Loop]
+    O --&gt; P[LLM Call: Chunk Analysis]
+    P --&gt; Q{More Chunks?}
+    Q --&gt;|Yes| O
+    Q --&gt;|No| R[mergeAnalysisResults]
+    R --&gt; S[Stage 3: Detailed Analysis&lt;br/&gt;70% Progress]
+    S --&gt; T{Component Type?}
+    T --&gt;|COPYBOOK| U[performCopybookLifecycleAnalysis]
+    T --&gt;|PROGRAM| V[performProgramFlowAnalysis]
+    T --&gt;|FIELD| W[performFieldLifecycleAnalysis]
+    T --&gt;|JCL| X[performJCLFlowAnalysis]
+    U --&gt; Y[LLM Call: Specialized Analysis]
+    V --&gt; Y
+    W --&gt; Y
+    X --&gt; Y
+    Y --&gt; Z[Stage 4: Validation&lt;br/&gt;100% Progress]
+    Z --&gt; AA[calculateQualityScore]
+    AA --&gt; BB[assessCompleteness]
+    BB --&gt; CC[generateRecommendations]
+    CC --&gt; DD[displayComponentAnalysis]
+    DD --&gt; EE[enableChat]
+    EE --&gt; FF[Analysis Complete]
+    
+    style I fill:#9C27B0,color:#fff
+    style P fill:#9C27B0,color:#fff
+    style Y fill:#9C27B0,color:#fff
+</div><h2 id="feature-specific-flow-diagrams">Feature-Specific Flow Diagrams </h2>
+<h3 id="1-smart-token-management-flow">1. Smart Token Management Flow </h3>
+<div class="mermaid">graph TD
+    A[Content Input] --&gt; B[estimateTokenCount&lt;br/&gt;text.length / 4]
+    B --&gt; C[updateTokenDisplay&lt;br/&gt;Show usage %]
+    C --&gt; D{Token Usage &gt; 60%?}
+    D --&gt;|No| E[Safe - Green Display]
+    D --&gt;|Yes| F{Token Usage &gt; 85%?}
+    F --&gt;|No| G[Warning - Yellow Display]
+    F --&gt;|Yes| H[Danger - Red Display]
+    H --&gt; I[optimizeContentForTokens]
+    I --&gt; J[intelligentTruncate]
+    J --&gt; K[Prioritize Critical Sections&lt;br/&gt;COPY/CALL/EXEC statements]
+    K --&gt; L[createOverlappingChunks]
+    L --&gt; M[Monitor Token Usage&lt;br/&gt;Throughout Analysis]
+    
+    E --&gt; N[Proceed with Analysis]
+    G --&gt; N
+    L --&gt; N
+    
+    style B fill:#4CAF50,color:#fff
+    style C fill:#4CAF50,color:#fff
+    style I fill:#FF9800,color:#000
+    style J fill:#FF9800,color:#000
+</div><p><strong>Example: TMS79RAU Analysis Token Management</strong></p>
+<div class="mermaid">graph LR
+    A[TMS79RAU.cpy&lt;br/&gt;2000 chars&lt;br/&gt;~500 tokens] --&gt; B[RAU001.cbl&lt;br/&gt;8000 chars&lt;br/&gt;~2000 tokens]
+    B --&gt; C[ORD001.cbl&lt;br/&gt;6000 chars&lt;br/&gt;~1500 tokens]
+    C --&gt; D[Total: 4000 tokens&lt;br/&gt;At 100% limit]
+    D --&gt; E[Apply 80% safety&lt;br/&gt;Use 3200 tokens]
+    E --&gt; F[Chunk 1: TMS79RAU.cpy&lt;br/&gt;+ RAU001 partial&lt;br/&gt;1200 tokens]
+    F --&gt; G[Chunk 2: RAU001 remainder&lt;br/&gt;+ ORD001 partial&lt;br/&gt;1000 tokens]
+    G --&gt; H[Chunk 3: ORD001 remainder&lt;br/&gt;1000 tokens]
+    
+    style D fill:#f44336,color:#fff
+    style E fill:#FF9800,color:#000
+    style F fill:#4CAF50,color:#fff
+    style G fill:#4CAF50,color:#fff
+    style H fill:#4CAF50,color:#fff
+</div><h3 id="2-progressive-analysis-flow">2. Progressive Analysis Flow </h3>
+<div class="mermaid">graph TD
+    A[Start Progressive Analysis] --&gt; B[Stage 1: Component ID&lt;br/&gt;Weight: 20%]
+    B --&gt; C[Update Progress: 0-20%]
+    C --&gt; D[updateLoadingStatus&lt;br/&gt;'Component Identification']
+    D --&gt; E[LLM Call #1]
+    E --&gt; F[Parse Component Info]
+    F --&gt; G[Stage 2: Multi-Chunk&lt;br/&gt;Weight: 40%]
+    G --&gt; H[Update Progress: 20-60%]
+    H --&gt; I[updateLoadingStatus&lt;br/&gt;'Multi-Chunk Analysis']
+    I --&gt; J[Process Chunk 1]
+    J --&gt; K[LLM Call #2]
+    K --&gt; L[Process Chunk 2]
+    L --&gt; M[LLM Call #3]
+    M --&gt; N{More Chunks?}
+    N --&gt;|Yes| O[Process Next Chunk&lt;br/&gt;LLM Call #N]
+    O --&gt; N
+    N --&gt;|No| P[Stage 3: Detailed&lt;br/&gt;Weight: 30%]
+    P --&gt; Q[Update Progress: 60-90%]
+    Q --&gt; R[updateLoadingStatus&lt;br/&gt;'Detailed Processing']
+    R --&gt; S[LLM Call: Specialized]
+    S --&gt; T[Stage 4: Validation&lt;br/&gt;Weight: 10%]
+    T --&gt; U[Update Progress: 90-100%]
+    U --&gt; V[updateLoadingStatus&lt;br/&gt;'Final Assembly']
+    V --&gt; W[Complete Analysis]
+    
+    style E fill:#9C27B0,color:#fff
+    style K fill:#9C27B0,color:#fff
+    style M fill:#9C27B0,color:#fff
+    style O fill:#9C27B0,color:#fff
+    style S fill:#9C27B0,color:#fff
+</div><p><strong>Example: CUSTOMER-RECORD Copybook Analysis</strong></p>
+<div class="mermaid">gantt
+    title Progressive Analysis Timeline - CUSTOMER-RECORD
+    dateFormat X
+    axisFormat %S
+    
+    section Stage 1 (20%)
+    Component ID        :0, 15
+    
+    section Stage 2 (40%)
+    Chunk 1 Analysis    :15, 25
+    Chunk 2 Analysis    :25, 35
+    Chunk 3 Analysis    :35, 45
+    
+    section Stage 3 (30%)
+    Copybook Lifecycle  :45, 60
+    
+    section Stage 4 (10%)
+    Validation &amp; Assembly :60, 65
+</div><h3 id="3-advanced-validation-flow">3. Advanced Validation Flow </h3>
+<div class="mermaid">graph TD
+    A[LLM Response Received] --&gt; B[validateResponse]
+    B --&gt; C{Response Length &gt; 50?}
+    C --&gt;|No| D[Mark as Invalid&lt;br/&gt;Too Short]
+    C --&gt;|Yes| E{Contains Required Fields?}
+    E --&gt;|No| F[Mark as Invalid&lt;br/&gt;Missing Fields]
+    E --&gt;|Yes| G[calculateQualityScore]
+    G --&gt; H[Base Score from Confidence&lt;br/&gt;0-30 points]
+    H --&gt; I[Analysis Depth Score&lt;br/&gt;0-30 points]
+    I --&gt; J[Structure Score&lt;br/&gt;0-20 points]
+    J --&gt; K[Business Context Score&lt;br/&gt;0-20 points]
+    K --&gt; L[Total Quality Score&lt;br/&gt;0-100 → 1-10 scale]
+    L --&gt; M[assessCompleteness]
+    M --&gt; N[Check Component Found&lt;br/&gt;✓/✗]
+    N --&gt; O[Check Location Mapped&lt;br/&gt;✓/✗]
+    O --&gt; P[Check Usage Context&lt;br/&gt;✓/✗]
+    P --&gt; Q[Check Related Components&lt;br/&gt;✓/✗]
+    Q --&gt; R[Check Detailed Analysis&lt;br/&gt;✓/✗]
+    R --&gt; S[Check Business Impact&lt;br/&gt;✓/✗]
+    S --&gt; T[Completeness Percentage&lt;br/&gt;Completed/Total * 100]
+    T --&gt; U{Quality &lt; 7?}
+    U --&gt;|Yes| V[callvLLMAPIWithRetry&lt;br/&gt;Attempt 2/3]
+    U --&gt;|No| W[Accept Results]
+    V --&gt; A
+    
+    D --&gt; X[Retry or Fail]
+    F --&gt; X
+    
+    style G fill:#2196F3,color:#fff
+    style M fill:#2196F3,color:#fff
+    style V fill:#FF9800,color:#000
+</div><p><strong>Example: TMS79RAU Quality Assessment</strong></p>
+<div class="mermaid">graph LR
+    A[LLM Response&lt;br/&gt;1847 characters] --&gt; B[Quality Scoring]
+    B --&gt; C[Confidence: 9/10&lt;br/&gt;→ 27 points]
+    C --&gt; D[Analysis Depth&lt;br/&gt;→ 28 points]
+    D --&gt; E[Good Structure&lt;br/&gt;→ 20 points]
+    E --&gt; F[Business Context&lt;br/&gt;→ 18 points]
+    F --&gt; G[Total: 93/100&lt;br/&gt;Quality Score: 9/10]
+    G --&gt; H[Completeness Check]
+    H --&gt; I[Component Found: ✓&lt;br/&gt;Location Mapped: ✓&lt;br/&gt;Usage Context: ✓&lt;br/&gt;Related Components: ✓&lt;br/&gt;Detailed Analysis: ✓&lt;br/&gt;Business Impact: ✓]
+    I --&gt; J[Completeness: 100%&lt;br/&gt;6/6 criteria met]
+    
+    style G fill:#4CAF50,color:#fff
+    style J fill:#4CAF50,color:#fff
+</div><h3 id="4-interactive-chat-flow">4. Interactive Chat Flow </h3>
+<div class="mermaid">graph TD
+    A[User Types Question] --&gt; B[sendChatMessage]
+    B --&gt; C{Component Analyzed?}
+    C --&gt;|No| D[Show Error&lt;br/&gt;'Analyze component first']
+    C --&gt;|Yes| E[addChatMessage&lt;br/&gt;User message]
+    E --&gt; F[showChatTyping&lt;br/&gt;Display typing indicator]
+    F --&gt; G[processEnhancedChatQuery]
+    G --&gt; H[Build Enhanced Prompt&lt;br/&gt;Context + Question]
+    H --&gt; I[Include Analysis Results&lt;br/&gt;componentAnalysis[component]]
+    I --&gt; J[Include Quality Metrics&lt;br/&gt;Score, Completeness, Confidence]
+    J --&gt; K[Include File Context&lt;br/&gt;uploadedFiles info]
+    K --&gt; L[LLM API Call&lt;br/&gt;Chat Query]
+    L --&gt; M[Format Response&lt;br/&gt;Markdown, code highlighting]
+    M --&gt; N[hideChatTyping]
+    N --&gt; O[addChatMessage&lt;br/&gt;Assistant response]
+    O --&gt; P[Update Chat History&lt;br/&gt;Store for context]
+    
+    style L fill:#9C27B0,color:#fff
+</div><p><strong>Example: Chat Query Flow for RESTRICTED-STATUS Field</strong></p>
+<div class="mermaid">sequenceDiagram
+    participant U as User
+    participant C as Chat System
+    participant L as LLM API
+    participant A as Analysis Data
+    
+    U-&gt;&gt;C: "How is RESTRICTED-STATUS field validated?"
+    C-&gt;&gt;A: Retrieve TMS79RAU analysis results
+    A-&gt;&gt;C: Component info, field usage, programs
+    C-&gt;&gt;L: Enhanced prompt with context + question
+    Note over L: Context includes:&lt;br/&gt;- Field definition&lt;br/&gt;- Usage in RAU002, ORD001-006&lt;br/&gt;- Business rules&lt;br/&gt;- Quality score: 9/10
+    L-&gt;&gt;C: Detailed response about validation
+    C-&gt;&gt;U: "RESTRICTED-STATUS is validated in 3 ways:&lt;br/&gt;1. Format check (Y/N only)&lt;br/&gt;2. Business rule validation in RAU002&lt;br/&gt;3. Order processing checks in ORD001-006"
+</div><h3 id="5-file-lifecycle-analysis-flow">5. File Lifecycle Analysis Flow </h3>
+<div class="mermaid">graph TD
+    A[File Upload] --&gt; B[detectFileType&lt;br/&gt;Analyze name &amp; content]
+    B --&gt; C{File Type?}
+    C --&gt;|.cpy| D[Copybook Processing]
+    C --&gt;|.cbl| E[COBOL Program Processing]
+    C --&gt;|.jcl| F[JCL Job Processing]
+    D --&gt; G[Extract Field Definitions&lt;br/&gt;Level numbers, PIC clauses]
+    E --&gt; H[Extract Program Structure&lt;br/&gt;COPY, CALL statements]
+    F --&gt; I[Extract Job Flow&lt;br/&gt;EXEC, DD statements]
+    G --&gt; J[updateComponentSuggestions&lt;br/&gt;Add fields to suggestion list]
+    H --&gt; J
+    I --&gt; J
+    J --&gt; K[Component Analysis Ready]
+    K --&gt; L[User Selects Component]
+    L --&gt; M[Track Component Lifecycle]
+    M --&gt; N[Creation Phase&lt;br/&gt;Where/how defined]
+    N --&gt; O[Usage Phase&lt;br/&gt;Programs that reference]
+    O --&gt; P[Update Phase&lt;br/&gt;Programs that modify]
+    P --&gt; Q[Reference Phase&lt;br/&gt;Lookup operations]
+    Q --&gt; R[Archive Phase&lt;br/&gt;Retention/cleanup]
+    
+    style G fill:#4CAF50,color:#fff
+    style H fill:#2196F3,color:#fff
+    style I fill:#FF9800,color:#000
+</div><p><strong>Example: TMS79RAU File Lifecycle</strong></p>
+<div class="mermaid">graph TD
+    A[TMS79RAU Created] --&gt; B[VSAM KSDS Definition&lt;br/&gt;Key: ASSET-ID]
+    B --&gt; C[Field Structure Design&lt;br/&gt;10 fields, 150 bytes]
+    C --&gt; D[Creation Programs&lt;br/&gt;RAU001: New records]
+    D --&gt; E[Update Programs&lt;br/&gt;RAU002: Modify records&lt;br/&gt;RAU005: Status changes]
+    E --&gt; F[Reference Programs&lt;br/&gt;ORD001-006: Order checks&lt;br/&gt;REF001-003: Lookups]
+    F --&gt; G[Reporting Programs&lt;br/&gt;BAT001: Daily reports&lt;br/&gt;BAT003: Audit reports]
+    G --&gt; H[Maintenance Programs&lt;br/&gt;BAT002: Cleanup expired]
+    H --&gt; I[Archive/Retention&lt;br/&gt;7-year compliance hold]
+    
+    J[Business Events] --&gt; K[Compliance Rule Change]
+    K --&gt; E
+    J --&gt; L[New Asset Created]
+    L --&gt; D
+    J --&gt; M[Order Processing]
+    M --&gt; F
+    
+    style D fill:#4CAF50,color:#fff
+    style E fill:#FF9800,color:#000
+    style F fill:#2196F3,color:#fff
+    style H fill:#f44336,color:#fff
+</div><h3 id="6-field-usage-tracking-flow">6. Field Usage Tracking Flow </h3>
+<div class="mermaid">graph TD
+    A[Field Selected for Analysis] --&gt; B[extractSpecializedFieldInfo]
+    B --&gt; C[Scan All Uploaded Files]
+    C --&gt; D[analyzeFieldInFile&lt;br/&gt;For each file]
+    D --&gt; E{Field Found in File?}
+    E --&gt;|No| F[Continue to Next File]
+    E --&gt;|Yes| G[analyzeLineForFieldUsage]
+    G --&gt; H[Categorize Usage Type]
+    H --&gt; I{Usage Pattern?}
+    I --&gt;|READ/ACCEPT| J[Mark as INPUT]
+    I --&gt;|WRITE/DISPLAY| K[Mark as OUTPUT]
+    I --&gt;|COMPUTE/ADD/etc| L[Mark as CALCULATED]
+    I --&gt;|MOVE TO field| M[Mark as ASSIGNED]
+    I --&gt;|IF field condition| N[Mark as VALIDATED]
+    I --&gt;|Just mentioned| O[Mark as REFERENCED]
+    J --&gt; P[Record Usage Details]
+    K --&gt; P
+    L --&gt; P
+    M --&gt; P
+    N --&gt; P
+    O --&gt; P
+    P --&gt; Q[Extract Source Programs]
+    Q --&gt; R[Count Usage Frequency]
+    R --&gt; S[Generate Lifecycle Stage]
+    S --&gt; T[Assess Business Impact]
+    T --&gt; U[Compile Final Field Report]
+    
+    F --&gt; V{More Files?}
+    V --&gt;|Yes| D
+    V --&gt;|No| W[No Usage Found&lt;br/&gt;Mark as UNUSED]
+    W --&gt; U
+    
+    style J fill:#4CAF50,color:#fff
+    style K fill:#2196F3,color:#fff
+    style L fill:#E91E63,color:#fff
+    style M fill:#FF9800,color:#000
+    style N fill:#9C27B0,color:#fff
+    style W fill:#f44336,color:#fff
+</div><p><strong>Example: RESTRICTED-STATUS Field Tracking</strong></p>
+<div class="mermaid">graph TD
+    A[RESTRICTED-STATUS Field] --&gt; B[Found in TMS79RAU.cpy&lt;br/&gt;Definition: PIC X(1)]
+    B --&gt; C[Found in RAU002.cbl&lt;br/&gt;Line 145: IF RESTRICTED-STATUS = 'Y']
+    C --&gt; D[Found in ORD001.cbl&lt;br/&gt;Line 67: READ TMS79RAU]
+    D --&gt; E[Found in ORD002.cbl&lt;br/&gt;Line 89: MOVE 'Y' TO RESTRICTED-STATUS]
+    E --&gt; F[Usage Classification]
+    F --&gt; G[INPUT: RAU002 screen entry]
+    G --&gt; H[VALIDATED: Business rule checks]
+    H --&gt; I[ASSIGNED: Status calculations]  
+    I --&gt; J[REFERENCED: Order processing]
+    J --&gt; K[Usage Summary&lt;br/&gt;23 references across 8 programs]
+    K --&gt; L[Lifecycle: Input → Validation → Processing → Order Control]
+    L --&gt; M[Business Impact: CRITICAL&lt;br/&gt;Controls all order processing]
+    
+    style G fill:#4CAF50,color:#fff
+    style H fill:#9C27B0,color:#fff
+    style I fill:#FF9800,color:#000
+    style J fill:#2196F3,color:#fff
+    style M fill:#f44336,color:#fff
+</div><h3 id="7-unused-code-detection-flow">7. Unused Code Detection Flow </h3>
+<div class="mermaid">graph TD
+    A[Start Cleanup Analysis] --&gt; B[extractUnusedFields]
+    B --&gt; C[Scan All Field Definitions]
+    C --&gt; D[For Each Field in Copybooks]
+    D --&gt; E[Search References Across All Programs]
+    E --&gt; F{References Found?}
+    F --&gt;|Yes| G[Mark as USED&lt;br/&gt;Record reference count]  
+    F --&gt;|No| H[Mark as UNUSED&lt;br/&gt;Cleanup candidate]
+    G --&gt; I[Assess Usage Frequency]
+    I --&gt; J{Usage Count?}
+    J --&gt;|&gt;10| K[Mark as HEAVILY USED]
+    J --&gt;|1-10| L[Mark as LIGHTLY USED&lt;br/&gt;Review needed]
+    J --&gt;|0| H
+    K --&gt; M[Keep - Business Critical]
+    L --&gt; N[Review - May be obsolete]
+    H --&gt; O[Add to Cleanup List]
+    O --&gt; P[Check Program Context]
+    P --&gt; Q{Used in Active Programs?}
+    Q --&gt;|Yes| R[Low Priority Cleanup]
+    Q --&gt;|No| S[High Priority Cleanup]
+    R --&gt; T[Generate Cleanup Report]
+    S --&gt; T
+    M --&gt; U[Generate Usage Report]
+    N --&gt; V[Generate Review Report]
+    T --&gt; W[Final Recommendations]
+    U --&gt; W
+    V --&gt; W
+    
+    style H fill:#f44336,color:#fff
+    style S fill:#f44336,color:#fff
+    style K fill:#4CAF50,color:#fff
+    style L fill:#FF9800,color:#000
+</div><p><strong>Example: TMS79RAU Unused Field Detection</strong></p>
+<div class="mermaid">graph LR
+    A[TMS79RAU Fields Scan] --&gt; B[ASSET-ID&lt;br/&gt;47 references&lt;br/&gt;HEAVILY USED]
+    A --&gt; C[RESTRICTED-STATUS&lt;br/&gt;23 references&lt;br/&gt;HEAVILY USED]
+    A --&gt; D[CUSIP&lt;br/&gt;19 references&lt;br/&gt;HEAVILY USED]
+    A --&gt; E[EFFECTIVE-DATE&lt;br/&gt;8 references&lt;br/&gt;LIGHTLY USED]
+    A --&gt; F[RESTRICTION-TYPE&lt;br/&gt;4 references&lt;br/&gt;LIGHTLY USED]
+    A --&gt; G[ISIN&lt;br/&gt;0 references&lt;br/&gt;UNUSED]
+    
+    B --&gt; H[Keep - Primary Key]
+    C --&gt; I[Keep - Business Critical]
+    D --&gt; J[Keep - Important ID]
+    E --&gt; K[Review - May be obsolete]
+    F --&gt; L[Review - Classification only]
+    G --&gt; M[CLEANUP CANDIDATE&lt;br/&gt;Safe to remove]
+    
+    style B fill:#4CAF50,color:#fff
+    style C fill:#4CAF50,color:#fff
+    style D fill:#4CAF50,color:#fff
+    style E fill:#FF9800,color:#000
+    style F fill:#FF9800,color:#000
+    style G fill:#f44336,color:#fff
+    style M fill:#f44336,color:#fff
+</div><h2 id="how-the-analysis-process-works">How the Analysis Process Works </h2>
+<h3 id="step-by-step-process-flow">Step-by-Step Process Flow </h3>
+<p><strong>When you click "Analyze Component":</strong></p>
+<ol>
+<li><strong>Check Requirements:</strong> System validates that files are uploaded, component name is entered, and API connection is working</li>
+<li><strong>Start Progressive Analysis:</strong> System begins the 4-stage analysis pipeline and shows progress</li>
+<li><strong>Run Component Analysis:</strong> System goes through each stage systematically</li>
+</ol>
+<p><strong>Stage 1: Component Identification</strong></p>
+<ol>
+<li><strong>Filter Relevant Files:</strong> System finds files that contain the component name or related patterns</li>
+<li><strong>Optimize Content:</strong> System intelligently reduces file content to fit within processing limits while keeping important parts</li>
+<li><strong>Call AI Analysis:</strong> System sends optimized content to AI for component identification and classification</li>
+<li><strong>Parse Results:</strong> System interprets the AI response to understand component type, location, and confidence level</li>
+</ol>
+<p><strong>Stage 2: Multi-Chunk Analysis</strong></p>
+<ol>
+<li><strong>Create Smart Chunks:</strong> System breaks files into overlapping pieces that maintain context</li>
+<li><strong>Process Each Chunk:</strong> System sends each chunk to AI for detailed analysis (typically 2-5 chunks)</li>
+<li><strong>Build Progressive Context:</strong> Each chunk analysis builds on previous findings</li>
+<li><strong>Merge Results:</strong> System combines all chunk analyses while avoiding duplication</li>
+</ol>
+<p><strong>Stage 3: Specialized Analysis</strong></p>
+<ol>
+<li><strong>Determine Component Type:</strong> System performs specialized analysis based on whether it's a copybook, program, field, or JCL</li>
+<li><strong>Deep Dive Analysis:</strong> System performs component-specific deep analysis (copybook lifecycle, program flow, etc.)</li>
+<li><strong>Business Context:</strong> System analyzes business impact and modernization opportunities</li>
+</ol>
+<p><strong>Stage 4: Validation and Assembly</strong></p>
+<ol>
+<li><strong>Validate Results:</strong> System checks analysis quality and completeness</li>
+<li><strong>Calculate Scores:</strong> System assigns quality scores (1-10) and completeness percentages</li>
+<li><strong>Generate Recommendations:</strong> System creates actionable suggestions based on findings</li>
+<li><strong>Store and Display:</strong> System saves results and shows them in multiple specialized tabs</li>
+</ol>
+<p><strong>Interactive Chat Activation:</strong></p>
+<ol>
+<li><strong>Enable Chat:</strong> System activates chat functionality with full context from analysis</li>
+<li><strong>Context Preservation:</strong> Chat has access to all analysis results for detailed questions</li>
+<li><strong>Real-time Responses:</strong> Users can ask questions and get detailed answers based on their specific analysis</li>
+</ol>
+<hr>
+<h2 id="conclusion">Conclusion </h2>
+<p>The Enhanced Mainframe Analyzer provides unprecedented insight into mainframe system lifecycles, enabling organizations to:</p>
+<ol>
+<li><strong>Understand</strong> complex legacy systems through comprehensive analysis</li>
+<li><strong>Optimize</strong> system performance by identifying unused components</li>
+<li><strong>Modernize</strong> efficiently by mapping dependencies and relationships</li>
+<li><strong>Maintain</strong> systems confidently with complete impact visibility</li>
+<li><strong>Document</strong> systems automatically for knowledge preservation</li>
+</ol>
+<p>The tool's intelligent token management and progressive analysis approach makes it capable of handling large, complex mainframe environments while providing actionable insights for system improvement and modernization efforts. Rather than requiring technical expertise to interpret results, the system presents findings in business terms that help teams make informed decisions about their mainframe systems.</p>
+
+      </div>
+      
+      
+    
+    
+    <script type="module">
+// TODO: If ZenUML gets integrated into mermaid in the future,
+//      we can remove the following lines.
+
+
+var MERMAID_CONFIG = ({"startOnLoad":false});
+if (typeof MERMAID_CONFIG !== 'undefined') {
+  MERMAID_CONFIG.startOnLoad = false
+  MERMAID_CONFIG.cloneCssStyles = false
+  MERMAID_CONFIG.theme = "default"
+}
+
+mermaid.initialize(MERMAID_CONFIG || {})
+if (typeof(window['Reveal']) !== 'undefined') {
+  function mermaidRevealHelper(event) {
+    var currentSlide = event.currentSlide
+    var diagrams = currentSlide.querySelectorAll('.mermaid')
+    for (var i = 0; i < diagrams.length; i++) {
+      var diagram = diagrams[i]
+      if (!diagram.hasAttribute('data-processed')) {
+        mermaid.init(null, diagram, ()=> {
+          Reveal.slide(event.indexh, event.indexv)
+        })
+      }
+    }
+  }
+  Reveal.addEventListener('slidetransitionend', mermaidRevealHelper)
+  Reveal.addEventListener('ready', mermaidRevealHelper)
+  await mermaid.run({
+    nodes: document.querySelectorAll('.mermaid')
+  })
+} else {
+  await mermaid.run({
+    nodes: document.querySelectorAll('.mermaid')
+  })
+}
+</script>
+    
+    
+    
+  
+    </body></html>

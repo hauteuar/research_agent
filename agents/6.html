@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Mainframe Analyzer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 25px;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(15px);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .header h1 {
+            font-size: 2.8rem;
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #FFD700, #FFA500);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 520px 1fr 400px;
+            gap: 25px;
+            min-height: 80vh;
+        }
+
+        .control-panel, .analysis-workspace, .chat-panel {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(15px);
+            border-radius: 20px;
+            padding: 25px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .control-panel {
+            height: fit-content;
+            max-height: 85vh;
+            overflow-y: auto;
+        }
+
+        .analysis-workspace {
+            min-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .chat-panel {
+            display: flex;
+            flex-direction: column;
+            max-height: 85vh;
+        }
+
+        /* Component Search Section */
+        .component-search-section {
+            margin-bottom: 25px;
+            padding: 20px;
+            background: rgba(76, 175, 80, 0.2);
+            border-radius: 15px;
+            border-left: 4px solid #4CAF50;
+        }
+
+        .component-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 14px;
+            margin-bottom: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .component-input:focus {
+            outline: none;
+            border-color: #FFD700;
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
+        }
+
+        .component-input::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .component-suggestions {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            max-height: 150px;
+            overflow-y: auto;
+            display: none;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .suggestion-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            transition: all 0.3s ease;
+            font-size: 13px;
+        }
+
+        .suggestion-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateX(3px);
+        }
+
+        /* Token Management */
+        .token-info {
+            background: rgba(255, 193, 7, 0.2);
+            border: 1px solid rgba(255, 193, 7, 0.5);
+            border-radius: 8px;
+            padding: 10px;
+            margin: 10px 0;
+            font-size: 12px;
+        }
+
+        .token-bar {
+            background: rgba(0, 0, 0, 0.3);
+            height: 6px;
+            border-radius: 3px;
+            margin: 8px 0;
+            overflow: hidden;
+        }
+
+        .token-fill {
+            height: 100%;
+            transition: all 0.3s ease;
+            border-radius: 3px;
+        }
+
+        .token-fill.safe { background: #4CAF50; }
+        .token-fill.warning { background: #FF9800; }
+        .token-fill.danger { background: #f44336; }
+
+        /* General Form Styles */
+        .section-title { 
+            color: #FFD700; 
+            font-size: 1.2rem; 
+            margin-bottom: 15px; 
+            font-weight: 600; 
+            display: flex; 
+            align-items: center; 
+            gap: 10px; 
+        }
+
+        .form-group { 
+            margin-bottom: 20px; 
+        }
+
+        .form-group input, 
+        .form-group select, 
+        .form-group textarea { 
+            width: 100%; 
+            padding: 12px; 
+            border: 1px solid rgba(255, 255, 255, 0.3); 
+            border-radius: 8px; 
+            background: rgba(255, 255, 255, 0.1); 
+            color: white; 
+            font-size: 14px; 
+            transition: all 0.3s ease; 
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #FFD700;
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
+        }
+
+        .form-group input::placeholder,
+        .form-group textarea::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .action-btn { 
+            width: 100%; 
+            background: linear-gradient(45deg, #FF6B6B, #FF5252); 
+            color: white; 
+            border: none; 
+            padding: 14px; 
+            border-radius: 10px; 
+            cursor: pointer; 
+            font-size: 15px; 
+            font-weight: 600; 
+            margin-bottom: 12px; 
+            transition: all 0.3s ease; 
+            text-transform: uppercase; 
+            letter-spacing: 1px; 
+        }
+
+        .action-btn:hover:not(:disabled) { 
+            transform: translateY(-2px); 
+            box-shadow: 0 6px 20px rgba(255, 107, 107, 0.4); 
+        }
+
+        .action-btn:disabled { 
+            opacity: 0.5; 
+            cursor: not-allowed; 
+            transform: none; 
+            box-shadow: none; 
+        }
+
+        .validate-btn { 
+            background: linear-gradient(45deg, #4CAF50, #45a049); 
+        }
+
+        .component-btn { 
+            background: linear-gradient(45deg, #4CAF50, #45a049); 
+        }
+
+        .secondary-btn { 
+            background: linear-gradient(45deg, #2196F3, #1976D2); 
+        }
+
+        /* API Status */
+        .api-status {
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 10px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .api-status.connected {
+            background: rgba(76, 175, 80, 0.2);
+            border: 1px solid rgba(76, 175, 80, 0.5);
+            color: #4CAF50;
+        }
+
+        .api-status.connecting {
+            background: rgba(255, 193, 7, 0.2);
+            border: 1px solid rgba(255, 193, 7, 0.5);
+            color: #FFC107;
+        }
+
+        .api-status.disconnected {
+            background: rgba(244, 67, 54, 0.2);
+            border: 1px solid rgba(244, 67, 54, 0.5);
+            color: #f44336;
+        }
+
+        /* Upload Area */
+        .upload-area {
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 15px;
+        }
+
+        .upload-area:hover {
+            border-color: #FFD700;
+            background: rgba(255, 215, 0, 0.05);
+        }
+
+        .upload-area.drag-over {
+            border-color: #4CAF50;
+            background: rgba(76, 175, 80, 0.1);
+        }
+
+        .file-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .file-item {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .file-info {
+            flex: 1;
+        }
+
+        .file-name {
+            font-weight: bold;
+            margin-bottom: 2px;
+        }
+
+        .file-details {
+            font-size: 11px;
+            opacity: 0.8;
+        }
+
+        .file-remove {
+            background: #f44336;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .file-remove:hover {
+            background: #d32f2f;
+        }
+
+        /* Loading Indicator */
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            z-index: 9999;
+        }
+
+        .loading.show {
+            display: flex;
+        }
+
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #FFD700;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading h3 {
+            color: #FFD700;
+            margin-bottom: 10px;
+        }
+
+        .loading p {
+            color: rgba(255, 255, 255, 0.8);
+            text-align: center;
+            max-width: 400px;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            margin-bottom: 25px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            padding: 5px;
+        }
+
+        .tab {
+            flex: 1;
+            background: transparent;
+            color: rgba(255, 255, 255, 0.7);
+            border: none;
+            padding: 12px 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .tab.active {
+            background: linear-gradient(45deg, #FFD700, #FFA500);
+            color: #000;
+        }
+
+        .tab:hover:not(.active) {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Message Types */
+        .error, .success, .warning {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 8px;
+            font-weight: bold;
+            z-index: 10000;
+            animation: slideInRight 0.3s ease;
+        }
+
+        .error {
+            background: #f44336;
+            color: white;
+        }
+
+        .success {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .warning {
+            background: #FF9800;
+            color: white;
+        }
+
+        @keyframes slideInRight {
+            from { transform: translateX(100%); }
+            to { transform: translateX(0); }
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1600px) { 
+            .main-grid { 
+                grid-template-columns: 450px 1fr 350px; 
+            } 
+        }
+
+        @media (max-width: 1400px) { 
+            .main-grid { 
+                grid-template-columns: 400px 1fr 300px; 
+            } 
+        }
+
+        @media (max-width: 1200px) { 
+            .main-grid { 
+                grid-template-columns: 1fr; 
+                gap: 20px; 
+            }
+            
+            .control-panel, 
+            .analysis-workspace, 
+            .chat-panel {
+                max-height: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔬 Enhanced Mainframe Analyzer</h1>
+            <p>Advanced mainframe analysis with field flow tracking, business rules, and dependency mapping</p>
+        </div>
+
+        <div class="main-grid">
+            <!-- Control Panel -->
+            <div class="control-panel">
+                <!-- Component Search Section -->
+                <div class="component-search-section">
+                    <h2 class="section-title">🎯 Component Analysis</h2>
+                    <div class="form-group">
+                        <label for="componentName">Enter Component Name:</label>
+                        <input type="text" id="componentName" class="component-input" 
+                               placeholder="e.g., CUSTOMER-RECORD, ACCOUNT-COPY, PAYROLL-PROC">
+                        <div id="componentSuggestions" class="component-suggestions"></div>
+                    </div>
+                    
+                    <!-- Token Usage Display -->
+                    <div id="tokenInfo" class="token-info" style="display: none;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                            <span style="font-weight: bold;">Token Management</span>
+                            <span id="tokenCount">0 / 4000</span>
+                        </div>
+                        <div class="token-bar">
+                            <div id="tokenFill" class="token-fill safe" style="width: 0%"></div>
+                        </div>
+                        <div id="tokenWarning" style="font-size: 11px; margin-top: 5px;"></div>
+                    </div>
+                    
+                    <button class="action-btn component-btn" id="analyzeComponentBtn" disabled>
+                        🔍 Analyze Component
+                    </button>
+                </div>
+
+                <!-- vLLM API Setup -->
+                <div style="margin-bottom: 25px; padding: 20px; background: rgba(0, 0, 0, 0.2); border-radius: 15px; border-left: 4px solid #4CAF50;">
+                    <h2 class="section-title">🚀 vLLM Server Setup</h2>
+                    <div class="form-group">
+                        <label for="vllmEndpoint">Server Endpoint:</label>
+                        <input type="text" id="vllmEndpoint" placeholder="http://localhost:8000" value="http://localhost:8000">
+                    </div>
+                    <div class="form-group">
+                        <label for="maxTokens">Max Tokens:</label>
+                        <input type="number" id="maxTokens" value="4000" min="1000" max="8000">
+                    </div>
+                    <button class="action-btn validate-btn" id="validateApiBtn">
+                        🔐 Test Connection
+                    </button>
+                    <div class="api-status disconnected" id="apiStatus">
+                        <span>🔴</span> Enter server details and test connection
+                    </div>
+                </div>
+
+                <!-- File Upload Section -->
+                <div style="margin-bottom: 25px;">
+                    <h2 class="section-title">📁 Upload Mainframe Files</h2>
+                    <div class="upload-area" id="uploadArea">
+                        <div>
+                            <h3 style="margin-bottom: 8px;">📤 Drop files here</h3>
+                            <p style="font-size: 14px;">COBOL (.cbl), Copybooks (.cpy), JCL (.jcl)</p>
+                        </div>
+                        <input type="file" id="fileInput" multiple accept=".cbl,.cob,.cpy,.copybook,.jcl,.txt,.proc" style="display: none;">
+                    </div>
+                    <div id="uploadedFiles" class="file-list"></div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div>
+                    <h3 class="section-title">⚡ Actions</h3>
+                    <button class="action-btn secondary-btn" id="bulkAnalyzeBtn" disabled>
+                        📊 Bulk Analyze
+                    </button>
+                    <button class="action-btn secondary-btn" id="exportBtn" disabled>
+                        📤 Export Results
+                    </button>
+                    <button class="action-btn secondary-btn" id="clearBtn">
+                        🗑️ Clear All Data
+                    </button>
+                </div>
+            </div>
+
+            <!-- Analysis Workspace -->
+            <div class="analysis-workspace">
+                <div class="tabs">
+                    <button class="tab active" data-tab="lifecycle">🔄 Analysis Results</button>
+                    <button class="tab" data-tab="fieldmatrix">📋 Field Matrix</button>
+                    <button class="tab" data-tab="usage">📈 Usage Patterns</button>
+                    <button class="tab" data-tab="dependencies">🔗 Dependencies</button>
+                </div>
+
+                <!-- Tab Contents -->
+                <div id="lifecycle" class="tab-content active">
+                    <div id="lifecycleContent">
+                        <h3>🎯 Component Analysis Results</h3>
+                        <p style="margin-bottom: 20px; line-height: 1.6;">
+                            Upload files, test your connection, and analyze components for detailed field flows and business rules.
+                        </p>
+                        
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #FFD700;">
+                            <h4 style="color: #FFD700; margin-bottom: 15px;">🚀 Analysis Features:</h4>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                                <div>
+                                    <strong style="color: #4CAF50;">📊 Field Flow Analysis:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Input/Output field tracking</li>
+                                        <li>• Derived and calculated fields</li>
+                                        <li>• Unused field identification</li>
+                                        <li>• Field transformation paths</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <strong style="color: #2196F3;">⚖️ Business Rules:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Validation logic extraction</li>
+                                        <li>• Decision point mapping</li>
+                                        <li>• Conditional processing</li>
+                                        <li>• Business calculation rules</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <strong style="color: #FF9800;">🔗 Dependencies:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Copybook dependencies</li>
+                                        <li>• Program call chains</li>
+                                        <li>• File references</li>
+                                        <li>• Database table usage</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <strong style="color: #9C27B0;">🧠 Smart Processing:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Token-aware chunking</li>
+                                        <li>• Progressive analysis</li>
+                                        <li>• Context preservation</li>
+                                        <li>• Quality validation</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="fieldmatrix" class="tab-content">
+                    <div id="fieldMatrixContent">
+                        <h3>📋 Field Matrix Analysis</h3>
+                        <p style="margin-bottom: 20px;">Field-level analysis with categorization will appear here after component analysis.</p>
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                            <p style="text-align: center; opacity: 0.8;">Field matrix will appear here after analysis.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="usage" class="tab-content">
+                    <div id="usageContent">
+                        <h3>📈 Usage Patterns Analysis</h3>
+                        <p style="margin-bottom: 20px;">Usage pattern analysis will appear here after component analysis.</p>
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                            <p style="text-align: center; opacity: 0.8;">Usage patterns will appear here after analysis.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="dependencies" class="tab-content">
+                    <div id="dependenciesContent">
+                        <h3>🔗 Dependency Analysis</h3>
+                        <p style="margin-bottom: 20px;">Dependency mapping will appear here after component analysis.</p>
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                            <p style="text-align: center; opacity: 0.8;">Dependency graph will appear here after analysis.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Loading Indicator -->
+                <div class="loading" id="loadingIndicator">
+                    <div class="spinner"></div>
+                    <h3>🤖 Analyzing Component</h3>
+                    <p id="loadingStatus">Processing component analysis...</p>
+                    <div id="progressBar" style="background: rgba(255,255,255,0.2); height: 6px; border-radius: 3px; margin: 15px 0; overflow: hidden;">
+                        <div id="progressFill" style="height: 100%; background: #4CAF50; width: 0%; transition: width 0.3s ease;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat Panel - Will be added in next part -->
+            <div class="chat-panel">
+                <div style="background: rgba(76, 175, 80, 0.2); border-radius: 10px; padding: 15px; margin-bottom: 15px; border-left: 4px solid #4CAF50;">
+                    <h3 style="margin-bottom: 8px; color: #FFD700;">💬 Analysis Chat</h3>
+                    <p style="font-size: 12px; opacity: 0.8;">Interactive chat will be enabled in Part 2</p>
+                </div>
+                
+                <div style="flex: 1; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.05); border-radius: 10px;">
+                    <p style="opacity: 0.6;">Chat functionality coming in Part 2...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Part 1: Basic Setup and Core Functionality
+        class EnhancedMainframeAnalyzer {
+            constructor() {
+                // Core properties
+                this.uploadedFiles = [];
+                this.analysisResults = {};
+                this.componentSuggestions = [];
+                this.serverValidated = false;
+                this.vllmEndpoint = 'http://localhost:8000';
+                this.maxTokens = 4000;
+                this.storageKey = 'enhanced_mainframe_analysis';
+                this.currentAnalyzedComponent = null;
+                
+                // Token management
+                this.averageCharsPerToken = 4;
+                this.tokenSafetyMargin = 0.8;
+                
+                this.initializeBasicEventListeners();
+                this.loadStoredData();
+                this.initializeTokenManagement();
+                
+                console.log('🚀 Enhanced Mainframe Analyzer - Part 1 Initialized');
+            }
+
+            initializeBasicEventListeners() {
+                // API validation
+                document.getElementById('validateApiBtn').addEventListener('click', () => this.validateConnection());
+                document.getElementById('vllmEndpoint').addEventListener('input', () => this.onEndpointChange());
+                document.getElementById('maxTokens').addEventListener('input', () => this.onSettingsChange());
+                
+                // File upload handlers
+                const uploadArea = document.getElementById('uploadArea');
+                const fileInput = document.getElementById('fileInput');
+                
+                uploadArea.addEventListener('click', () => {
+                    if (this.serverValidated) fileInput.click();
+                });
+                uploadArea.addEventListener('drop', (e) => this.handleFileDrop(e));
+                uploadArea.addEventListener('dragover', (e) => this.handleDragOver(e));
+                uploadArea.addEventListener('dragleave', (e) => this.handleDragLeave(e));
+                fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
+
+                // Component analysis
+                document.getElementById('componentName').addEventListener('input', () => this.onComponentInput());
+                document.getElementById('analyzeComponentBtn').addEventListener('click', () => this.analyzeComponent());
+                
+                // Quick actions
+                document.getElementById('bulkAnalyzeBtn').addEventListener('click', () => this.bulkAnalyze());
+                document.getElementById('exportBtn').addEventListener('click', () => this.exportResults());
+                document.getElementById('clearBtn').addEventListener('click', () => this.clearAllData());
+
+                // Tab navigation
+                document.querySelectorAll('.tab').forEach(tab => {
+                    tab.addEventListener('click', (e) => this.switchTab(e));
+                });
+
+                // Hide suggestions when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (!e.target.closest('.component-search-section')) {
+                        document.getElementById('componentSuggestions').style.display = 'none';
+                    }
+                });
+            }
+
+            initializeTokenManagement() {
+                this.updateTokenDisplay(0);
+                this.showSuccess('🚀 Enhanced Mainframe Analyzer Ready!');
+            }
+
+            // === TOKEN MANAGEMENT ===
+            estimateTokenCount(text) {
+                if (!text) return 0;
+                return Math.ceil(text.length / this.averageCharsPerToken);
+            }
+
+            updateTokenDisplay(currentTokens) {
+                const tokenInfo = document.getElementById('tokenInfo');
+                const tokenCount = document.getElementById('tokenCount');
+                const tokenFill = document.getElementById('tokenFill');
+                const tokenWarning = document.getElementById('tokenWarning');
+
+                tokenInfo.style.display = 'block';
+                tokenCount.textContent = `${currentTokens} / ${this.maxTokens}`;
+                
+                const percentage = (currentTokens / this.maxTokens) * 100;
+                tokenFill.style.width = `${Math.min(percentage, 100)}%`;
+                
+                tokenFill.className = 'token-fill';
+                if (percentage <= 60) {
+                    tokenFill.classList.add('safe');
+                    tokenWarning.textContent = '🟢 Optimal token usage - full analysis available';
+                } else if (percentage <= 85) {
+                    tokenFill.classList.add('warning');
+                    tokenWarning.textContent = '🟡 Moderate usage - intelligent chunking active';
+                } else {
+                    tokenFill.classList.add('danger');
+                    tokenWarning.textContent = '🔴 High usage - optimization required';
+                }
+            }
+
+            // === API CONNECTION ===
+            async validateConnection() {
+                const endpoint = document.getElementById('vllmEndpoint').value.trim();
+                if (!endpoint) {
+                    this.showError('Please enter vLLM endpoint');
+                    return;
+                }
+
+                this.updateConnectionStatus('connecting', 'Testing connection...');
+
+                try {
+                    const response = await fetch(`${endpoint}/generate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            prompt: "Test connection. Respond with 'Connected'",
+                            max_tokens: 10,
+                            temperature: 0.1
+                        }),
+                        signal: AbortSignal.timeout(10000)
+                    });
+
+                    if (response.ok) {
+                        this.serverValidated = true;
+                        this.vllmEndpoint = endpoint;
+                        this.updateConnectionStatus('connected', `✅ Connection verified`);
+                        this.showSuccess('🚀 vLLM server connected successfully!');
+                    } else {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                } catch (error) {
+                    this.serverValidated = false;
+                    this.updateConnectionStatus('disconnected', `❌ Connection failed: ${error.message}`);
+                    this.showError(`Connection failed: ${error.message}`);
+                }
+                
+                this.validateForm();
+            }
+
+            updateConnectionStatus(status, message) {
+                const statusElement = document.getElementById('apiStatus');
+                statusElement.className = `api-status ${status}`;
+                statusElement.innerHTML = message;
+            }
+
+            // === FILE UPLOAD ===
+            handleFileDrop(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const uploadArea = document.getElementById('uploadArea');
+                uploadArea.classList.remove('drag-over');
+                
+                if (!this.serverValidated) {
+                    this.showError('Please validate API connection first');
+                    return;
+                }
+                
+                const files = Array.from(e.dataTransfer.files);
+                this.processFiles(files);
+            }
+
+            handleDragOver(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                document.getElementById('uploadArea').classList.add('drag-over');
+            }
+
+            handleDragLeave(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                document.getElementById('uploadArea').classList.remove('drag-over');
+            }
+
+            handleFileSelect(e) {
+                if (!this.serverValidated) {
+                    this.showError('Please validate API connection first');
+                    return;
+                }
+                
+                const files = Array.from(e.target.files);
+                this.processFiles(files);
+            }
+
+            async processFiles(files) {
+                for (const file of files) {
+                    try {
+                        const content = await this.readFile(file);
+                        const fileType = this.detectFileType(file.name, content);
+                        
+                        const fileObj = {
+                            name: file.name,
+                            content: content,
+                            size: file.size,
+                            type: fileType,
+                            uploadDate: new Date().toISOString(),
+                            id: Date.now() + Math.random()
+                        };
+                        
+                        this.uploadedFiles.push(fileObj);
+                        this.updateComponentSuggestions();
+                        
+                    } catch (error) {
+                        this.showError(`Failed to read ${file.name}: ${error.message}`);
+                    }
+                }
+                
+                this.displayUploadedFiles();
+                this.validateForm();
+                this.saveToStorage();
+                this.showSuccess(`📁 ${files.length} files uploaded successfully!`);
+            }
+
+            readFile(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = e => resolve(e.target.result);
+                    reader.onerror = e => reject(new Error('File read failed'));
+                    reader.readAsText(file);
+                });
+            }
+
+            detectFileType(fileName, content) {
+                const name = fileName.toLowerCase();
+                const upperContent = content.toUpperCase();
+                
+                if (name.includes('.cpy') || name.includes('copybook')) {
+                    return 'Copybook';
+                } else if (name.includes('.jcl') || upperContent.includes('//JOB ')) {
+                    return 'JCL Job';
+                } else if (name.includes('.cbl') || name.includes('.cob') || 
+                          upperContent.includes('IDENTIFICATION DIVISION') ||
+                          upperContent.includes('PROGRAM-ID')) {
+                    return 'COBOL Program';
+                } else if (name.includes('.proc')) {
+                    return 'JCL Procedure';
+                } else {
+                    return 'Text File';
+                }
+            }
+
+            displayUploadedFiles() {
+                const container = document.getElementById('uploadedFiles');
+                if (this.uploadedFiles.length === 0) {
+                    container.innerHTML = '';
+                    return;
+                }
+                
+                let html = '';
+                this.uploadedFiles.forEach(file => {
+                    html += `
+                        <div class="file-item">
+                            <div class="file-info">
+                                <div class="file-name">${file.name}</div>
+                                <div class="file-details">${file.type} • ${Math.round(file.size/1024)}KB</div>
+                            </div>
+                            <button class="file-remove" onclick="analyzer.removeFile('${file.id}')">🗑️</button>
+                        </div>
+                    `;
+                });
+                
+                container.innerHTML = html;
+            }
+
+            removeFile(fileId) {
+                this.uploadedFiles = this.uploadedFiles.filter(f => f.id != fileId);
+                this.displayUploadedFiles();
+                this.updateComponentSuggestions();
+                this.validateForm();
+                this.saveToStorage();
+            }
+
+            // === COMPONENT SUGGESTIONS ===
+            updateComponentSuggestions() {
+                this.componentSuggestions = [];
+                
+                this.uploadedFiles.forEach(file => {
+                    const content = file.content.toUpperCase();
+                    const lines = content.split('\n');
+                    
+                    lines.forEach(line => {
+                        const trimmed = line.trim();
+                        
+                        // Extract COBOL field names
+                        const fieldMatch = trimmed.match(/^\s*\d{2}\s+([A-Z][A-Z0-9\-_]{2,})/);
+                        if (fieldMatch) {
+                            this.componentSuggestions.push({
+                                name: fieldMatch[1],
+                                type: 'FIELD',
+                                file: file.name
+                            });
+                        }
+                        
+                        // Extract copybook names
+                        const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]{2,})/);
+                        if (copyMatch) {
+                            this.componentSuggestions.push({
+                                name: copyMatch[1],
+                                type: 'COPYBOOK',
+                                file: file.name
+                            });
+                        }
+                        
+                        // Extract program names
+                        const programMatch = trimmed.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]{2,})/);
+                        if (programMatch) {
+                            this.componentSuggestions.push({
+                                name: programMatch[1],
+                                type: 'PROGRAM',
+                                file: file.name
+                            });
+                        }
+                    });
+                });
+                
+                // Remove duplicates
+                this.componentSuggestions = this.componentSuggestions.filter((item, index, self) => 
+                    index === self.findIndex(t => t.name === item.name && t.type === item.type)
+                );
+            }
+
+            onComponentInput() {
+                const input = document.getElementById('componentName');
+                const value = input.value.trim().toUpperCase();
+                const suggestions = document.getElementById('componentSuggestions');
+                
+                if (value.length < 2) {
+                    suggestions.style.display = 'none';
+                    this.validateForm();
+                    return;
+                }
+                
+                const filtered = this.componentSuggestions.filter(item => 
+                    item.name.includes(value)
+                ).slice(0, 8);
+                
+                if (filtered.length > 0) {
+                    let html = '';
+                    filtered.forEach(item => {
+                        html += `
+                            <div class="suggestion-item" onclick="analyzer.selectSuggestion('${item.name}')">
+                                <strong>${item.name}</strong> 
+                                <span style="opacity: 0.7;">(${item.type} in ${item.file})</span>
+                            </div>
+                        `;
+                    });
+                    suggestions.innerHTML = html;
+                    suggestions.style.display = 'block';
+                } else {
+                    suggestions.style.display = 'none';
+                }
+                
+                this.validateForm();
+            }
+
+            selectSuggestion(componentName) {
+                document.getElementById('componentName').value = componentName;
+                document.getElementById('componentSuggestions').style.display = 'none';
+                this.validateForm();
+            }
+
+            // === FORM VALIDATION ===
+            validateForm() {
+                const hasFiles = this.uploadedFiles.length > 0;
+                const hasComponent = document.getElementById('componentName').value.trim().length > 0;
+                const hasConnection = this.serverValidated;
+                
+                document.getElementById('analyzeComponentBtn').disabled = !(hasFiles && hasComponent && hasConnection);
+                document.getElementById('bulkAnalyzeBtn').disabled = !(hasFiles && hasConnection);
+                document.getElementById('exportBtn').disabled = Object.keys(this.analysisResults).length === 0;
+            }
+
+            // === EVENT HANDLERS ===
+            onEndpointChange() {
+                this.serverValidated = false;
+                this.updateConnectionStatus('disconnected', '🔴 Connection not validated');
+                this.validateForm();
+            }
+
+            onSettingsChange() {
+                this.maxTokens = parseInt(document.getElementById('maxTokens').value) || 4000;
+                this.saveToStorage();
+            }
+
+            switchTab(e) {
+                const targetTab = e.target?.dataset?.tab || e.dataset?.tab;
+                if (!targetTab) return;
+                
+                document.querySelectorAll('.tab').forEach(tab => {
+                    tab.classList.remove('active');
+                });
+                
+                const clickedTab = e.target || e;
+                if (clickedTab.classList) {
+                    clickedTab.classList.add('active');
+                }
+                
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                
+                const targetContent = document.getElementById(targetTab);
+                if (targetContent) {
+                    targetContent.classList.add('active');
+                }
+            }
+
+            // === PLACEHOLDER METHODS FOR PART 2 ===
+            async analyzeComponent() {
+                this.showWarning('Analysis functionality will be added in Part 2');
+            }
+
+            async bulkAnalyze() {
+                this.showWarning('Bulk analysis functionality will be added in Part 2');
+            }
+
+            exportResults() {
+                this.showWarning('Export functionality will be added in Part 2');
+            }
+
+            // === UTILITY METHODS ===
+            showLoading() { 
+                document.getElementById('loadingIndicator').classList.add('show'); 
+            }
+            
+            hideLoading() { 
+                document.getElementById('loadingIndicator').classList.remove('show'); 
+            }
+            
+            updateLoadingStatus(status) { 
+                document.getElementById('loadingStatus').textContent = status; 
+            }
+
+            updateProgress(percentage) {
+                const progressFill = document.getElementById('progressFill');
+                if (progressFill) {
+                    progressFill.style.width = `${percentage}%`;
+                }
+            }
+
+            showMessage(type, message, duration = 3000) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = type;
+                messageDiv.textContent = message;
+                document.body.appendChild(messageDiv);
+                
+                setTimeout(() => {
+                    if (messageDiv.parentNode) {
+                        messageDiv.parentNode.removeChild(messageDiv);
+                    }
+                }, duration);
+            }
+            
+            showError(message) { this.showMessage('error', message, 5000); }
+            showSuccess(message) { this.showMessage('success', message, 3000); }
+            showWarning(message) { this.showMessage('warning', message, 4000); }
+            
+            sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+            // === STORAGE MANAGEMENT ===
+            saveToStorage() {
+                try {
+                    const data = {
+                        uploadedFiles: this.uploadedFiles,
+                        analysisResults: this.analysisResults,
+                        vllmEndpoint: this.vllmEndpoint,
+                        maxTokens: this.maxTokens,
+                        timestamp: new Date().toISOString()
+                    };
+                    localStorage.setItem(this.storageKey, JSON.stringify(data));
+                } catch (error) {
+                    console.warn('Failed to save to storage:', error);
+                }
+            }
+
+            loadStoredData() {
+                try {
+                    const stored = localStorage.getItem(this.storageKey);
+                    if (stored) {
+                        const data = JSON.parse(stored);
+                        this.uploadedFiles = data.uploadedFiles || [];
+                        this.analysisResults = data.analysisResults || {};
+                        
+                        if (data.vllmEndpoint) {
+                            document.getElementById('vllmEndpoint').value = data.vllmEndpoint;
+                            this.vllmEndpoint = data.vllmEndpoint;
+                        }
+                        
+                        if (data.maxTokens) {
+                            document.getElementById('maxTokens').value = data.maxTokens;
+                            this.maxTokens = data.maxTokens;
+                        }
+                        
+                        this.displayUploadedFiles();
+                        this.updateComponentSuggestions();
+                        this.validateForm();
+                        
+                        console.log('📁 Stored data loaded successfully');
+                    }
+                } catch (error) {
+                    console.warn('Failed to load stored data:', error);
+                }
+            }
+
+            clearAllData() {
+                if (confirm('Are you sure you want to clear all data? This cannot be undone.')) {
+                    this.uploadedFiles = [];
+                    this.analysisResults = {};
+                    this.componentSuggestions = [];
+                    this.currentAnalyzedComponent = null;
+                    
+                    localStorage.removeItem(this.storageKey);
+                    
+                    this.displayUploadedFiles();
+                    this.validateForm();
+                    
+                    document.getElementById('lifecycleContent').innerHTML = `
+                        <h3>🎯 Component Analysis Results</h3>
+                        <p style="margin-bottom: 20px;">Upload files and analyze components to get started.</p>
+                    `;
+                    
+                    this.showSuccess('🗑️ All data cleared successfully');
+                }
+            }
+        }
+
+        // Initialize the analyzer
+        const analyzer = new EnhancedMainframeAnalyzer();
+        
+        console.log('🚀 Enhanced Mainframe Analyzer - Part 1 Ready!');
+        console.log('✅ Features active: File upload, API connection, component suggestions, token management');
+        console.log('⏳ Coming in Part 2: Analysis engine, chat functionality, field matrix, dependencies');
+    </script>
+</body>
+</html>
