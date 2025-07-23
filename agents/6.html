@@ -1210,6 +1210,1630 @@
         console.log('🚀 Enhanced Mainframe Analyzer - Part 1 Ready!');
         console.log('✅ Features active: File upload, API connection, component suggestions, token management');
         console.log('⏳ Coming in Part 2: Analysis engine, chat functionality, field matrix, dependencies');
+
+        // Part 2: Analysis Engine and Chat Functionality
+// This extends the analyzer from Part 1
+
+// === ANALYSIS ENGINE ===
+EnhancedMainframeAnalyzer.prototype.analyzeComponent = async function() {
+    const componentName = document.getElementById('componentName').value.trim();
+    if (!componentName) return;
+
+    this.showLoading();
+    this.updateProgress(0);
+
+    try {
+        const results = await this.runFocusedAnalysis(componentName);
+        
+        this.analysisResults[componentName] = results;
+        this.currentAnalyzedComponent = componentName;
+        
+        this.displayAnalysisResults(componentName, results);
+        this.enableChat();
+        this.saveToStorage();
+        
+        this.hideLoading();
+        this.showSuccess(`✅ Analysis complete for ${componentName}!`);
+        
+    } catch (error) {
+        this.hideLoading();
+        this.showError(`Analysis failed: ${error.message}`);
+        console.error('Analysis error:', error);
+    }
+};
+
+EnhancedMainframeAnalyzer.prototype.runFocusedAnalysis = async function(componentName) {
+    console.log(`Starting focused analysis for: ${componentName}`);
+    
+    // Stage 1: Find relevant files
+    this.updateLoadingStatus('🔍 Stage 1: Finding relevant files...');
+    this.updateProgress(20);
+    
+    const relevantFiles = this.findRelevantFiles(componentName);
+    if (relevantFiles.length === 0) {
+        throw new Error(`Component "${componentName}" not found in uploaded files`);
+    }
+
+    // Stage 2: Optimize content for tokens
+    this.updateLoadingStatus('🧠 Stage 2: Optimizing content...');
+    this.updateProgress(40);
+    
+    const optimizedContent = this.optimizeContentForTokens(relevantFiles);
+    this.updateTokenDisplay(optimizedContent.totalTokens);
+
+    // Stage 3: Perform analysis
+    this.updateLoadingStatus('⚡ Stage 3: Analyzing component...');
+    this.updateProgress(70);
+    
+    const analysisPrompt = this.buildFocusedPrompt(componentName, optimizedContent.files);
+    const analysisResult = await this.callvLLMAPI(analysisPrompt);
+    
+    this.updateProgress(100);
+    
+    return {
+        componentName: componentName,
+        timestamp: new Date().toISOString(),
+        filesAnalyzed: relevantFiles.map(f => f.name),
+        analysis: analysisResult,
+        componentType: this.detectComponentType(componentName, relevantFiles),
+        qualityScore: this.calculateQualityScore(analysisResult),
+        completeness: this.assessCompleteness(analysisResult)
+    };
+};
+
+EnhancedMainframeAnalyzer.prototype.findRelevantFiles = function(componentName) {
+    const upperComponentName = componentName.toUpperCase();
+    
+    return this.uploadedFiles.filter(file => {
+        const content = file.content.toUpperCase();
+        const fileName = file.name.toUpperCase();
+        
+        return content.includes(upperComponentName) || 
+               fileName.includes(upperComponentName) ||
+               this.hasRelatedContent(content, upperComponentName);
+    });
+};
+
+EnhancedMainframeAnalyzer.prototype.hasRelatedContent = function(content, componentName) {
+    const patterns = [
+        `COPY\\s+${componentName}`,
+        `CALL\\s+['"]?${componentName}['"]?`,
+        `\\b${componentName}\\b`,
+        componentName.replace(/-/g, '[\\-_]')
+    ];
+    
+    return patterns.some(pattern => new RegExp(pattern, 'i').test(content));
+};
+
+EnhancedMainframeAnalyzer.prototype.optimizeContentForTokens = function(files) {
+    const targetTokens = Math.floor(this.maxTokens * this.tokenSafetyMargin);
+    const optimized = [];
+    let currentTokens = 0;
+
+    for (const file of files) {
+        const fileTokens = this.estimateTokenCount(file.content);
+        
+        if (currentTokens + fileTokens <= targetTokens) {
+            optimized.push({
+                ...file,
+                content: file.content,
+                truncated: false
+            });
+            currentTokens += fileTokens;
+        } else {
+            // Intelligent truncation
+            const remainingTokens = targetTokens - currentTokens;
+            if (remainingTokens > 100) { // Only include if meaningful space left
+                const truncatedContent = this.intelligentTruncate(file.content, remainingTokens);
+                optimized.push({
+                    ...file,
+                    content: truncatedContent,
+                    truncated: true
+                });
+                currentTokens += this.estimateTokenCount(truncatedContent);
+            }
+            break; // Stop adding files once we're near limit
+        }
+    }
+
+    return { files: optimized, totalTokens: currentTokens };
+};
+
+EnhancedMainframeAnalyzer.prototype.intelligentTruncate = function(content, targetTokens) {
+    const targetChars = targetTokens * this.averageCharsPerToken;
+    const lines = content.split('\n');
+    
+    // Prioritize important lines
+    const prioritizedLines = {
+        critical: [],
+        important: [],
+        regular: []
+    };
+
+    lines.forEach(line => {
+        const upperLine = line.toUpperCase().trim();
+        
+        if (upperLine.includes('COPY ') || 
+            upperLine.includes('CALL ') || 
+            upperLine.includes('EXEC ') ||
+            upperLine.match(/^\s*\d{2}\s+[A-Z]/) || 
+            upperLine.includes('PROCEDURE DIVISION') ||
+            upperLine.includes('DATA DIVISION')) {
+            prioritizedLines.critical.push(line);
+        }
+        else if (upperLine.includes('WORKING-STORAGE') ||
+                 upperLine.includes('LINKAGE') ||
+                 upperLine.includes('//') || 
+                 upperLine.includes('IF ') ||
+                 upperLine.includes('PERFORM ')) {
+            prioritizedLines.important.push(line);
+        }
+        else {
+            prioritizedLines.regular.push(line);
+        }
+    });
+
+    // Build optimized content
+    let result = prioritizedLines.critical.join('\n');
+    let remainingChars = targetChars - result.length;
+
+    // Add important lines if space allows
+    for (const line of prioritizedLines.important) {
+        if (result.length + line.length + 1 < remainingChars * 0.8) {
+            result += '\n' + line;
+        } else break;
+    }
+
+    // Fill remaining space with regular content
+    remainingChars = targetChars - result.length;
+    for (const line of prioritizedLines.regular) {
+        if (result.length + line.length + 1 < remainingChars) {
+            result += '\n' + line;
+        } else break;
+    }
+
+    return result;
+};
+
+EnhancedMainframeAnalyzer.prototype.detectComponentType = function(componentName, files) {
+    const mainFile = files.find(f => 
+        f.name.toUpperCase().includes(componentName.toUpperCase())
+    );
+    
+    if (mainFile) {
+        return mainFile.type;
+    }
+    
+    // Check if it's a field in a copybook
+    const copybookFile = files.find(f => f.type === 'Copybook');
+    if (copybookFile) {
+        const fieldPattern = new RegExp(`^\\s*\\d{2}\\s+${componentName}`, 'im');
+        if (fieldPattern.test(copybookFile.content)) {
+            return 'Field';
+        }
+    }
+    
+    return 'Component';
+};
+
+// OPTIMIZED PROMPT - FOCUSED AND CONCISE
+EnhancedMainframeAnalyzer.prototype.buildFocusedPrompt = function(componentName, files) {
+    return `ANALYZE COMPONENT: ${componentName}
+
+FILES:
+${files.map(f => `=== ${f.name} (${f.type}) ===\n${f.content}`).join('\n')}
+
+REQUIRED ANALYSIS:
+
+**1. FIELD FLOW TRACKING**
+For each field found:
+- INPUT: How field gets data (file/screen/calculation)
+- PROCESSING: How field is transformed/used
+- OUTPUT: Where field data goes
+- UNUSED: Fields defined but never used
+
+**2. BUSINESS RULES**  
+- Validation logic (IF statements, conditions)
+- Calculation rules (COMPUTE, ADD, etc.)
+- Decision points (EVALUATE, WHEN)
+
+**3. FIELD CATEGORIES**
+List fields under each category:
+- INPUT_FIELDS: [field1, field2, ...]
+- DERIVED_FIELDS: [field1, field2, ...]  
+- OUTPUT_FIELDS: [field1, field2, ...]
+- UNUSED_FIELDS: [field1, field2, ...]
+
+**4. PROGRAM FLOW** (if program)
+- Main processing steps
+- Called programs/modules
+- File operations
+
+FORMAT: Use ** headers, be specific, include field names and line references where possible.`;
+};
+
+// === API COMMUNICATION ===
+EnhancedMainframeAnalyzer.prototype.callvLLMAPI = async function(prompt) {
+    const response = await fetch(`${this.vllmEndpoint}/generate`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            prompt: prompt,
+            max_tokens: Math.floor(this.maxTokens * 0.6),
+            temperature: 0.3,
+            top_p: 0.95,
+            stop: ["Human:", "Assistant:"],
+            stream: false
+        }),
+        signal: AbortSignal.timeout(60000)
+    });
+
+    if (!response.ok) {
+        throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    
+    if (data.text) {
+        return data.text.trim();
+    } else if (data.choices && data.choices[0]) {
+        return data.choices[0].text.trim();
+    } else {
+        throw new Error('Invalid API response format');
+    }
+};
+
+EnhancedMainframeAnalyzer.prototype.calculateQualityScore = function(analysisText) {
+    let score = 0;
+    
+    // Structure score
+    const hasHeaders = analysisText.includes('**');
+    score += hasHeaders ? 30 : 0;
+    
+    // Content depth score
+    const analysisLength = analysisText.length;
+    score += Math.min(analysisLength / 1000, 1) * 40;
+    
+    // Field categories score
+    const hasFieldCategories = analysisText.includes('INPUT_FIELDS:') || 
+                              analysisText.includes('DERIVED_FIELDS:');
+    score += hasFieldCategories ? 30 : 0;
+    
+    return Math.min(Math.round(score / 10), 10);
+};
+
+EnhancedMainframeAnalyzer.prototype.assessCompleteness = function(analysisText) {
+    const checkpoints = {
+        'Field Flow': analysisText.includes('FIELD FLOW') || analysisText.includes('INPUT:'),
+        'Business Rules': analysisText.includes('BUSINESS RULES') || analysisText.includes('VALIDATION'),
+        'Field Categories': analysisText.includes('INPUT_FIELDS:') || analysisText.includes('DERIVED_FIELDS:'),
+        'Program Flow': analysisText.includes('PROGRAM FLOW') || analysisText.includes('PROCESSING'),
+        'Detailed Analysis': analysisText.length > 500
+    };
+    
+    const completed = Object.values(checkpoints).filter(Boolean).length;
+    const total = Object.keys(checkpoints).length;
+    
+    return {
+        score: Math.round((completed / total) * 100),
+        checkpoints: checkpoints,
+        completed: completed,
+        total: total
+    };
+};
+
+// === DISPLAY METHODS ===
+EnhancedMainframeAnalyzer.prototype.displayAnalysisResults = function(componentName, results) {
+    // Update main analysis tab
+    this.displayMainAnalysis(componentName, results);
+    
+    // Update field matrix tab
+    this.displayFieldMatrix(componentName, results);
+    
+    // Update usage patterns tab
+    this.displayUsagePatterns(componentName, results);
+    
+    // Switch to analysis tab
+    this.switchTab({ target: { dataset: { tab: 'lifecycle' } } });
+};
+
+EnhancedMainframeAnalyzer.prototype.displayMainAnalysis = function(componentName, results) {
+    const container = document.getElementById('lifecycleContent');
+    
+    const html = `
+        <h3>🔄 Analysis Results: ${componentName}</h3>
+        <p style="margin-bottom: 20px;">
+            Component type: <strong>${results.componentType}</strong> • 
+            Files analyzed: <strong>${results.filesAnalyzed.length}</strong> • 
+            Completed: <strong>${new Date(results.timestamp).toLocaleString()}</strong>
+        </p>
+        
+        <!-- Quality Metrics -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; margin-bottom: 25px;">
+            <div style="background: rgba(76, 175, 80, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #4CAF50;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${results.qualityScore}/10</div>
+                <div style="font-size: 11px;">Quality Score</div>
+            </div>
+            <div style="background: rgba(33, 150, 243, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #2196F3;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${results.completeness.score}%</div>
+                <div style="font-size: 11px;">Completeness</div>
+            </div>
+            <div style="background: rgba(255, 152, 0, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #FF9800;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${results.filesAnalyzed.length}</div>
+                <div style="font-size: 11px;">Files Analyzed</div>
+            </div>
+        </div>
+
+        <!-- Analysis Results -->
+        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #FFD700;">
+            <h4 style="color: #FFD700; margin-bottom: 15px;">🔍 Analysis Results</h4>
+            <div style="background: rgba(0, 0, 0, 0.2); padding: 20px; border-radius: 8px; font-family: monospace; font-size: 13px; line-height: 1.6; max-height: 600px; overflow-y: auto;">
+                ${this.formatAnalysisText(results.analysis)}
+            </div>
+        </div>
+    `;
+    
+    container.innerHTML = html;
+};
+
+EnhancedMainframeAnalyzer.prototype.displayFieldMatrix = function(componentName, results) {
+    const container = document.getElementById('fieldMatrixContent');
+    const fieldInfo = this.extractFieldInformation(results.analysis);
+    
+    let html = `
+        <h3>📋 Field Matrix: ${componentName}</h3>
+        <p style="margin-bottom: 20px;">Field-level flow tracking and categorization.</p>
+    `;
+    
+    if (fieldInfo.categories && Object.keys(fieldInfo.categories).some(cat => fieldInfo.categories[cat].length > 0)) {
+        html += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">';
+        
+        Object.keys(fieldInfo.categories).forEach(category => {
+            const fields = fieldInfo.categories[category];
+            if (fields.length > 0) {
+                const color = this.getCategoryColor(category);
+                html += `
+                    <div style="background: rgba(255, 255, 255, 0.05); padding: 15px; border-radius: 8px; border-left: 4px solid ${color};">
+                        <h4 style="color: ${color}; margin-bottom: 10px;">${this.formatCategoryName(category)}</h4>
+                        <div style="font-family: monospace; font-size: 12px;">
+                            ${fields.map(field => `<div style="margin: 5px 0; padding: 5px; background: rgba(0,0,0,0.2); border-radius: 3px;">• ${field}</div>`).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+        });
+        
+        html += '</div>';
+    } else {
+        html += `
+            <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                <p style="text-align: center; opacity: 0.8;">No structured field information found. Check the main analysis tab for details.</p>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+};
+
+EnhancedMainframeAnalyzer.prototype.displayUsagePatterns = function(componentName, results) {
+    const container = document.getElementById('usageContent');
+    const usageStats = this.extractUsageStatistics(results.analysis, results.componentType);
+    
+    let html = `
+        <h3>📈 Usage Patterns: ${componentName}</h3>
+        <p style="margin-bottom: 20px;">Usage pattern analysis for ${results.componentType}.</p>
+    `;
+    
+    if (usageStats.length > 0) {
+        html += `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px;">
+                ${usageStats.map(stat => `
+                    <div style="background: rgba(255, 255, 255, 0.05); padding: 15px; border-radius: 8px; border-left: 4px solid ${stat.color};">
+                        <div style="font-size: 1.2rem; font-weight: bold; color: #FFD700; margin-bottom: 5px;">
+                            ${stat.value}
+                        </div>
+                        <div style="font-size: 12px; opacity: 0.8;">
+                            ${stat.label}
+                        </div>
+                        <div style="font-size: 10px; margin-top: 5px; opacity: 0.6;">
+                            ${stat.description}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    html += `
+        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+            <h4 style="color: #FFD700; margin-bottom: 15px;">📊 Usage Patterns</h4>
+            <div style="background: rgba(0, 0, 0, 0.2); padding: 20px; border-radius: 8px;">
+                ${this.generateUsagePatternDisplay(results.analysis, results.componentType)}
+            </div>
+        </div>
+    `;
+
+    container.innerHTML = html;
+};
+
+// === UTILITY HELPER METHODS ===
+EnhancedMainframeAnalyzer.prototype.formatAnalysisText = function(text) {
+    return text
+        .replace(/\*\*([^*]+)\*\*/g, '<strong style="color: #FFD700;">$1</strong>')
+        .replace(/\n/g, '<br>')
+        .replace(/^- /gm, '• ');
+};
+
+EnhancedMainframeAnalyzer.prototype.extractFieldInformation = function(analysisText) {
+    const fieldInfo = { categories: {} };
+    
+    // Look for field categories in the analysis
+    const categoryPatterns = {
+        'INPUT_FIELDS': /INPUT_FIELDS:\s*\[(.*?)\]/s,
+        'DERIVED_FIELDS': /DERIVED_FIELDS:\s*\[(.*?)\]/s,
+        'OUTPUT_FIELDS': /OUTPUT_FIELDS:\s*\[(.*?)\]/s,
+        'UNUSED_FIELDS': /UNUSED_FIELDS:\s*\[(.*?)\]/s
+    };
+
+    Object.keys(categoryPatterns).forEach(category => {
+        const match = analysisText.match(categoryPatterns[category]);
+        if (match) {
+            const fieldsStr = match[1];
+            const fields = fieldsStr.split(',')
+                .map(f => f.trim().replace(/['"]/g, ''))
+                .filter(f => f && f !== '...' && f !== 'none');
+            fieldInfo.categories[category] = fields;
+        } else {
+            fieldInfo.categories[category] = [];
+        }
+    });
+
+    return fieldInfo;
+};
+
+EnhancedMainframeAnalyzer.prototype.getCategoryColor = function(category) {
+    const colors = {
+        'INPUT_FIELDS': '#4CAF50',
+        'DERIVED_FIELDS': '#2196F3',
+        'OUTPUT_FIELDS': '#FF9800',
+        'UNUSED_FIELDS': '#f44336'
+    };
+    return colors[category] || '#FFD700';
+};
+
+EnhancedMainframeAnalyzer.prototype.formatCategoryName = function(category) {
+    return category.replace(/_/g, ' ').toLowerCase()
+        .replace(/\b\w/g, l => l.toUpperCase());
+};
+
+EnhancedMainframeAnalyzer.prototype.extractUsageStatistics = function(analysisText, componentType) {
+    const stats = [];
+    
+    switch (componentType) {
+        case 'Copybook':
+            stats.push(
+                { label: 'Fields Defined', value: this.countMatches(analysisText, /\d{2}\s+[A-Z]/g), color: '#4CAF50', description: 'Total field definitions' },
+                { label: 'Programs Using', value: this.countMatches(analysisText, /PROGRAM|COPY/gi), color: '#2196F3', description: 'Programs referencing' },
+                { label: 'Usage Frequency', value: 'Active', color: '#FF9800', description: 'Access pattern analysis' }
+            );
+            break;
+        case 'COBOL Program':
+            stats.push(
+                { label: 'Call Operations', value: this.countMatches(analysisText, /CALL/gi), color: '#4CAF50', description: 'External program calls' },
+                { label: 'File Operations', value: this.countMatches(analysisText, /READ|WRITE|OPEN|CLOSE/gi), color: '#2196F3', description: 'File I/O operations' },
+                { label: 'Business Rules', value: this.countMatches(analysisText, /IF|WHEN|EVALUATE/gi), color: '#FF9800', description: 'Decision points' }
+            );
+            break;
+        case 'Field':
+            stats.push(
+                { label: 'Read Operations', value: this.countMatches(analysisText, /READ|MOVE.*TO/gi), color: '#4CAF50', description: 'Field access count' },
+                { label: 'Write Operations', value: this.countMatches(analysisText, /MOVE.*TO|COMPUTE/gi), color: '#2196F3', description: 'Field modification count' },
+                { label: 'Validation Rules', value: this.countMatches(analysisText, /VALIDATE|CHECK|IF/gi), color: '#FF9800', description: 'Data validation points' }
+            );
+            break;
+    }
+    
+    return stats;
+};
+
+EnhancedMainframeAnalyzer.prototype.countMatches = function(text, regex) {
+    const matches = text.match(regex);
+    return matches ? matches.length : 0;
+};
+
+EnhancedMainframeAnalyzer.prototype.generateUsagePatternDisplay = function(analysisText, componentType) {
+    const patterns = this.extractUsagePatterns(analysisText, componentType);
+    
+    if (patterns.length === 0) {
+        return '<p style="text-align: center; opacity: 0.7;">Usage patterns extracted from analysis</p>';
+    }
+    
+    return patterns.map(pattern => `
+        <div style="margin-bottom: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 5px; border-left: 3px solid ${pattern.color};">
+            <strong style="color: ${pattern.color};">${pattern.type}:</strong> ${pattern.description}
+            <div style="font-size: 11px; opacity: 0.8; margin-top: 5px;">${pattern.details}</div>
+        </div>
+    `).join('');
+};
+
+EnhancedMainframeAnalyzer.prototype.extractUsagePatterns = function(text, componentType) {
+    const patterns = [];
+    
+    if (text.toLowerCase().includes('read') || text.includes('INPUT')) {
+        patterns.push({
+            type: 'Read Pattern',
+            color: '#4CAF50',
+            description: 'Data access and retrieval operations',
+            details: 'Input operations detected in analysis'
+        });
+    }
+    
+    if (text.toLowerCase().includes('write') || text.includes('MOVE') || text.includes('OUTPUT')) {
+        patterns.push({
+            type: 'Write Pattern',
+            color: '#2196F3',
+            description: 'Data modification and update operations',
+            details: 'Output operations detected in analysis'
+        });
+    }
+    
+    if (text.includes('CALL') || text.toLowerCase().includes('program')) {
+        patterns.push({
+            type: 'Integration Pattern',
+            color: '#FF9800',
+            description: 'External program and system integration',
+            details: 'Cross-component integration detected'
+        });
+    }
+    
+    if (text.includes('UNUSED') || text.includes('unused')) {
+        patterns.push({
+            type: 'Unused Elements',
+            color: '#f44336',
+            description: 'Unused fields or components identified',
+            details: 'Cleanup opportunities detected'
+        });
+    }
+    
+    return patterns;
+};
+
+// === BULK ANALYSIS ===
+EnhancedMainframeAnalyzer.prototype.bulkAnalyze = async function() {
+    if (this.uploadedFiles.length === 0) {
+        this.showError('No files uploaded for bulk analysis');
+        return;
+    }
+
+    this.showLoading();
+    this.updateLoadingStatus('🔄 Starting bulk analysis...');
+
+    const components = this.componentSuggestions.slice(0, 5); // Limit to 5 components
+    let completed = 0;
+
+    try {
+        for (const component of components) {
+            this.updateLoadingStatus(`Analyzing ${component.name} (${completed + 1}/${components.length})...`);
+            this.updateProgress((completed / components.length) * 100);
+            
+            try {
+                const results = await this.runFocusedAnalysis(component.name);
+                this.analysisResults[component.name] = results;
+                completed++;
+                
+                await this.sleep(2000); // Brief pause between analyses
+            } catch (error) {
+                console.warn(`Failed to analyze ${component.name}:`, error);
+            }
+        }
+
+        this.hideLoading();
+        this.saveToStorage();
+        this.showSuccess(`✨ Bulk analysis complete! ${completed}/${components.length} components analyzed`);
+
+    } catch (error) {
+        this.hideLoading();
+        this.showError(`Bulk analysis failed: ${error.message}`);
+    }
+};
+
+// === EXPORT FUNCTIONALITY ===
+EnhancedMainframeAnalyzer.prototype.exportResults = function() {
+    if (Object.keys(this.analysisResults).length === 0) {
+        this.showError('No analysis results to export');
+        return;
+    }
+
+    try {
+        const exportData = {
+            timestamp: new Date().toISOString(),
+            totalComponents: Object.keys(this.analysisResults).length,
+            totalFiles: this.uploadedFiles.length,
+            analysisResults: this.analysisResults,
+            fileInfo: this.uploadedFiles.map(f => ({
+                name: f.name,
+                type: f.type,
+                size: f.size,
+                uploadDate: f.uploadDate
+            })),
+            systemInfo: {
+                vllmEndpoint: this.vllmEndpoint,
+                maxTokens: this.maxTokens,
+                version: '2.0.0-focused'
+            }
+        };
+
+        const dataStr = JSON.stringify(exportData, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(dataBlob);
+        link.download = `mainframe-analysis-${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        this.showSuccess('📤 Analysis results exported successfully!');
+        
+    } catch (error) {
+        this.showError(`Export failed: ${error.message}`);
+    }
+};
+
+// === ENHANCED CHAT FUNCTIONALITY ===
+EnhancedMainframeAnalyzer.prototype.initializeChat = function() {
+    // Update chat panel HTML
+    const chatPanel = document.querySelector('.chat-panel');
+    chatPanel.innerHTML = `
+        <div style="background: rgba(76, 175, 80, 0.2); border-radius: 10px; padding: 15px; margin-bottom: 15px; border-left: 4px solid #4CAF50;">
+            <h3 style="margin-bottom: 8px; color: #FFD700;">💬 Analysis Chat</h3>
+            <p style="font-size: 12px; opacity: 0.8;">Ask detailed questions about your analysis</p>
+        </div>
+
+        <div style="margin-bottom: 15px;">
+            <div style="font-size: 11px; margin-bottom: 8px; opacity: 0.7;">Quick questions:</div>
+            <button class="chat-suggestion-btn" data-question="What fields are unused in this component?">Unused fields?</button>
+            <button class="chat-suggestion-btn" data-question="Show me the complete field flow">Field flow?</button>
+            <button class="chat-suggestion-btn" data-question="What business rules are implemented?">Business rules?</button>
+            <button class="chat-suggestion-btn" data-question="Which fields come from input files?">Input fields?</button>
+        </div>
+
+        <div id="chatMessages" style="flex: 1; overflow-y: auto; margin-bottom: 15px; max-height: 400px; padding-right: 10px;">
+            <div style="margin-bottom: 15px; padding: 12px; border-radius: 10px; max-width: 85%; background: rgba(76, 175, 80, 0.3); border-left: 4px solid #4CAF50;">
+                <div style="font-weight: bold; font-size: 12px; opacity: 0.8; margin-bottom: 5px;">Analysis Assistant</div>
+                <div style="font-size: 14px; line-height: 1.5;">
+                    👋 Welcome! I can help analyze your mainframe components.
+                    <br><br>
+                    Once you analyze a component, I can answer questions about:
+                    <br>• Field flows and transformations
+                    <br>• Business rules and validations
+                    <br>• Unused or static fields
+                    <br>• Input/output patterns
+                    <br><br>
+                    Upload files and analyze a component to get started!
+                </div>
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 10px; align-items: flex-start;">
+            <textarea 
+                id="chatInput" 
+                style="flex: 1; padding: 12px; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 8px; background: rgba(255, 255, 255, 0.1); color: white; font-size: 14px; resize: vertical; min-height: 40px; max-height: 100px; font-family: inherit;"
+                placeholder="Ask about field flows, business rules, unused fields..."
+                disabled
+                rows="2"
+            ></textarea>
+            <button id="chatSendBtn" style="background: linear-gradient(45deg, #4CAF50, #45a049); color: white; border: none; padding: 12px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.3s ease; white-space: nowrap; min-width: 80px;" disabled>
+                Send
+            </button>
+        </div>
+
+        <div style="font-size: 10px; opacity: 0.6; margin-top: 8px; text-align: center;">
+            Chat enabled after component analysis
+        </div>
+    `;
+
+    // Add chat styles
+    const chatStyles = document.createElement('style');
+    chatStyles.textContent = `
+        .chat-suggestion-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 15px;
+            font-size: 11px;
+            cursor: pointer;
+            margin: 3px;
+            transition: all 0.3s ease;
+            display: inline-block;
+        }
+
+        .chat-suggestion-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-1px);
+        }
+
+        #chatMessages::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        #chatMessages::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+        }
+
+        #chatMessages::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 3px;
+        }
+
+        #chatInput:focus {
+            outline: none;
+            border-color: #FFD700;
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
+        }
+
+        #chatInput::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        #chatSendBtn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+        }
+
+        #chatSendBtn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+    `;
+    document.head.appendChild(chatStyles);
+
+    // Initialize chat event listeners
+    this.initializeChatEventListeners();
+};
+
+EnhancedMainframeAnalyzer.prototype.initializeChatEventListeners = function() {
+    const chatSendBtn = document.getElementById('chatSendBtn');
+    const chatInput = document.getElementById('chatInput');
+    
+    if (chatSendBtn && chatInput) {
+        chatSendBtn.addEventListener('click', () => {
+            console.log('Chat send button clicked');
+            this.sendChatMessage();
+        });
+        
+        chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                console.log('Enter pressed in chat');
+                this.sendChatMessage();
+            }
+        });
+    }
+
+    // Chat suggestions
+    document.querySelectorAll('.chat-suggestion-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const question = e.target.dataset.question;
+            console.log('Suggestion clicked:', question);
+            if (chatInput) {
+                chatInput.value = question;
+                this.sendChatMessage();
+            }
+        });
+    });
+};
+
+EnhancedMainframeAnalyzer.prototype.sendChatMessage = async function() {
+    const input = document.getElementById('chatInput');
+    const sendBtn = document.getElementById('chatSendBtn');
+    const message = input.value.trim();
+    
+    console.log('Send chat message called:', message);
+    
+    if (!message) {
+        this.showError('Please enter a message');
+        return;
+    }
+    
+    if (!this.currentAnalyzedComponent) {
+        this.showError('Please analyze a component first');
+        return;
+    }
+    
+    input.disabled = true;
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Processing...';
+    
+    this.addChatMessage('user', message);
+    input.value = '';
+    
+    this.showChatTyping();
+    
+    try {
+        console.log('Processing chat query...');
+        const response = await this.processChatQuery(message);
+        console.log('Got response:', response);
+        
+        this.hideChatTyping();
+        this.addChatMessage('assistant', response);
+        
+    } catch (error) {
+        console.error('Chat error:', error);
+        this.hideChatTyping();
+        this.addChatMessage('assistant', `I apologize, but I encountered an error: ${error.message}. Please try rephrasing your question.`);
+    } finally {
+        input.disabled = false;
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Send';
+        input.focus();
+    }
+};
+
+EnhancedMainframeAnalyzer.prototype.processChatQuery = async function(question) {
+    const analysisData = this.analysisResults[this.currentAnalyzedComponent];
+    
+    // OPTIMIZED CHAT PROMPT
+    const chatPrompt = `ANALYSIS CHAT: ${this.currentAnalyzedComponent}
+
+QUESTION: "${question}"
+
+ANALYSIS RESULTS:
+${analysisData.analysis}
+
+INSTRUCTIONS:
+Answer the user's question based on the analysis results above. Be specific and reference exact field names, programs, or line numbers when available. If the information isn't in the analysis, say so clearly.
+
+Focus on:
+- Field flows and transformations
+- Business rules and validations
+- Unused or static fields  
+- Input/output patterns
+
+Keep responses practical and use examples from the actual analysis.`;
+
+    return await this.callvLLMAPI(chatPrompt);
+};
+
+EnhancedMainframeAnalyzer.prototype.addChatMessage = function(sender, content) {
+    const messagesContainer = document.getElementById('chatMessages');
+    if (!messagesContainer) {
+        console.error('Chat messages container not found');
+        return;
+    }
+    
+    const messageDiv = document.createElement('div');
+    messageDiv.style.cssText = `
+        margin-bottom: 15px; 
+        padding: 12px; 
+        border-radius: 10px; 
+        max-width: 85%; 
+        word-wrap: break-word; 
+        line-height: 1.5;
+        animation: fadeInUp 0.3s ease;
+        ${sender === 'user' ? 
+            'background: rgba(33, 150, 243, 0.3); border-left: 4px solid #2196F3; margin-left: auto; text-align: right;' : 
+            'background: rgba(76, 175, 80, 0.3); border-left: 4px solid #4CAF50;'
+        }
+    `;
+    
+    messageDiv.innerHTML = `
+        <div style="font-weight: bold; font-size: 12px; opacity: 0.8; margin-bottom: 5px;">
+            ${sender === 'user' ? 'You' : 'Analysis Assistant'}
+        </div>
+        <div style="font-size: 14px; line-height: 1.5;">
+            ${this.formatChatMessage(content)}
+        </div>
+    `;
+    
+    messagesContainer.appendChild(messageDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+};
+
+EnhancedMainframeAnalyzer.prototype.formatChatMessage = function(content) {
+    return content
+        .replace(/\n/g, '<br>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong style="color: #FFD700;">$1</strong>')
+        .replace(/`([^`]+)`/g, '<code style="background: rgba(0,0,0,0.3); padding: 2px 4px; border-radius: 3px; color: #4CAF50;">$1</code>')
+        .replace(/^- /gm, '• ');
+};
+
+EnhancedMainframeAnalyzer.prototype.showChatTyping = function() {
+    const messagesContainer = document.getElementById('chatMessages');
+    if (!messagesContainer) return;
+    
+    this.hideChatTyping();
+    
+    const typingDiv = document.createElement('div');
+    typingDiv.id = 'typingIndicator';
+    typingDiv.style.cssText = `
+        margin-bottom: 15px; 
+        padding: 12px; 
+        border-radius: 10px; 
+        max-width: 85%; 
+        background: rgba(76, 175, 80, 0.3); 
+        border-left: 4px solid #4CAF50;
+    `;
+    
+    typingDiv.innerHTML = `
+        <div style="font-weight: bold; font-size: 12px; opacity: 0.8; margin-bottom: 5px;">Analysis Assistant</div>
+        <div style="font-size: 14px; line-height: 1.5;">
+            <span style="opacity: 0.7;">Analyzing your question...</span>
+            <span style="animation: blink 1s infinite; margin-left: 5px;">●●●</span>
+        </div>
+    `;
+    
+    messagesContainer.appendChild(typingDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+};
+
+EnhancedMainframeAnalyzer.prototype.hideChatTyping = function() {
+    const typingIndicator = document.getElementById('typingIndicator');
+    if (typingIndicator && typingIndicator.parentNode) {
+        typingIndicator.parentNode.removeChild(typingIndicator);
+    }
+};
+
+EnhancedMainframeAnalyzer.prototype.enableChat = function() {
+    const chatInput = document.getElementById('chatInput');
+    const chatSendBtn = document.getElementById('chatSendBtn');
+    
+    if (chatInput && chatSendBtn) {
+        chatInput.disabled = false;
+        chatSendBtn.disabled = false;
+        
+        this.addChatMessage('assistant', 
+            `🎯 **Analysis complete for ${this.currentAnalyzedComponent}!**
+            
+I can now answer detailed questions about:
+• Field flows and transformations
+• Business rules and validation logic  
+• Unused or static fields
+• Input/output patterns
+• Program logic and structure
+
+**Try asking:**
+• "What fields are unused?"
+• "Show me the field flow"
+• "What business rules are implemented?"
+• "Which fields come from input files?"`
+        );
+    }
+};
+
+// Initialize chat when document is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+        if (typeof analyzer !== 'undefined') {
+            analyzer.initializeChat();
+        }
+    });
+} else {
+    // Document already loaded
+    if (typeof analyzer !== 'undefined') {
+        analyzer.initializeChat();
+    }
+}
+
+// Add CSS animation for chat messages
+const chatAnimationStyle = document.createElement('style');
+chatAnimationStyle.textContent = `
+    @keyframes fadeInUp {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    @keyframes blink {
+        0%, 50% { opacity: 1; }
+        51%, 100% { opacity: 0; }
+    }
+`;
+document.head.appendChild(chatAnimationStyle);
+
+console.log('🚀 Enhanced Mainframe Analyzer - Part 2 Ready!');
+console.log('✅ Features active: Analysis engine, chat functionality, field matrix, usage patterns');
+console.log('⏳ Coming in Part 3: Enhanced dependency mapping with chunking');
+
+// Part 3: Enhanced Dependency Mapping with Chunking
+// This extends the analyzer from Parts 1 & 2
+
+// === ENHANCED DEPENDENCY ANALYSIS ===
+EnhancedMainframeAnalyzer.prototype.initializeDependencyAnalysis = function() {
+    // Update dependencies tab content
+    const dependenciesContent = document.getElementById('dependenciesContent');
+    dependenciesContent.innerHTML = `
+        <h3>🔗 Enhanced Dependency Analysis</h3>
+        <p style="margin-bottom: 20px;">Complete dependency mapping with intelligent chunking and availability checking.</p>
+        
+        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; text-align: center;">
+            <button class="action-btn secondary-btn" id="checkDependenciesBtn" style="width: auto; padding: 12px 24px; margin: 0 auto; display: block;">
+                🔍 Analyze Dependencies with Chunking
+            </button>
+            <p style="font-size: 12px; margin-top: 15px; opacity: 0.8;">
+                Uses intelligent chunking to scan all uploaded files for comprehensive dependency mapping
+            </p>
+        </div>
+    `;
+    
+    // Add event listener for dependency analysis
+    const checkBtn = document.getElementById('checkDependenciesBtn');
+    if (checkBtn) {
+        checkBtn.addEventListener('click', async () => {
+            if (!this.currentAnalyzedComponent) {
+                this.showError('Please analyze a component first');
+                return;
+            }
+            
+            try {
+                checkBtn.disabled = true;
+                checkBtn.textContent = '⏳ Analyzing Dependencies...';
+                
+                const dependencyReport = await this.performEnhancedDependencyAnalysis(this.currentAnalyzedComponent);
+                
+                // Store the results
+                if (!this.analysisResults[this.currentAnalyzedComponent]) {
+                    this.analysisResults[this.currentAnalyzedComponent] = {};
+                }
+                this.analysisResults[this.currentAnalyzedComponent].dependencyReport = dependencyReport;
+                
+                this.displayDependencyResults(dependenciesContent, this.currentAnalyzedComponent, dependencyReport);
+                this.saveToStorage();
+                
+            } catch (error) {
+                console.error('Dependency analysis failed:', error);
+                checkBtn.disabled = false;
+                checkBtn.textContent = '🔍 Analyze Dependencies with Chunking';
+                this.showError(`Dependency analysis failed: ${error.message}`);
+            }
+        });
+    }
+};
+
+EnhancedMainframeAnalyzer.prototype.performEnhancedDependencyAnalysis = async function(componentName) {
+    this.showLoading();
+    this.updateLoadingStatus('🔍 Starting enhanced dependency analysis with chunking...');
+    
+    try {
+        // Stage 1: Create dependency-optimized chunks
+        this.updateLoadingStatus('📊 Stage 1: Creating dependency-aware chunks...');
+        this.updateProgress(20);
+        
+        const dependencyChunks = this.createDependencyScanChunks();
+        
+        // Stage 2: Scan all chunks for dependencies
+        this.updateLoadingStatus('🔄 Stage 2: Scanning chunks for dependencies...');
+        this.updateProgress(40);
+        
+        const allDependencies = await this.scanAllDependenciesWithChunking(dependencyChunks);
+        
+        // Stage 3: Analyze component-specific dependencies
+        this.updateLoadingStatus('🎯 Stage 3: Analyzing component-specific dependencies...');
+        this.updateProgress(70);
+        
+        const componentDeps = await this.analyzeComponentSpecificDependencies(componentName, allDependencies);
+        
+        // Stage 4: Generate comprehensive report
+        this.updateLoadingStatus('📋 Stage 4: Generating dependency report...');
+        this.updateProgress(90);
+        
+        const dependencyReport = this.generateEnhancedDependencyReport(componentName, componentDeps);
+        
+        this.updateProgress(100);
+        this.hideLoading();
+        this.showSuccess(`✅ Enhanced dependency analysis complete for ${componentName}!`);
+        
+        return dependencyReport;
+        
+    } catch (error) {
+        this.hideLoading();
+        this.showError(`Enhanced dependency analysis failed: ${error.message}`);
+        throw error;
+    }
+};
+
+EnhancedMainframeAnalyzer.prototype.createDependencyScanChunks = function() {
+    const chunks = [];
+    const targetTokensPerChunk = Math.floor(this.maxTokens * 0.4); // Conservative for dependency scanning
+    
+    console.log(`Creating dependency chunks with target ${targetTokensPerChunk} tokens each`);
+    
+    // Prioritize files by type for dependency scanning
+    const cobolPrograms = this.uploadedFiles.filter(f => f.type === 'COBOL Program');
+    const copybooks = this.uploadedFiles.filter(f => f.type === 'Copybook');
+    const jclFiles = this.uploadedFiles.filter(f => f.type.includes('JCL'));
+    const otherFiles = this.uploadedFiles.filter(f => 
+        !cobolPrograms.includes(f) && !copybooks.includes(f) && !jclFiles.includes(f));
+    
+    // Process files in priority order
+    this.createDependencyAwareChunks([...cobolPrograms, ...copybooks, ...jclFiles, ...otherFiles], 
+        targetTokensPerChunk, chunks);
+    
+    console.log(`Created ${chunks.length} dependency-aware chunks`);
+    return chunks;
+};
+
+EnhancedMainframeAnalyzer.prototype.createDependencyAwareChunks = function(files, targetTokens, chunks) {
+    let currentChunk = [];
+    let currentTokens = 0;
+    let overlapContent = '';
+    
+    files.forEach(file => {
+        const fileTokens = this.estimateTokenCount(file.content);
+        
+        if (currentTokens + fileTokens > targetTokens && currentChunk.length > 0) {
+            chunks.push({
+                files: [...currentChunk],
+                totalTokens: currentTokens,
+                overlapContext: overlapContent,
+                chunkIndex: chunks.length,
+                scanType: 'dependency'
+            });
+            
+            overlapContent = this.createDependencyOverlap(currentChunk);
+            currentChunk = [];
+            currentTokens = this.estimateTokenCount(overlapContent);
+        }
+        
+        currentChunk.push(file);
+        currentTokens += fileTokens;
+    });
+    
+    if (currentChunk.length > 0) {
+        chunks.push({
+            files: currentChunk,
+            totalTokens: currentTokens,
+            overlapContext: overlapContent,
+            chunkIndex: chunks.length,
+            scanType: 'dependency'
+        });
+    }
+};
+
+EnhancedMainframeAnalyzer.prototype.createDependencyOverlap = function(files) {
+    let overlapContent = '';
+    
+    files.forEach(file => {
+        const lines = file.content.split('\n');
+        
+        // Extract dependency-relevant lines for overlap
+        const dependencyLines = lines.filter(line => {
+            const upper = line.toUpperCase().trim();
+            return upper.includes('COPY ') ||
+                   upper.includes('CALL ') ||
+                   upper.includes('EXEC ') ||
+                   upper.includes('//') ||
+                   upper.includes('DSN=') ||
+                   upper.includes('DD ') ||
+                   upper.includes('EXEC SQL') ||
+                   upper.includes('TABLE ') ||
+                   upper.includes('FROM ') ||
+                   upper.includes('INTO ') ||
+                   upper.includes('SELECT ') ||
+                   upper.includes('FD ') ||
+                   upper.includes('ASSIGN');
+        });
+        
+        if (dependencyLines.length > 0) {
+            overlapContent += `\n=== DEPENDENCY CONTEXT from ${file.name} ===\n`;
+            overlapContent += dependencyLines.slice(0, 20).join('\n');
+        }
+    });
+    
+    return overlapContent;
+};
+
+EnhancedMainframeAnalyzer.prototype.scanAllDependenciesWithChunking = async function(dependencyChunks) {
+    let allDependencies = {
+        copybooks: new Set(),
+        calledPrograms: new Set(),
+        callingPrograms: new Set(),
+        jclDatasets: new Set(),
+        dbTables: new Set(),
+        fileReferences: new Set()
+    };
+    
+    for (let i = 0; i < dependencyChunks.length; i++) {
+        this.updateLoadingStatus(`Processing dependency chunk ${i + 1}/${dependencyChunks.length}...`);
+        
+        const chunkDeps = await this.extractDependenciesFromChunk(dependencyChunks[i]);
+        
+        // Merge dependencies from this chunk
+        Object.keys(chunkDeps).forEach(depType => {
+            if (chunkDeps[depType] && Array.isArray(chunkDeps[depType])) {
+                chunkDeps[depType].forEach(dep => allDependencies[depType].add(dep));
+            }
+        });
+        
+        if (i < dependencyChunks.length - 1) {
+            await this.sleep(800); // Brief pause between chunks
+        }
+    }
+    
+    // Convert Sets back to Arrays
+    Object.keys(allDependencies).forEach(key => {
+        allDependencies[key] = Array.from(allDependencies[key]);
+    });
+    
+    console.log('Dependencies found:', allDependencies);
+    return allDependencies;
+};
+
+EnhancedMainframeAnalyzer.prototype.extractDependenciesFromChunk = async function(chunk) {
+    // OPTIMIZED DEPENDENCY EXTRACTION PROMPT - FOCUSED AND CONCISE
+    const prompt = `DEPENDENCY EXTRACTION - Chunk ${chunk.chunkIndex + 1}
+
+FILES FOR ANALYSIS:
+${chunk.files.map(f => `=== ${f.name} (${f.type}) ===\n${f.content}`).join('\n')}
+
+${chunk.overlapContext ? `DEPENDENCY CONTEXT:\n${chunk.overlapContext}\n` : ''}
+
+EXTRACT ALL DEPENDENCIES:
+
+**COPYBOOK DEPENDENCIES**
+- COPY statements: COPY COPYBOOK-NAME
+- Include statements and copybook references
+
+**PROGRAM CALL DEPENDENCIES**  
+- CALL statements: CALL 'PROGRAM-NAME'
+- Dynamic calls and JCL EXEC PGM= statements
+
+**JCL DATASET DEPENDENCIES**
+- DD statements: DSN=DATASET.NAME
+- Input and output file references
+
+**DATABASE TABLE DEPENDENCIES**
+- EXEC SQL statements with table names
+- SELECT, INSERT, UPDATE, DELETE operations
+
+**FILE REFERENCE DEPENDENCIES**
+- FD entries and SELECT statements
+- File assignments and OPEN/CLOSE operations
+
+RESPONSE FORMAT (exact format required):
+COPYBOOKS: name1, name2, name3
+CALLED_PROGRAMS: prog1, prog2, prog3  
+CALLING_PROGRAMS: caller1, caller2, caller3
+JCL_DATASETS: dataset1, dataset2, dataset3
+DB_TABLES: table1, table2, table3
+FILE_REFERENCES: file1, file2, file3
+
+Only include actual names found, no descriptions or explanations.`;
+
+    const response = await this.callvLLMAPI(prompt);
+    return this.parseDependencyResponse(response);
+};
+
+EnhancedMainframeAnalyzer.prototype.parseDependencyResponse = function(response) {
+    const dependencies = {
+        copybooks: [],
+        calledPrograms: [],
+        callingPrograms: [],
+        jclDatasets: [],
+        dbTables: [],
+        fileReferences: []
+    };
+
+    const lines = response.split('\n');
+    lines.forEach(line => {
+        const trimmed = line.trim();
+        
+        if (trimmed.startsWith('COPYBOOKS:')) {
+            dependencies.copybooks = this.parseCommaSeparatedList(trimmed.split(':')[1]);
+        } else if (trimmed.startsWith('CALLED_PROGRAMS:')) {
+            dependencies.calledPrograms = this.parseCommaSeparatedList(trimmed.split(':')[1]);
+        } else if (trimmed.startsWith('CALLING_PROGRAMS:')) {
+            dependencies.callingPrograms = this.parseCommaSeparatedList(trimmed.split(':')[1]);
+        } else if (trimmed.startsWith('JCL_DATASETS:')) {
+            dependencies.jclDatasets = this.parseCommaSeparatedList(trimmed.split(':')[1]);
+        } else if (trimmed.startsWith('DB_TABLES:')) {
+            dependencies.dbTables = this.parseCommaSeparatedList(trimmed.split(':')[1]);
+        } else if (trimmed.startsWith('FILE_REFERENCES:')) {
+            dependencies.fileReferences = this.parseCommaSeparatedList(trimmed.split(':')[1]);
+        }
+    });
+
+    return dependencies;
+};
+
+EnhancedMainframeAnalyzer.prototype.parseCommaSeparatedList = function(str) {
+    if (!str) return [];
+    return str.split(',')
+        .map(item => item.trim())
+        .filter(item => item && item.length > 0 && !item.toLowerCase().includes('none') && !item.toLowerCase().includes('n/a'))
+        .map(item => item.replace(/['"`]/g, ''))
+        .slice(0, 20); // Limit to reasonable number
+};
+
+EnhancedMainframeAnalyzer.prototype.analyzeComponentSpecificDependencies = async function(componentName, allDependencies) {
+    this.updateLoadingStatus('🔍 Analyzing specific dependencies for ' + componentName + '...');
+    
+    // OPTIMIZED COMPONENT-SPECIFIC DEPENDENCY PROMPT
+    const prompt = `COMPONENT DEPENDENCY ANALYSIS: ${componentName}
+
+ALL DISCOVERED DEPENDENCIES:
+Copybooks: ${allDependencies.copybooks.slice(0, 15).join(', ')}
+Called Programs: ${allDependencies.calledPrograms.slice(0, 15).join(', ')}
+Calling Programs: ${allDependencies.callingPrograms.slice(0, 15).join(', ')}
+JCL Datasets: ${allDependencies.jclDatasets.slice(0, 15).join(', ')}
+DB Tables: ${allDependencies.dbTables.slice(0, 15).join(', ')}
+File References: ${allDependencies.fileReferences.slice(0, 15).join(', ')}
+
+UPLOADED FILES:
+${this.uploadedFiles.map(f => f.name + ' (' + f.type + ')').join(', ')}
+
+ANALYZE:
+1. Which dependencies are directly related to ${componentName}?
+2. Which dependencies are present vs missing in uploaded files?
+3. What is the risk level for each missing dependency?
+
+Provide focused analysis for ${componentName} dependencies.`;
+
+    const response = await this.callvLLMAPI(prompt);
+    return this.parseComponentDependencyResponse(response, allDependencies);
+};
+
+EnhancedMainframeAnalyzer.prototype.parseComponentDependencyResponse = function(response, allDependencies) {
+    // Enhanced parsing with actual dependency data and availability checking
+    const presentDependencies = Object.values(allDependencies).flat().filter(dep => 
+        this.uploadedFiles.some(f => 
+            f.content.toUpperCase().includes(dep.toUpperCase()) || 
+            f.name.toUpperCase().includes(dep.toUpperCase())
+        )
+    );
+    
+    return {
+        directDependencies: {
+            copybooks: allDependencies.copybooks.slice(0, 10),
+            programs: allDependencies.calledPrograms.slice(0, 10),
+            files: allDependencies.fileReferences.slice(0, 10),
+            tables: allDependencies.dbTables.slice(0, 10)
+        },
+        reverseDependencies: {
+            calledByPrograms: allDependencies.callingPrograms.slice(0, 10),
+            usedInJCL: allDependencies.jclDatasets.slice(0, 10)
+        },
+        availabilityAnalysis: {
+            present: presentDependencies,
+            missing: Object.values(allDependencies).flat().filter(dep => !presentDependencies.includes(dep))
+        },
+        summary: {
+            totalDependencies: Object.values(allDependencies).flat().length,
+            presentDependencies: presentDependencies.length,
+            missingDependencies: Object.values(allDependencies).flat().length - presentDependencies.length,
+            completenessPercentage: Math.round((presentDependencies.length / Math.max(Object.values(allDependencies).flat().length, 1)) * 100)
+        }
+    };
+};
+
+EnhancedMainframeAnalyzer.prototype.generateEnhancedDependencyReport = function(componentName, componentDeps) {
+    return {
+        componentName: componentName,
+        timestamp: new Date().toISOString(),
+        analysisMethod: 'Enhanced Chunking',
+        dependencies: {
+            copybooks: componentDeps.directDependencies.copybooks,
+            calledPrograms: componentDeps.directDependencies.programs,
+            callingPrograms: componentDeps.reverseDependencies.calledByPrograms,
+            jclDatasets: componentDeps.reverseDependencies.usedInJCL,
+            fileReferences: componentDeps.directDependencies.files,
+            dbTables: componentDeps.directDependencies.tables
+        },
+        summary: componentDeps.summary,
+        availabilityAnalysis: componentDeps.availabilityAnalysis,
+        recommendations: this.generateDependencyRecommendations(componentDeps)
+    };
+};
+
+EnhancedMainframeAnalyzer.prototype.generateDependencyRecommendations = function(componentDeps) {
+    const recommendations = [];
+    
+    if (componentDeps.summary.missingDependencies > 0) {
+        recommendations.push({
+            priority: 'HIGH',
+            category: 'Missing Dependencies',
+            description: `${componentDeps.summary.missingDependencies} dependencies not found in uploaded files`,
+            action: 'Upload missing copybooks, programs, or JCL files for complete analysis'
+        });
+    }
+    
+    if (componentDeps.summary.completenessPercentage < 70) {
+        recommendations.push({
+            priority: 'MEDIUM',
+            category: 'Incomplete Analysis',
+            description: `Only ${componentDeps.summary.completenessPercentage}% of dependencies are available`,
+            action: 'Consider uploading additional related files'
+        });
+    }
+    
+    if (componentDeps.directDependencies.copybooks.length > 10) {
+        recommendations.push({
+            priority: 'LOW',
+            category: 'High Coupling',
+            description: 'Component has many copybook dependencies',
+            action: 'Review for potential refactoring opportunities'
+        });
+    }
+    
+    return recommendations;
+};
+
+EnhancedMainframeAnalyzer.prototype.displayDependencyResults = function(container, componentName, depReport) {
+    const deps = depReport.dependencies;
+    
+    let html = `
+        <h3>🔗 Enhanced Dependency Analysis: ${componentName}</h3>
+        <p style="margin-bottom: 20px;">
+            Complete dependency mapping using intelligent chunking • Completed: ${new Date(depReport.timestamp).toLocaleString()}
+        </p>
+        
+        <!-- Dependency Summary -->
+        <div style="background: rgba(76, 175, 80, 0.1); padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #4CAF50;">
+            <h4 style="color: #FFD700; margin-bottom: 15px;">📊 Dependency Summary</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px;">
+                <div style="text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${depReport.summary.totalDependencies}</div>
+                    <div style="font-size: 11px;">Total Dependencies</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #4CAF50;">${depReport.summary.presentDependencies}</div>
+                    <div style="font-size: 11px;">Present</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #f44336;">${depReport.summary.missingDependencies}</div>
+                    <div style="font-size: 11px;">Missing</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #FF9800;">${depReport.summary.completenessPercentage}%</div>
+                    <div style="font-size: 11px;">Completeness</div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Display each dependency type
+    let hasAnyDependencies = false;
+    
+    Object.keys(deps).forEach(depType => {
+        if (deps[depType] && deps[depType].length > 0) {
+            hasAnyDependencies = true;
+            const title = this.getDependencyTypeTitle(depType);
+            const icon = this.getDependencyTypeIcon(depType);
+            
+            html += `
+                <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; margin-bottom: 15px;">
+                    <h4 style="color: #FFD700; margin-bottom: 10px;">${icon} ${title}</h4>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px;">
+                        ${deps[depType].map(dep => {
+                            const isPresent = this.uploadedFiles.some(f => 
+                                f.content.toUpperCase().includes(dep.toUpperCase()) || 
+                                f.name.toUpperCase().includes(dep.toUpperCase())
+                            );
+                            const statusColor = isPresent ? '#4CAF50' : '#f44336';
+                            const statusIcon = isPresent ? '✅' : '❌';
+                            
+                            return `
+                                <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: rgba(255,255,255,0.05); border-radius: 5px; border-left: 3px solid ${statusColor};">
+                                    <span style="font-family: monospace; color: white; font-size: 13px;">${dep}</span>
+                                    <span style="color: ${statusColor}; font-size: 11px; font-weight: bold;">
+                                        ${statusIcon} ${isPresent ? 'PRESENT' : 'MISSING'}
+                                    </span>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+        }
+    });
+    
+    // Add recommendations if available
+    if (depReport.recommendations && depReport.recommendations.length > 0) {
+        html += `
+            <div style="background: rgba(255, 193, 7, 0.1); padding: 20px; border-radius: 10px; border-left: 4px solid #FFC107;">
+                <h4 style="color: #FFC107; margin-bottom: 15px;">💡 Recommendations</h4>
+                ${depReport.recommendations.map(rec => `
+                    <div style="margin-bottom: 10px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 5px; border-left: 3px solid ${this.getPriorityColor(rec.priority)};">
+                        <div style="font-weight: bold; color: ${this.getPriorityColor(rec.priority)}; margin-bottom: 5px;">
+                            ${this.getPriorityIcon(rec.priority)} ${rec.category} (${rec.priority})
+                        </div>
+                        <div style="font-size: 12px; margin-bottom: 5px;">${rec.description}</div>
+                        <div style="font-size: 11px; opacity: 0.8;"><strong>Action:</strong> ${rec.action}</div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+    
+    if (!hasAnyDependencies || depReport.summary.totalDependencies === 0) {
+        html += `
+            <div style="background: rgba(255, 193, 7, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #FFC107;">
+                <h4 style="color: #FFC107; margin-bottom: 10px;">ℹ️ No Dependencies Found</h4>
+                <p>No dependencies were detected for <strong>${componentName}</strong></p>
+                <p style="font-size: 12px; opacity: 0.8; margin-top: 10px;">
+                    This could indicate a standalone component or dependencies not captured in the uploaded files.
+                </p>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+    console.log('Enhanced dependency results displayed successfully');
+};
+
+EnhancedMainframeAnalyzer.prototype.getDependencyTypeTitle = function(depType) {
+    const titles = {
+        copybooks: 'Copybook Dependencies',
+        calledPrograms: 'Called Programs',
+        callingPrograms: 'Calling Programs', 
+        jclDatasets: 'JCL Datasets',
+        dbTables: 'Database Tables',
+        fileReferences: 'File References'
+    };
+    return titles[depType] || depType;
+};
+
+EnhancedMainframeAnalyzer.prototype.getDependencyTypeIcon = function(depType) {
+    const icons = {
+        copybooks: '📚',
+        calledPrograms: '📞',
+        callingPrograms: '📲',
+        jclDatasets: '💾',
+        dbTables: '🗄️',
+        fileReferences: '📁'
+    };
+    return icons[depType] || '🔗';
+};
+
+EnhancedMainframeAnalyzer.prototype.getPriorityColor = function(priority) {
+    const colors = {
+        'HIGH': '#f44336',
+        'MEDIUM': '#FF9800',
+        'LOW': '#4CAF50'
+    };
+    return colors[priority] || '#FFD700';
+};
+
+EnhancedMainframeAnalyzer.prototype.getPriorityIcon = function(priority) {
+    const icons = {
+        'HIGH': '🚨',
+        'MEDIUM': '⚠️',
+        'LOW': '💡'
+    };
+    return icons[priority] || '📌';
+};
+
+// Initialize dependency analysis when document is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+        if (typeof analyzer !== 'undefined') {
+            analyzer.initializeDependencyAnalysis();
+        }
+    });
+} else {
+    // Document already loaded
+    if (typeof analyzer !== 'undefined') {
+        analyzer.initializeDependencyAnalysis();
+    }
+}
+
+console.log('🚀 Enhanced Mainframe Analyzer - Part 3 Ready!');
+console.log('✅ Features active: Enhanced dependency mapping with intelligent chunking');
+console.log('🎯 Complete system now includes:');
+console.log('   • File upload and management');
+console.log('   • Component suggestions and validation');
+console.log('   • Token-aware analysis with optimization');
+console.log('   • Focused field flow and business rule analysis');
+console.log('   • Interactive chat functionality');
+console.log('   • Field matrix and usage patterns');
+console.log('   • Enhanced dependency mapping with chunking');
+console.log('   • Export and storage capabilities');
+console.log('   • Bulk analysis support');
     </script>
 </body>
 </html>
