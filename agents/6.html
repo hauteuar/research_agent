@@ -750,7 +750,7 @@
             // === TOKEN MANAGEMENT ===
             estimateTokenCount(text) {
                 if (!text) return 0;
-                return Math.ceil(text.length / this.averageCharsPerToken);
+                return Math.ceil(text.length / 3);
             }
 
             updateTokenDisplay(currentTokens) {
@@ -1242,6 +1242,234 @@ EnhancedMainframeAnalyzer.prototype.analyzeComponent = async function() {
     }
 };
 
+EnhancedMainframeAnalyzer.prototype.createOverlappingChunks = function(files, componentInfo) {
+    const chunks = [];
+    const maxTokensPerChunk = Math.floor(this.maxTokens * 0.25); // Very conservative - 25% max
+    
+    console.log(`Creating aggressive chunks with max ${maxTokensPerChunk} tokens each`);
+    
+    // Sort files by size (smallest first for better packing)
+    const sortedFiles = files.sort((a, b) => 
+        this.estimateTokenCount(a.content) - this.estimateTokenCount(b.content)
+    );
+    
+    let currentChunk = [];
+    let currentTokens = 0;
+    let overlapContent = '';
+    
+    sortedFiles.forEach((file, index) => {
+        const fileTokens = this.estimateTokenCount(file.content);
+        
+        console.log(`Processing file ${file.name}: ${fileTokens} tokens for chunking`);
+        
+        // If single file is too large, split it
+        if (fileTokens > maxTokensPerChunk) {
+            console.log(`File ${file.name} too large (${fileTokens} tokens), splitting...`);
+            
+            // Finish current chunk first
+            if (currentChunk.length > 0) {
+                chunks.push({
+                    files: [...currentChunk],
+                    totalTokens: currentTokens,
+                    overlapContext: overlapContent,
+                    chunkIndex: chunks.length
+                });
+                currentChunk = [];
+                currentTokens = 0;
+            }
+            
+            // Split large file into multiple chunks
+            const fileParts = this.splitLargeFile(file, maxTokensPerChunk);
+            fileParts.forEach(part => {
+                chunks.push({
+                    files: [part],
+                    totalTokens: this.estimateTokenCount(part.content),
+                    overlapContext: this.extractFileOverlap(part),
+                    chunkIndex: chunks.length
+                });
+            });
+            
+            overlapContent = this.extractFileOverlap(fileParts[fileParts.length - 1]);
+        }
+        // If adding this file would exceed limit, start new chunk
+        else if (currentTokens + fileTokens > maxTokensPerChunk && currentChunk.length > 0) {
+            console.log(`Starting new chunk. Current: ${currentTokens}, adding: ${fileTokens} would exceed ${maxTokensPerChunk}`);
+            
+            chunks.push({
+                files: [...currentChunk],
+                totalTokens: currentTokens,
+                overlapContext: overlapContent,
+                chunkIndex: chunks.length
+            });
+            
+            // Create overlap from previous chunk
+            overlapContent = this.extractOverlapContent(currentChunk);
+            const overlapTokens = this.estimateTokenCount(overlapContent);
+            
+            currentChunk = [file];
+            currentTokens = fileTokens + overlapTokens;
+        }
+        // Add file to current chunk
+        else {
+            currentChunk.push(file);
+            currentTokens += fileTokens;
+            console.log(`Added ${file.name} to chunk. Total: ${currentTokens} tokens`);
+        }
+    });
+    
+    // Add final chunk
+    if (currentChunk.length > 0) {
+        chunks.push({
+            files: currentChunk,
+            totalTokens: currentTokens,
+            overlapContext: overlapContent,
+            chunkIndex: chunks.length
+        });
+    }
+    
+    console.log(`Created ${chunks.length} aggressive chunks with max ${Math.max(...chunks.map(c => c.totalTokens))} tokens`);
+    return chunks;
+};
+
+EnhancedMainframeAnalyzer.prototype.extractFileOverlap = function(file) {
+    const lines = file.content.split('\n');
+    const importantLines = lines.filter(line => {
+        const upper = line.toUpperCase().trim();
+        return upper.includes('COPY ') ||
+               upper.includes('CALL ') ||
+               upper.includes('PROGRAM-ID') ||
+               upper.match(/^\s*\d{2}\s+[A-Z]/);
+    });
+    
+    const overlap = importantLines.slice(0, 10).join('\n'); // Max 10 lines
+    return overlap ? `\n=== CONTEXT from ${file.name} ===\n${overlap}` : '';
+};
+
+// Override dependency chunking to be more aggressive too
+
+
+EnhancedMainframeAnalyzer.prototype.splitLargeFile = function(file, maxTokens) {
+    const parts = [];
+    const lines = file.content.split('\n');
+    const maxCharsPerPart = maxTokens * 3; // Conservative char-to-token ratio
+    
+    console.log(`Splitting large file ${file.name} into parts of max ${maxTokens} tokens each`);
+    
+    let currentPart = [];
+    let currentChars = 0;
+    let partIndex = 0;
+    
+    // Group lines that should stay together
+    const lineGroups = this.groupRelatedLines(lines);
+    
+    for (const group of lineGroups) {
+        const groupContent = group.join('\n');
+        const groupChars = groupContent.length;
+        
+        // If this group alone exceeds limit, truncate it
+        if (groupChars > maxCharsPerPart) {
+            if (currentPart.length > 0) {
+                // Save current part first
+                parts.push({
+                    ...file,
+                    name: `${file.name}-part-${partIndex + 1}`,
+                    content: currentPart.join('\n'),
+                    originalFile: file.name,
+                    partIndex: partIndex
+                });
+                partIndex++;
+                currentPart = [];
+                currentChars = 0;
+            }
+            
+            // Truncate this large group
+            const truncatedGroup = this.aggressiveTruncate(groupContent, maxTokens);
+            parts.push({
+                ...file,
+                name: `${file.name}-part-${partIndex + 1}`,
+                content: truncatedGroup,
+                originalFile: file.name,
+                partIndex: partIndex,
+                truncated: true
+            });
+            partIndex++;
+        }
+        // If adding this group would exceed limit, start new part
+        else if (currentChars + groupChars > maxCharsPerPart && currentPart.length > 0) {
+            parts.push({
+                ...file,
+                name: `${file.name}-part-${partIndex + 1}`,
+                content: currentPart.join('\n'),
+                originalFile: file.name,
+                partIndex: partIndex
+            });
+            partIndex++;
+            
+            currentPart = [...group];
+            currentChars = groupChars;
+        }
+        // Add group to current part
+        else {
+            currentPart.push(...group);
+            currentChars += groupChars + 1; // +1 for newline
+        }
+    }
+    
+    // Add final part
+    if (currentPart.length > 0) {
+        parts.push({
+            ...file,
+            name: `${file.name}-part-${partIndex + 1}`,
+            content: currentPart.join('\n'),
+            originalFile: file.name,
+            partIndex: partIndex
+        });
+    }
+    
+    console.log(`Split ${file.name} into ${parts.length} parts`);
+    return parts;
+};
+
+EnhancedMainframeAnalyzer.prototype.groupRelatedLines = function(lines) {
+    const groups = [];
+    let currentGroup = [];
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim().toUpperCase();
+        
+        // Start new group for major sections
+        if (trimmed.includes('IDENTIFICATION DIVISION') ||
+            trimmed.includes('ENVIRONMENT DIVISION') ||
+            trimmed.includes('DATA DIVISION') ||
+            trimmed.includes('PROCEDURE DIVISION') ||
+            trimmed.includes('WORKING-STORAGE SECTION') ||
+            trimmed.includes('LINKAGE SECTION')) {
+            
+            if (currentGroup.length > 0) {
+                groups.push([...currentGroup]);
+                currentGroup = [];
+            }
+        }
+        
+        currentGroup.push(line);
+        
+        // Keep groups reasonably sized (max 50 lines)
+        if (currentGroup.length >= 50) {
+            groups.push([...currentGroup]);
+            currentGroup = [];
+        }
+    }
+    
+    if (currentGroup.length > 0) {
+        groups.push(currentGroup);
+    }
+    
+    return groups;
+};
+
+
+
 EnhancedMainframeAnalyzer.prototype.runFocusedAnalysis = async function(componentName) {
     console.log(`Starting focused analysis for: ${componentName}`);
     
@@ -1306,37 +1534,184 @@ EnhancedMainframeAnalyzer.prototype.hasRelatedContent = function(content, compon
 };
 
 EnhancedMainframeAnalyzer.prototype.optimizeContentForTokens = function(files) {
-    const targetTokens = Math.floor(this.maxTokens * this.tokenSafetyMargin);
+    const maxSafeTokens = Math.floor(this.maxTokens * 0.3); // Much more conservative - use only 30%
+    console.log(`Aggressive optimization: Target max tokens: ${maxSafeTokens}`);
+    
     const optimized = [];
     let currentTokens = 0;
 
-    for (const file of files) {
+    // Sort files by relevance and size
+    const sortedFiles = files.sort((a, b) => {
+        // Prioritize smaller, more relevant files
+        const aRelevance = this.calculateFileRelevance(a);
+        const bRelevance = this.calculateFileRelevance(b);
+        const aSize = this.estimateTokenCount(a.content);
+        const bSize = this.estimateTokenCount(b.content);
+        
+        // Higher relevance and smaller size = higher priority
+        return (bRelevance - aRelevance) || (aSize - bSize);
+    });
+
+    for (const file of sortedFiles) {
         const fileTokens = this.estimateTokenCount(file.content);
         
-        if (currentTokens + fileTokens <= targetTokens) {
-            optimized.push({
-                ...file,
-                content: file.content,
-                truncated: false
-            });
-            currentTokens += fileTokens;
+        console.log(`Processing file ${file.name}: ${fileTokens} tokens`);
+        
+        if (fileTokens <= 500) {
+            // Small file - include if space allows
+            if (currentTokens + fileTokens <= maxSafeTokens) {
+                optimized.push({
+                    ...file,
+                    content: file.content,
+                    truncated: false,
+                    originalTokens: fileTokens
+                });
+                currentTokens += fileTokens;
+                console.log(`Added small file ${file.name}: ${fileTokens} tokens`);
+            }
         } else {
-            // Intelligent truncation
-            const remainingTokens = targetTokens - currentTokens;
-            if (remainingTokens > 100) { // Only include if meaningful space left
-                const truncatedContent = this.intelligentTruncate(file.content, remainingTokens);
+            // Large file - aggressively truncate
+            const remainingTokens = maxSafeTokens - currentTokens;
+            if (remainingTokens > 200) { // Only include if meaningful space left
+                const targetTokens = Math.min(800, remainingTokens); // Max 800 tokens per file
+                const truncatedContent = this.aggressiveTruncate(file.content, targetTokens);
+                const actualTokens = this.estimateTokenCount(truncatedContent);
+                
                 optimized.push({
                     ...file,
                     content: truncatedContent,
-                    truncated: true
+                    truncated: true,
+                    originalTokens: fileTokens,
+                    optimizedTokens: actualTokens
                 });
-                currentTokens += this.estimateTokenCount(truncatedContent);
+                currentTokens += actualTokens;
+                console.log(`Truncated large file ${file.name}: ${fileTokens} → ${actualTokens} tokens`);
             }
-            break; // Stop adding files once we're near limit
+        }
+        
+        // Stop if we're getting close to limit
+        if (currentTokens >= maxSafeTokens * 0.9) {
+            console.log(`Stopping file processing at ${currentTokens} tokens`);
+            break;
         }
     }
 
+    console.log(`Final optimization result: ${currentTokens} tokens from ${optimized.length} files`);
     return { files: optimized, totalTokens: currentTokens };
+};
+
+
+EnhancedMainframeAnalyzer.prototype.aggressiveTruncate = function(content, targetTokens) {
+    const targetChars = targetTokens * 3; // Conservative char-to-token ratio
+    console.log(`Aggressive truncation: target ${targetTokens} tokens (${targetChars} chars)`);
+    
+    if (content.length <= targetChars) {
+        return content;
+    }
+    
+    const lines = content.split('\n');
+    const prioritizedSections = {
+        critical: [],
+        important: [],
+        regular: []
+    };
+
+    // More aggressive prioritization
+    lines.forEach(line => {
+        const upperLine = line.toUpperCase().trim();
+        
+        // Critical: Only the most essential lines
+        if (upperLine.includes('COPY ') || 
+            upperLine.includes('CALL ') || 
+            upperLine.includes('PROGRAM-ID') ||
+            upperLine.includes('PROCEDURE DIVISION') ||
+            upperLine.includes('DATA DIVISION') ||
+            upperLine.match(/^\s*\d{2}\s+[A-Z][A-Z0-9\-_]+\s+PIC/)) { // Field definitions with PIC
+            prioritizedSections.critical.push(line);
+        }
+        // Important: Somewhat useful
+        else if (upperLine.includes('WORKING-STORAGE') ||
+                 upperLine.includes('LINKAGE') ||
+                 upperLine.includes('IF ') ||
+                 upperLine.includes('PERFORM ') ||
+                 upperLine.includes('EXEC ') ||
+                 upperLine.match(/^\s*\d{2}\s+[A-Z]/)) { // Other field definitions
+            prioritizedSections.important.push(line);
+        }
+        // Regular: Everything else
+        else if (upperLine.length > 0) { // Skip empty lines
+            prioritizedSections.regular.push(line);
+        }
+    });
+
+    // Build result with strict limits
+    let result = '';
+    let usedChars = 0;
+    
+    // Add critical lines (up to 50% of budget)
+    const criticalBudget = Math.floor(targetChars * 0.5);
+    for (const line of prioritizedSections.critical) {
+        if (usedChars + line.length + 1 <= criticalBudget) {
+            result += (result ? '\n' : '') + line;
+            usedChars += line.length + 1;
+        } else {
+            break;
+        }
+    }
+    
+    // Add important lines (up to 35% of budget)
+    const importantBudget = Math.floor(targetChars * 0.35);
+    let importantUsed = 0;
+    for (const line of prioritizedSections.important) {
+        if (importantUsed + line.length + 1 <= importantBudget && 
+            usedChars + line.length + 1 <= targetChars * 0.85) {
+            result += '\n' + line;
+            usedChars += line.length + 1;
+            importantUsed += line.length + 1;
+        } else {
+            break;
+        }
+    }
+    
+    // Add regular lines only if significant space remains (up to 15% of budget)
+    const regularBudget = Math.floor(targetChars * 0.15);
+    let regularUsed = 0;
+    for (const line of prioritizedSections.regular) {
+        if (regularUsed + line.length + 1 <= regularBudget && 
+            usedChars + line.length + 1 <= targetChars * 0.9) {
+            result += '\n' + line;
+            usedChars += line.length + 1;
+            regularUsed += line.length + 1;
+        } else {
+            break;
+        }
+    }
+    
+    // Add truncation notice if we had to cut content
+    if (usedChars < content.length * 0.8) {
+        result += '\n... [AGGRESSIVELY TRUNCATED FOR TOKEN OPTIMIZATION]';
+    }
+    
+    console.log(`Truncation result: ${content.length} → ${result.length} chars (${Math.round(result.length/content.length*100)}% retained)`);
+    return result;
+};
+
+
+
+EnhancedMainframeAnalyzer.prototype.calculateFileRelevance = function(file) {
+    let relevance = 0;
+    const content = file.content.toUpperCase();
+    
+    // Higher relevance for files with important keywords
+    if (content.includes('COPY ')) relevance += 10;
+    if (content.includes('CALL ')) relevance += 8;
+    if (content.includes('PROCEDURE DIVISION')) relevance += 15;
+    if (content.includes('DATA DIVISION')) relevance += 12;
+    if (content.includes('WORKING-STORAGE')) relevance += 10;
+    if (file.type === 'Copybook') relevance += 20;
+    if (file.type === 'COBOL Program') relevance += 15;
+    
+    return relevance;
 };
 
 EnhancedMainframeAnalyzer.prototype.intelligentTruncate = function(content, targetTokens) {
@@ -2339,23 +2714,101 @@ EnhancedMainframeAnalyzer.prototype.performEnhancedDependencyAnalysis = async fu
 
 EnhancedMainframeAnalyzer.prototype.createDependencyScanChunks = function() {
     const chunks = [];
-    const targetTokensPerChunk = Math.floor(this.maxTokens * 0.4); // Conservative for dependency scanning
+    const targetTokensPerChunk = Math.floor(this.maxTokens * 0.2); // Very conservative - 20% max
     
-    console.log(`Creating dependency chunks with target ${targetTokensPerChunk} tokens each`);
+    console.log(`Creating aggressive dependency chunks with target ${targetTokensPerChunk} tokens each`);
     
-    // Prioritize files by type for dependency scanning
-    const cobolPrograms = this.uploadedFiles.filter(f => f.type === 'COBOL Program');
-    const copybooks = this.uploadedFiles.filter(f => f.type === 'Copybook');
-    const jclFiles = this.uploadedFiles.filter(f => f.type.includes('JCL'));
+    // Prioritize files by type and size
+    const cobolPrograms = this.uploadedFiles.filter(f => f.type === 'COBOL Program').sort((a, b) => a.size - b.size);
+    const copybooks = this.uploadedFiles.filter(f => f.type === 'Copybook').sort((a, b) => a.size - b.size);
+    const jclFiles = this.uploadedFiles.filter(f => f.type.includes('JCL')).sort((a, b) => a.size - b.size);
     const otherFiles = this.uploadedFiles.filter(f => 
-        !cobolPrograms.includes(f) && !copybooks.includes(f) && !jclFiles.includes(f));
+        !cobolPrograms.includes(f) && !copybooks.includes(f) && !jclFiles.includes(f)).sort((a, b) => a.size - b.size);
     
-    // Process files in priority order
-    this.createDependencyAwareChunks([...cobolPrograms, ...copybooks, ...jclFiles, ...otherFiles], 
+    // Process files in priority order with aggressive chunking
+    this.createAggressiveDependencyChunks([...copybooks, ...cobolPrograms, ...jclFiles, ...otherFiles], 
         targetTokensPerChunk, chunks);
     
-    console.log(`Created ${chunks.length} dependency-aware chunks`);
+    console.log(`Created ${chunks.length} aggressive dependency chunks`);
     return chunks;
+};
+
+EnhancedMainframeAnalyzer.prototype.createAggressiveDependencyChunks = function(files, targetTokens, chunks) {
+    let currentChunk = [];
+    let currentTokens = 0;
+    let overlapContent = '';
+    
+    files.forEach(file => {
+        const fileTokens = this.estimateTokenCount(file.content);
+        
+        // If file is too large, split it aggressively
+        if (fileTokens > targetTokens) {
+            console.log(`Large file ${file.name} (${fileTokens} tokens) - splitting for dependencies`);
+            
+            // Save current chunk first
+            if (currentChunk.length > 0) {
+                chunks.push({
+                    files: [...currentChunk],
+                    totalTokens: currentTokens,
+                    overlapContext: overlapContent,
+                    chunkIndex: chunks.length,
+                    scanType: 'dependency'
+                });
+                currentChunk = [];
+                currentTokens = 0;
+            }
+            
+            // Extract only dependency-relevant content
+            const dependencyContent = this.extractDependencyRelevantContent(file, targetTokens);
+            if (dependencyContent.length > 0) {
+                chunks.push({
+                    files: [{
+                        ...file,
+                        content: dependencyContent,
+                        name: `${file.name}-deps-extract`
+                    }],
+                    totalTokens: this.estimateTokenCount(dependencyContent),
+                    overlapContext: '',
+                    chunkIndex: chunks.length,
+                    scanType: 'dependency'
+                });
+            }
+            
+            overlapContent = '';
+        }
+        // If adding file would exceed limit, start new chunk
+        else if (currentTokens + fileTokens > targetTokens && currentChunk.length > 0) {
+            chunks.push({
+                files: [...currentChunk],
+                totalTokens: currentTokens,
+                overlapContext: overlapContent,
+                chunkIndex: chunks.length,
+                scanType: 'dependency'
+            });
+            
+            overlapContent = this.createDependencyOverlap(currentChunk);
+            const overlapTokens = this.estimateTokenCount(overlapContent);
+            
+            currentChunk = [file];
+            currentTokens = fileTokens + overlapTokens;
+        }
+        // Add to current chunk
+        else {
+            currentChunk.push(file);
+            currentTokens += fileTokens;
+        }
+    });
+    
+    // Add final chunk
+    if (currentChunk.length > 0) {
+        chunks.push({
+            files: currentChunk,
+            totalTokens: currentTokens,
+            overlapContext: overlapContent,
+            chunkIndex: chunks.length,
+            scanType: 'dependency'
+        });
+    }
 };
 
 EnhancedMainframeAnalyzer.prototype.createDependencyAwareChunks = function(files, targetTokens, chunks) {
@@ -2464,50 +2917,6 @@ EnhancedMainframeAnalyzer.prototype.scanAllDependenciesWithChunking = async func
     return allDependencies;
 };
 
-EnhancedMainframeAnalyzer.prototype.extractDependenciesFromChunk = async function(chunk) {
-    // OPTIMIZED DEPENDENCY EXTRACTION PROMPT - FOCUSED AND CONCISE
-    const prompt = `DEPENDENCY EXTRACTION - Chunk ${chunk.chunkIndex + 1}
-
-FILES FOR ANALYSIS:
-${chunk.files.map(f => `=== ${f.name} (${f.type}) ===\n${f.content}`).join('\n')}
-
-${chunk.overlapContext ? `DEPENDENCY CONTEXT:\n${chunk.overlapContext}\n` : ''}
-
-EXTRACT ALL DEPENDENCIES:
-
-**COPYBOOK DEPENDENCIES**
-- COPY statements: COPY COPYBOOK-NAME
-- Include statements and copybook references
-
-**PROGRAM CALL DEPENDENCIES**  
-- CALL statements: CALL 'PROGRAM-NAME'
-- Dynamic calls and JCL EXEC PGM= statements
-
-**JCL DATASET DEPENDENCIES**
-- DD statements: DSN=DATASET.NAME
-- Input and output file references
-
-**DATABASE TABLE DEPENDENCIES**
-- EXEC SQL statements with table names
-- SELECT, INSERT, UPDATE, DELETE operations
-
-**FILE REFERENCE DEPENDENCIES**
-- FD entries and SELECT statements
-- File assignments and OPEN/CLOSE operations
-
-RESPONSE FORMAT (exact format required):
-COPYBOOKS: name1, name2, name3
-CALLED_PROGRAMS: prog1, prog2, prog3  
-CALLING_PROGRAMS: caller1, caller2, caller3
-JCL_DATASETS: dataset1, dataset2, dataset3
-DB_TABLES: table1, table2, table3
-FILE_REFERENCES: file1, file2, file3
-
-Only include actual names found, no descriptions or explanations.`;
-
-    const response = await this.callvLLMAPI(prompt);
-    return this.parseDependencyResponse(response);
-};
 
 EnhancedMainframeAnalyzer.prototype.parseDependencyResponse = function(response) {
     const dependencies = {
@@ -2611,24 +3020,6 @@ EnhancedMainframeAnalyzer.prototype.parseComponentDependencyResponse = function(
     };
 };
 
-EnhancedMainframeAnalyzer.prototype.generateEnhancedDependencyReport = function(componentName, componentDeps) {
-    return {
-        componentName: componentName,
-        timestamp: new Date().toISOString(),
-        analysisMethod: 'Enhanced Chunking',
-        dependencies: {
-            copybooks: componentDeps.directDependencies.copybooks,
-            calledPrograms: componentDeps.directDependencies.programs,
-            callingPrograms: componentDeps.reverseDependencies.calledByPrograms,
-            jclDatasets: componentDeps.reverseDependencies.usedInJCL,
-            fileReferences: componentDeps.directDependencies.files,
-            dbTables: componentDeps.directDependencies.tables
-        },
-        summary: componentDeps.summary,
-        availabilityAnalysis: componentDeps.availabilityAnalysis,
-        recommendations: this.generateDependencyRecommendations(componentDeps)
-    };
-};
 
 EnhancedMainframeAnalyzer.prototype.generateDependencyRecommendations = function(componentDeps) {
     const recommendations = [];
@@ -2663,132 +3054,6 @@ EnhancedMainframeAnalyzer.prototype.generateDependencyRecommendations = function
     return recommendations;
 };
 
-EnhancedMainframeAnalyzer.prototype.displayDependencyResults = function(container, componentName, depReport) {
-    const deps = depReport.dependencies;
-    
-    let html = `
-        <h3>🔗 Enhanced Dependency Analysis: ${componentName}</h3>
-        <p style="margin-bottom: 20px;">
-            Complete dependency mapping using intelligent chunking • Completed: ${new Date(depReport.timestamp).toLocaleString()}
-        </p>
-        
-        <!-- Dependency Summary -->
-        <div style="background: rgba(76, 175, 80, 0.1); padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #4CAF50;">
-            <h4 style="color: #FFD700; margin-bottom: 15px;">📊 Dependency Summary</h4>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px;">
-                <div style="text-align: center;">
-                    <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${depReport.summary.totalDependencies}</div>
-                    <div style="font-size: 11px;">Total Dependencies</div>
-                </div>
-                <div style="text-align: center;">
-                    <div style="font-size: 1.5rem; font-weight: bold; color: #4CAF50;">${depReport.summary.presentDependencies}</div>
-                    <div style="font-size: 11px;">Present</div>
-                </div>
-                <div style="text-align: center;">
-                    <div style="font-size: 1.5rem; font-weight: bold; color: #f44336;">${depReport.summary.missingDependencies}</div>
-                    <div style="font-size: 11px;">Missing</div>
-                </div>
-                <div style="text-align: center;">
-                    <div style="font-size: 1.5rem; font-weight: bold; color: #FF9800;">${depReport.summary.completenessPercentage}%</div>
-                    <div style="font-size: 11px;">Completeness</div>
-                </div>
-            </div>
-        </div>
-    `;
-
-    // Display each dependency type
-    let hasAnyDependencies = false;
-    
-    Object.keys(deps).forEach(depType => {
-        if (deps[depType] && deps[depType].length > 0) {
-            hasAnyDependencies = true;
-            const title = this.getDependencyTypeTitle(depType);
-            const icon = this.getDependencyTypeIcon(depType);
-            
-            html += `
-                <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; margin-bottom: 15px;">
-                    <h4 style="color: #FFD700; margin-bottom: 10px;">${icon} ${title}</h4>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px;">
-                        ${deps[depType].map(dep => {
-                            const isPresent = this.uploadedFiles.some(f => 
-                                f.content.toUpperCase().includes(dep.toUpperCase()) || 
-                                f.name.toUpperCase().includes(dep.toUpperCase())
-                            );
-                            const statusColor = isPresent ? '#4CAF50' : '#f44336';
-                            const statusIcon = isPresent ? '✅' : '❌';
-                            
-                            return `
-                                <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: rgba(255,255,255,0.05); border-radius: 5px; border-left: 3px solid ${statusColor};">
-                                    <span style="font-family: monospace; color: white; font-size: 13px;">${dep}</span>
-                                    <span style="color: ${statusColor}; font-size: 11px; font-weight: bold;">
-                                        ${statusIcon} ${isPresent ? 'PRESENT' : 'MISSING'}
-                                    </span>
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
-                </div>
-            `;
-        }
-    });
-    
-    // Add recommendations if available
-    if (depReport.recommendations && depReport.recommendations.length > 0) {
-        html += `
-            <div style="background: rgba(255, 193, 7, 0.1); padding: 20px; border-radius: 10px; border-left: 4px solid #FFC107;">
-                <h4 style="color: #FFC107; margin-bottom: 15px;">💡 Recommendations</h4>
-                ${depReport.recommendations.map(rec => `
-                    <div style="margin-bottom: 10px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 5px; border-left: 3px solid ${this.getPriorityColor(rec.priority)};">
-                        <div style="font-weight: bold; color: ${this.getPriorityColor(rec.priority)}; margin-bottom: 5px;">
-                            ${this.getPriorityIcon(rec.priority)} ${rec.category} (${rec.priority})
-                        </div>
-                        <div style="font-size: 12px; margin-bottom: 5px;">${rec.description}</div>
-                        <div style="font-size: 11px; opacity: 0.8;"><strong>Action:</strong> ${rec.action}</div>
-                    </div>
-                `).join('')}
-            </div>
-        `;
-    }
-    
-    if (!hasAnyDependencies || depReport.summary.totalDependencies === 0) {
-        html += `
-            <div style="background: rgba(255, 193, 7, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #FFC107;">
-                <h4 style="color: #FFC107; margin-bottom: 10px;">ℹ️ No Dependencies Found</h4>
-                <p>No dependencies were detected for <strong>${componentName}</strong></p>
-                <p style="font-size: 12px; opacity: 0.8; margin-top: 10px;">
-                    This could indicate a standalone component or dependencies not captured in the uploaded files.
-                </p>
-            </div>
-        `;
-    }
-    
-    container.innerHTML = html;
-    console.log('Enhanced dependency results displayed successfully');
-};
-
-EnhancedMainframeAnalyzer.prototype.getDependencyTypeTitle = function(depType) {
-    const titles = {
-        copybooks: 'Copybook Dependencies',
-        calledPrograms: 'Called Programs',
-        callingPrograms: 'Calling Programs', 
-        jclDatasets: 'JCL Datasets',
-        dbTables: 'Database Tables',
-        fileReferences: 'File References'
-    };
-    return titles[depType] || depType;
-};
-
-EnhancedMainframeAnalyzer.prototype.getDependencyTypeIcon = function(depType) {
-    const icons = {
-        copybooks: '📚',
-        calledPrograms: '📞',
-        callingPrograms: '📲',
-        jclDatasets: '💾',
-        dbTables: '🗄️',
-        fileReferences: '📁'
-    };
-    return icons[depType] || '🔗';
-};
 
 EnhancedMainframeAnalyzer.prototype.getPriorityColor = function(priority) {
     const colors = {
@@ -2822,6 +3087,63 @@ if (document.readyState === 'loading') {
     }
 }
 
+EnhancedMainframeAnalyzer.prototype.extractDependencyRelevantContent = function(file, maxTokens) {
+    const lines = file.content.split('\n');
+    const dependencyLines = [];
+    
+    lines.forEach((line, index) => {
+        const upper = line.toUpperCase().trim();
+        
+        // Only include lines that contain dependency information
+        if (upper.includes('COPY ') ||
+            upper.includes('CALL ') ||
+            upper.includes('EXEC ') ||
+            upper.includes('//') ||
+            upper.includes('DSN=') ||
+            upper.includes('DD ') ||
+            upper.includes('EXEC SQL') ||
+            upper.includes('TABLE ') ||
+            upper.includes('FROM ') ||
+            upper.includes('INTO ') ||
+            upper.includes('SELECT ') ||
+            upper.includes('FD ') ||
+            upper.includes('ASSIGN') ||
+            upper.includes('PROGRAM-ID')) {
+            
+            // Include some context around dependency lines
+            const contextStart = Math.max(0, index - 1);
+            const contextEnd = Math.min(lines.length, index + 2);
+            
+            for (let i = contextStart; i <= contextEnd; i++) {
+                if (i < lines.length && !dependencyLines.includes(lines[i])) {
+                    dependencyLines.push(lines[i]);
+                }
+            }
+        }
+    });
+    
+    // Limit to token budget
+    const targetChars = maxTokens * 3;
+    let result = dependencyLines.join('\n');
+    
+    if (result.length > targetChars) {
+        result = result.substring(0, targetChars) + '\n... [TRUNCATED FOR DEPENDENCY ANALYSIS]';
+    }
+    
+    console.log(`Extracted ${dependencyLines.length} dependency-relevant lines from ${file.name}`);
+    return result;
+};
+
+console.log('🔧 Aggressive Chunking Fix Applied!');
+console.log('✅ Changes made:');
+console.log('   • More conservative token estimation (3 chars/token vs 4)');
+console.log('   • Reduced token budget to 30% for analysis, 25% for chunks, 20% for dependencies');
+console.log('   • Aggressive file truncation with strict prioritization');
+console.log('   • Large file splitting with related line grouping');
+console.log('   • Dependency-specific content extraction');
+console.log('   • Maximum chunk size enforcement');
+console.log('⚠️  This will significantly reduce content but keep chunks under token limits');
+
 console.log('🚀 Enhanced Mainframe Analyzer - Part 3 Ready!');
 console.log('✅ Features active: Enhanced dependency mapping with intelligent chunking');
 console.log('🎯 Complete system now includes:');
@@ -2834,6 +3156,442 @@ console.log('   • Field matrix and usage patterns');
 console.log('   • Enhanced dependency mapping with chunking');
 console.log('   • Export and storage capabilities');
 console.log('   • Bulk analysis support');
+
+EnhancedMainframeAnalyzer.prototype.generateEnhancedDependencyReport = function(componentName, componentDeps) {
+    // Categorize each dependency type by availability
+    const categorizedDependencies = this.categorizeDependenciesByAvailability(componentDeps);
+    
+    return {
+        componentName: componentName,
+        timestamp: new Date().toISOString(),
+        analysisMethod: 'Enhanced Chunking',
+        dependencies: {
+            copybooks: componentDeps.directDependencies.copybooks,
+            calledPrograms: componentDeps.directDependencies.programs,
+            callingPrograms: componentDeps.reverseDependencies.calledByPrograms,
+            jclDatasets: componentDeps.reverseDependencies.usedInJCL,
+            fileReferences: componentDeps.directDependencies.files,
+            dbTables: componentDeps.directDependencies.tables
+        },
+        categorizedDependencies: categorizedDependencies,
+        summary: componentDeps.summary,
+        availabilityAnalysis: componentDeps.availabilityAnalysis,
+        recommendations: this.generateDetailedDependencyRecommendations(categorizedDependencies)
+    };
+};
+
+// Categorize dependencies by availability for each type
+EnhancedMainframeAnalyzer.prototype.categorizeDependenciesByAvailability = function(componentDeps) {
+    const categorized = {
+        copybooks: { present: [], missing: [] },
+        calledPrograms: { present: [], missing: [] },
+        callingPrograms: { present: [], missing: [] },
+        jclDatasets: { present: [], missing: [] },
+        fileReferences: { present: [], missing: [] },
+        dbTables: { present: [], missing: [] }
+    };
+    
+    // Check copybooks
+    componentDeps.directDependencies.copybooks.forEach(copybook => {
+        if (this.isDependencyPresent(copybook)) {
+            categorized.copybooks.present.push(copybook);
+        } else {
+            categorized.copybooks.missing.push(copybook);
+        }
+    });
+    
+    // Check called programs
+    componentDeps.directDependencies.programs.forEach(program => {
+        if (this.isDependencyPresent(program)) {
+            categorized.calledPrograms.present.push(program);
+        } else {
+            categorized.calledPrograms.missing.push(program);
+        }
+    });
+    
+    // Check calling programs
+    componentDeps.reverseDependencies.calledByPrograms.forEach(program => {
+        if (this.isDependencyPresent(program)) {
+            categorized.callingPrograms.present.push(program);
+        } else {
+            categorized.callingPrograms.missing.push(program);
+        }
+    });
+    
+    // Check JCL datasets
+    componentDeps.reverseDependencies.usedInJCL.forEach(dataset => {
+        if (this.isDependencyPresent(dataset)) {
+            categorized.jclDatasets.present.push(dataset);
+        } else {
+            categorized.jclDatasets.missing.push(dataset);
+        }
+    });
+    
+    // Check file references
+    componentDeps.directDependencies.files.forEach(file => {
+        if (this.isDependencyPresent(file)) {
+            categorized.fileReferences.present.push(file);
+        } else {
+            categorized.fileReferences.missing.push(file);
+        }
+    });
+    
+    // Check database tables
+    componentDeps.directDependencies.tables.forEach(table => {
+        if (this.isDependencyPresent(table)) {
+            categorized.dbTables.present.push(table);
+        } else {
+            categorized.dbTables.missing.push(table);
+        }
+    });
+    
+    return categorized;
+};
+
+// Enhanced dependency presence check
+EnhancedMainframeAnalyzer.prototype.isDependencyPresent = function(dependency) {
+    const upperDep = dependency.toUpperCase();
+    
+    return this.uploadedFiles.some(file => {
+        const upperContent = file.content.toUpperCase();
+        const upperFileName = file.name.toUpperCase();
+        
+        // Check if dependency name appears in file content or filename
+        return upperContent.includes(upperDep) || 
+               upperFileName.includes(upperDep) ||
+               // Additional specific patterns for better matching
+               upperFileName.replace(/\.[^.]*$/, '').includes(upperDep) || // Filename without extension
+               upperContent.includes(`COPY ${upperDep}`) ||
+               upperContent.includes(`CALL ${upperDep}`) ||
+               upperContent.includes(`EXEC ${upperDep}`) ||
+               upperContent.includes(`DSN=${upperDep}`) ||
+               upperContent.includes(`PROGRAM-ID. ${upperDep}`);
+    });
+};
+
+// Generate detailed recommendations based on missing items
+EnhancedMainframeAnalyzer.prototype.generateDetailedDependencyRecommendations = function(categorizedDeps) {
+    const recommendations = [];
+    
+    // Check each category for missing items
+    Object.keys(categorizedDeps).forEach(category => {
+        const missing = categorizedDeps[category].missing;
+        if (missing.length > 0) {
+            recommendations.push({
+                priority: this.getDependencyPriority(category, missing.length),
+                category: this.getDependencyTypeTitle(category),
+                description: `${missing.length} ${this.getDependencyTypeTitle(category).toLowerCase()} not found`,
+                action: `Upload missing ${this.getDependencyTypeTitle(category).toLowerCase()}: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? '...' : ''}`,
+                missingItems: missing
+            });
+        }
+    });
+    
+    return recommendations;
+};
+
+// Determine priority based on dependency type and count
+EnhancedMainframeAnalyzer.prototype.getDependencyPriority = function(category, count) {
+    if (category === 'copybooks' || category === 'calledPrograms') {
+        return count > 3 ? 'HIGH' : 'MEDIUM';
+    } else if (category === 'dbTables' || category === 'fileReferences') {
+        return count > 5 ? 'HIGH' : 'MEDIUM';
+    } else {
+        return count > 2 ? 'MEDIUM' : 'LOW';
+    }
+};
+
+// Enhanced dependency display with clear missing items
+EnhancedMainframeAnalyzer.prototype.displayDependencyResults = function(container, componentName, depReport) {
+    const deps = depReport.dependencies;
+    const categorized = depReport.categorizedDependencies;
+    
+    let html = `
+        <h3>🔗 Enhanced Dependency Analysis: ${componentName}</h3>
+        <p style="margin-bottom: 20px;">
+            Complete dependency mapping using intelligent chunking • Completed: ${new Date(depReport.timestamp).toLocaleString()}
+        </p>
+        
+        <!-- Dependency Summary -->
+        <div style="background: rgba(76, 175, 80, 0.1); padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #4CAF50;">
+            <h4 style="color: #FFD700; margin-bottom: 15px;">📊 Dependency Summary</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px;">
+                <div style="text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${depReport.summary.totalDependencies}</div>
+                    <div style="font-size: 11px;">Total Dependencies</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #4CAF50;">${depReport.summary.presentDependencies}</div>
+                    <div style="font-size: 11px;">Present</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #f44336;">${depReport.summary.missingDependencies}</div>
+                    <div style="font-size: 11px;">Missing</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #FF9800;">${depReport.summary.completenessPercentage}%</div>
+                    <div style="font-size: 11px;">Completeness</div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Display each dependency type with clear present/missing breakdown
+    let hasAnyDependencies = false;
+    
+    Object.keys(categorized).forEach(depType => {
+        const present = categorized[depType].present;
+        const missing = categorized[depType].missing;
+        const total = present.length + missing.length;
+        
+        if (total > 0) {
+            hasAnyDependencies = true;
+            const title = this.getDependencyTypeTitle(depType);
+            const icon = this.getDependencyTypeIcon(depType);
+            
+            html += `
+                <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; margin-bottom: 15px;">
+                    <h4 style="color: #FFD700; margin-bottom: 15px;">${icon} ${title}</h4>
+                    
+                    <!-- Summary for this type -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 5px;">
+                        <span style="font-weight: bold;">Total: ${total}</span>
+                        <span style="color: #4CAF50;">✅ Present: ${present.length}</span>
+                        <span style="color: #f44336;">❌ Missing: ${missing.length}</span>
+                        <span style="color: #FF9800;">📊 ${Math.round((present.length/total)*100)}% Available</span>
+                    </div>
+            `;
+            
+            // Present items section
+            if (present.length > 0) {
+                html += `
+                    <div style="margin-bottom: 15px;">
+                        <h5 style="color: #4CAF50; margin-bottom: 10px; font-size: 14px;">✅ Present ${title} (${present.length})</h5>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 8px;">
+                            ${present.map(dep => `
+                                <div style="padding: 6px 10px; background: rgba(76, 175, 80, 0.2); border-radius: 4px; border-left: 3px solid #4CAF50;">
+                                    <span style="font-family: monospace; color: white; font-size: 12px;">${dep}</span>
+                                    <span style="color: #4CAF50; font-size: 10px; font-weight: bold; margin-left: 8px;">FOUND</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Missing items section - CLEARLY HIGHLIGHTED
+            if (missing.length > 0) {
+                html += `
+                    <div style="margin-bottom: 15px;">
+                        <h5 style="color: #f44336; margin-bottom: 10px; font-size: 14px;">❌ Missing ${title} (${missing.length})</h5>
+                        <div style="background: rgba(244, 67, 54, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #f44336;">
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 8px;">
+                                ${missing.map(dep => `
+                                    <div style="padding: 8px 12px; background: rgba(244, 67, 54, 0.2); border-radius: 4px; border-left: 3px solid #f44336;">
+                                        <span style="font-family: monospace; color: white; font-size: 12px; font-weight: bold;">${dep}</span>
+                                        <span style="color: #f44336; font-size: 10px; font-weight: bold; margin-left: 8px;">NOT FOUND</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                            <div style="margin-top: 10px; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 4px;">
+                                <strong style="color: #f44336;">Upload Needed:</strong> 
+                                <span style="font-size: 12px;">Please upload files containing these ${title.toLowerCase()} for complete analysis</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            html += '</div>'; // Close dependency type section
+        }
+    });
+    
+    // Enhanced recommendations with specific missing items
+    if (depReport.recommendations && depReport.recommendations.length > 0) {
+        html += `
+            <div style="background: rgba(255, 193, 7, 0.1); padding: 20px; border-radius: 10px; border-left: 4px solid #FFC107;">
+                <h4 style="color: #FFC107; margin-bottom: 15px;">💡 Detailed Recommendations</h4>
+                ${depReport.recommendations.map(rec => `
+                    <div style="margin-bottom: 15px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 8px; border-left: 3px solid ${this.getPriorityColor(rec.priority)};">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <div style="font-weight: bold; color: ${this.getPriorityColor(rec.priority)};">
+                                ${this.getPriorityIcon(rec.priority)} ${rec.category} (${rec.priority} Priority)
+                            </div>
+                            <div style="font-size: 12px; opacity: 0.8;">${rec.description}</div>
+                        </div>
+                        
+                        <div style="margin-bottom: 10px;">
+                            <strong style="color: #FFD700;">Action Required:</strong> ${rec.action}
+                        </div>
+                        
+                        ${rec.missingItems && rec.missingItems.length > 0 ? `
+                            <div style="background: rgba(244, 67, 54, 0.1); padding: 10px; border-radius: 4px; margin-top: 10px;">
+                                <strong style="color: #f44336;">Specifically Missing:</strong>
+                                <div style="margin-top: 5px; font-family: monospace; font-size: 11px;">
+                                    ${rec.missingItems.map(item => `<span style="display: inline-block; background: rgba(244, 67, 54, 0.2); padding: 2px 6px; margin: 2px; border-radius: 3px;">${item}</span>`).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+    
+    if (!hasAnyDependencies || depReport.summary.totalDependencies === 0) {
+        html += `
+            <div style="background: rgba(255, 193, 7, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #FFC107;">
+                <h4 style="color: #FFC107; margin-bottom: 10px;">ℹ️ No Dependencies Found</h4>
+                <p>No dependencies were detected for <strong>${componentName}</strong></p>
+                <p style="font-size: 12px; opacity: 0.8; margin-top: 10px;">
+                    This could indicate a standalone component or dependencies not captured in the uploaded files.
+                </p>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+    console.log('Enhanced dependency results with missing items displayed successfully');
+};
+
+// Enhanced dependency type mapping
+EnhancedMainframeAnalyzer.prototype.getDependencyTypeTitle = function(depType) {
+    const titles = {
+        copybooks: 'Copybooks',
+        calledPrograms: 'Called Programs',
+        callingPrograms: 'Calling Programs', 
+        jclDatasets: 'JCL Datasets',
+        dbTables: 'Database Tables',
+        fileReferences: 'File References'
+    };
+    return titles[depType] || depType.replace(/([A-Z])/g, ' $1').trim();
+};
+
+EnhancedMainframeAnalyzer.prototype.getDependencyTypeIcon = function(depType) {
+    const icons = {
+        copybooks: '📚',
+        calledPrograms: '📞',
+        callingPrograms: '📲',
+        jclDatasets: '💾',
+        dbTables: '🗄️',
+        fileReferences: '📁'
+    };
+    return icons[depType] || '🔗';
+};
+
+// Enhanced dependency extraction to capture more patterns
+EnhancedMainframeAnalyzer.prototype.extractDependenciesFromChunk = async function(chunk) {
+    // ENHANCED DEPENDENCY EXTRACTION PROMPT - More specific patterns
+    const prompt = `DEPENDENCY EXTRACTION - Chunk ${chunk.chunkIndex + 1}
+
+FILES FOR ANALYSIS:
+${chunk.files.map(f => `=== ${f.name} (${f.type}) ===\n${f.content}`).join('\n')}
+
+${chunk.overlapContext ? `DEPENDENCY CONTEXT:\n${chunk.overlapContext}\n` : ''}
+
+EXTRACT ALL DEPENDENCIES - BE VERY SPECIFIC:
+
+**COPYBOOK DEPENDENCIES**
+Look for: COPY statements, INCLUDE statements
+Examples: COPY CUSTOMER-REC, COPY 'ACCOUNT-COPY', INCLUDE PAYROLL-COPY
+Extract ONLY the copybook names
+
+**PROGRAM CALL DEPENDENCIES**  
+Look for: CALL statements, LINK statements, XCTL statements, JCL EXEC PGM=
+Examples: CALL 'CUSTPROG', CALL CUSTOMER-UPDATE, EXEC PGM=PAYROLL
+Extract ONLY the program names
+
+**JCL DATASET DEPENDENCIES**
+Look for: DSN= parameters, DD statements with dataset names
+Examples: DSN=PROD.CUSTOMER.DATA, DSN=TEST.PAYROLL.FILE
+Extract ONLY the dataset names
+
+**DATABASE TABLE DEPENDENCIES**
+Look for: EXEC SQL with table names, FROM clauses, INTO clauses
+Examples: FROM CUSTOMER_TABLE, INTO ACCOUNT_MASTER, SELECT * FROM PAYROLL
+Extract ONLY the table names
+
+**FILE REFERENCE DEPENDENCIES**
+Look for: FD entries, SELECT-ASSIGN statements, OPEN/CLOSE statements
+Examples: FD CUSTOMER-FILE, SELECT CUST-FILE ASSIGN, OPEN INPUT PAYFILE
+Extract ONLY the file names
+
+RESPONSE FORMAT (EXACT FORMAT - NO EXTRA TEXT):
+COPYBOOKS: name1, name2, name3
+CALLED_PROGRAMS: prog1, prog2, prog3  
+CALLING_PROGRAMS: caller1, caller2, caller3
+JCL_DATASETS: dataset1, dataset2, dataset3
+DB_TABLES: table1, table2, table3
+FILE_REFERENCES: file1, file2, file3
+
+If no dependencies found in a category, write: CATEGORYNAME: none
+Extract actual names only - no quotes, no prefixes, no explanations.`;
+
+    const response = await this.callvLLMAPI(prompt);
+    return this.parseEnhancedDependencyResponse(response);
+};
+
+// Enhanced parsing with better error handling
+EnhancedMainframeAnalyzer.prototype.parseEnhancedDependencyResponse = function(response) {
+    const dependencies = {
+        copybooks: [],
+        calledPrograms: [],
+        callingPrograms: [],
+        jclDatasets: [],
+        dbTables: [],
+        fileReferences: []
+    };
+
+    console.log('Parsing dependency response:', response);
+
+    const lines = response.split('\n');
+    lines.forEach(line => {
+        const trimmed = line.trim();
+        
+        if (trimmed.startsWith('COPYBOOKS:')) {
+            dependencies.copybooks = this.parseEnhancedCommaSeparatedList(trimmed.split(':')[1]);
+        } else if (trimmed.startsWith('CALLED_PROGRAMS:')) {
+            dependencies.calledPrograms = this.parseEnhancedCommaSeparatedList(trimmed.split(':')[1]);
+        } else if (trimmed.startsWith('CALLING_PROGRAMS:')) {
+            dependencies.callingPrograms = this.parseEnhancedCommaSeparatedList(trimmed.split(':')[1]);
+        } else if (trimmed.startsWith('JCL_DATASETS:')) {
+            dependencies.jclDatasets = this.parseEnhancedCommaSeparatedList(trimmed.split(':')[1]);
+        } else if (trimmed.startsWith('DB_TABLES:')) {
+            dependencies.dbTables = this.parseEnhancedCommaSeparatedList(trimmed.split(':')[1]);
+        } else if (trimmed.startsWith('FILE_REFERENCES:')) {
+            dependencies.fileReferences = this.parseEnhancedCommaSeparatedList(trimmed.split(':')[1]);
+        }
+    });
+
+    console.log('Parsed dependencies:', dependencies);
+    return dependencies;
+};
+
+EnhancedMainframeAnalyzer.prototype.parseEnhancedCommaSeparatedList = function(str) {
+    if (!str) return [];
+    
+    return str.split(',')
+        .map(item => item.trim())
+        .filter(item => item && 
+                item.length > 0 && 
+                !item.toLowerCase().includes('none') && 
+                !item.toLowerCase().includes('n/a') &&
+                !item.toLowerCase().includes('not found') &&
+                item !== '...')
+        .map(item => item.replace(/['"`]/g, '').trim())
+        .filter(item => item.length > 0)
+        .slice(0, 15); // Reasonable limit per category
+};
+
+console.log('🔧 Enhanced Dependency Display Fix Applied!');
+console.log('✅ Improvements:');
+console.log('   • Clear breakdown of present vs missing items in each category');
+console.log('   • Specific lists of what copybooks/programs/datasets are missing');
+console.log('   • Enhanced recommendations with exact missing items');
+console.log('   • Better dependency extraction patterns');
+console.log('   • Improved visual highlighting of missing dependencies');
+console.log('   • Detailed upload suggestions for each missing category');
+
     </script>
 </body>
 </html>
