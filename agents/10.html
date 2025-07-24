@@ -1599,7 +1599,77 @@
 
                 return dependencies;
             }
+            
+async analyzeCopybookWithLLM(copybookName, relevantFiles, basicDependencies) {
+                console.log(`LLM analyzing copybook: ${copybookName}`);
+                
+                const copybookFile = relevantFiles.find(f => 
+                    f.type === 'Copybook' && 
+                    (f.name.toUpperCase().includes(copybookName.toUpperCase()) || 
+                     f.content.toUpperCase().includes(copybookName.toUpperCase()))
+                );
 
+                if (!copybookFile) {
+                    throw new Error(`Copybook file for ${copybookName} not found`);
+                }
+
+                // Prepare content for LLM analysis
+                const copybookContent = this.prepareContentForLLM(copybookFile.content, 'copybook');
+                
+                // Find programs using this copybook
+                const usingPrograms = this.findProgramsUsingCopybook(copybookName);
+                
+                const llmPrompt = `MAINFRAME COPYBOOK LIFECYCLE ANALYSIS
+
+TASK: Analyze the copybook "${copybookName}" and provide detailed field lifecycle information.
+
+COPYBOOK CONTENT:
+${copybookContent}
+
+PROGRAMS USING THIS COPYBOOK:
+${usingPrograms.map(p => p.name).join(', ')}
+
+DEPENDENCIES FOUND:
+Copy Statements: ${basicDependencies.copyStatements.join(', ')}
+Call Statements: ${basicDependencies.callStatements.join(', ')}
+
+INSTRUCTIONS:
+1. Extract ALL fields from the copybook with their levels, pictures, and values
+2. Categorize each field as: INPUT, OUTPUT, DERIVED, CONDITION, UNUSED, or STATIC
+3. For each field, analyze its usage pattern across programs
+4. Identify business rules and validation logic
+5. Provide recommendations for optimization
+
+OUTPUT FORMAT:
+{
+  "totalFields": <number>,
+  "fieldCategories": {
+    "INPUT_FIELDS": [<field_names>],
+    "OUTPUT_FIELDS": [<field_names>],
+    "DERIVED_FIELDS": [<field_names>],
+    "CONDITION_FIELDS": [<field_names>],
+    "UNUSED_FIELDS": [<field_names>],
+    "STATIC_FIELDS": [<field_names>]
+  },
+  "fieldDetails": {
+    "<field_name>": {
+      "level": <number>,
+      "picture": "<pic_clause>",
+      "value": "<value_clause>",
+      "category": "<category>",
+      "usagePattern": "<detailed_usage_description>",
+      "businessRole": "<business_purpose>"
+    }
+  },
+  "businessRules": [<extracted_business_rules>],
+  "recommendations": [<optimization_recommendations>],
+  "qualityScore": <1-10>
+}
+
+Respond with valid JSON only.`;
+
+                return await this.callLLMAPI(llmPrompt);
+            }
             // === LLM-POWERED COMPONENT ANALYSIS ===
   async analyzeProgramWithLLM(programName, relevantFiles, basicDependencies) {
                 console.log(`LLM analyzing program: ${programName}`);
