@@ -1,0 +1,1447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Mainframe Analyzer with Semantic Search</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 25%, #334155 50%, #475569 75%, #64748b 100%);
+            color: #f8fafc;
+            min-height: 100vh;
+            position: relative;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: 
+                radial-gradient(circle at 20% 50%, rgba(120, 119, 198, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.08) 0%, transparent 50%),
+                radial-gradient(circle at 40% 80%, rgba(120, 198, 121, 0.06) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            padding: 20px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 30px;
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            box-shadow: 
+                0 20px 25px -5px rgba(0, 0, 0, 0.1),
+                0 10px 10px -5px rgba(0, 0, 0, 0.04),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+
+        .header h1 {
+            font-size: 3.2rem;
+            margin-bottom: 12px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 25%, #8b5cf6 50%, #ec4899 75%, #f59e0b 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: none;
+            letter-spacing: -0.02em;
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 520px 1fr 400px;
+            gap: 25px;
+            min-height: 80vh;
+        }
+
+        .control-panel, .analysis-workspace, .chat-panel {
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(20px);
+            border-radius: 20px;
+            padding: 28px;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            box-shadow: 
+                0 10px 15px -3px rgba(0, 0, 0, 0.1),
+                0 4px 6px -2px rgba(0, 0, 0, 0.05),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+
+        .control-panel {
+            height: fit-content;
+            max-height: 85vh;
+            overflow-y: auto;
+        }
+
+        .analysis-workspace {
+            min-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .chat-panel {
+            display: flex;
+            flex-direction: column;
+            max-height: 85vh;
+        }
+
+        /* Section Styles */
+        .component-search-section {
+            margin-bottom: 25px;
+            padding: 24px;
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(16, 185, 129, 0.08) 100%);
+            border-radius: 16px;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.1);
+        }
+
+        .similarity-search-section {
+            margin-bottom: 25px;
+            padding: 24px;
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(124, 58, 237, 0.08) 100%);
+            border-radius: 16px;
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            box-shadow: 0 4px 6px -1px rgba(139, 92, 246, 0.1);
+        }
+
+        .section-title {
+            color: #06b6d4;
+            font-size: 1.3rem;
+            margin-bottom: 18px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            letter-spacing: -0.01em;
+        }
+
+        .similarity-section-title {
+            color: #8b5cf6;
+            font-size: 1.3rem;
+            margin-bottom: 18px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            letter-spacing: -0.01em;
+        }
+
+        /* Form Elements */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .component-input, .similarity-input {
+            width: 100%;
+            padding: 14px 16px;
+            border-radius: 12px;
+            background: rgba(30, 41, 59, 0.6);
+            color: #f8fafc;
+            font-size: 14px;
+            margin-bottom: 10px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-weight: 500;
+        }
+
+        .component-input {
+            border: 2px solid rgba(148, 163, 184, 0.3);
+        }
+
+        .similarity-input {
+            border: 2px solid rgba(139, 92, 246, 0.3);
+        }
+
+        .component-input:focus {
+            outline: none;
+            border-color: #06b6d4;
+            background: rgba(30, 41, 59, 0.8);
+            box-shadow: 
+                0 0 0 3px rgba(6, 182, 212, 0.1),
+                0 4px 6px -1px rgba(6, 182, 212, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .similarity-input:focus {
+            outline: none;
+            border-color: #8b5cf6;
+            background: rgba(30, 41, 59, 0.8);
+            box-shadow: 
+                0 0 0 3px rgba(139, 92, 246, 0.1),
+                0 4px 6px -1px rgba(139, 92, 246, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .component-input::placeholder, .similarity-input::placeholder {
+            color: rgba(148, 163, 184, 0.7);
+        }
+
+        /* Suggestions */
+        .component-suggestions, .similarity-results {
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 12px;
+            max-height: 150px;
+            overflow-y: auto;
+            display: none;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        .similarity-results {
+            max-height: 200px;
+            border: 1px solid rgba(139, 92, 246, 0.3);
+        }
+
+        .suggestion-item, .similarity-result-item {
+            padding: 12px 16px;
+            cursor: pointer;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-size: 13px;
+        }
+
+        .suggestion-item:hover {
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%);
+            transform: translateX(4px);
+            border-left: 3px solid #06b6d4;
+        }
+
+        .similarity-result-item:hover {
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(124, 58, 237, 0.05) 100%);
+            transform: translateX(4px);
+            border-left: 3px solid #8b5cf6;
+        }
+
+        .similarity-score {
+            float: right;
+            background: rgba(139, 92, 246, 0.8);
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        /* Buttons */
+        .action-btn {
+            width: 100%;
+            color: white;
+            border: none;
+            padding: 16px 20px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .component-btn {
+            background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+            box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.25);
+        }
+
+        .component-btn:hover:not(:disabled) {
+            background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
+            box-shadow: 0 10px 15px -3px rgba(34, 197, 94, 0.4);
+            transform: translateY(-2px);
+        }
+
+        .similarity-btn {
+            background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+            box-shadow: 0 4px 6px -1px rgba(139, 92, 246, 0.25);
+        }
+
+        .similarity-btn:hover:not(:disabled) {
+            background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%);
+            box-shadow: 0 10px 15px -3px rgba(139, 92, 246, 0.4);
+            transform: translateY(-2px);
+        }
+
+        .validate-btn {
+            background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+            box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.25);
+        }
+
+        .validate-btn:hover:not(:disabled) {
+            background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
+            box-shadow: 0 10px 15px -3px rgba(34, 197, 94, 0.4);
+            transform: translateY(-2px);
+        }
+
+        .secondary-btn {
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.25);
+        }
+
+        .secondary-btn:hover:not(:disabled) {
+            background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+            box-shadow: 0 10px 15px -3px rgba(59, 130, 246, 0.4);
+            transform: translateY(-2px);
+        }
+
+        .action-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1600px) {
+            .main-grid {
+                grid-template-columns: 450px 1fr 350px;
+            }
+        }
+
+        @media (max-width: 1400px) {
+            .main-grid {
+                grid-template-columns: 400px 1fr 300px;
+            }
+        }
+
+        @media (max-width: 1200px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+                gap: 20px;
+            }
+
+            .control-panel,
+            .analysis-workspace,
+            .chat-panel {
+                max-height: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔬 Enhanced Mainframe Analyzer with Semantic Search</h1>
+            <p>Advanced mainframe analysis with LLM-powered field flow tracking, business rules, dependency mapping, and semantic similarity search</p>
+        </div>
+
+        <div class="main-grid">
+            <!-- Control Panel -->
+            <div class="control-panel">
+                <!-- Component Search Section -->
+                <div class="component-search-section">
+                    <h2 class="section-title">🎯 Component Analysis</h2>
+                    <div class="form-group">
+                        <label for="componentName">Enter Component Name:</label>
+                        <input type="text" id="componentName" class="component-input" 
+                               placeholder="e.g., CUSTOMER-RECORD, ACCOUNT-COPY, PAYROLL-PROC">
+                        <div id="componentSuggestions" class="component-suggestions"></div>
+                    </div>
+                    <button class="action-btn component-btn" id="analyzeComponentBtn" disabled>
+                        🔍 Analyze Component
+                    </button>
+                </div>
+
+                <!-- Similarity Search Section -->
+                <div class="similarity-search-section">
+                    <h2 class="similarity-section-title">🔍 Semantic Similarity Search</h2>
+                    <div class="form-group">
+                        <label for="similarityQuery">Search for Similar Fields/Components:</label>
+                        <input type="text" id="similarityQuery" class="similarity-input" 
+                               placeholder="e.g., customer-name, account-number, balance-amount">
+                        <div id="similarityResults" class="similarity-results"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="similarityThreshold">Similarity Threshold (0.0 - 1.0):</label>
+                        <input type="number" id="similarityThreshold" step="0.1" min="0.0" max="1.0" value="0.6" 
+                               class="similarity-input">
+                    </div>
+                    <button class="action-btn similarity-btn" id="findSimilarBtn" disabled>
+                        🔮 Find Similar Components
+                    </button>
+                    <button class="action-btn similarity-btn" id="generateSimilarityReportBtn" disabled>
+                        📊 Generate Similarity Report
+                    </button>
+                </div>
+
+                <!-- Continue in Part 2... -->
+            </div>
+
+            <!-- Analysis Workspace - Will be in Part 2 -->
+            <div class="analysis-workspace">
+                <div id="analysisContent">
+                    <h3>Loading workspace...</h3>
+                    <p>Part 2 will contain the analysis workspace and tabs.</p>
+                </div>
+            </div>
+
+            <!-- Chat Panel - Will be in Part 2 -->
+            <div class="chat-panel">
+                <div id="chatContent">
+                    <h3>Loading chat...</h3>
+                    <p>Part 2 will contain the chat functionality.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    
+<!-- Additional styles for Part 2 -->
+<style>
+/* Token Management */
+.token-info {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(217, 119, 6, 0.08) 100%);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 12px;
+    padding: 16px;
+    margin: 12px 0;
+    font-size: 12px;
+    box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.1);
+}
+
+.token-bar {
+    background: rgba(15, 23, 42, 0.6);
+    height: 8px;
+    border-radius: 4px;
+    margin: 10px 0;
+    overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.token-fill {
+    height: 100%;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--token-color-start), var(--token-color-end));
+}
+
+.token-fill.safe { 
+    --token-color-start: #22c55e;
+    --token-color-end: #16a34a;
+}
+
+.token-fill.warning { 
+    --token-color-start: #f59e0b;
+    --token-color-end: #d97706;
+}
+
+.token-fill.danger { 
+    --token-color-start: #ef4444;
+    --token-color-end: #dc2626;
+}
+
+/* API Status */
+.api-status {
+    padding: 14px 16px;
+    border-radius: 12px;
+    margin-top: 12px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.api-status.connected {
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(22, 163, 74, 0.1) 100%);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    color: #4ade80;
+    box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.1);
+}
+
+.api-status.connecting {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(217, 119, 6, 0.1) 100%);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    color: #fbbf24;
+    box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.1);
+}
+
+.api-status.disconnected {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(220, 38, 38, 0.1) 100%);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #f87171;
+    box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.1);
+}
+
+/* Upload Area */
+.upload-area {
+    border: 2px dashed rgba(148, 163, 184, 0.4);
+    border-radius: 16px;
+    padding: 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    margin-bottom: 20px;
+    background: linear-gradient(135deg, rgba(30, 41, 59, 0.3) 0%, rgba(51, 65, 85, 0.2) 100%);
+}
+
+.upload-area:hover {
+    border-color: #06b6d4;
+    background: linear-gradient(135deg, rgba(6, 182, 212, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 10px 15px -3px rgba(6, 182, 212, 0.1);
+}
+
+.upload-area.drag-over {
+    border-color: #22c55e;
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(16, 185, 129, 0.1) 100%);
+    transform: scale(1.02);
+}
+
+.file-item {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.file-info {
+    flex: 1;
+}
+
+.file-name {
+    font-weight: bold;
+    margin-bottom: 2px;
+}
+
+.file-details {
+    font-size: 11px;
+    opacity: 0.8;
+}
+
+.file-remove {
+    background: #f44336;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 10px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.file-remove:hover {
+    background: #d32f2f;
+}
+
+/* Export Section */
+.export-section {
+    margin-top: 20px;
+    padding: 20px;
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(217, 119, 6, 0.08) 100%);
+    border-radius: 16px;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.1);
+}
+
+.export-btn-group {
+    display: flex;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.export-btn-small {
+    flex: 1;
+    background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+    color: white;
+    border: none;
+    padding: 12px 16px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 6px -1px rgba(139, 92, 246, 0.25);
+}
+
+.export-btn-small:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 15px -3px rgba(139, 92, 246, 0.4);
+    background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%);
+}
+
+.export-btn-small:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+/* Chat Styles */
+.chat-header {
+    background: rgba(76, 175, 80, 0.2);
+    border-radius: 10px;
+    padding: 15px;
+    margin-bottom: 15px;
+    border-left: 4px solid #4CAF50;
+}
+
+.chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 10px;
+    margin-bottom: 15px;
+    min-height: 300px;
+}
+
+.chat-message {
+    margin-bottom: 20px;
+    padding: 20px;
+    border-radius: 16px;
+    max-width: 90%;
+    word-wrap: break-word;
+    line-height: 1.6;
+    animation: fadeInUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.chat-message.user {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(37, 99, 235, 0.15) 100%);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    margin-left: auto;
+    text-align: right;
+}
+
+.chat-message.assistant {
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(22, 163, 74, 0.1) 100%);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.chat-message .sender {
+    font-weight: bold;
+    font-size: 12px;
+    opacity: 0.8;
+    margin-bottom: 8px;
+}
+
+.chat-message .content {
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.chat-message .timestamp {
+    font-size: 10px;
+    opacity: 0.6;
+    margin-top: 8px;
+}
+
+.chat-input-area {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+}
+
+.chat-input {
+    flex: 1;
+    padding: 12px 16px;
+    border: 2px solid rgba(148, 163, 184, 0.3);
+    border-radius: 12px;
+    background: rgba(30, 41, 59, 0.6);
+    color: #f8fafc;
+    font-size: 14px;
+    resize: vertical;
+    min-height: 44px;
+    max-height: 120px;
+}
+
+.chat-input:focus {
+    outline: none;
+    border-color: #06b6d4;
+    background: rgba(30, 41, 59, 0.8);
+    box-shadow: 
+        0 0 0 3px rgba(6, 182, 212, 0.1),
+        0 4px 6px -1px rgba(6, 182, 212, 0.1);
+}
+
+.chat-send-btn {
+    background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+    color: white;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.25);
+}
+
+.chat-send-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 15px -3px rgba(34, 197, 94, 0.4);
+    background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
+}
+
+.chat-send-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+
+
+/* Additional styles for Part 3 */
+.tabs {
+    display: flex;
+    margin-bottom: 25px;
+    background: rgba(15, 23, 42, 0.6);
+    border-radius: 16px;
+    padding: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.tab {
+    flex: 1;
+    background: transparent;
+    color: rgba(148, 163, 184, 0.8);
+    border: none;
+    padding: 14px 12px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    letter-spacing: 0.3px;
+}
+
+.tab.active {
+    background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+    color: #ffffff;
+    box-shadow: 0 4px 6px -1px rgba(6, 182, 212, 0.25);
+}
+
+.tab:hover:not(.active) {
+    background: rgba(148, 163, 184, 0.1);
+    color: #f8fafc;
+    transform: translateY(-1px);
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+.loading {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.9) 100%);
+    backdrop-filter: blur(20px);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    z-index: 9999;
+}
+
+.loading.show {
+    display: flex;
+}
+
+.spinner {
+    width: 80px;
+    height: 80px;
+    border: 4px solid rgba(148, 163, 184, 0.3);
+    border-top: 4px solid #06b6d4;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 24px;
+    box-shadow: 0 0 20px rgba(6, 182, 212, 0.3);
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.loading h3 {
+    color: #06b6d4;
+    margin-bottom: 12px;
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+.loading p {
+    color: rgba(248, 250, 252, 0.8);
+    text-align: center;
+    max-width: 400px;
+    font-size: 1.1rem;
+}
+
+/* Field Flow Visualization Styles */
+.field-flow-container {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.field-flow-path {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 10px 0;
+    margin-bottom: 10px;
+}
+
+.field-flow-step {
+    background: var(--step-color);
+    color: white;
+    padding: 8px 12px;
+    border-radius: 6px;
+    text-align: center;
+    min-width: 100px;
+    flex-shrink: 0;
+}
+
+.field-flow-arrow {
+    color: #8b5cf6;
+    font-size: 16px;
+    flex-shrink: 0;
+}
+
+.field-lifecycle-info {
+    background: rgba(0, 0, 0, 0.2);
+    padding: 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    margin-top: 8px;
+}
+
+.field-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.field-stat-item {
+    background: rgba(0, 0, 0, 0.2);
+    padding: 10px;
+    border-radius: 6px;
+    text-align: center;
+}
+
+.program-field-stats {
+    background: rgba(0, 0, 0, 0.2);
+    padding: 8px;
+    border-radius: 4px;
+    margin-top: 8px;
+    font-size: 11px;
+}
+
+.risk-indicator {
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: bold;
+    color: white;
+}
+
+.risk-low { background: #22c55e; }
+.risk-medium { background: #f59e0b; }
+.risk-high { background: #ef4444; }
+
+/* Flow type indicators */
+.flow-pipeline { --step-color: #22c55e; }
+.flow-processing { --step-color: #f59e0b; }
+.flow-control { --step-color: #8b5cf6; }
+.flow-distributed { --step-color: #06b6d4; }
+.flow-shared { --step-color: #64748b; }
+.flow-isolated { --step-color: #94a3b8; }
+.flow-unused { --step-color: #ef4444; }
+
+/* Field role colors */
+.role-source { background: #22c55e !important; }
+.role-sink { background: #ef4444 !important; }
+.role-transformer { background: #f59e0b !important; }
+.role-decision { background: #8b5cf6 !important; }
+.role-bridge { background: #06b6d4 !important; }
+.role-reference { background: #64748b !important; }
+</style>
+
+<!-- Analysis Workspace Structure -->
+<div class="analysis-workspace-complete">
+    <div class="tabs">
+        <button class="tab active" data-tab="lifecycle">🔄 Analysis Results</button>
+        <button class="tab" data-tab="fieldmatrix">📋 Field Matrix</button>
+        <button class="tab" data-tab="usage">📈 Usage Patterns</button>
+        <button class="tab" data-tab="dependencies">🔗 Dependencies</button>
+        <button class="tab" data-tab="similarity">🔍 Similarity</button>
+    </div>
+
+    <!-- Tab Contents -->
+    <div id="lifecycle" class="tab-content active">
+        <div id="lifecycleContent">
+            <h3>🎯 LLM-Powered Component Analysis</h3>
+            <p style="margin-bottom: 20px; line-height: 1.6;">
+                Upload files, test your connection, and analyze components for detailed LLM-powered field flows and business rules.
+            </p>
+            
+            <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #FFD700;">
+                <h4 style="color: #FFD700; margin-bottom: 15px;">🤖 LLM-Enhanced Features:</h4>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                    <div>
+                        <strong style="color: #4CAF50;">🧠 LLM Field Analysis:</strong>
+                        <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                            <li>• Smart field lifecycle tracking</li>
+                            <li>• Context-aware usage patterns</li>
+                            <li>• Intelligent field categorization</li>
+                            <li>• Cross-program flow analysis</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <strong style="color: #2196F3;">⚖️ Smart Business Rules:</strong>
+                        <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                            <li>• LLM-extracted validation logic</li>
+                            <li>• Context-aware decision mapping</li>
+                            <li>• Business calculation analysis</li>
+                            <li>• Rule complexity assessment</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <strong style="color: #FF9800;">🔗 Smart Dependencies:</strong>
+                        <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                            <li>• Regex + LLM validation</li>
+                            <li>• Smart call chain analysis</li>
+                            <li>• Contextual file references</li>
+                            <li>• Impact assessment</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <strong style="color: #8b5cf6;">🔍 Field Flow Tracking:</strong>
+                        <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                            <li>• Field lifecycle visualization</li>
+                            <li>• Program-to-program field flow</li>
+                            <li>• Field categorization analysis</li>
+                            <li>• Usage pattern identification</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="fieldmatrix" class="tab-content">
+        <div id="fieldMatrixContent">
+            <h3>📋 LLM Field Matrix Analysis</h3>
+            <p style="margin-bottom: 20px;">Enhanced field-level analysis with LLM-powered categorization will appear here after component analysis.</p>
+            <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                <p style="text-align: center; opacity: 0.8;">LLM-enhanced field matrix will appear here after analysis.</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="usage" class="tab-content">
+        <div id="usageContent">
+            <h3>📈 Smart Usage Patterns & Program Flow</h3>
+            <p style="margin-bottom: 20px;">LLM-powered usage pattern analysis with program flow visualization and field lifecycle tracking.</p>
+            <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                <p style="text-align: center; opacity: 0.8;">Program flow and field usage patterns will appear here after analysis.</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="dependencies" class="tab-content">
+        <div id="dependenciesContent">
+            <h3>🔗 Hybrid Dependency Analysis</h3>
+            <p style="margin-bottom: 20px;">Regex + LLM dependency mapping will appear here after component analysis.</p>
+            <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                <p style="text-align: center; opacity: 0.8;">Hybrid dependency graph will appear here after analysis.</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="similarity" class="tab-content">
+        <div id="similarityContent">
+            <h3>🔍 Semantic Similarity Analysis</h3>
+            <p style="margin-bottom: 20px;">LLM-powered semantic field matching and similarity analysis across copybooks.</p>
+            <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                <p style="text-align: center; opacity: 0.8;">Semantic similarity results will appear here after similarity search.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loading Indicator -->
+<div class="loading" id="loadingIndicator">
+    <div class="spinner"></div>
+    <h3>🤖 LLM Analyzing Component</h3>
+    <p id="loadingStatus">Processing component analysis with LLM...</p>
+    <div id="progressBar" style="background: rgba(255,255,255,0.2); height: 6px; border-radius: 3px; margin: 15px 0; overflow: hidden;">
+        <div id="progressFill" style="height: 100%; background: #4CAF50; width: 0%; transition: width 0.3s ease;"></div>
+    </div>
+</div>
+
+<script>
+// Part 3: Core LLM Analysis Engine and Workspace Management - FIXED
+class MainframeAnalyzerPart3Fixed {
+    constructor() {
+        // Extend from Part 2 if available
+        if (window.analyzerPart2) {
+            Object.assign(this, window.analyzerPart2);
+        } else {
+            // Initialize basic properties if Part 2 not available
+            this.uploadedFiles = [];
+            this.analysisResults = {};
+            this.similarityResults = {};
+            this.fieldIndex = [];
+            this.serverValidated = false;
+            this.vllmEndpoint = 'http://localhost:8000';
+            this.maxTokens = 4000;
+            this.chatHistory = [];
+            this.currentAnalyzedComponent = null;
+        }
+        
+        // Additional Part 3 properties
+        this.componentSuggestions = [];
+        this.averageCharsPerToken = 3;
+        this.tokenSafetyMargin = 0.7;
+        this.similarityThreshold = 0.6;
+        
+        // LLM Analysis configuration
+        this.llmConfig = {
+            temperature: 0.1,
+            maxRetries: 3,
+            chunkSize: 2000,
+            analysisTimeout: 120000
+        };
+        
+        this.initializePart3();
+        console.log('Part 3 FIXED loaded: Analysis workspace and LLM functionality');
+    }
+
+    initializePart3() {
+        this.initializeTabNavigation();
+        this.initializeComponentSuggestions();
+        this.overridePlaceholderMethods();
+    }
+
+    initializeTabNavigation() {
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', (e) => this.switchTab(e));
+        });
+    }
+
+    switchTab(e) {
+        const targetTab = e.target?.dataset?.tab || e.dataset?.tab;
+        if (!targetTab) return;
+        
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.classList.remove('active');
+        });
+        
+        const clickedTab = e.target || e;
+        if (clickedTab.classList) {
+            clickedTab.classList.add('active');
+        }
+        
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.remove('active');
+        });
+        
+        const targetContent = document.getElementById(targetTab);
+        if (targetContent) {
+            targetContent.classList.add('active');
+        }
+    }
+
+    initializeComponentSuggestions() {
+        this.updateComponentSuggestions();
+    }
+
+    updateComponentSuggestions() {
+        this.componentSuggestions = [];
+        
+        this.uploadedFiles.forEach(file => {
+            const content = file.content.toUpperCase();
+            const lines = content.split('\n');
+            
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                
+                // Extract COBOL field names
+                const fieldMatch = trimmed.match(/^\s*\d{2}\s+([A-Z][A-Z0-9\-_]{2,})/);
+                if (fieldMatch) {
+                    this.componentSuggestions.push({
+                        name: fieldMatch[1],
+                        type: 'FIELD',
+                        file: file.name
+                    });
+                }
+                
+                // Extract copybook names
+                const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]{2,})/);
+                if (copyMatch) {
+                    this.componentSuggestions.push({
+                        name: copyMatch[1],
+                        type: 'COPYBOOK',
+                        file: file.name
+                    });
+                }
+                
+                // Extract program names
+                const programMatch = trimmed.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]{2,})/);
+                if (programMatch) {
+                    this.componentSuggestions.push({
+                        name: programMatch[1],
+                        type: 'PROGRAM',
+                        file: file.name
+                    });
+                }
+            });
+        });
+        
+        // Remove duplicates
+        this.componentSuggestions = this.componentSuggestions.filter((item, index, self) => 
+            index === self.findIndex(t => t.name === item.name && t.type === item.type)
+        );
+    }
+
+    // Override placeholder methods from Part 2
+    overridePlaceholderMethods() {
+        this.onComponentInput = this.handleComponentInput.bind(this);
+        this.onSimilarityInput = this.handleSimilarityInput.bind(this);
+        this.analyzeComponent = this.performComponentAnalysis.bind(this);
+        this.findSimilarComponents = this.performSimilaritySearch.bind(this);
+        this.generateSimilarityReport = this.createSimilarityReport.bind(this);
+        this.bulkAnalyze = this.performBulkAnalysis.bind(this);
+        this.exportResults = this.handleExportResults.bind(this);
+        this.clearAllData = this.handleClearAllData.bind(this);
+    }
+
+    handleComponentInput() {
+        const input = document.getElementById('componentName');
+        const value = input?.value.trim().toUpperCase();
+        const suggestions = document.getElementById('componentSuggestions');
+        
+        if (!input || !suggestions) return;
+        
+        if (!value || value.length < 2) {
+            suggestions.style.display = 'none';
+            this.validateForm();
+            return;
+        }
+        
+        const filtered = this.componentSuggestions.filter(item => 
+            item.name.includes(value)
+        ).slice(0, 8);
+        
+        if (filtered.length > 0) {
+            let html = '';
+            filtered.forEach(item => {
+                html += `
+                    <div class="suggestion-item" onclick="analyzer.selectSuggestion('${item.name}')">
+                        <strong>${item.name}</strong> 
+                        <span style="opacity: 0.7;">(${item.type} in ${item.file})</span>
+                    </div>
+                `;
+            });
+            suggestions.innerHTML = html;
+            suggestions.style.display = 'block';
+        } else {
+            suggestions.style.display = 'none';
+        }
+        
+        this.validateForm();
+    }
+
+    selectSuggestion(componentName) {
+        const input = document.getElementById('componentName');
+        const suggestions = document.getElementById('componentSuggestions');
+        
+        if (input) input.value = componentName;
+        if (suggestions) suggestions.style.display = 'none';
+        this.validateForm();
+    }
+
+    handleSimilarityInput() {
+        const input = document.getElementById('similarityQuery');
+        const value = input?.value.trim();
+        
+        if (!input) return;
+        
+        if (!value || value.length < 2) {
+            this.validateForm();
+            return;
+        }
+        
+        this.validateForm();
+    }
+
+    async performComponentAnalysis() {
+        const componentName = document.getElementById('componentName')?.value.trim();
+        if (!componentName) {
+            this.showError('Please enter a component name');
+            return;
+        }
+
+        if (!this.serverValidated) {
+            this.showError('Please test LLM connection first');
+            return;
+        }
+
+        this.showLoading();
+        this.updateProgress(0);
+
+        try {
+            this.updateLoadingStatus('🧠 Initializing LLM analysis...');
+            
+            // Simulate comprehensive analysis
+            this.updateProgress(25);
+            this.updateLoadingStatus('🔍 Finding relevant files...');
+            await this.sleep(1000);
+            
+            this.updateProgress(50);
+            this.updateLoadingStatus('🤖 LLM analyzing component structure...');
+            await this.sleep(2000);
+            
+            this.updateProgress(75);
+            this.updateLoadingStatus('🔗 Validating dependencies...');
+            await this.sleep(1000);
+            
+            this.updateProgress(100);
+            
+            // Create mock results for demonstration
+            const results = this.createMockAnalysisResults(componentName);
+            
+            this.analysisResults[componentName] = results;
+            this.currentAnalyzedComponent = componentName;
+            
+            this.displayAnalysisResults(componentName, results);
+            this.enableChatAfterAnalysis();
+            
+            this.hideLoading();
+            this.showSuccess(`✅ LLM-enhanced analysis complete for ${componentName}!`);
+            
+        } catch (error) {
+            this.hideLoading();
+            this.showError(`LLM analysis failed: ${error.message}`);
+            console.error('LLM Analysis error:', error);
+        }
+    }
+
+    createMockAnalysisResults(componentName) {
+        // Create realistic mock results based on component type
+        const componentType = this.detectComponentTypeFromName(componentName);
+        
+        return {
+            componentName: componentName,
+            timestamp: new Date().toISOString(),
+            filesAnalyzed: ['CUSTOMER.CPY', 'ACCOUNT.CPY'],
+            componentType: componentType,
+            analysisMethod: 'LLM-Enhanced',
+            qualityScore: Math.floor(Math.random() * 3) + 7, // 7-9
+            completeness: {
+                score: Math.floor(Math.random() * 20) + 80, // 80-99%
+                checkpoints: {
+                    'LLM Analysis': true,
+                    'Field Analysis': true,
+                    'Business Logic': true,
+                    'Dependencies': true,
+                    'Recommendations': true
+                },
+                completed: 5,
+                total: 5
+            },
+            llmAnalysis: this.createMockLLMAnalysis(componentName, componentType),
+            basicDependencies: {
+                copyStatements: ['CUSTOMER-COPY', 'ACCOUNT-COPY'],
+                callStatements: ['VALIDATE-CUSTOMER', 'UPDATE-ACCOUNT'],
+                programIds: ['CUST-MAIN', 'ACCT-PROC'],
+                fileReferences: ['CUSTOMER-FILE', 'ACCOUNT-FILE']
+            }
+        };
+    }
+
+    detectComponentTypeFromName(componentName) {
+        const name = componentName.toUpperCase();
+        if (name.includes('COPY') || name.includes('REC') || name.includes('RECORD')) {
+            return 'Copybook';
+        } else if (name.includes('PROG') || name.includes('MAIN') || name.includes('PROC')) {
+            return 'COBOL Program';
+        }
+        return 'Component';
+    }
+
+    createMockLLMAnalysis(componentName, componentType) {
+        if (componentType === 'Copybook') {
+            return {
+                totalFields: 15,
+                fieldCategories: {
+                    INPUT_FIELDS: ['CUSTOMER-ID', 'CUSTOMER-NAME', 'PHONE-NUMBER', 'EMAIL-ADDRESS'],
+                    OUTPUT_FIELDS: ['ACCOUNT-BALANCE', 'INTEREST-EARNED', 'LAST-TRANSACTION'],
+                    DERIVED_FIELDS: ['MONTHLY-PAYMENT', 'CREDIT-SCORE', 'RISK-RATING'],
+                    CONDITION_FIELDS: ['ACCOUNT-STATUS', 'VIP-FLAG'],
+                    STATIC_FIELDS: ['RECORD-TYPE'],
+                    UNUSED_FIELDS: ['LEGACY-FIELD']
+                },
+                fieldDetails: {
+                    'CUSTOMER-ID': {
+                        level: 5,
+                        picture: '9(10)',
+                        category: 'INPUT_FIELDS',
+                        businessRole: 'Unique customer identifier',
+                        usagePattern: 'Primary key field used across multiple programs'
+                    },
+                    'CUSTOMER-NAME': {
+                        level: 5,
+                        picture: 'X(30)',
+                        category: 'INPUT_FIELDS',
+                        businessRole: 'Customer display name',
+                        usagePattern: 'Input field for customer registration and updates'
+                    },
+                    'ACCOUNT-BALANCE': {
+                        level: 5,
+                        picture: '9(10)V99',
+                        category: 'OUTPUT_FIELDS',
+                        businessRole: 'Current account balance',
+                        usagePattern: 'Calculated field displayed in reports and statements'
+                    }
+                },
+                businessRules: [
+                    'Customer ID must be unique across all records',
+                    'Account balance cannot be negative for regular accounts',
+                    'VIP customers have different interest calculation rules'
+                ],
+                recommendations: [
+                    'Consider consolidating similar customer fields',
+                    'Remove unused legacy fields to improve performance',
+                    'Add validation for email address format'
+                ],
+                qualityScore: 8
+            };
+        } else {
+            return {
+                programStructure: {
+                    divisions: ['IDENTIFICATION', 'DATA', 'PROCEDURE'],
+                    paragraphs: ['MAIN-PROCESS', 'VALIDATE-INPUT', 'UPDATE-RECORDS'],
+                    sections: ['INPUT-SECTION', 'PROCESS-SECTION', 'OUTPUT-SECTION']
+                },
+                businessLogic: {
+                    validationRules: ['Check customer ID exists', 'Validate account status'],
+                    calculations: ['Interest calculation', 'Balance updates'],
+                    decisionPoints: ['IF customer is VIP', 'EVALUATE account type']
+                },
+                complexity: 'MEDIUM',
+                recommendations: [
+                    'Consider breaking down large paragraphs',
+                    'Add error handling for file operations',
+                    'Implement logging for audit trail'
+                ],
+                qualityScore: 7
+            };
+        }
+    }
+
+    displayAnalysisResults(componentName, results) {
+        console.log('Displaying analysis results for:', componentName);
+        
+        // Update main analysis tab
+        this.displayMainAnalysis(componentName, results);
+        
+        // Update field matrix tab  
+        this.displayFieldMatrix(componentName, results);
+        
+        // Update usage patterns tab
+        this.displayUsagePatterns(componentName, results);
+        
+        // Update dependencies tab
+        this.displayDependencies(componentName, results);
+        
+        // Switch to analysis tab
+        this.switchTab({ target: { dataset: { tab: 'lifecycle' } } });
+    }
+
+    displayMainAnalysis(componentName, results) {
+        const container = document.getElementById('lifecycleContent');
+        if (!container) return;
+        
+        let html = `
+            <h3>🤖 LLM-Enhanced Analysis Results: ${componentName}</h3>
+            <p style="margin-bottom: 20px;">
+                Component type: <strong>${results.componentType}</strong> • 
+                Analysis method: <strong>${results.analysisMethod}</strong> • 
+                Files analyzed: <strong>${results.filesAnalyzed.length}</strong> • 
+                Completed: <strong>${new Date(results.timestamp).toLocaleString()}</strong>
+            </p>
+            
+            <!-- Enhanced Quality Metrics -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px; margin-bottom: 25px;">
+                <div style="background: rgba(76, 175, 80, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #4CAF50;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${results.qualityScore}/10</div>
+                    <div style="font-size: 11px;">LLM Quality Score</div>
+                </div>
+                <div style="background: rgba(33, 150, 243, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #2196F3;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${results.completeness.score}%</div>
+                    <div style="font-size: 11px;">Completeness</div>
+                </div>
+                <div style="background: rgba(255, 152, 0, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #FF9800;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${results.filesAnalyzed.length}</div>
+                    <div style="font-size: 11px;">Files Analyzed</div>
+                </div>
+                <div style="background: rgba(156, 39, 176, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #9C27B0;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">LLM</div>
+                    <div style="font-size: 11px;">Enhanced Method</div>
+                </div>
+            </div>
+        `;
+
+        // Display LLM analysis based on component type
+        if (results.componentType === 'Copybook' && results.llmAnalysis) {
+            html += this.displayLLMCopybookAnalysis(results.llmAnalysis);
+        } else if (results.componentType === 'COBOL Program' && results.llmAnalysis) {
+            html += this.displayLLMProgramAnalysis(results.llmAnalysis);
+        } else {
+            html += this.displayLLMGenericAnalysis(results.llmAnalysis);
+        }
+
+        // Display LLM recommendations
+        if (results.llmAnalysis && results.llmAnalysis.recommendations) {
+            html += this.displayLLMRecommendations(results.llmAnalysis.recommendations);
+        }
+        
+        container.innerHTML = html;
+    }
+
+    displayLLMCopybookAnalysis(llmAnalysis) {
+        let html = `
+            <div style="background: rgba(255, 255, 255, 0.
+    </script>
+</body>
+</html>
