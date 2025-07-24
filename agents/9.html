@@ -1,0 +1,3771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Mainframe Analyzer</title>
+    <style>
+        /* Your existing styles remain the same */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 25%, #334155 50%, #475569 75%, #64748b 100%);
+            color: #f8fafc;
+            min-height: 100vh;
+            position: relative;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: 
+                radial-gradient(circle at 20% 50%, rgba(120, 119, 198, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.08) 0%, transparent 50%),
+                radial-gradient(circle at 40% 80%, rgba(120, 198, 121, 0.06) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            padding: 20px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 30px;
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            box-shadow: 
+                0 20px 25px -5px rgba(0, 0, 0, 0.1),
+                0 10px 10px -5px rgba(0, 0, 0, 0.04),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+
+        .header h1 {
+            font-size: 3.2rem;
+            margin-bottom: 12px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 25%, #8b5cf6 50%, #ec4899 75%, #f59e0b 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: none;
+            letter-spacing: -0.02em;
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 520px 1fr 400px;
+            gap: 25px;
+            min-height: 80vh;
+        }
+
+        .control-panel, .analysis-workspace, .chat-panel {
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(20px);
+            border-radius: 20px;
+            padding: 28px;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            box-shadow: 
+                0 10px 15px -3px rgba(0, 0, 0, 0.1),
+                0 4px 6px -2px rgba(0, 0, 0, 0.05),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+
+        .control-panel {
+            height: fit-content;
+            max-height: 85vh;
+            overflow-y: auto;
+        }
+
+        .analysis-workspace {
+            min-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .chat-panel {
+            display: flex;
+            flex-direction: column;
+            max-height: 85vh;
+        }
+
+        /* Component Search Section */
+        .component-search-section {
+            margin-bottom: 25px;
+            padding: 24px;
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(16, 185, 129, 0.08) 100%);
+            border-radius: 16px;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.1);
+        }
+
+        .component-input {
+            width: 100%;
+            padding: 14px 16px;
+            border: 2px solid rgba(148, 163, 184, 0.3);
+            border-radius: 12px;
+            background: rgba(30, 41, 59, 0.6);
+            color: #f8fafc;
+            font-size: 14px;
+            margin-bottom: 10px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-weight: 500;
+        }
+
+        .component-input:focus {
+            outline: none;
+            border-color: #06b6d4;
+            background: rgba(30, 41, 59, 0.8);
+            box-shadow: 
+                0 0 0 3px rgba(6, 182, 212, 0.1),
+                0 4px 6px -1px rgba(6, 182, 212, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .component-input::placeholder {
+            color: rgba(148, 163, 184, 0.7);
+        }
+
+        .component-suggestions {
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 12px;
+            max-height: 150px;
+            overflow-y: auto;
+            display: none;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        .suggestion-item {
+            padding: 12px 16px;
+            cursor: pointer;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-size: 13px;
+        }
+
+        .suggestion-item:hover {
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%);
+            transform: translateX(4px);
+            border-left: 3px solid #06b6d4;
+        }
+
+        /* Token Management */
+        .token-info {
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(217, 119, 6, 0.08) 100%);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 16px;
+            margin: 12px 0;
+            font-size: 12px;
+            box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.1);
+        }
+
+        .token-bar {
+            background: rgba(15, 23, 42, 0.6);
+            height: 8px;
+            border-radius: 4px;
+            margin: 10px 0;
+            overflow: hidden;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }
+
+        .token-fill {
+            height: 100%;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 4px;
+            background: linear-gradient(90deg, var(--token-color-start), var(--token-color-end));
+        }
+
+        .token-fill.safe { 
+            --token-color-start: #22c55e;
+            --token-color-end: #16a34a;
+        }
+        .token-fill.warning { 
+            --token-color-start: #f59e0b;
+            --token-color-end: #d97706;
+        }
+        .token-fill.danger { 
+            --token-color-start: #ef4444;
+            --token-color-end: #dc2626;
+        }
+
+        /* General Form Styles */
+        .section-title { 
+            color: #06b6d4; 
+            font-size: 1.3rem; 
+            margin-bottom: 18px; 
+            font-weight: 700; 
+            display: flex; 
+            align-items: center; 
+            gap: 12px;
+            letter-spacing: -0.01em;
+        }
+
+        .form-group { 
+            margin-bottom: 20px; 
+        }
+
+        .form-group input, 
+        .form-group select, 
+        .form-group textarea { 
+            width: 100%; 
+            padding: 14px 16px; 
+            border: 2px solid rgba(148, 163, 184, 0.3); 
+            border-radius: 12px; 
+            background: rgba(30, 41, 59, 0.6); 
+            color: #f8fafc; 
+            font-size: 14px; 
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-weight: 500;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #06b6d4;
+            background: rgba(30, 41, 59, 0.8);
+            box-shadow: 
+                0 0 0 3px rgba(6, 182, 212, 0.1),
+                0 4px 6px -1px rgba(6, 182, 212, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .form-group input::placeholder,
+        .form-group textarea::placeholder {
+            color: rgba(148, 163, 184, 0.7);
+        }
+
+        .action-btn { 
+            width: 100%; 
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); 
+            color: white; 
+            border: none; 
+            padding: 16px 20px; 
+            border-radius: 12px; 
+            cursor: pointer; 
+            font-size: 15px; 
+            font-weight: 600; 
+            margin-bottom: 12px; 
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); 
+            text-transform: uppercase; 
+            letter-spacing: 0.5px;
+            box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.25);
+        }
+
+        .action-btn:hover:not(:disabled) { 
+            transform: translateY(-2px); 
+            box-shadow: 0 10px 15px -3px rgba(239, 68, 68, 0.4);
+            background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
+        }
+
+        .action-btn:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .action-btn:disabled { 
+            opacity: 0.5; 
+            cursor: not-allowed; 
+            transform: none; 
+            box-shadow: none; 
+        }
+
+        .validate-btn { 
+            background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); 
+            box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.25);
+        }
+
+        .validate-btn:hover:not(:disabled) {
+            background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
+            box-shadow: 0 10px 15px -3px rgba(34, 197, 94, 0.4);
+        }
+
+        .component-btn { 
+            background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); 
+            box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.25);
+        }
+
+        .component-btn:hover:not(:disabled) {
+            background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
+            box-shadow: 0 10px 15px -3px rgba(34, 197, 94, 0.4);
+        }
+
+        .secondary-btn { 
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); 
+            box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.25);
+        }
+
+        .secondary-btn:hover:not(:disabled) {
+            background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+            box-shadow: 0 10px 15px -3px rgba(59, 130, 246, 0.4);
+        }
+
+        /* API Status */
+        .api-status {
+            padding: 14px 16px;
+            border-radius: 12px;
+            margin-top: 12px;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .api-status.connected {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(22, 163, 74, 0.1) 100%);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            color: #4ade80;
+            box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.1);
+        }
+
+        .api-status.connecting {
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(217, 119, 6, 0.1) 100%);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            color: #fbbf24;
+            box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.1);
+        }
+
+        .api-status.disconnected {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(220, 38, 38, 0.1) 100%);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #f87171;
+            box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.1);
+        }
+
+        /* Upload Area */
+        .upload-area {
+            border: 2px dashed rgba(148, 163, 184, 0.4);
+            border-radius: 16px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.3) 0%, rgba(51, 65, 85, 0.2) 100%);
+        }
+
+        .upload-area:hover {
+            border-color: #06b6d4;
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(6, 182, 212, 0.1);
+        }
+
+        .upload-area.drag-over {
+            border-color: #22c55e;
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(16, 185, 129, 0.1) 100%);
+            transform: scale(1.02);
+        }
+
+        .file-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .file-item {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .file-info {
+            flex: 1;
+        }
+
+        .file-name {
+            font-weight: bold;
+            margin-bottom: 2px;
+        }
+
+        .file-details {
+            font-size: 11px;
+            opacity: 0.8;
+        }
+
+        .file-remove {
+            background: #f44336;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .file-remove:hover {
+            background: #d32f2f;
+        }
+
+        /* Loading Indicator */
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.9) 100%);
+            backdrop-filter: blur(20px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            z-index: 9999;
+        }
+
+        .loading.show {
+            display: flex;
+        }
+
+        .spinner {
+            width: 80px;
+            height: 80px;
+            border: 4px solid rgba(148, 163, 184, 0.3);
+            border-top: 4px solid #06b6d4;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 24px;
+            box-shadow: 0 0 20px rgba(6, 182, 212, 0.3);
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading h3 {
+            color: #06b6d4;
+            margin-bottom: 12px;
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .loading p {
+            color: rgba(248, 250, 252, 0.8);
+            text-align: center;
+            max-width: 400px;
+            font-size: 1.1rem;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            margin-bottom: 25px;
+            background: rgba(15, 23, 42, 0.6);
+            border-radius: 16px;
+            padding: 6px;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }
+
+        .tab {
+            flex: 1;
+            background: transparent;
+            color: rgba(148, 163, 184, 0.8);
+            border: none;
+            padding: 14px 12px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            letter-spacing: 0.3px;
+        }
+
+        .tab.active {
+            background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+            color: #ffffff;
+            box-shadow: 0 4px 6px -1px rgba(6, 182, 212, 0.25);
+        }
+
+        .tab:hover:not(.active) {
+            background: rgba(148, 163, 184, 0.1);
+            color: #f8fafc;
+            transform: translateY(-1px);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Message Types */
+        .error, .success, .warning {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            padding: 16px 24px;
+            border-radius: 12px;
+            font-weight: 600;
+            z-index: 10000;
+            animation: slideInRight 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(20px);
+        }
+
+        .error {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.95) 0%, rgba(220, 38, 38, 0.9) 100%);
+            color: #ffffff;
+            border: 1px solid rgba(239, 68, 68, 0.5);
+        }
+
+        .success {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.95) 0%, rgba(22, 163, 74, 0.9) 100%);
+            color: #ffffff;
+            border: 1px solid rgba(34, 197, 94, 0.5);
+        }
+
+        .warning {
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.95) 0%, rgba(217, 119, 6, 0.9) 100%);
+            color: #ffffff;
+            border: 1px solid rgba(245, 158, 11, 0.5);
+        }
+
+        @keyframes slideInRight {
+            from { 
+                transform: translateX(100%); 
+                opacity: 0;
+            }
+            to { 
+                transform: translateX(0); 
+                opacity: 1;
+            }
+        }
+
+        /* Enhanced Chat Styles */
+        .chat-suggestion-btn {
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(51, 65, 85, 0.6) 100%);
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            color: #f8fafc;
+            padding: 8px 14px;
+            border-radius: 20px;
+            font-size: 11px;
+            cursor: pointer;
+            margin: 4px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: inline-block;
+            font-weight: 500;
+        }
+
+        .chat-suggestion-btn:hover {
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.2) 0%, rgba(59, 130, 246, 0.15) 100%);
+            border-color: #06b6d4;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px -1px rgba(6, 182, 212, 0.25);
+        }
+
+        .chat-message {
+            margin-bottom: 20px;
+            padding: 20px;
+            border-radius: 16px;
+            max-width: 90%;
+            word-wrap: break-word;
+            line-height: 1.6;
+            animation: fadeInUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .chat-message.user {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(37, 99, 235, 0.15) 100%);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            margin-left: auto;
+            text-align: right;
+        }
+
+        .chat-message.assistant {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(22, 163, 74, 0.1) 100%);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+
+        .chat-message .sender {
+            font-weight: bold;
+            font-size: 12px;
+            opacity: 0.8;
+            margin-bottom: 8px;
+        }
+
+        .chat-message .content {
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .chat-message .timestamp {
+            font-size: 10px;
+            opacity: 0.6;
+            margin-top: 8px;
+        }
+
+        .chat-message .export-btn {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(51, 65, 85, 0.7) 100%);
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            border-radius: 8px;
+            padding: 6px 10px;
+            font-size: 10px;
+            color: #f8fafc;
+            cursor: pointer;
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-weight: 500;
+        }
+
+        .chat-message:hover .export-btn {
+            opacity: 1;
+        }
+
+        .chat-message .export-btn:hover {
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.2) 0%, rgba(59, 130, 246, 0.15) 100%);
+            border-color: #06b6d4;
+            transform: translateY(-1px);
+        }
+
+        #chatMessages::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        #chatMessages::-webkit-scrollbar-track {
+            background: rgba(30, 41, 59, 0.3);
+            border-radius: 4px;
+        }
+
+        #chatMessages::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, #64748b 0%, #475569 100%);
+            border-radius: 4px;
+        }
+
+        #chatMessages::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+        }
+
+        #chatInput:focus {
+            outline: none;
+            border-color: #06b6d4;
+            background: rgba(30, 41, 59, 0.8);
+            box-shadow: 
+                0 0 0 3px rgba(6, 182, 212, 0.1),
+                0 4px 6px -1px rgba(6, 182, 212, 0.1);
+        }
+
+        #chatInput::placeholder {
+            color: rgba(148, 163, 184, 0.7);
+        }
+
+        #chatSendBtn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(34, 197, 94, 0.4);
+        }
+
+        #chatSendBtn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+
+        /* Export Buttons */
+        .export-section {
+            margin-top: 20px;
+            padding: 20px;
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(217, 119, 6, 0.08) 100%);
+            border-radius: 16px;
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.1);
+        }
+
+        .export-btn-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .export-btn-small {
+            flex: 1;
+            background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+            color: white;
+            border: none;
+            padding: 12px 16px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 6px -1px rgba(139, 92, 246, 0.25);
+        }
+
+        .export-btn-small:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(139, 92, 246, 0.4);
+            background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%);
+        }
+
+        .export-btn-small:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1600px) { 
+            .main-grid { 
+                grid-template-columns: 450px 1fr 350px; 
+            } 
+        }
+
+        @media (max-width: 1400px) { 
+            .main-grid { 
+                grid-template-columns: 400px 1fr 300px; 
+            } 
+        }
+
+        @media (max-width: 1200px) { 
+            .main-grid { 
+                grid-template-columns: 1fr; 
+                gap: 20px; 
+            }
+            
+            .control-panel, 
+            .analysis-workspace, 
+            .chat-panel {
+                max-height: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔬 Enhanced Mainframe Analyzer</h1>
+            <p>Advanced mainframe analysis with LLM-powered field flow tracking, business rules, and dependency mapping</p>
+        </div>
+
+        <div class="main-grid">
+            <!-- Control Panel -->
+            <div class="control-panel">
+                <!-- Component Search Section -->
+                <div class="component-search-section">
+                    <h2 class="section-title">🎯 Component Analysis</h2>
+                    <div class="form-group">
+                        <label for="componentName">Enter Component Name:</label>
+                        <input type="text" id="componentName" class="component-input" 
+                               placeholder="e.g., CUSTOMER-RECORD, ACCOUNT-COPY, PAYROLL-PROC">
+                        <div id="componentSuggestions" class="component-suggestions"></div>
+                    </div>
+                    
+                    <!-- Token Usage Display -->
+                    <div id="tokenInfo" class="token-info" style="display: none;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                            <span style="font-weight: bold;">Token Management</span>
+                            <span id="tokenCount">0 / 4000</span>
+                        </div>
+                        <div class="token-bar">
+                            <div id="tokenFill" class="token-fill safe" style="width: 0%"></div>
+                        </div>
+                        <div id="tokenWarning" style="font-size: 11px; margin-top: 5px;"></div>
+                    </div>
+                    
+                    <button class="action-btn component-btn" id="analyzeComponentBtn" disabled>
+                        🔍 Analyze Component
+                    </button>
+                </div>
+
+                <!-- vLLM API Setup -->
+                <div style="margin-bottom: 25px; padding: 20px; background: rgba(0, 0, 0, 0.2); border-radius: 15px; border-left: 4px solid #4CAF50;">
+                    <h2 class="section-title">🚀 vLLM Server Setup</h2>
+                    <div class="form-group">
+                        <label for="vllmEndpoint">Server Endpoint:</label>
+                        <input type="text" id="vllmEndpoint" placeholder="http://localhost:8000" value="http://localhost:8000">
+                    </div>
+                    <div class="form-group">
+                        <label for="maxTokens">Max Tokens:</label>
+                        <input type="number" id="maxTokens" value="4000" min="1000" max="8000">
+                    </div>
+                    <button class="action-btn validate-btn" id="validateApiBtn">
+                        🔐 Test Connection
+                    </button>
+                    <div class="api-status disconnected" id="apiStatus">
+                        <span>🔴</span> Enter server details and test connection
+                    </div>
+                </div>
+
+                <!-- File Upload Section -->
+                <div style="margin-bottom: 25px;">
+                    <h2 class="section-title">📁 Upload Mainframe Files</h2>
+                    <div class="upload-area" id="uploadArea">
+                        <div>
+                            <h3 style="margin-bottom: 8px;">📤 Drop files here</h3>
+                            <p style="font-size: 14px;">COBOL (.cbl), Copybooks (.cpy), JCL (.jcl)</p>
+                        </div>
+                        <input type="file" id="fileInput" multiple accept=".cbl,.cob,.cpy,.copybook,.jcl,.txt,.proc" style="display: none;">
+                    </div>
+                    <div id="uploadedFiles" class="file-list"></div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div>
+                    <h3 class="section-title">⚡ Actions</h3>
+                    <button class="action-btn secondary-btn" id="bulkAnalyzeBtn" disabled>
+                        📊 Bulk Analyze
+                    </button>
+                    
+                    <!-- Export Section -->
+                    <div class="export-section">
+                        <h4 style="color: #FFC107; margin-bottom: 10px; font-size: 14px;">📤 Export Options</h4>
+                        <div class="export-btn-group">
+                            <button class="export-btn-small" id="exportJsonBtn" disabled>
+                                📋 JSON Export
+                            </button>
+                            <button class="export-btn-small" id="exportMdBtn" disabled>
+                                📝 Markdown Export
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <button class="action-btn secondary-btn" id="clearBtn">
+                        🗑️ Clear All Data
+                    </button>
+                </div>
+            </div>
+
+            <!-- Analysis Workspace -->
+            <div class="analysis-workspace">
+                <div class="tabs">
+                    <button class="tab active" data-tab="lifecycle">🔄 Analysis Results</button>
+                    <button class="tab" data-tab="fieldmatrix">📋 Field Matrix</button>
+                    <button class="tab" data-tab="usage">📈 Usage Patterns</button>
+                    <button class="tab" data-tab="dependencies">🔗 Dependencies</button>
+                </div>
+
+                <!-- Tab Contents -->
+                <div id="lifecycle" class="tab-content active">
+                    <div id="lifecycleContent">
+                        <h3>🎯 LLM-Powered Component Analysis</h3>
+                        <p style="margin-bottom: 20px; line-height: 1.6;">
+                            Upload files, test your connection, and analyze components for detailed LLM-powered field flows and business rules.
+                        </p>
+                        
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #FFD700;">
+                            <h4 style="color: #FFD700; margin-bottom: 15px;">🤖 LLM-Enhanced Features:</h4>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                                <div>
+                                    <strong style="color: #4CAF50;">🧠 LLM Field Analysis:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Smart field lifecycle tracking</li>
+                                        <li>• Context-aware usage patterns</li>
+                                        <li>• Intelligent field categorization</li>
+                                        <li>• Cross-program flow analysis</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <strong style="color: #2196F3;">⚖️ Smart Business Rules:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• LLM-extracted validation logic</li>
+                                        <li>• Context-aware decision mapping</li>
+                                        <li>• Business calculation analysis</li>
+                                        <li>• Rule complexity assessment</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <strong style="color: #FF9800;">🔗 Smart Dependencies:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Regex + LLM validation</li>
+                                        <li>• Smart call chain analysis</li>
+                                        <li>• Contextual file references</li>
+                                        <li>• Impact assessment</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <strong style="color: #9C27B0;">🎯 Enhanced Chat:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Rich answer formatting</li>
+                                        <li>• Export chat responses</li>
+                                        <li>• Context-aware queries</li>
+                                        <li>• Interactive exploration</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="fieldmatrix" class="tab-content">
+                    <div id="fieldMatrixContent">
+                        <h3>📋 LLM Field Matrix Analysis</h3>
+                        <p style="margin-bottom: 20px;">Enhanced field-level analysis with LLM-powered categorization will appear here after component analysis.</p>
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                            <p style="text-align: center; opacity: 0.8;">LLM-enhanced field matrix will appear here after analysis.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="usage" class="tab-content">
+                    <div id="usageContent">
+                        <h3>📈 Smart Usage Patterns</h3>
+                        <p style="margin-bottom: 20px;">LLM-powered usage pattern analysis will appear here after component analysis.</p>
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                            <p style="text-align: center; opacity: 0.8;">Smart usage patterns will appear here after analysis.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="dependencies" class="tab-content">
+                    <div id="dependenciesContent">
+                        <h3>🔗 Hybrid Dependency Analysis</h3>
+                        <p style="margin-bottom: 20px;">Regex + LLM dependency mapping will appear here after component analysis.</p>
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                            <p style="text-align: center; opacity: 0.8;">Hybrid dependency graph will appear here after analysis.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Loading Indicator -->
+                <div class="loading" id="loadingIndicator">
+                    <div class="spinner"></div>
+                    <h3>🤖 LLM Analyzing Component</h3>
+                    <p id="loadingStatus">Processing component analysis with LLM...</p>
+                    <div id="progressBar" style="background: rgba(255,255,255,0.2); height: 6px; border-radius: 3px; margin: 15px 0; overflow: hidden;">
+                        <div id="progressFill" style="height: 100%; background: #4CAF50; width: 0%; transition: width 0.3s ease;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Enhanced Chat Panel -->
+            <div class="chat-panel">
+                <div style="background: rgba(76, 175, 80, 0.2); border-radius: 10px; padding: 15px; margin-bottom: 15px; border-left: 4px solid #4CAF50;">
+                    <h3 style="margin-bottom: 8px; color: #FFD700;">💬 LLM Analysis Chat</h3>
+                    <p style="font-size: 12px; opacity: 0.8;">Enhanced interactive chat with rich formatting and export</p>
+                </div>
+                
+                <div style="flex: 1; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.05); border-radius: 10px;" id="chatContainer">
+                    <p style="opacity: 0.6;">Chat functionality will be enabled after component analysis...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Enhanced Mainframe Analyzer with LLM Integration - Part 2
+        class EnhancedMainframeAnalyzer {
+            constructor() {
+                // Core properties
+                this.uploadedFiles = [];
+                this.analysisResults = {};
+                this.componentSuggestions = [];
+                this.serverValidated = false;
+                this.vllmEndpoint = 'http://localhost:8000';
+                this.maxTokens = 4000;
+                this.storageKey = 'enhanced_mainframe_analysis';
+                this.currentAnalyzedComponent = null;
+                this.chatHistory = [];
+                
+                // Token management
+                this.averageCharsPerToken = 3;
+                this.tokenSafetyMargin = 0.7;
+                
+                // LLM Analysis configuration
+                this.llmConfig = {
+                    temperature: 0.1,
+                    maxRetries: 3,
+                    chunkSize: 2000, // Characters per chunk for large files
+                    analysisTimeout: 120000 // 2 minutes
+                };
+                
+                this.initializeBasicEventListeners();
+                this.loadStoredData();
+                this.initializeTokenManagement();
+                this.initializeChat();
+                
+                console.log('🚀 Enhanced Mainframe Analyzer with LLM Integration Initialized');
+            }
+
+            // === BASIC EVENT LISTENERS ===
+            initializeBasicEventListeners() {
+                // API validation
+                document.getElementById('validateApiBtn').addEventListener('click', () => this.validateConnection());
+                document.getElementById('vllmEndpoint').addEventListener('input', () => this.onEndpointChange());
+                document.getElementById('maxTokens').addEventListener('input', () => this.onSettingsChange());
+                
+                // File upload handlers
+                const uploadArea = document.getElementById('uploadArea');
+                const fileInput = document.getElementById('fileInput');
+                
+                uploadArea.addEventListener('click', () => {
+                    if (this.serverValidated) fileInput.click();
+                });
+                uploadArea.addEventListener('drop', (e) => this.handleFileDrop(e));
+                uploadArea.addEventListener('dragover', (e) => this.handleDragOver(e));
+                uploadArea.addEventListener('dragleave', (e) => this.handleDragLeave(e));
+                fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
+
+                // Component analysis
+                document.getElementById('componentName').addEventListener('input', () => this.onComponentInput());
+                document.getElementById('analyzeComponentBtn').addEventListener('click', () => this.analyzeComponent());
+                
+                // Quick actions
+                document.getElementById('bulkAnalyzeBtn').addEventListener('click', () => this.bulkAnalyze());
+                document.getElementById('exportJsonBtn').addEventListener('click', () => this.exportResults('json'));
+                document.getElementById('exportMdBtn').addEventListener('click', () => this.exportResults('markdown'));
+                document.getElementById('clearBtn').addEventListener('click', () => this.clearAllData());
+
+                // Tab navigation
+                document.querySelectorAll('.tab').forEach(tab => {
+                    tab.addEventListener('click', (e) => this.switchTab(e));
+                });
+
+                // Hide suggestions when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (!e.target.closest('.component-search-section')) {
+                        document.getElementById('componentSuggestions').style.display = 'none';
+                    }
+                });
+            }
+
+            initializeTokenManagement() {
+                this.updateTokenDisplay(0);
+                this.showSuccess('🚀 Enhanced LLM Mainframe Analyzer Ready!');
+            }
+
+            // === TOKEN MANAGEMENT ===
+            estimateTokenCount(text) {
+                if (!text) return 0;
+                return Math.ceil(text.length / this.averageCharsPerToken);
+            }
+
+            updateTokenDisplay(currentTokens) {
+                const tokenInfo = document.getElementById('tokenInfo');
+                const tokenCount = document.getElementById('tokenCount');
+                const tokenFill = document.getElementById('tokenFill');
+                const tokenWarning = document.getElementById('tokenWarning');
+
+                tokenInfo.style.display = 'block';
+                tokenCount.textContent = `${currentTokens} / ${this.maxTokens}`;
+                
+                const percentage = (currentTokens / this.maxTokens) * 100;
+                tokenFill.style.width = `${Math.min(percentage, 100)}%`;
+                
+                tokenFill.className = 'token-fill';
+                if (percentage <= 50) {
+                    tokenFill.classList.add('safe');
+                    tokenWarning.textContent = '🟢 Optimal token usage - full LLM analysis available';
+                } else if (percentage <= 70) {
+                    tokenFill.classList.add('warning');
+                    tokenWarning.textContent = '🟡 Moderate usage - intelligent LLM chunking active';
+                } else {
+                    tokenFill.classList.add('danger');
+                    tokenWarning.textContent = '🔴 High usage - LLM optimization required';
+                }
+            }
+
+            // === API CONNECTION ===
+            async validateConnection() {
+                const endpoint = document.getElementById('vllmEndpoint').value.trim();
+                if (!endpoint) {
+                    this.showError('Please enter vLLM endpoint');
+                    return;
+                }
+
+                this.updateConnectionStatus('connecting', 'Testing LLM connection...');
+
+                try {
+                    const response = await fetch(`${endpoint}/generate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            prompt: "Test LLM connection. Respond with 'LLM Connected'",
+                            max_tokens: 20,
+                            temperature: 0.1
+                        }),
+                        signal: AbortSignal.timeout(10000)
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.serverValidated = true;
+                        this.vllmEndpoint = endpoint;
+                        this.updateConnectionStatus('connected', `✅ LLM connection verified`);
+                        this.showSuccess('🚀 vLLM server connected successfully!');
+                    } else {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                } catch (error) {
+                    this.serverValidated = false;
+                    this.updateConnectionStatus('disconnected', `❌ LLM connection failed: ${error.message}`);
+                    this.showError(`LLM connection failed: ${error.message}`);
+                }
+                
+                this.validateForm();
+            }
+
+            updateConnectionStatus(status, message) {
+                const statusElement = document.getElementById('apiStatus');
+                statusElement.className = `api-status ${status}`;
+                statusElement.innerHTML = message;
+            }
+
+            // === FILE UPLOAD (Unchanged from original) ===
+            handleFileDrop(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const uploadArea = document.getElementById('uploadArea');
+                uploadArea.classList.remove('drag-over');
+                
+                if (!this.serverValidated) {
+                    this.showError('Please validate LLM API connection first');
+                    return;
+                }
+                
+                const files = Array.from(e.dataTransfer.files);
+                this.processFiles(files);
+            }
+
+            handleDragOver(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                document.getElementById('uploadArea').classList.add('drag-over');
+            }
+
+            handleDragLeave(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                document.getElementById('uploadArea').classList.remove('drag-over');
+            }
+
+            handleFileSelect(e) {
+                if (!this.serverValidated) {
+                    this.showError('Please validate LLM API connection first');
+                    return;
+                }
+                
+                const files = Array.from(e.target.files);
+                this.processFiles(files);
+            }
+
+            async processFiles(files) {
+                for (const file of files) {
+                    try {
+                        const content = await this.readFile(file);
+                        const fileType = this.detectFileType(file.name, content);
+                        
+                        const fileObj = {
+                            name: file.name,
+                            content: content,
+                            size: file.size,
+                            type: fileType,
+                            uploadDate: new Date().toISOString(),
+                            id: Date.now() + Math.random()
+                        };
+                        
+                        this.uploadedFiles.push(fileObj);
+                        this.updateComponentSuggestions();
+                        
+                    } catch (error) {
+                        this.showError(`Failed to read ${file.name}: ${error.message}`);
+                    }
+                }
+                
+                this.displayUploadedFiles();
+                this.validateForm();
+                this.saveToStorage();
+                this.showSuccess(`📁 ${files.length} files uploaded successfully!`);
+            }
+
+            readFile(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = e => resolve(e.target.result);
+                    reader.onerror = e => reject(new Error('File read failed'));
+                    reader.readAsText(file);
+                });
+            }
+
+            detectFileType(fileName, content) {
+                const name = fileName.toLowerCase();
+                const upperContent = content.toUpperCase();
+                
+                if (name.includes('.cpy') || name.includes('copybook')) {
+                    return 'Copybook';
+                } else if (name.includes('.jcl') || upperContent.includes('//JOB ')) {
+                    return 'JCL Job';
+                } else if (name.includes('.cbl') || name.includes('.cob') || 
+                          upperContent.includes('IDENTIFICATION DIVISION') ||
+                          upperContent.includes('PROGRAM-ID')) {
+                    return 'COBOL Program';
+                } else if (name.includes('.proc')) {
+                    return 'JCL Procedure';
+                } else {
+                    return 'Text File';
+                }
+            }
+
+            displayUploadedFiles() {
+                const container = document.getElementById('uploadedFiles');
+                if (this.uploadedFiles.length === 0) {
+                    container.innerHTML = '';
+                    return;
+                }
+                
+                let html = '';
+                this.uploadedFiles.forEach(file => {
+                    html += `
+                        <div class="file-item">
+                            <div class="file-info">
+                                <div class="file-name">${file.name}</div>
+                                <div class="file-details">${file.type} • ${Math.round(file.size/1024)}KB</div>
+                            </div>
+                            <button class="file-remove" onclick="analyzer.removeFile('${file.id}')">🗑️</button>
+                        </div>
+                    `;
+                });
+                
+                container.innerHTML = html;
+            }
+
+            removeFile(fileId) {
+                this.uploadedFiles = this.uploadedFiles.filter(f => f.id != fileId);
+                this.displayUploadedFiles();
+                this.updateComponentSuggestions();
+                this.validateForm();
+                this.saveToStorage();
+            }
+
+            // === ENHANCED COMPONENT SUGGESTIONS (Using basic regex for speed) ===
+            updateComponentSuggestions() {
+                this.componentSuggestions = [];
+                
+                this.uploadedFiles.forEach(file => {
+                    const content = file.content.toUpperCase();
+                    const lines = content.split('\n');
+                    
+                    lines.forEach(line => {
+                        const trimmed = line.trim();
+                        
+                        // Extract COBOL field names
+                        const fieldMatch = trimmed.match(/^\s*\d{2}\s+([A-Z][A-Z0-9\-_]{2,})/);
+                        if (fieldMatch) {
+                            this.componentSuggestions.push({
+                                name: fieldMatch[1],
+                                type: 'FIELD',
+                                file: file.name
+                            });
+                        }
+                        
+                        // Extract copybook names
+                        const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]{2,})/);
+                        if (copyMatch) {
+                            this.componentSuggestions.push({
+                                name: copyMatch[1],
+                                type: 'COPYBOOK',
+                                file: file.name
+                            });
+                        }
+                        
+                        // Extract program names
+                        const programMatch = trimmed.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]{2,})/);
+                        if (programMatch) {
+                            this.componentSuggestions.push({
+                                name: programMatch[1],
+                                type: 'PROGRAM',
+                                file: file.name
+                            });
+                        }
+                    });
+                });
+                
+                // Remove duplicates
+                this.componentSuggestions = this.componentSuggestions.filter((item, index, self) => 
+                    index === self.findIndex(t => t.name === item.name && t.type === item.type)
+                );
+            }
+
+            onComponentInput() {
+                const input = document.getElementById('componentName');
+                const value = input.value.trim().toUpperCase();
+                const suggestions = document.getElementById('componentSuggestions');
+                
+                if (value.length < 2) {
+                    suggestions.style.display = 'none';
+                    this.validateForm();
+                    return;
+                }
+                
+                const filtered = this.componentSuggestions.filter(item => 
+                    item.name.includes(value)
+                ).slice(0, 8);
+                
+                if (filtered.length > 0) {
+                    let html = '';
+                    filtered.forEach(item => {
+                        html += `
+                            <div class="suggestion-item" onclick="analyzer.selectSuggestion('${item.name}')">
+                                <strong>${item.name}</strong> 
+                                <span style="opacity: 0.7;">(${item.type} in ${item.file})</span>
+                            </div>
+                        `;
+                    });
+                    suggestions.innerHTML = html;
+                    suggestions.style.display = 'block';
+                } else {
+                    suggestions.style.display = 'none';
+                }
+                
+                this.validateForm();
+            }
+
+            selectSuggestion(componentName) {
+                document.getElementById('componentName').value = componentName;
+                document.getElementById('componentSuggestions').style.display = 'none';
+                this.validateForm();
+            }
+
+            // === FORM VALIDATION ===
+            validateForm() {
+                const hasFiles = this.uploadedFiles.length > 0;
+                const hasComponent = document.getElementById('componentName').value.trim().length > 0;
+                const hasConnection = this.serverValidated;
+                
+                document.getElementById('analyzeComponentBtn').disabled = !(hasFiles && hasComponent && hasConnection);
+                document.getElementById('bulkAnalyzeBtn').disabled = !(hasFiles && hasConnection);
+                
+                const hasResults = Object.keys(this.analysisResults).length > 0;
+                document.getElementById('exportJsonBtn').disabled = !hasResults;
+                document.getElementById('exportMdBtn').disabled = !hasResults;
+            }
+
+            // === EVENT HANDLERS ===
+            onEndpointChange() {
+                this.serverValidated = false;
+                this.updateConnectionStatus('disconnected', '🔴 LLM connection not validated');
+                this.validateForm();
+            }
+
+            onSettingsChange() {
+                this.maxTokens = parseInt(document.getElementById('maxTokens').value) || 4000;
+                this.saveToStorage();
+            }
+
+            switchTab(e) {
+                const targetTab = e.target?.dataset?.tab || e.dataset?.tab;
+                if (!targetTab) return;
+                
+                document.querySelectorAll('.tab').forEach(tab => {
+                    tab.classList.remove('active');
+                });
+                
+                const clickedTab = e.target || e;
+                if (clickedTab.classList) {
+                    clickedTab.classList.add('active');
+                }
+                
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                
+                const targetContent = document.getElementById(targetTab);
+                if (targetContent) {
+                    targetContent.classList.add('active');
+                }
+            }
+
+            // === ENHANCED LLM ANALYSIS ENGINE ===
+            async analyzeComponent() {
+                const componentName = document.getElementById('componentName').value.trim();
+                if (!componentName) return;
+
+                this.showLoading();
+                this.updateProgress(0);
+
+                try {
+                    this.updateLoadingStatus('🧠 Initializing LLM analysis...');
+                    const results = await this.runLLMEnhancedAnalysis(componentName);
+                    
+                    this.analysisResults[componentName] = results;
+                    this.currentAnalyzedComponent = componentName;
+                    
+                    this.displayAnalysisResults(componentName, results);
+                    this.enableChat();
+                    this.saveToStorage();
+                    
+                    this.hideLoading();
+                    this.showSuccess(`✅ LLM-enhanced analysis complete for ${componentName}!`);
+                    
+                } catch (error) {
+                    this.hideLoading();
+                    this.showError(`LLM analysis failed: ${error.message}`);
+                    console.error('LLM Analysis error:', error);
+                }
+            }
+
+            async runLLMEnhancedAnalysis(componentName) {
+                console.log(`Starting LLM-enhanced analysis for: ${componentName}`);
+                
+                // Stage 1: Find relevant files and detect component type
+                this.updateLoadingStatus('🔍 Stage 1: Finding relevant files...');
+                this.updateProgress(10);
+                
+                const relevantFiles = this.findRelevantFiles(componentName);
+                if (relevantFiles.length === 0) {
+                    throw new Error(`Component "${componentName}" not found in uploaded files`);
+                }
+
+                const componentType = this.detectComponentType(componentName, relevantFiles);
+                console.log(`Component type detected: ${componentType}`);
+
+                // Stage 2: Basic dependency extraction (using regex for speed)
+                this.updateLoadingStatus('🔗 Stage 2: Extracting basic dependencies...');
+                this.updateProgress(25);
+                
+                const basicDependencies = await this.extractBasicDependencies();
+
+                // Stage 3: LLM-powered component analysis
+                this.updateLoadingStatus('🤖 Stage 3: LLM analyzing component structure...');
+                this.updateProgress(50);
+                
+                let llmAnalysis;
+                if (componentType === 'Copybook') {
+                    llmAnalysis = await this.analyzeCopybookWithLLM(componentName, relevantFiles, basicDependencies);
+                } else if (componentType === 'COBOL Program') {
+                    llmAnalysis = await this.analyzeProgramWithLLM(componentName, relevantFiles, basicDependencies);
+                } else {
+                    llmAnalysis = await this.analyzeGenericComponentWithLLM(componentName, relevantFiles, basicDependencies);
+                }
+                
+                // Stage 4: LLM validation of dependencies
+                this.updateLoadingStatus('🔍 Stage 4: LLM validating dependencies...');
+                this.updateProgress(80);
+                
+                const validatedDependencies = await this.validateDependenciesWithLLM(basicDependencies, relevantFiles);
+                
+                this.updateProgress(100);
+                
+                return {
+                    componentName: componentName,
+                    timestamp: new Date().toISOString(),
+                    filesAnalyzed: relevantFiles.map(f => f.name),
+                    componentType: componentType,
+                    basicDependencies: basicDependencies,
+                    validatedDependencies: validatedDependencies,
+                    llmAnalysis: llmAnalysis,
+                    qualityScore: this.calculateQualityScore(llmAnalysis),
+                    completeness: this.assessCompleteness(llmAnalysis),
+                    analysisMethod: 'LLM-Enhanced'
+                };
+            }
+
+            // === BASIC DEPENDENCY EXTRACTION (Using regex for performance) ===
+            async extractBasicDependencies() {
+                console.log('Extracting basic dependencies using regex patterns...');
+                
+                const dependencies = {
+                    copyStatements: new Set(),
+                    callStatements: new Set(),
+                    execStatements: new Set(),
+                    jclDatasets: new Set(),
+                    programIds: new Set(),
+                    sqlTables: new Set(),
+                    fileReferences: new Set()
+                };
+
+                // Process each uploaded file for dependencies
+                for (const file of this.uploadedFiles) {
+                    const fileDeps = this.extractDependenciesFromFile(file);
+                    
+                    // Merge dependencies
+                    Object.keys(fileDeps).forEach(depType => {
+                        if (dependencies[depType]) {
+                            fileDeps[depType].forEach(dep => dependencies[depType].add(dep));
+                        }
+                    });
+                }
+
+                // Convert Sets to Arrays and clean up
+                const cleanDependencies = {};
+                Object.keys(dependencies).forEach(key => {
+                    cleanDependencies[key] = Array.from(dependencies[key])
+                        .filter(dep => dep && dep.length > 1)
+                        .slice(0, 50); // Reasonable limit
+                });
+
+                console.log('Basic dependencies extracted:', cleanDependencies);
+                return cleanDependencies;
+            }
+
+            extractDependenciesFromFile(file) {
+                const dependencies = {
+                    copyStatements: [],
+                    callStatements: [],
+                    execStatements: [],
+                    jclDatasets: [],
+                    programIds: [],
+                    sqlTables: [],
+                    fileReferences: []
+                };
+
+                const lines = file.content.split('\n');
+                
+                lines.forEach((line, lineNum) => {
+                    const trimmed = line.trim().toUpperCase();
+                    
+                    // COPY statements
+                    let copyMatch = trimmed.match(/COPY\s+(['"]*[A-Z][A-Z0-9\-_]{1,}['"]*)/);
+                    if (copyMatch) {
+                        const copyName = copyMatch[1].replace(/['"]/g, '');
+                        dependencies.copyStatements.push(copyName);
+                    }
+
+                    // CALL statements
+                    let callMatch = trimmed.match(/CALL\s+['"]*([A-Z][A-Z0-9\-_]{1,})['"]*/) ||
+                                   trimmed.match(/LINK\s+['"]*([A-Z][A-Z0-9\-_]{1,})['"]*/) ||
+                                   trimmed.match(/XCTL\s+['"]*([A-Z][A-Z0-9\-_]{1,})['"]*/);
+                    if (callMatch) {
+                        dependencies.callStatements.push(callMatch[1]);
+                    }
+
+                    // JCL EXEC statements
+                    let execMatch = trimmed.match(/EXEC\s+PGM=([A-Z][A-Z0-9\-_]{1,})/) ||
+                                   trimmed.match(/\/\/\w+\s+EXEC\s+([A-Z][A-Z0-9\-_]{1,})/);
+                    if (execMatch) {
+                        dependencies.execStatements.push(execMatch[1]);
+                    }
+
+                    // JCL Dataset references
+                    let datasetMatch = trimmed.match(/DSN=([A-Z][A-Z0-9\.\-_]{3,})/) ||
+                                      trimmed.match(/DSNAME=([A-Z][A-Z0-9\.\-_]{3,})/);
+                    if (datasetMatch) {
+                        dependencies.jclDatasets.push(datasetMatch[1]);
+                    }
+
+                    // PROGRAM-ID
+                    let programMatch = trimmed.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]{1,})/);
+                    if (programMatch) {
+                        dependencies.programIds.push(programMatch[1]);
+                    }
+
+                    // SQL Table references
+                    let tableMatch = trimmed.match(/FROM\s+([A-Z][A-Z0-9_]{1,})/) ||
+                                    trimmed.match(/INTO\s+([A-Z][A-Z0-9_]{1,})/) ||
+                                    trimmed.match(/UPDATE\s+([A-Z][A-Z0-9_]{1,})/) ||
+                                    trimmed.match(/DELETE\s+FROM\s+([A-Z][A-Z0-9_]{1,})/);
+                    if (tableMatch) {
+                        dependencies.sqlTables.push(tableMatch[1]);
+                    }
+
+                    // File references
+                    let fileMatch = trimmed.match(/FD\s+([A-Z][A-Z0-9\-_]{1,})/) ||
+                                   trimmed.match(/SELECT\s+([A-Z][A-Z0-9\-_]{1,})\s+ASSIGN/) ||
+                                   trimmed.match(/OPEN\s+(?:INPUT|OUTPUT|I-O)\s+([A-Z][A-Z0-9\-_]{1,})/);
+                    if (fileMatch) {
+                        dependencies.fileReferences.push(fileMatch[1]);
+                    }
+                });
+
+                return dependencies;
+            }
+
+            // === LLM-POWERED COMPONENT ANALYSIS ===
+            async analyzeCopybookWithLLM(copybookName, relevantFiles, basicDependencies) {
+                console.log(`LLM analyzing copybook: ${copybookName}`);
+                
+                const copybookFile = relevantFiles.find(f => 
+                    f.type === 'Copybook' && 
+                    (f.name.toUpperCase().includes(copybookName.toUpperCase()) || 
+                     f.content.toUpperCase().includes(copybookName.toUpperCase()))
+                );
+
+                if (!copybookFile) {
+                    throw new Error(`Copybook file for ${copybookName} not found`);
+                }
+
+                // Prepare content for LLM analysis
+                const copybookContent = this.prepareContentForLLM(copybookFile.content, 'copybook');
+                
+                // Find programs using this copybook
+                const usingPrograms = this.findProgramsUsingCopybook(copybookName);
+                
+                const llmPrompt = `MAINFRAME COPYBOOK LIFECYCLE ANALYSIS
+
+TASK: Analyze the copybook "${copybookName}" and provide detailed field lifecycle information.
+
+COPYBOOK CONTENT:
+${copybookContent}
+
+PROGRAMS USING THIS COPYBOOK:
+${usingPrograms.map(p => p.name).join(', ')}
+
+DEPENDENCIES FOUND:
+Copy Statements: ${basicDependencies.copyStatements.join(', ')}
+Call Statements: ${basicDependencies.callStatements.join(', ')}
+
+INSTRUCTIONS:
+1. Extract ALL fields from the copybook with their levels, pictures, and values
+2. Categorize each field as: INPUT, OUTPUT, DERIVED, CONDITION, UNUSED, or STATIC
+3. For each field, analyze its usage pattern across programs
+4. Identify business rules and validation logic
+5. Provide recommendations for optimization
+
+OUTPUT FORMAT:
+{
+  "totalFields": <number>,
+  "fieldCategories": {
+    "INPUT_FIELDS": [<field_names>],
+    "OUTPUT_FIELDS": [<field_names>],
+    "DERIVED_FIELDS": [<field_names>],
+    "CONDITION_FIELDS": [<field_names>],
+    "UNUSED_FIELDS": [<field_names>],
+    "STATIC_FIELDS": [<field_names>]
+  },
+  "fieldDetails": {
+    "<field_name>": {
+      "level": <number>,
+      "picture": "<pic_clause>",
+      "value": "<value_clause>",
+      "category": "<category>",
+      "usagePattern": "<detailed_usage_description>",
+      "businessRole": "<business_purpose>"
+    }
+  },
+  "businessRules": [<extracted_business_rules>],
+  "recommendations": [<optimization_recommendations>],
+  "qualityScore": <1-10>
+}
+
+Respond with valid JSON only.`;
+
+                return await this.callLLMAPI(llmPrompt);
+            }
+
+  async analyzeProgramWithLLM(programName, relevantFiles, basicDependencies) {
+                console.log(`LLM analyzing program: ${programName}`);
+                
+                const programFile = relevantFiles.find(f => 
+                    f.type === 'COBOL Program' && 
+                    (f.name.toUpperCase().includes(programName.toUpperCase()) || 
+                     f.content.toUpperCase().includes(`PROGRAM-ID. ${programName.toUpperCase()}`))
+                );
+
+                if (!programFile) {
+                    throw new Error(`Program file for ${programName} not found`);
+                }
+
+                const programContent = this.prepareContentForLLM(programFile.content, 'program');
+
+                const llmPrompt = `MAINFRAME COBOL PROGRAM ANALYSIS
+
+TASK: Analyze the COBOL program "${programName}" and provide detailed structural and business logic information.
+
+PROGRAM CONTENT:
+${programContent}
+
+DEPENDENCIES FOUND:
+Copy Statements: ${basicDependencies.copyStatements.join(', ')}
+Call Statements: ${basicDependencies.callStatements.join(', ')}
+File References: ${basicDependencies.fileReferences.join(', ')}
+
+INSTRUCTIONS:
+1. Analyze program structure (divisions, sections, paragraphs)
+2. Extract business logic and decision points
+3. Identify file operations and data flow
+4. Map program dependencies and call patterns
+5. Extract validation rules and calculations
+6. Provide recommendations for modernization
+
+OUTPUT FORMAT:
+{
+  "programStructure": {
+    "divisions": [<division_names>],
+    "paragraphs": [<paragraph_names>],
+    "sections": [<section_names>]
+  },
+  "businessLogic": {
+    "validationRules": [<validation_rules>],
+    "calculations": [<calculation_logic>],
+    "decisionPoints": [<if_when_conditions>]
+  },
+  "dataFlow": {
+    "inputFiles": [<input_files>],
+    "outputFiles": [<output_files>],
+    "workingStorage": [<key_variables>]
+  },
+  "dependencies": {
+    "copybooks": [<used_copybooks>],
+    "calledPrograms": [<called_programs>],
+    "files": [<accessed_files>]
+  },
+  "recommendations": [<modernization_suggestions>],
+  "complexity": "<LOW|MEDIUM|HIGH>",
+  "qualityScore": <1-10>
+}
+
+Respond with valid JSON only.`;
+
+                return await this.callLLMAPI(llmPrompt);
+            }
+
+            async analyzeGenericComponentWithLLM(componentName, relevantFiles, basicDependencies) {
+                console.log(`LLM analyzing generic component: ${componentName}`);
+                
+                const componentFile = relevantFiles[0];
+                const componentContent = this.prepareContentForLLM(componentFile.content, 'generic');
+
+                const llmPrompt = `MAINFRAME COMPONENT ANALYSIS
+
+TASK: Analyze the mainframe component "${componentName}" and provide general analysis.
+
+COMPONENT CONTENT:
+${componentContent}
+
+COMPONENT TYPE: ${componentFile.type}
+FILE SIZE: ${componentFile.size} bytes
+
+DEPENDENCIES FOUND:
+${Object.keys(basicDependencies).map(key => 
+    `${key}: ${basicDependencies[key].join(', ')}`
+).join('\n')}
+
+INSTRUCTIONS:
+1. Identify the component type and purpose
+2. Extract key elements and structures
+3. Identify any patterns or notable features
+4. Provide general recommendations
+
+OUTPUT FORMAT:
+{
+  "componentType": "${componentFile.type}",
+  "purpose": "<identified_purpose>",
+  "keyElements": [<important_elements>],
+  "patterns": [<identified_patterns>],
+  "recommendations": [<general_recommendations>],
+  "qualityScore": <1-10>
+}
+
+Respond with valid JSON only.`;
+
+                return await this.callLLMAPI(llmPrompt);
+            }
+
+            // === LLM DEPENDENCY VALIDATION ===
+            async validateDependenciesWithLLM(basicDependencies, relevantFiles) {
+                console.log('LLM validating dependencies...');
+                
+                // Prepare file context for LLM
+                const fileContext = relevantFiles.map(f => 
+                    `FILE: ${f.name} (${f.type})\nCONTENT_SAMPLE: ${f.content.substring(0, 500)}...`
+                ).join('\n\n');
+
+                const llmPrompt = `MAINFRAME DEPENDENCY VALIDATION
+
+TASK: Validate and enhance the discovered dependencies using context from the actual files.
+
+BASIC DEPENDENCIES FOUND:
+Copy Statements: ${basicDependencies.copyStatements.join(', ')}
+Call Statements: ${basicDependencies.callStatements.join(', ')}
+Exec Statements: ${basicDependencies.execStatements.join(', ')}
+Program IDs: ${basicDependencies.programIds.join(', ')}
+JCL Datasets: ${basicDependencies.jclDatasets.join(', ')}
+SQL Tables: ${basicDependencies.sqlTables.join(', ')}
+File References: ${basicDependencies.fileReferences.join(', ')}
+
+FILE CONTEXT:
+${fileContext}
+
+INSTRUCTIONS:
+1. Validate each dependency against the actual file content
+2. Remove false positives and add any missed dependencies
+3. Categorize dependencies by type and criticality
+4. Identify dependency chains and relationships
+5. Assess impact and coupling levels
+
+OUTPUT FORMAT:
+{
+  "validatedDependencies": {
+    "copyStatements": [<validated_copies>],
+    "callStatements": [<validated_calls>],
+    "execStatements": [<validated_execs>],
+    "programIds": [<validated_programs>],
+    "jclDatasets": [<validated_datasets>],
+    "sqlTables": [<validated_tables>],
+    "fileReferences": [<validated_files>]
+  },
+  "dependencyChains": [<dependency_relationships>],
+  "couplingLevel": "<LOW|MEDIUM|HIGH>",
+  "impactAssessment": [<impact_descriptions>],
+  "recommendations": [<dependency_recommendations>]
+}
+
+Respond with valid JSON only.`;
+
+                return await this.callLLMAPI(llmPrompt);
+            }
+
+            // === LLM UTILITY METHODS ===
+            prepareContentForLLM(content, type) {
+                // Clean and prepare content for LLM analysis
+                const maxChars = this.maxTokens * this.averageCharsPerToken * 0.7; // 70% of max tokens
+                
+                if (content.length <= maxChars) {
+                    return content;
+                }
+                
+                // Intelligent chunking based on content type
+                if (type === 'copybook') {
+                    // For copybooks, prioritize field definitions
+                    const lines = content.split('\n');
+                    const importantLines = lines.filter(line => {
+                        const trimmed = line.trim().toUpperCase();
+                        return trimmed.match(/^\s*\d{2}\s+/) || // Field definitions
+                               trimmed.includes('PIC ') ||      // Picture clauses
+                               trimmed.includes('VALUE ') ||    // Value clauses
+                               trimmed.includes('REDEFINES ');  // Redefines
+                    });
+                    
+                    let result = importantLines.join('\n');
+                    if (result.length > maxChars) {
+                        result = result.substring(0, maxChars);
+                    }
+                    return result;
+                    
+                } else if (type === 'program') {
+                    // For programs, prioritize procedure division
+                    const procedureIndex = content.toUpperCase().indexOf('PROCEDURE DIVISION');
+                    if (procedureIndex > -1) {
+                        const procedureContent = content.substring(procedureIndex);
+                        if (procedureContent.length <= maxChars) {
+                            return procedureContent;
+                        }
+                        return procedureContent.substring(0, maxChars);
+                    }
+                }
+                
+                // Default: take first part
+                return content.substring(0, maxChars);
+            }
+
+            async callLLMAPI(prompt, retries = 0) {
+                try {
+                    const response = await fetch(`${this.vllmEndpoint}/generate`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            prompt: prompt,
+                            max_tokens: Math.floor(this.maxTokens * 0.8),
+                            temperature: this.llmConfig.temperature,
+                            top_p: 0.95,
+                            stop: ["Human:", "Assistant:", "TASK:", "INSTRUCTIONS:"],
+                            stream: false
+                        }),
+                        signal: AbortSignal.timeout(this.llmConfig.analysisTimeout)
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`LLM API request failed: ${response.status} ${response.statusText}`);
+                    }
+
+                    const data = await response.json();
+                    
+                    let resultText = '';
+                    if (data.text) {
+                        resultText = data.text.trim();
+                    } else if (data.choices && data.choices[0]) {
+                        resultText = data.choices[0].text.trim();
+                    } else {
+                        throw new Error('Invalid LLM API response format');
+                    }
+
+                    // Try to parse as JSON
+                    try {
+                        return JSON.parse(resultText);
+                    } catch (parseError) {
+                        // If JSON parsing fails, extract JSON from text
+                        const jsonMatch = resultText.match(/\{[\s\S]*\}/);
+                        if (jsonMatch) {
+                            try {
+                                return JSON.parse(jsonMatch[0]);
+                            } catch (secondParseError) {
+                                console.warn('Failed to parse LLM JSON response:', resultText);
+                                // Return a structured fallback
+                                return {
+                                    error: 'LLM response parsing failed',
+                                    rawResponse: resultText,
+                                    fallbackAnalysis: this.createFallbackAnalysis(resultText)
+                                };
+                            }
+                        } else {
+                            // Return raw text analysis
+                            return {
+                                rawAnalysis: resultText,
+                                parsedAnalysis: this.parseRawLLMResponse(resultText)
+                            };
+                        }
+                    }
+
+                } catch (error) {
+                    if (retries < this.llmConfig.maxRetries) {
+                        console.warn(`LLM API call failed, retrying (${retries + 1}/${this.llmConfig.maxRetries}):`, error);
+                        await this.sleep(2000);
+                        return this.callLLMAPI(prompt, retries + 1);
+                    }
+                    throw new Error(`LLM API failed after ${this.llmConfig.maxRetries} retries: ${error.message}`);
+                }
+            }
+
+            createFallbackAnalysis(rawResponse) {
+                // Create a basic analysis structure from raw LLM response
+                return {
+                    analysisType: 'Fallback Analysis',
+                    summary: rawResponse.substring(0, 500),
+                    recommendations: ['Review raw LLM response for detailed analysis'],
+                    qualityScore: 5
+                };
+            }
+
+            parseRawLLMResponse(rawText) {
+                // Basic parsing of non-JSON LLM responses
+                const lines = rawText.split('\n');
+                const analysis = {
+                    fields: [],
+                    recommendations: [],
+                    businessRules: []
+                };
+
+                lines.forEach(line => {
+                    const trimmed = line.trim();
+                    if (trimmed.includes('field') || trimmed.includes('FIELD')) {
+                        analysis.fields.push(trimmed);
+                    } else if (trimmed.includes('recommend') || trimmed.includes('RECOMMEND')) {
+                        analysis.recommendations.push(trimmed);
+                    } else if (trimmed.includes('rule') || trimmed.includes('RULE')) {
+                        analysis.businessRules.push(trimmed);
+                    }
+                });
+
+                return analysis;
+            }
+
+            // === ANALYSIS HELPER METHODS ===
+            findRelevantFiles(componentName) {
+                return this.uploadedFiles.filter(file => 
+                    file.content.toUpperCase().includes(componentName.toUpperCase()) ||
+                    file.name.toUpperCase().includes(componentName.toUpperCase())
+                );
+            }
+
+            detectComponentType(componentName, files) {
+                const copybookFile = files.find(f => f.type === 'Copybook');
+                if (copybookFile) return 'Copybook';
+                
+                const programFile = files.find(f => f.type === 'COBOL Program');
+                if (programFile) return 'COBOL Program';
+                
+                return 'Component';
+            }
+
+            findProgramsUsingCopybook(copybookName) {
+                const usingPrograms = [];
+                
+                this.uploadedFiles.forEach(file => {
+                    if (file.type === 'COBOL Program') {
+                        const content = file.content.toUpperCase();
+                        const copyPattern = new RegExp(`COPY\\s+['"]*${copybookName.toUpperCase()}['"]*`, 'g');
+                        if (copyPattern.test(content)) {
+                            usingPrograms.push(file);
+                        }
+                    }
+                });
+                
+                return usingPrograms;
+            }
+
+            calculateQualityScore(analysisResult) {
+                if (!analysisResult) return 5;
+                
+                if (analysisResult.qualityScore) {
+                    return analysisResult.qualityScore;
+                }
+                
+                let score = 5; // Base score
+                
+                // Add points for comprehensive analysis
+                if (analysisResult.fieldCategories) score += 2;
+                if (analysisResult.businessLogic) score += 2;
+                if (analysisResult.recommendations) score += 1;
+                
+                return Math.min(Math.max(score, 1), 10);
+            }
+
+            assessCompleteness(analysisResult) {
+                if (!analysisResult) {
+                    return { score: 0, checkpoints: {}, completed: 0, total: 5 };
+                }
+                
+                const checkpoints = {
+                    'LLM Analysis': !!analysisResult,
+                    'Field Analysis': !!(analysisResult.fieldCategories || analysisResult.fieldDetails),
+                    'Business Logic': !!(analysisResult.businessLogic || analysisResult.businessRules),
+                    'Dependencies': !!(analysisResult.dependencies || analysisResult.validatedDependencies),
+                    'Recommendations': !!(analysisResult.recommendations && analysisResult.recommendations.length > 0)
+                };
+                
+                const completed = Object.values(checkpoints).filter(Boolean).length;
+                const total = Object.keys(checkpoints).length;
+                
+                return {
+                    score: Math.round((completed / total) * 100),
+                    checkpoints: checkpoints,
+                    completed: completed,
+                    total: total
+                };
+            }
+
+            // === ENHANCED CHAT FUNCTIONALITY ===
+            initializeChat() {
+                const chatContainer = document.getElementById('chatContainer');
+                chatContainer.innerHTML = `
+                    <div style="background: rgba(76, 175, 80, 0.2); border-radius: 10px; padding: 15px; margin-bottom: 15px; border-left: 4px solid #4CAF50; width: 100%;">
+                        <h3 style="margin-bottom: 8px; color: #FFD700;">💬 LLM Analysis Chat</h3>
+                        <p style="font-size: 12px; opacity: 0.8;">Enhanced interactive chat with rich formatting and export capabilities</p>
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <div style="font-size: 11px; margin-bottom: 8px; opacity: 0.7;">Quick LLM questions:</div>
+                        <button class="chat-suggestion-btn" data-question="What fields are unused in this copybook and why?">🔍 Unused fields analysis</button>
+                        <button class="chat-suggestion-btn" data-question="Explain the complete field lifecycle with business context">📊 Field lifecycle</button>
+                        <button class="chat-suggestion-btn" data-question="What are the business rules and validation logic?">⚖️ Business rules</button>
+                        <button class="chat-suggestion-btn" data-question="Analyze dependencies and their impact">🔗 Dependency impact</button>
+                        <button class="chat-suggestion-btn" data-question="Provide modernization recommendations">🚀 Modernization tips</button>
+                    </div>
+
+                    <div id="chatMessages" style="flex: 1; overflow-y: auto; margin-bottom: 15px; max-height: 400px; padding-right: 10px;">
+                        <div class="chat-message assistant">
+                            <div class="sender">LLM Analysis Assistant</div>
+                            <div class="content">
+                                👋 <strong>Welcome to LLM-Enhanced Mainframe Analysis!</strong>
+                                <br><br>
+                                I can provide detailed analysis using advanced language models including:
+                                <br><br>
+                                🧠 <strong>Smart Field Analysis:</strong> Context-aware field lifecycle tracking
+                                <br>⚖️ <strong>Business Logic Extraction:</strong> Intelligent rule and validation discovery  
+                                <br>🔗 <strong>Dependency Mapping:</strong> Comprehensive relationship analysis
+                                <br>💡 <strong>Modernization Guidance:</strong> AI-powered optimization recommendations
+                                <br><br>
+                                <em>Upload files and analyze a component to unlock the full power of LLM analysis!</em>
+                            </div>
+                            <div class="timestamp">${new Date().toLocaleTimeString()}</div>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; gap: 10px; align-items: flex-start;">
+                        <textarea 
+                            id="chatInput" 
+                            style="flex: 1; padding: 12px; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 8px; background: rgba(255, 255, 255, 0.1); color: white; font-size: 14px; resize: vertical; min-height: 40px; max-height: 100px; font-family: inherit;"
+                            placeholder="Ask detailed questions about LLM analysis results..."
+                            disabled
+                            rows="2"
+                        ></textarea>
+                        <button id="chatSendBtn" style="background: linear-gradient(45deg, #4CAF50, #45a049); color: white; border: none; padding: 12px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.3s ease; white-space: nowrap; min-width: 80px;" disabled>
+                            Send
+                        </button>
+                    </div>
+
+                    <div style="font-size: 10px; opacity: 0.6; margin-top: 8px; text-align: center;">
+                        Enhanced LLM chat enabled after component analysis
+                    </div>
+                `;
+                
+                this.initializeChatEventListeners();
+            }
+
+            initializeChatEventListeners() {
+                const chatSendBtn = document.getElementById('chatSendBtn');
+                const chatInput = document.getElementById('chatInput');
+                
+                if (chatSendBtn && chatInput) {
+                    chatSendBtn.addEventListener('click', () => this.sendChatMessage());
+                    
+                    chatInput.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            this.sendChatMessage();
+                        }
+                    });
+                }
+
+                // Chat suggestions
+                document.querySelectorAll('.chat-suggestion-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const question = e.target.dataset.question;
+                        if (chatInput) {
+                            chatInput.value = question;
+                            this.sendChatMessage();
+                        }
+                    });
+                });
+            }
+
+            enableChat() {
+                const chatInput = document.getElementById('chatInput');
+                const chatSendBtn = document.getElementById('chatSendBtn');
+                
+                if (chatInput && chatSendBtn) {
+                    chatInput.disabled = false;
+                    chatSendBtn.disabled = false;
+                    
+                    this.addChatMessage('assistant', 
+                        `🎯 **LLM-Enhanced analysis complete for ${this.currentAnalyzedComponent}!**
+                        
+I can now provide detailed insights using advanced language model analysis:
+
+🧠 **Smart Field Analysis:** Context-aware categorization and lifecycle tracking
+⚖️ **Business Logic:** Extracted validation rules and decision patterns  
+🔗 **Dependency Analysis:** Comprehensive relationship mapping with impact assessment
+💡 **Optimization:** AI-powered modernization and cleanup recommendations
+
+**Try these enhanced questions:**
+• "Explain the business purpose of each field category"
+• "What are the most critical dependencies and their risks?"
+• "How can we optimize this component for better maintainability?"
+• "What fields have complex business logic and why?"
+• "Generate a modernization roadmap for this component"`
+                    );
+                }
+            }
+
+            async sendChatMessage() {
+                const input = document.getElementById('chatInput');
+                const sendBtn = document.getElementById('chatSendBtn');
+                const message = input.value.trim();
+                
+                if (!message) {
+                    this.showError('Please enter a message');
+                    return;
+                }
+                
+                if (!this.currentAnalyzedComponent) {
+                    this.showError('Please analyze a component first');
+                    return;
+                }
+                
+                input.disabled = true;
+                sendBtn.disabled = true;
+                sendBtn.textContent = 'Processing...';
+                
+                this.addChatMessage('user', message);
+                input.value = '';
+                
+                this.showChatTyping();
+                
+                try {
+                    const response = await this.processEnhancedChatQuery(message);
+                    this.hideChatTyping();
+                    this.addChatMessage('assistant', response);
+                } catch (error) {
+                    console.error('Enhanced chat error:', error);
+                    this.hideChatTyping();
+                    this.addChatMessage('assistant', `I apologize, but I encountered an error processing your question: ${error.message}. Please try rephrasing your question or check the LLM connection.`);
+                } finally {
+                    input.disabled = false;
+                    sendBtn.disabled = false;
+                    sendBtn.textContent = 'Send';
+                    input.focus();
+                }
+            }
+
+            addChatMessage(sender, content) {
+                const messagesContainer = document.getElementById('chatMessages');
+                if (!messagesContainer) return;
+                
+                const messageId = 'msg_' + Date.now();
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `chat-message ${sender}`;
+                messageDiv.id = messageId;
+                
+                messageDiv.innerHTML = `
+                    <div class="sender">${sender === 'user' ? 'You' : 'LLM Analysis Assistant'}</div>
+                    <div class="content">${this.formatChatMessage(content)}</div>
+                    <div class="timestamp">${new Date().toLocaleTimeString()}</div>
+                    ${sender === 'assistant' ? `<button class="export-btn" onclick="analyzer.exportChatMessage('${messageId}')">💾</button>` : ''}
+                `;
+                
+                messagesContainer.appendChild(messageDiv);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                
+                // Store in chat history
+                this.chatHistory.push({
+                    id: messageId,
+                    sender: sender,
+                    content: content,
+                    timestamp: new Date().toISOString()
+                });
+            }
+
+            formatChatMessage(content) {
+                return content
+                    .replace(/\n/g, '<br>')
+                    .replace(/\*\*([^*]+)\*\*/g, '<strong style="color: #FFD700;">$1</strong>')
+                    .replace(/`([^`]+)`/g, '<code style="background: rgba(0,0,0,0.3); padding: 2px 4px; border-radius: 3px; color: #4CAF50; font-family: monospace;">$1</code>')
+                    .replace(/^- /gm, '• ')
+                    .replace(/^• /gm, '<span style="color: #4CAF50;">•</span> ')
+                    // Enhanced formatting for structured content
+                    .replace(/🧠|⚖️|🔗|💡|🎯|📊|🔍|🚀/g, '<span style="font-size: 1.2em;">$&</span>')
+                    // Format lists better
+                    .replace(/(\d+\.\s)/g, '<strong style="color: #2196F3;">$1</strong>');
+            }
+
+            showChatTyping() {
+                const messagesContainer = document.getElementById('chatMessages');
+                if (!messagesContainer) return;
+                
+                this.hideChatTyping();
+                
+                const typingDiv = document.createElement('div');
+                typingDiv.id = 'typingIndicator';
+                typingDiv.className = 'chat-message assistant';
+                
+                typingDiv.innerHTML = `
+                    <div class="sender">LLM Analysis Assistant</div>
+                    <div class="content">
+                        <span style="opacity: 0.7;">🤖 Processing with LLM analysis...</span>
+                        <span style="animation: blink 1s infinite; margin-left: 5px;">●●●</span>
+                    </div>
+                `;
+                
+                messagesContainer.appendChild(typingDiv);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+
+            hideChatTyping() {
+                const typingIndicator = document.getElementById('typingIndicator');
+                if (typingIndicator && typingIndicator.parentNode) {
+                    typingIndicator.parentNode.removeChild(typingIndicator);
+                }
+            }
+
+            async processEnhancedChatQuery(question) {
+                const analysisData = this.analysisResults[this.currentAnalyzedComponent];
+                
+                // Create comprehensive context for enhanced chat
+                let context = `ENHANCED LLM MAINFRAME ANALYSIS CONTEXT
+
+COMPONENT: ${this.currentAnalyzedComponent}
+COMPONENT TYPE: ${analysisData.componentType}
+ANALYSIS METHOD: ${analysisData.analysisMethod}
+FILES ANALYZED: ${analysisData.filesAnalyzed.join(', ')}
+QUALITY SCORE: ${analysisData.qualityScore}/10
+COMPLETENESS: ${analysisData.completeness.score}%
+
+`;
+
+                // Add LLM analysis results
+                if (analysisData.llmAnalysis) {
+                    context += `LLM ANALYSIS RESULTS:
+${JSON.stringify(analysisData.llmAnalysis, null, 2)}
+
+`;
+                }
+
+                // Add validated dependencies
+                if (analysisData.validatedDependencies) {
+                    context += `VALIDATED DEPENDENCIES:
+${JSON.stringify(analysisData.validatedDependencies, null, 2)}
+
+`;
+                }
+
+                // Add basic dependencies as fallback
+                if (analysisData.basicDependencies) {
+                    context += `BASIC DEPENDENCIES:
+${JSON.stringify(analysisData.basicDependencies, null, 2)}
+
+`;
+                }
+
+                const enhancedChatPrompt = `ENHANCED MAINFRAME ANALYSIS CHAT ASSISTANT
+
+CONTEXT:
+${context}
+
+USER QUESTION: "${question}"
+
+INSTRUCTIONS:
+You are an expert mainframe analyst with deep knowledge of COBOL, copybooks, and legacy system modernization. 
+
+Based on the LLM analysis results above, provide a detailed, insightful response that:
+
+1. **Addresses the specific question** with concrete examples from the analysis
+2. **Uses rich formatting** with headers, bullets, and emphasis for readability
+3. **Provides actionable insights** based on the LLM analysis data
+4. **References specific fields, programs, or dependencies** when relevant
+5. **Explains business context** and technical implications
+6. **Offers practical recommendations** for improvement or modernization
+
+For copybook questions, focus on:
+- Field lifecycle and business purpose
+- Cross-program usage patterns with specific examples
+- Unused/static field optimization opportunities with impact analysis
+- Business rule extraction and validation logic
+- Modernization strategies
+
+For program questions, focus on:
+- Program structure and flow analysis
+- Business logic and decision point mapping
+- Dependency relationships and coupling assessment
+- Performance and maintainability recommendations
+
+Format your response with:
+- **Bold headers** for major sections
+- `Code snippets` for field names and technical terms
+- • Bullet points for lists
+- Clear explanations of business impact
+
+If specific information isn't available in the analysis, clearly state what additional analysis would be helpful.
+
+Provide a comprehensive, well-formatted response that demonstrates deep understanding of the analysis results.`;
+
+                return await this.callLLMAPI(enhancedChatPrompt);
+            }
+
+            // === EXPORT FUNCTIONALITY ===
+            exportChatMessage(messageId) {
+                const messageElement = document.getElementById(messageId);
+                if (!messageElement) return;
+                
+                const chatData = this.chatHistory.find(msg => msg.id === messageId);
+                if (!chatData) return;
+                
+                const timestamp = new Date(chatData.timestamp).toLocaleString();
+                const filename = `chat-response-${this.currentAnalyzedComponent}-${Date.now()}.txt`;
+                
+                const exportContent = `MAINFRAME ANALYSIS CHAT RESPONSE
+=====================================
+
+Component: ${this.currentAnalyzedComponent}
+Timestamp: ${timestamp}
+Question: ${chatData.content.split('\n')[0]}
+
+Response:
+${chatData.content.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ')}
+
+Generated by: Enhanced Mainframe Analyzer with LLM Integration
+Analysis Date: ${new Date().toLocaleString()}
+`;
+
+                this.downloadTextFile(exportContent, filename);
+                this.showSuccess(`💾 Chat response exported as ${filename}`);
+            }
+
+            // === ENHANCED EXPORT METHODS ===
+            async exportResults(format) {
+                if (Object.keys(this.analysisResults).length === 0) {
+                    this.showError('No analysis results to export');
+                    return;
+                }
+
+                try {
+                    if (format === 'json') {
+                        await this.exportAsJSON();
+                    } else if (format === 'markdown') {
+                        await this.exportAsMarkdown();
+                    }
+                } catch (error) {
+                    this.showError(`Export failed: ${error.message}`);
+                }
+            }
+async exportAsJSON() {
+                const exportData = {
+                    metadata: {
+                        timestamp: new Date().toISOString(),
+                        totalComponents: Object.keys(this.analysisResults).length,
+                        totalFiles: this.uploadedFiles.length,
+                        analysisMethod: 'LLM-Enhanced',
+                        version: '3.0.0-llm-enhanced'
+                    },
+                    analysisResults: this.analysisResults,
+                    chatHistory: this.chatHistory,
+                    summary: this.generateExportSummary(),
+                    fileInfo: this.uploadedFiles.map(f => ({
+                        name: f.name,
+                        type: f.type,
+                        size: f.size,
+                        uploadDate: f.uploadDate
+                    })),
+                    systemInfo: {
+                        vllmEndpoint: this.vllmEndpoint,
+                        maxTokens: this.maxTokens,
+                        llmConfig: this.llmConfig
+                    }
+                };
+
+                const dataStr = JSON.stringify(exportData, null, 2);
+                const filename = `enhanced-mainframe-analysis-${new Date().toISOString().split('T')[0]}.json`;
+                
+                this.downloadTextFile(dataStr, filename);
+                this.showSuccess(`📋 Enhanced analysis results exported as ${filename}`);
+            }
+
+            async exportAsMarkdown() {
+                const exportContent = await this.generateMarkdownReport();
+                const filename = `mainframe-analysis-report-${new Date().toISOString().split('T')[0]}.md`;
+                
+                this.downloadTextFile(exportContent, filename);
+                this.showSuccess(`📝 Markdown report exported as ${filename}`);
+            }
+
+            async exportAsPlainText() {
+                const exportContent = await this.generatePlainTextReport();
+                const filename = `mainframe-analysis-report-${new Date().toISOString().split('T')[0]}.txt`;
+                
+                this.downloadTextFile(exportContent, filename);
+                this.showSuccess(`📄 Plain text report exported as ${filename}`);
+            }
+
+            async exportChatHistory() {
+                if (this.chatHistory.length === 0) {
+                    this.showError('No chat history to export');
+                    return;
+                }
+                
+                const exportContent = this.generateChatHistoryText();
+                const filename = `chat-history-${new Date().toISOString().split('T')[0]}.txt`;
+                
+                this.downloadTextFile(exportContent, filename);
+                this.showSuccess(`💬 Chat history exported as ${filename}`);
+            }
+
+            async generateMarkdownReport() {
+                const timestamp = new Date().toLocaleString();
+                const summary = this.generateExportSummary();
+                
+                let markdown = `# Enhanced Mainframe Analysis Report
+
+**Generated:** ${timestamp}  
+**Analysis Method:** LLM-Enhanced  
+**Components Analyzed:** ${Object.keys(this.analysisResults).length}  
+**Files Processed:** ${this.uploadedFiles.length}  
+
+---
+
+## Executive Summary
+
+- **Total Components:** ${summary.totalComponents}
+- **Component Types:** ${Object.entries(summary.componentTypes).map(([type, count]) => `${type} (${count})`).join(', ')}
+- **Total Unused Fields:** ${summary.totalUnusedFields}
+- **Total Static Fields:** ${summary.totalStaticFields}
+- **Recommendations Generated:** ${summary.recommendationsCount}
+
+---
+
+`;
+
+                // Generate detailed analysis for each component
+                for (const [componentName, results] of Object.entries(this.analysisResults)) {
+                    markdown += await this.generateComponentMarkdown(componentName, results);
+                    markdown += '\n---\n\n';
+                }
+
+                // Add chat history if available
+                if (this.chatHistory.length > 0) {
+                    markdown += this.generateChatHistoryMarkdown();
+                }
+
+                // Add file information
+                markdown += this.generateFileInfoMarkdown();
+
+                return markdown;
+            }
+
+            async generatePlainTextReport() {
+                const timestamp = new Date().toLocaleString();
+                const summary = this.generateExportSummary();
+                
+                let report = `ENHANCED MAINFRAME ANALYSIS REPORT
+=============================================
+
+Generated: ${timestamp}
+Analysis Method: LLM-Enhanced
+Components Analyzed: ${Object.keys(this.analysisResults).length}
+Files Processed: ${this.uploadedFiles.length}
+
+EXECUTIVE SUMMARY
+=================
+- Total Components: ${summary.totalComponents}
+- Component Types: ${Object.entries(summary.componentTypes).map(([type, count]) => `${type} (${count})`).join(', ')}
+- Total Unused Fields: ${summary.totalUnusedFields}
+- Total Static Fields: ${summary.totalStaticFields}
+- Recommendations Generated: ${summary.recommendationsCount}
+
+`;
+
+                // Generate detailed analysis for each component
+                for (const [componentName, results] of Object.entries(this.analysisResults)) {
+                    report += await this.generateComponentPlainText(componentName, results);
+                    report += '\n' + '='.repeat(80) + '\n\n';
+                }
+
+                // Add file information
+                report += this.generateFileInfoPlainText();
+
+                return report;
+            }
+
+            async generateComponentPlainText(componentName, results) {
+                let report = `COMPONENT ANALYSIS: ${componentName.toUpperCase()}
+${'-'.repeat(40)}
+
+Component Type: ${results.componentType}
+Quality Score: ${results.qualityScore}/10
+Completeness: ${results.completeness.score}%
+Files Analyzed: ${results.filesAnalyzed.join(', ')}
+Analysis Date: ${new Date(results.timestamp).toLocaleString()}
+
+`;
+
+                // LLM Analysis Results
+                if (results.llmAnalysis) {
+                    report += `LLM ANALYSIS RESULTS
+--------------------
+
+`;
+                    report += await this.formatLLMAnalysisForPlainText(results.llmAnalysis, results.componentType);
+                }
+
+                // Dependencies
+                if (results.validatedDependencies) {
+                    report += `VALIDATED DEPENDENCIES
+----------------------
+
+`;
+                    report += this.formatDependenciesForPlainText(results.validatedDependencies);
+                } else if (results.basicDependencies) {
+                    report += `BASIC DEPENDENCIES
+------------------
+
+`;
+                    report += this.formatDependenciesForPlainText(results.basicDependencies);
+                }
+
+                return report;
+            }
+
+            async formatLLMAnalysisForPlainText(llmAnalysis, componentType) {
+                let report = '';
+
+                if (componentType === 'Copybook') {
+                    // Format copybook analysis
+                    if (llmAnalysis.totalFields) {
+                        report += `Total Fields: ${llmAnalysis.totalFields}\n\n`;
+                    }
+
+                    if (llmAnalysis.fieldCategories) {
+                        report += `FIELD CATEGORIES:\n`;
+                        Object.entries(llmAnalysis.fieldCategories).forEach(([category, fields]) => {
+                            if (fields && fields.length > 0) {
+                                report += `\n${category.replace(/_/g, ' ')} (${fields.length}):\n`;
+                                fields.forEach(field => {
+                                    report += `  - ${field}\n`;
+                                });
+                            }
+                        });
+                        report += '\n';
+                    }
+
+                    if (llmAnalysis.fieldDetails) {
+                        report += `FIELD DETAILS:\n`;
+                        Object.entries(llmAnalysis.fieldDetails).forEach(([fieldName, details]) => {
+                            report += `\n${fieldName}:\n`;
+                            report += `  Level: ${details.level || 'N/A'}\n`;
+                            report += `  Picture: ${details.picture || 'N/A'}\n`;
+                            report += `  Category: ${details.category || 'N/A'}\n`;
+                            if (details.businessRole) {
+                                report += `  Business Role: ${details.businessRole}\n`;
+                            }
+                            if (details.usagePattern) {
+                                report += `  Usage Pattern: ${details.usagePattern}\n`;
+                            }
+                        });
+                        report += '\n';
+                    }
+
+                } else if (componentType === 'COBOL Program') {
+                    // Format program analysis
+                    if (llmAnalysis.programStructure) {
+                        report += `PROGRAM STRUCTURE:\n`;
+                        const structure = llmAnalysis.programStructure;
+                        
+                        if (structure.divisions) {
+                            report += `Divisions: ${structure.divisions.join(', ')}\n`;
+                        }
+                        if (structure.paragraphs) {
+                            report += `Paragraphs: ${structure.paragraphs.length} found\n`;
+                        }
+                        if (structure.sections) {
+                            report += `Sections: ${structure.sections.join(', ')}\n`;
+                        }
+                        report += '\n';
+                    }
+
+                    if (llmAnalysis.businessLogic) {
+                        report += `BUSINESS LOGIC:\n`;
+                        const logic = llmAnalysis.businessLogic;
+                        
+                        if (logic.validationRules) {
+                            report += `\nValidation Rules:\n`;
+                            logic.validationRules.forEach(rule => {
+                                report += `  - ${rule}\n`;
+                            });
+                        }
+                        
+                        if (logic.calculations) {
+                            report += `\nCalculations:\n`;
+                            logic.calculations.forEach(calc => {
+                                report += `  - ${calc}\n`;
+                            });
+                        }
+                        
+                        if (logic.decisionPoints) {
+                            report += `\nDecision Points:\n`;
+                            logic.decisionPoints.forEach(decision => {
+                                report += `  - ${decision}\n`;
+                            });
+                        }
+                        report += '\n';
+                    }
+
+                    if (llmAnalysis.complexity) {
+                        report += `Complexity Level: ${llmAnalysis.complexity}\n\n`;
+                    }
+                }
+
+                // Business Rules
+                if (llmAnalysis.businessRules) {
+                    report += `BUSINESS RULES:\n`;
+                    llmAnalysis.businessRules.forEach(rule => {
+                        report += `  - ${rule}\n`;
+                    });
+                    report += '\n';
+                }
+
+                // Recommendations
+                if (llmAnalysis.recommendations) {
+                    report += `RECOMMENDATIONS:\n`;
+                    llmAnalysis.recommendations.forEach((rec, index) => {
+                        report += `  ${index + 1}. ${rec}\n`;
+                    });
+                    report += '\n';
+                }
+
+                return report;
+            }
+
+            formatDependenciesForPlainText(dependencies) {
+                let report = '';
+
+                Object.entries(dependencies).forEach(([depType, deps]) => {
+                    if (deps && deps.length > 0) {
+                        const title = depType.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+                        report += `${title}:\n`;
+                        deps.forEach(dep => {
+                            report += `  - ${dep}\n`;
+                        });
+                        report += '\n';
+                    }
+                });
+
+                return report;
+            }
+
+            generateChatHistoryText() {
+                let chatText = `MAINFRAME ANALYSIS CHAT HISTORY
+=====================================
+
+Export Date: ${new Date().toLocaleString()}
+Component: ${this.currentAnalyzedComponent || 'Multiple Components'}
+Total Messages: ${this.chatHistory.length}
+
+`;
+
+                let questionNumber = 1;
+                for (let i = 0; i < this.chatHistory.length; i += 2) {
+                    const userMsg = this.chatHistory[i];
+                    const assistantMsg = this.chatHistory[i + 1];
+                    
+                    if (userMsg && userMsg.sender === 'user') {
+                        chatText += `QUESTION ${questionNumber}
+${'-'.repeat(20)}
+Asked: ${new Date(userMsg.timestamp).toLocaleString()}
+
+${userMsg.content}
+
+`;
+                        
+                        if (assistantMsg && assistantMsg.sender === 'assistant') {
+                            chatText += `ANSWER
+------
+Responded: ${new Date(assistantMsg.timestamp).toLocaleString()}
+
+${assistantMsg.content.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ')}
+
+`;
+                        }
+                        
+                        chatText += '='.repeat(60) + '\n\n';
+                        questionNumber++;
+                    }
+                }
+
+                chatText += `Generated by: Enhanced Mainframe Analyzer with LLM Integration
+Analysis System Version: 3.0.0-llm-enhanced
+`;
+
+                return chatText;
+            }
+
+            generateFileInfoPlainText() {
+                let report = `FILE INFORMATION
+================
+
+`;
+                
+                this.uploadedFiles.forEach(file => {
+                    const uploadDate = new Date(file.uploadDate).toLocaleDateString();
+                    report += `File Name: ${file.name}\n`;
+                    report += `Type: ${file.type}\n`;
+                    report += `Size: ${Math.round(file.size/1024)} KB\n`;
+                    report += `Upload Date: ${uploadDate}\n`;
+                    report += '-'.repeat(40) + '\n';
+                });
+
+                return report;
+            }
+
+            async generateComponentMarkdown(componentName, results) {
+                let markdown = `## Component Analysis: ${componentName}
+
+**Type:** ${results.componentType}  
+**Quality Score:** ${results.qualityScore}/10  
+**Completeness:** ${results.completeness.score}%  
+**Files Analyzed:** ${results.filesAnalyzed.join(', ')}  
+**Analysis Date:** ${new Date(results.timestamp).toLocaleString()}  
+
+`;
+
+                // LLM Analysis Results
+                if (results.llmAnalysis) {
+                    markdown += `### 🤖 LLM Analysis Results\n\n`;
+                    markdown += await this.formatLLMAnalysisForMarkdown(results.llmAnalysis, results.componentType);
+                }
+
+                // Dependencies
+                if (results.validatedDependencies) {
+                    markdown += `### 🔗 Validated Dependencies\n\n`;
+                    markdown += this.formatDependenciesForMarkdown(results.validatedDependencies);
+                } else if (results.basicDependencies) {
+                    markdown += `### 🔗 Basic Dependencies\n\n`;
+                    markdown += this.formatDependenciesForMarkdown(results.basicDependencies);
+                }
+
+                return markdown;
+            }
+
+            async formatLLMAnalysisForMarkdown(llmAnalysis, componentType) {
+                let markdown = '';
+
+                if (componentType === 'Copybook') {
+                    // Format copybook analysis
+                    if (llmAnalysis.totalFields) {
+                        markdown += `**Total Fields:** ${llmAnalysis.totalFields}\n\n`;
+                    }
+
+                    if (llmAnalysis.fieldCategories) {
+                        markdown += `#### Field Categories\n\n`;
+                        Object.entries(llmAnalysis.fieldCategories).forEach(([category, fields]) => {
+                            if (fields && fields.length > 0) {
+                                markdown += `**${category.replace(/_/g, ' ')}** (${fields.length}):  \n`;
+                                fields.forEach(field => {
+                                    markdown += `- \`${field}\`\n`;
+                                });
+                                markdown += '\n';
+                            }
+                        });
+                    }
+
+                    if (llmAnalysis.fieldDetails) {
+                        markdown += `#### Field Details\n\n`;
+                        Object.entries(llmAnalysis.fieldDetails).forEach(([fieldName, details]) => {
+                            markdown += `**${fieldName}**\n`;
+                            markdown += `- Level: ${details.level || 'N/A'}\n`;
+                            markdown += `- Picture: \`${details.picture || 'N/A'}\`\n`;
+                            markdown += `- Category: ${details.category || 'N/A'}\n`;
+                            if (details.businessRole) {
+                                markdown += `- Business Role: ${details.businessRole}\n`;
+                            }
+                            if (details.usagePattern) {
+                                markdown += `- Usage Pattern: ${details.usagePattern}\n`;
+                            }
+                            markdown += '\n';
+                        });
+                    }
+
+                } else if (componentType === 'COBOL Program') {
+                    // Format program analysis
+                    if (llmAnalysis.programStructure) {
+                        markdown += `#### Program Structure\n\n`;
+                        const structure = llmAnalysis.programStructure;
+                        
+                        if (structure.divisions) {
+                            markdown += `**Divisions:** ${structure.divisions.join(', ')}\n`;
+                        }
+                        if (structure.paragraphs) {
+                            markdown += `**Paragraphs:** ${structure.paragraphs.length} found\n`;
+                        }
+                        if (structure.sections) {
+                            markdown += `**Sections:** ${structure.sections.join(', ')}\n`;
+                        }
+                        markdown += '\n';
+                    }
+
+                    if (llmAnalysis.businessLogic) {
+                        markdown += `#### Business Logic\n\n`;
+                        const logic = llmAnalysis.businessLogic;
+                        
+                        if (logic.validationRules) {
+                            markdown += `**Validation Rules:**\n`;
+                            logic.validationRules.forEach(rule => {
+                                markdown += `- ${rule}\n`;
+                            });
+                        }
+                        
+                        if (logic.calculations) {
+                            markdown += `**Calculations:**\n`;
+                            logic.calculations.forEach(calc => {
+                                markdown += `- ${calc}\n`;
+                            });
+                        }
+                        
+                        if (logic.decisionPoints) {
+                            markdown += `**Decision Points:**\n`;
+                            logic.decisionPoints.forEach(decision => {
+                                markdown += `- ${decision}\n`;
+                            });
+                        }
+                        markdown += '\n';
+                    }
+
+                    if (llmAnalysis.complexity) {
+                        markdown += `**Complexity Level:** ${llmAnalysis.complexity}\n\n`;
+                    }
+                }
+
+                // Business Rules
+                if (llmAnalysis.businessRules) {
+                    markdown += `#### Business Rules\n\n`;
+                    llmAnalysis.businessRules.forEach(rule => {
+                        markdown += `- ${rule}\n`;
+                    });
+                    markdown += '\n';
+                }
+
+                // Recommendations
+                if (llmAnalysis.recommendations) {
+                    markdown += `#### Recommendations\n\n`;
+                    llmAnalysis.recommendations.forEach(rec => {
+                        markdown += `- ${rec}\n`;
+                    });
+                    markdown += '\n';
+                }
+
+                return markdown;
+            }
+
+            formatDependenciesForMarkdown(dependencies) {
+                let markdown = '';
+
+                Object.entries(dependencies).forEach(([depType, deps]) => {
+                    if (deps && deps.length > 0) {
+                        const title = depType.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+                        markdown += `**${title}:**  \n`;
+                        deps.forEach(dep => {
+                            markdown += `- \`${dep}\`\n`;
+                        });
+                        markdown += '\n';
+                    }
+                });
+
+                return markdown;
+            }
+
+            generateChatHistoryMarkdown() {
+                let markdown = `## Chat History\n\n`;
+                
+                this.chatHistory.forEach((chat, index) => {
+                    if (chat.sender === 'user') {
+                        markdown += `### Question ${Math.floor(index/2) + 1}\n\n`;
+                        markdown += `**User:** ${chat.content}\n\n`;
+                    } else {
+                        markdown += `**LLM Assistant Response:**\n\n`;
+                        // Clean HTML tags and format for markdown
+                        const cleanContent = chat.content
+                            .replace(/<[^>]*>/g, '')
+                            .replace(/&nbsp;/g, ' ')
+                            .replace(/• /g, '- ');
+                        markdown += `${cleanContent}\n\n`;
+                        markdown += `*Timestamp: ${new Date(chat.timestamp).toLocaleString()}*\n\n`;
+                    }
+                });
+
+                return markdown;
+            }
+
+            generateFileInfoMarkdown() {
+                let markdown = `## File Information\n\n`;
+                
+                markdown += `| File Name | Type | Size (KB) | Upload Date |\n`;
+                markdown += `|-----------|------|-----------|-------------|\n`;
+                
+                this.uploadedFiles.forEach(file => {
+                    const uploadDate = new Date(file.uploadDate).toLocaleDateString();
+                    markdown += `| ${file.name} | ${file.type} | ${Math.round(file.size/1024)} | ${uploadDate} |\n`;
+                });
+
+                return markdown;
+            }
+
+            downloadTextFile(content, filename) {
+                const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+
+            generateExportSummary() {
+                const summary = {
+                    totalComponents: Object.keys(this.analysisResults).length,
+                    componentTypes: {},
+                    totalUnusedFields: 0,
+                    totalStaticFields: 0,
+                    recommendationsCount: 0
+                };
+
+                Object.values(this.analysisResults).forEach(result => {
+                    // Count component types
+                    summary.componentTypes[result.componentType] = (summary.componentTypes[result.componentType] || 0) + 1;
+                    
+                    // Count unused and static fields for copybooks
+                    if (result.componentType === 'Copybook' && result.llmAnalysis && result.llmAnalysis.fieldCategories) {
+                        if (result.llmAnalysis.fieldCategories.UNUSED_FIELDS) {
+                            summary.totalUnusedFields += result.llmAnalysis.fieldCategories.UNUSED_FIELDS.length;
+                        }
+                        if (result.llmAnalysis.fieldCategories.STATIC_FIELDS) {
+                            summary.totalStaticFields += result.llmAnalysis.fieldCategories.STATIC_FIELDS.length;
+                        }
+                    }
+                    
+                    // Count recommendations
+                    if (result.llmAnalysis && result.llmAnalysis.recommendations) {
+                        summary.recommendationsCount += result.llmAnalysis.recommendations.length;
+                    }
+                });
+
+                return summary;
+            }
+
+            // === BULK ANALYSIS ===
+            async bulkAnalyze() {
+                if (this.uploadedFiles.length === 0) {
+                    this.showError('No files uploaded for bulk analysis');
+                    return;
+                }
+
+                this.showLoading();
+                this.updateLoadingStatus('🔄 Starting LLM bulk analysis...');
+
+                const components = this.componentSuggestions.filter(c => c.type === 'COPYBOOK' || c.type === 'PROGRAM').slice(0, 5);
+                let completed = 0;
+
+                try {
+                    for (const component of components) {
+                        this.updateLoadingStatus(`LLM analyzing ${component.name} (${completed + 1}/${components.length})...`);
+                        this.updateProgress((completed / components.length) * 100);
+                        
+                        try {
+                            // Set the component name and analyze
+                            document.getElementById('componentName').value = component.name;
+                            const results = await this.runLLMEnhancedAnalysis(component.name);
+                            this.analysisResults[component.name] = results;
+                            completed++;
+                            
+                            await this.sleep(3000); // Longer delay for LLM processing
+                        } catch (error) {
+                            console.warn(`Failed to analyze ${component.name}:`, error);
+                        }
+                    }
+
+                    this.hideLoading();
+                    this.saveToStorage();
+                    this.showSuccess(`✨ LLM bulk analysis complete! ${completed}/${components.length} components analyzed`);
+
+                } catch (error) {
+                    this.hideLoading();
+                    this.showError(`LLM bulk analysis failed: ${error.message}`);
+                }
+            }
+
+            // === DISPLAY METHODS ===
+            displayAnalysisResults(componentName, results) {
+                console.log('Displaying LLM analysis results for:', componentName);
+                
+                // Update main analysis tab
+                this.displayMainAnalysis(componentName, results);
+                
+                // Update field matrix tab  
+                this.displayFieldMatrix(componentName, results);
+                
+                // Update usage patterns tab
+                this.displayUsagePatterns(componentName, results);
+                
+                // Update dependencies tab
+                this.displayDependencies(componentName, results);
+                
+                // Switch to analysis tab
+                this.switchTab({ target: { dataset: { tab: 'lifecycle' } } });
+            }
+
+            displayMainAnalysis(componentName, results) {
+                const container = document.getElementById('lifecycleContent');
+                
+                let html = `
+                    <h3>🤖 LLM-Enhanced Analysis Results: ${componentName}</h3>
+                    <p style="margin-bottom: 20px;">
+                        Component type: <strong>${results.componentType}</strong> • 
+                        Analysis method: <strong>${results.analysisMethod}</strong> • 
+                        Files analyzed: <strong>${results.filesAnalyzed.length}</strong> • 
+                        Completed: <strong>${new Date(results.timestamp).toLocaleString()}</strong>
+                    </p>
+                    
+                    <!-- Enhanced Quality Metrics -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px; margin-bottom: 25px;">
+                        <div style="background: rgba(76, 175, 80, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #4CAF50;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${results.qualityScore}/10</div>
+                            <div style="font-size: 11px;">LLM Quality Score</div>
+                        </div>
+                        <div style="background: rgba(33, 150, 243, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #2196F3;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${results.completeness.score}%</div>
+                            <div style="font-size: 11px;">Completeness</div>
+                        </div>
+                        <div style="background: rgba(255, 152, 0, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #FF9800;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${results.filesAnalyzed.length}</div>
+                            <div style="font-size: 11px;">Files Analyzed</div>
+                        </div>
+                        <div style="background: rgba(156, 39, 176, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #9C27B0;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">LLM</div>
+                            <div style="font-size: 11px;">Enhanced Method</div>
+                        </div>
+                    </div>
+                `;
+
+                // Display LLM analysis based on component type
+                if (results.componentType === 'Copybook' && results.llmAnalysis) {
+                    html += this.displayLLMCopybookAnalysis(results.llmAnalysis);
+                } else if (results.componentType === 'COBOL Program' && results.llmAnalysis) {
+                    html += this.displayLLMProgramAnalysis(results.llmAnalysis);
+                } else {
+                    html += this.displayLLMGenericAnalysis(results.llmAnalysis);
+                }
+
+                // Display LLM recommendations
+                if (results.llmAnalysis && results.llmAnalysis.recommendations) {
+                    html += this.displayLLMRecommendations(results.llmAnalysis.recommendations);
+                }
+                
+                container.innerHTML = html;
+            }
+
+            displayLLMCopybookAnalysis(llmAnalysis) {
+                if (!llmAnalysis || llmAnalysis.error) {
+                    return `
+                        <div style="background: rgba(244, 67, 54, 0.1); padding: 20px; border-radius: 10px; border-left: 4px solid #f44336;">
+                            <h4 style="color: #f44336; margin-bottom: 15px;">⚠️ LLM Analysis Error</h4>
+                            <p>LLM analysis encountered an issue. Raw response available in export.</p>
+                        </div>
+                    `;
+                }
+
+                let html = `
+                    <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #FFD700; margin-bottom: 20px;">
+                        <h4 style="color: #FFD700; margin-bottom: 15px;">🤖 LLM Copybook Analysis</h4>
+                `;
+
+                // Display field categories if available
+                if (llmAnalysis.fieldCategories) {
+                    const totalFields = llmAnalysis.totalFields || 0;
+                    
+                    html += `
+                        <!-- LLM Field Summary -->
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                            <div style="text-align: center; background: rgba(76, 175, 80, 0.1); padding: 10px; border-radius: 5px;">
+                                <div style="font-size: 1.2rem; font-weight: bold; color: #4CAF50;">${totalFields}</div>
+                                <div style="font-size: 11px;">Total Fields</div>
+                            </div>
+                    `;
+
+                    Object.entries(llmAnalysis.fieldCategories).forEach(([category, fields]) => {
+                        if (fields && fields.length > 0) {
+                            const color = this.getCategoryColor(category);
+                            html += `
+                                <div style="text-align: center; background: rgba(${this.hexToRgb(color)}, 0.1); padding: 10px; border-radius: 5px;">
+                                    <div style="font-size: 1.2rem; font-weight: bold; color: ${color};">${fields.length}</div>
+                                    <div style="font-size: 11px;">${this.formatCategoryName(category)}</div>
+                                </div>
+                            `;
+                        }
+                    });
+
+                    html += `</div>`;
+
+                    // Display detailed field categories
+                    html += `
+                        <div style="margin-bottom: 20px;">
+                            <h5 style="color: #FFD700; margin-bottom: 15px;">🏷️ LLM Field Categorization:</h5>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                    `;
+
+                    Object.entries(llmAnalysis.fieldCategories).forEach(([category, fields]) => {
+                        if (fields && fields.length > 0) {
+                            const color = this.getCategoryColor(category);
+                            const icon = this.getCategoryIcon(category);
+                            
+                            html += `
+                                <div style="background: rgba(255, 255, 255, 0.05); padding: 12px; border-radius: 8px; border-left: 3px solid ${color};">
+                                    <h6 style="color: ${color}; margin-bottom: 8px; font-size: 13px;">${icon} ${this.formatCategoryName(category)} (${fields.length})</h6>
+                                    <div style="max-height: 120px; overflow-y: auto;">
+                                        ${fields.slice(0, 10).map(field => `
+                                            <div style="margin: 3px 0; padding: 3px 6px; background: rgba(0,0,0,0.2); border-radius: 3px; font-family: monospace; font-size: 11px;">
+                                                ${field}
+                                            </div>
+                                        `).join('')}
+                                        ${fields.length > 10 ? `<div style="font-size: 10px; opacity: 0.7; text-align: center; margin-top: 5px;">... and ${fields.length - 10} more</div>` : ''}
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    });
+
+                    html += `</div></div>`;
+                }
+
+                html += '</div>';
+                return html;
+            }
+
+            displayLLMProgramAnalysis(llmAnalysis) {
+                if (!llmAnalysis || llmAnalysis.error) {
+                    return `
+                        <div style="background: rgba(244, 67, 54, 0.1); padding: 20px; border-radius: 10px; border-left: 4px solid #f44336;">
+                            <h4 style="color: #f44336; margin-bottom: 15px;">⚠️ LLM Analysis Error</h4>
+                            <p>LLM analysis encountered an issue. Raw response available in export.</p>
+                        </div>
+                    `;
+                }
+
+                let html = `
+                    <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #2196F3; margin-bottom: 20px;">
+                        <h4 style="color: #2196F3; margin-bottom: 15px;">🤖 LLM Program Analysis</h4>
+                `;
+
+                // Program structure
+                if (llmAnalysis.programStructure) {
+                    const structure = llmAnalysis.programStructure;
+                    html += `
+                        <div style="margin-bottom: 20px;">
+                            <h5 style="color: #2196F3; margin-bottom: 10px;">📋 Program Structure:</h5>
+                            <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px;">
+                    `;
+                    
+                    if (structure.divisions) {
+                        html += `<p><strong>Divisions:</strong> ${structure.divisions.join(', ')}</p>`;
+                    }
+                    if (structure.paragraphs) {
+                        html += `<p><strong>Paragraphs:</strong> ${Array.isArray(structure.paragraphs) ? structure.paragraphs.length : structure.paragraphs} found</p>`;
+                    }
+                    if (structure.sections) {
+                        html += `<p><strong>Sections:</strong> ${structure.sections.join(', ')}</p>`;
+                    }
+                    
+                    html += '</div></div>';
+                }
+
+                // Business logic
+                if (llmAnalysis.businessLogic) {
+                    html += `
+                        <div style="margin-bottom: 20px;">
+                            <h5 style="color: #FF9800; margin-bottom: 10px;">⚖️ Business Logic:</h5>
+                            <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px;">
+                    `;
+                    
+                    const logic = llmAnalysis.businessLogic;
+                    if (logic.validationRules && logic.validationRules.length > 0) {
+                        html += `<p><strong>Validation Rules:</strong></p><ul>`;
+                        logic.validationRules.forEach(rule => {
+                            html += `<li style="margin-bottom: 5px;">${rule}</li>`;
+                        });
+                        html += '</ul>';
+                    }
+                    
+                    html += '</div></div>';
+                }
+
+                // Complexity
+                if (llmAnalysis.complexity) {
+                    const complexityColor = llmAnalysis.complexity === 'HIGH' ? '#f44336' : 
+                                          llmAnalysis.complexity === 'MEDIUM' ? '#FF9800' : '#4CAF50';
+                    html += `
+                        <div style="margin-bottom: 20px;">
+                            <h5 style="color: #9C27B0; margin-bottom: 10px;">📊 Complexity Assessment:</h5>
+                            <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px;">
+                                <span style="background: ${complexityColor}; color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold;">
+                                    ${llmAnalysis.complexity} COMPLEXITY
+                                </span>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                html += '</div>';
+                return html;
+            }
+
+            displayLLMGenericAnalysis(llmAnalysis) {
+                if (!llmAnalysis) {
+                    return `
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #9C27B0;">
+                            <h4 style="color: #9C27B0; margin-bottom: 15px;">🤖 LLM Component Analysis</h4>
+                            <p style="text-align: center; opacity: 0.8;">
+                                LLM analysis completed. Results available in chat and export.
+                            </p>
+                        </div>
+                    `;
+                }
+
+                return `
+                    <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #9C27B0;">
+                        <h4 style="color: #9C27B0; margin-bottom: 15px;">🤖 LLM Component Analysis</h4>
+                        <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px;">
+                            <p><strong>Component Type:</strong> ${llmAnalysis.componentType || 'Generic'}</p>
+                            ${llmAnalysis.purpose ? `<p><strong>Purpose:</strong> ${llmAnalysis.purpose}</p>` : ''}
+                            <p style="margin-top: 15px; opacity: 0.8;">
+                                Detailed analysis available through chat interface and export functionality.
+                            </p>
+                        </div>
+                    </div>
+                `;
+            }
+
+            displayLLMRecommendations(recommendations) {
+                if (!recommendations || recommendations.length === 0) return '';
+                
+                let html = `
+                    <div style="background: rgba(255, 193, 7, 0.1); padding: 20px; border-radius: 10px; border-left: 4px solid #FFC107; margin-top: 20px;">
+                        <h4 style="color: #FFC107; margin-bottom: 15px;">🤖 LLM Recommendations</h4>
+                `;
+
+                recommendations.forEach((rec, index) => {
+                    html += `
+                        <div style="margin-bottom: 15px; padding: 12px; background: rgba(0,0,0,0.2); border-radius: 8px; border-left: 3px solid #FFC107;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <strong style="color: #FFC107;">💡 Recommendation ${index + 1}</strong>
+                                <span style="font-size: 11px; background: #FFC107; color: #000; padding: 2px 6px; border-radius: 3px; font-weight: bold;">
+                                    LLM GENERATED
+                                </span>
+                            </div>
+                            <div style="line-height: 1.6;">${rec}</div>
+                        </div>
+                    `;
+                });
+
+                html += '</div>';
+                return html;
+            }
+
+            // === UTILITY METHODS ===
+            getCategoryColor(category) {
+                const colors = {
+                    'INPUT_FIELDS': '#4CAF50',
+                    'OUTPUT_FIELDS': '#2196F3',
+                    'DERIVED_FIELDS': '#FF9800',
+                    'CONDITION_FIELDS': '#9C27B0',
+                    'UNUSED_FIELDS': '#f44336',
+                    'STATIC_FIELDS': '#607D8B'
+                };
+                return colors[category] || '#FFD700';
+            }
+getCategoryIcon(category) {
+                const icons = {
+                    'INPUT_FIELDS': '📥',
+                    'OUTPUT_FIELDS': '📤',
+                    'DERIVED_FIELDS': '🔄',
+                    'CONDITION_FIELDS': '❓',
+                    'UNUSED_FIELDS': '🚫',
+                    'STATIC_FIELDS': '🔒'
+                };
+                return icons[category] || '📋';
+            }
+
+            formatCategoryName(category) {
+                return category.replace(/_/g, ' ').toLowerCase()
+                    .replace(/\b\w/g, l => l.toUpperCase());
+            }
+
+            hexToRgb(hex) {
+                const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                return result ? 
+                    `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : 
+                    '255, 255, 255';
+            }
+
+            // === DISPLAY METHODS FOR OTHER TABS ===
+            displayFieldMatrix(componentName, results) {
+                const container = document.getElementById('fieldMatrixContent');
+                
+                let html = `
+                    <h3>📋 LLM Field Matrix Analysis: ${componentName}</h3>
+                    <p style="margin-bottom: 20px;">Enhanced field-level analysis with LLM-powered categorization and insights.</p>
+                `;
+                
+                if (results.componentType === 'Copybook' && results.llmAnalysis && results.llmAnalysis.fieldDetails) {
+                    html += this.displayDetailedLLMFieldMatrix(results.llmAnalysis.fieldDetails);
+                } else {
+                    html += `
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; text-align: center;">
+                            <p style="opacity: 0.8;">LLM field matrix analysis is available for copybook components with detailed field analysis.</p>
+                            <p style="font-size: 12px; margin-top: 10px; opacity: 0.6;">
+                                Analyze a copybook with LLM to see detailed field usage patterns and business context.
+                            </p>
+                        </div>
+                    `;
+                }
+                
+                container.innerHTML = html;
+            }
+
+            displayDetailedLLMFieldMatrix(fieldDetails) {
+                let html = `
+                    <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                        <h4 style="color: #FFD700; margin-bottom: 15px;">🤖 LLM Field Analysis Matrix</h4>
+                        <div style="overflow-x: auto;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                                <thead>
+                                    <tr style="background: rgba(0,0,0,0.3);">
+                                        <th style="padding: 8px; text-align: left; border: 1px solid rgba(255,255,255,0.1); color: #FFD700;">Field Name</th>
+                                        <th style="padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); color: #4CAF50;">Level</th>
+                                        <th style="padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); color: #2196F3;">Picture</th>
+                                        <th style="padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); color: #FF9800;">Category</th>
+                                        <th style="padding: 8px; text-align: left; border: 1px solid rgba(255,255,255,0.1); color: #9C27B0;">Business Role</th>
+                                        <th style="padding: 8px; text-align: left; border: 1px solid rgba(255,255,255,0.1); color: #607D8B;">Usage Pattern</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                `;
+
+                Object.entries(fieldDetails).forEach(([fieldName, details]) => {
+                    const categoryColor = this.getCategoryColor(details.category);
+                    
+                    html += `
+                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                            <td style="padding: 6px 8px; font-family: monospace; font-weight: bold;">${fieldName}</td>
+                            <td style="padding: 6px 8px; text-align: center;">${details.level || 'N/A'}</td>
+                            <td style="padding: 6px 8px; text-align: center; font-family: monospace; font-size: 10px;">${details.picture || 'N/A'}</td>
+                            <td style="padding: 6px 8px; text-align: center; color: ${categoryColor}; font-weight: bold; font-size: 10px;">${details.category || 'N/A'}</td>
+                            <td style="padding: 6px 8px; font-size: 10px; max-width: 200px; word-wrap: break-word;">${details.businessRole || 'N/A'}</td>
+                            <td style="padding: 6px 8px; font-size: 10px; max-width: 200px; word-wrap: break-word;">${details.usagePattern || 'N/A'}</td>
+                        </tr>
+                    `;
+                });
+
+                html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+
+                return html;
+            }
+
+            displayUsagePatterns(componentName, results) {
+                const container = document.getElementById('usageContent');
+                
+                let html = `
+                    <h3>📈 LLM Usage Patterns Analysis: ${componentName}</h3>
+                    <p style="margin-bottom: 20px;">Advanced usage pattern analysis powered by LLM insights.</p>
+                `;
+                
+                if (results.llmAnalysis) {
+                    html += this.displayLLMUsagePatterns(results.llmAnalysis, results.componentType);
+                } else {
+                    html += `
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; text-align: center;">
+                            <p style="opacity: 0.8;">LLM usage patterns analysis will appear here after component analysis.</p>
+                        </div>
+                    `;
+                }
+                
+                container.innerHTML = html;
+            }
+
+            displayLLMUsagePatterns(llmAnalysis, componentType) {
+                let html = `
+                    <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                        <h4 style="color: #FFD700; margin-bottom: 15px;">🤖 LLM Usage Analysis</h4>
+                `;
+
+                if (componentType === 'Copybook' && llmAnalysis.fieldCategories) {
+                    // Display copybook usage patterns
+                    html += `
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                    `;
+
+                    Object.entries(llmAnalysis.fieldCategories).forEach(([category, fields]) => {
+                        if (fields && fields.length > 0) {
+                            const color = this.getCategoryColor(category);
+                            const icon = this.getCategoryIcon(category);
+                            
+                            html += `
+                                <div style="background: rgba(255, 255, 255, 0.05); padding: 12px; border-radius: 8px; border-left: 3px solid ${color};">
+                                    <h6 style="color: ${color}; margin-bottom: 8px; font-size: 13px;">${icon} ${this.formatCategoryName(category)}</h6>
+                                    <div style="font-size: 24px; font-weight: bold; color: ${color}; text-align: center;">${fields.length}</div>
+                                    <div style="font-size: 10px; text-align: center; opacity: 0.8;">fields</div>
+                                </div>
+                            `;
+                        }
+                    });
+
+                    html += '</div>';
+
+                } else if (componentType === 'COBOL Program' && llmAnalysis.businessLogic) {
+                    // Display program usage patterns
+                    const logic = llmAnalysis.businessLogic;
+                    
+                    html += `
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                            <div style="background: rgba(76, 175, 80, 0.1); padding: 12px; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 1.5rem; font-weight: bold; color: #4CAF50;">${logic.validationRules ? logic.validationRules.length : 0}</div>
+                                <div style="font-size: 11px;">Validation Rules</div>
+                            </div>
+                            <div style="background: rgba(33, 150, 243, 0.1); padding: 12px; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 1.5rem; font-weight: bold; color: #2196F3;">${logic.calculations ? logic.calculations.length : 0}</div>
+                                <div style="font-size: 11px;">Calculations</div>
+                            </div>
+                            <div style="background: rgba(255, 152, 0, 0.1); padding: 12px; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 1.5rem; font-weight: bold; color: #FF9800;">${logic.decisionPoints ? logic.decisionPoints.length : 0}</div>
+                                <div style="font-size: 11px;">Decision Points</div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                html += '</div>';
+                return html;
+            }
+
+            displayDependencies(componentName, results) {
+                const container = document.getElementById('dependenciesContent');
+                
+                let html = `
+                    <h3>🔗 Hybrid Dependency Analysis: ${componentName}</h3>
+                    <p style="margin-bottom: 20px;">Regex discovery + LLM validation for comprehensive dependency mapping.</p>
+                `;
+                
+                if (results.validatedDependencies) {
+                    html += this.displayValidatedDependencies(results.validatedDependencies);
+                } else if (results.basicDependencies) {
+                    html += this.displayBasicDependencies(results.basicDependencies);
+                } else {
+                    html += `
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; text-align: center;">
+                            <p style="opacity: 0.8;">Dependency analysis will appear here after component analysis.</p>
+                        </div>
+                    `;
+                }
+                
+                container.innerHTML = html;
+            }
+
+            displayValidatedDependencies(validatedDependencies) {
+                let html = `
+                    <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                        <h4 style="color: #FFD700; margin-bottom: 15px;">🤖 LLM-Validated Dependencies</h4>
+                `;
+
+                // Display coupling level if available
+                if (validatedDependencies.couplingLevel) {
+                    const couplingColor = validatedDependencies.couplingLevel === 'HIGH' ? '#f44336' : 
+                                        validatedDependencies.couplingLevel === 'MEDIUM' ? '#FF9800' : '#4CAF50';
+                    html += `
+                        <div style="margin-bottom: 20px; text-align: center;">
+                            <span style="background: ${couplingColor}; color: white; padding: 8px 16px; border-radius: 8px; font-weight: bold;">
+                                ${validatedDependencies.couplingLevel} COUPLING
+                            </span>
+                        </div>
+                    `;
+                }
+
+                html += this.displayDependencyDetails(validatedDependencies.validatedDependencies || validatedDependencies);
+
+                // Display dependency chains if available
+                if (validatedDependencies.dependencyChains && validatedDependencies.dependencyChains.length > 0) {
+                    html += `
+                        <div style="margin-top: 20px;">
+                            <h5 style="color: #2196F3; margin-bottom: 10px;">🔗 Dependency Chains:</h5>
+                            <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px;">
+                    `;
+                    
+                    validatedDependencies.dependencyChains.forEach(chain => {
+                        html += `<p style="margin-bottom: 8px;">• ${chain}</p>`;
+                    });
+                    
+                    html += '</div></div>';
+                }
+
+                html += '</div>';
+                return html;
+            }
+
+            displayBasicDependencies(basicDependencies) {
+                return `
+                    <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                        <h4 style="color: #FFD700; margin-bottom: 15px;">🔍 Basic Dependencies (Regex)</h4>
+                        <div style="background: rgba(255, 193, 7, 0.1); padding: 10px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #FFC107;">
+                            <p style="font-size: 12px; margin: 0;">
+                                <strong>Note:</strong> These dependencies were discovered using regex patterns. 
+                                LLM validation provides enhanced accuracy and context.
+                            </p>
+                        </div>
+                        ${this.displayDependencyDetails(basicDependencies)}
+                    </div>
+                `;
+            }
+
+            displayDependencyDetails(dependencies) {
+                let html = `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">`;
+
+                const dependencyTypes = [
+                    { key: 'copyStatements', title: 'Copy Statements', icon: '📚', color: '#4CAF50' },
+                    { key: 'callStatements', title: 'Call Statements', icon: '📞', color: '#2196F3' },
+                    { key: 'execStatements', title: 'Exec Statements', icon: '⚡', color: '#FF9800' },
+                    { key: 'programIds', title: 'Program IDs', icon: '💼', color: '#9C27B0' },
+                    { key: 'jclDatasets', title: 'JCL Datasets', icon: '💾', color: '#607D8B' },
+                    { key: 'sqlTables', title: 'SQL Tables', icon: '🗄️', color: '#795548' },
+                    { key: 'fileReferences', title: 'File References', icon: '📁', color: '#E91E63' }
+                ];
+
+                dependencyTypes.forEach(depType => {
+                    const deps = dependencies[depType.key] || [];
+                    if (deps.length > 0) {
+                        html += `
+                            <div style="background: rgba(255, 255, 255, 0.05); padding: 12px; border-radius: 8px; border-left: 3px solid ${depType.color};">
+                                <h6 style="color: ${depType.color}; margin-bottom: 8px; font-size: 13px;">
+                                    ${depType.icon} ${depType.title} (${deps.length})
+                                </h6>
+                                <div style="max-height: 120px; overflow-y: auto;">
+                                    ${deps.slice(0, 10).map(dep => `
+                                        <div style="margin: 2px 0; padding: 3px 6px; background: rgba(0,0,0,0.2); border-radius: 3px; font-family: monospace; font-size: 11px;">
+                                            ${dep}
+                                        </div>
+                                    `).join('')}
+                                    ${deps.length > 10 ? `<div style="font-size: 10px; opacity: 0.7; text-align: center; margin-top: 5px;">... and ${deps.length - 10} more</div>` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }
+                });
+
+                html += '</div>';
+                return html;
+            }
+
+            // === STORAGE MANAGEMENT ===
+            saveToStorage() {
+                try {
+                    const data = {
+                        uploadedFiles: this.uploadedFiles,
+                        analysisResults: this.analysisResults,
+                        chatHistory: this.chatHistory,
+                        vllmEndpoint: this.vllmEndpoint,
+                        maxTokens: this.maxTokens,
+                        llmConfig: this.llmConfig,
+                        timestamp: new Date().toISOString()
+                    };
+                    localStorage.setItem(this.storageKey, JSON.stringify(data));
+                } catch (error) {
+                    console.warn('Failed to save to storage:', error);
+                }
+            }
+
+            loadStoredData() {
+                try {
+                    const stored = localStorage.getItem(this.storageKey);
+                    if (stored) {
+                        const data = JSON.parse(stored);
+                        this.uploadedFiles = data.uploadedFiles || [];
+                        this.analysisResults = data.analysisResults || {};
+                        this.chatHistory = data.chatHistory || [];
+                        
+                        if (data.vllmEndpoint) {
+                            document.getElementById('vllmEndpoint').value = data.vllmEndpoint;
+                            this.vllmEndpoint = data.vllmEndpoint;
+                        }
+                        
+                        if (data.maxTokens) {
+                            document.getElementById('maxTokens').value = data.maxTokens;
+                            this.maxTokens = data.maxTokens;
+                        }
+
+                        if (data.llmConfig) {
+                            this.llmConfig = { ...this.llmConfig, ...data.llmConfig };
+                        }
+                        
+                        this.displayUploadedFiles();
+                        this.updateComponentSuggestions();
+                        this.validateForm();
+                        
+                        console.log('📁 Stored LLM analysis data loaded successfully');
+                    }
+                } catch (error) {
+                    console.warn('Failed to load stored data:', error);
+                }
+            }
+
+            clearAllData() {
+                if (confirm('Are you sure you want to clear all LLM analysis data? This cannot be undone.')) {
+                    this.uploadedFiles = [];
+                    this.analysisResults = {};
+                    this.componentSuggestions = [];
+                    this.currentAnalyzedComponent = null;
+                    this.chatHistory = [];
+                    
+                    localStorage.removeItem(this.storageKey);
+                    
+                    this.displayUploadedFiles();
+                    this.validateForm();
+                    this.initializeChat();
+                    
+                    document.getElementById('lifecycleContent').innerHTML = `
+                        <h3>🎯 LLM-Powered Component Analysis</h3>
+                        <p style="margin-bottom: 20px;">Upload files and analyze components to get started with LLM-enhanced analysis.</p>
+                    `;
+                    
+                    this.showSuccess('🗑️ All LLM analysis data cleared successfully');
+                }
+            }
+
+            // === UTILITY METHODS ===
+            showLoading() { 
+                document.getElementById('loadingIndicator').classList.add('show'); 
+            }
+            
+            hideLoading() { 
+                document.getElementById('loadingIndicator').classList.remove('show'); 
+            }
+            
+            updateLoadingStatus(status) { 
+                document.getElementById('loadingStatus').textContent = status; 
+            }
+
+            updateProgress(percentage) {
+                const progressFill = document.getElementById('progressFill');
+                if (progressFill) {
+                    progressFill.style.width = `${percentage}%`;
+                }
+            }
+
+            showMessage(type, message, duration = 3000) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = type;
+                messageDiv.textContent = message;
+                document.body.appendChild(messageDiv);
+                
+                setTimeout(() => {
+                    if (messageDiv.parentNode) {
+                        messageDiv.parentNode.removeChild(messageDiv);
+                    }
+                }, duration);
+            }
+            
+            showError(message) { this.showMessage('error', message, 5000); }
+            showSuccess(message) { this.showMessage('success', message, 3000); }
+            showWarning(message) { this.showMessage('warning', message, 4000); }
+            
+            sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+        }
+
+        // === INITIALIZATION ===
+        document.addEventListener('DOMContentLoaded', function() {
+            window.analyzer = new EnhancedMainframeAnalyzer();
+            
+            console.log('🚀 Enhanced Mainframe Analyzer with Complete LLM Integration Ready!');
+            console.log('✅ LLM-Enhanced Features:');
+            console.log('   • LLM-powered field lifecycle analysis with business context');
+            console.log('   • Smart dependency detection: Regex discovery + LLM validation');
+            console.log('   • Context-aware copybook field categorization');
+            console.log('   • Intelligent program structure and business logic extraction');
+            console.log('   • Enhanced interactive chat with rich formatting');
+            console.log('   • Export capabilities: JSON + Markdown with chat history');
+            console.log('   • Individual chat message export as plain text');
+            console.log('   • Bulk analysis support with LLM processing');
+            console.log('   • Token management and intelligent content chunking');
+            console.log('   • Fallback handling for LLM response parsing');
+            console.log('🎯 Ready for comprehensive LLM-enhanced mainframe analysis!');
+        });
+
+        // Fallback initialization
+        if (document.readyState === 'loading') {
+            // Document still loading, wait for DOMContentLoaded
+        } else {
+            // Document already loaded
+            window.analyzer = new EnhancedMainframeAnalyzer();
+            console.log('🚀 Enhanced LLM Mainframe Analyzer initialized (fallback)');
+        }
+    </script>
+</body>
+</html>
