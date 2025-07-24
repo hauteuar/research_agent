@@ -1,0 +1,2736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Mainframe Analyzer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 25px;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(15px);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .header h1 {
+            font-size: 2.8rem;
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #FFD700, #FFA500);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 520px 1fr 400px;
+            gap: 25px;
+            min-height: 80vh;
+        }
+
+        .control-panel, .analysis-workspace, .chat-panel {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(15px);
+            border-radius: 20px;
+            padding: 25px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .control-panel {
+            height: fit-content;
+            max-height: 85vh;
+            overflow-y: auto;
+        }
+
+        .analysis-workspace {
+            min-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .chat-panel {
+            display: flex;
+            flex-direction: column;
+            max-height: 85vh;
+        }
+
+        /* Component Search Section */
+        .component-search-section {
+            margin-bottom: 25px;
+            padding: 20px;
+            background: rgba(76, 175, 80, 0.2);
+            border-radius: 15px;
+            border-left: 4px solid #4CAF50;
+        }
+
+        .component-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 14px;
+            margin-bottom: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .component-input:focus {
+            outline: none;
+            border-color: #FFD700;
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
+        }
+
+        .component-input::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .component-suggestions {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            max-height: 150px;
+            overflow-y: auto;
+            display: none;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .suggestion-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            transition: all 0.3s ease;
+            font-size: 13px;
+        }
+
+        .suggestion-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateX(3px);
+        }
+
+        /* Token Management */
+        .token-info {
+            background: rgba(255, 193, 7, 0.2);
+            border: 1px solid rgba(255, 193, 7, 0.5);
+            border-radius: 8px;
+            padding: 10px;
+            margin: 10px 0;
+            font-size: 12px;
+        }
+
+        .token-bar {
+            background: rgba(0, 0, 0, 0.3);
+            height: 6px;
+            border-radius: 3px;
+            margin: 8px 0;
+            overflow: hidden;
+        }
+
+        .token-fill {
+            height: 100%;
+            transition: all 0.3s ease;
+            border-radius: 3px;
+        }
+
+        .token-fill.safe { background: #4CAF50; }
+        .token-fill.warning { background: #FF9800; }
+        .token-fill.danger { background: #f44336; }
+
+        /* General Form Styles */
+        .section-title { 
+            color: #FFD700; 
+            font-size: 1.2rem; 
+            margin-bottom: 15px; 
+            font-weight: 600; 
+            display: flex; 
+            align-items: center; 
+            gap: 10px; 
+        }
+
+        .form-group { 
+            margin-bottom: 20px; 
+        }
+
+        .form-group input, 
+        .form-group select, 
+        .form-group textarea { 
+            width: 100%; 
+            padding: 12px; 
+            border: 1px solid rgba(255, 255, 255, 0.3); 
+            border-radius: 8px; 
+            background: rgba(255, 255, 255, 0.1); 
+            color: white; 
+            font-size: 14px; 
+            transition: all 0.3s ease; 
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #FFD700;
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
+        }
+
+        .form-group input::placeholder,
+        .form-group textarea::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .action-btn { 
+            width: 100%; 
+            background: linear-gradient(45deg, #FF6B6B, #FF5252); 
+            color: white; 
+            border: none; 
+            padding: 14px; 
+            border-radius: 10px; 
+            cursor: pointer; 
+            font-size: 15px; 
+            font-weight: 600; 
+            margin-bottom: 12px; 
+            transition: all 0.3s ease; 
+            text-transform: uppercase; 
+            letter-spacing: 1px; 
+        }
+
+        .action-btn:hover:not(:disabled) { 
+            transform: translateY(-2px); 
+            box-shadow: 0 6px 20px rgba(255, 107, 107, 0.4); 
+        }
+
+        .action-btn:disabled { 
+            opacity: 0.5; 
+            cursor: not-allowed; 
+            transform: none; 
+            box-shadow: none; 
+        }
+
+        .validate-btn { 
+            background: linear-gradient(45deg, #4CAF50, #45a049); 
+        }
+
+        .component-btn { 
+            background: linear-gradient(45deg, #4CAF50, #45a049); 
+        }
+
+        .secondary-btn { 
+            background: linear-gradient(45deg, #2196F3, #1976D2); 
+        }
+
+        /* API Status */
+        .api-status {
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 10px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .api-status.connected {
+            background: rgba(76, 175, 80, 0.2);
+            border: 1px solid rgba(76, 175, 80, 0.5);
+            color: #4CAF50;
+        }
+
+        .api-status.connecting {
+            background: rgba(255, 193, 7, 0.2);
+            border: 1px solid rgba(255, 193, 7, 0.5);
+            color: #FFC107;
+        }
+
+        .api-status.disconnected {
+            background: rgba(244, 67, 54, 0.2);
+            border: 1px solid rgba(244, 67, 54, 0.5);
+            color: #f44336;
+        }
+
+        /* Upload Area */
+        .upload-area {
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 15px;
+        }
+
+        .upload-area:hover {
+            border-color: #FFD700;
+            background: rgba(255, 215, 0, 0.05);
+        }
+
+        .upload-area.drag-over {
+            border-color: #4CAF50;
+            background: rgba(76, 175, 80, 0.1);
+        }
+
+        .file-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .file-item {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .file-info {
+            flex: 1;
+        }
+
+        .file-name {
+            font-weight: bold;
+            margin-bottom: 2px;
+        }
+
+        .file-details {
+            font-size: 11px;
+            opacity: 0.8;
+        }
+
+        .file-remove {
+            background: #f44336;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .file-remove:hover {
+            background: #d32f2f;
+        }
+
+        /* Loading Indicator */
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            z-index: 9999;
+        }
+
+        .loading.show {
+            display: flex;
+        }
+
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #FFD700;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading h3 {
+            color: #FFD700;
+            margin-bottom: 10px;
+        }
+
+        .loading p {
+            color: rgba(255, 255, 255, 0.8);
+            text-align: center;
+            max-width: 400px;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            margin-bottom: 25px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            padding: 5px;
+        }
+
+        .tab {
+            flex: 1;
+            background: transparent;
+            color: rgba(255, 255, 255, 0.7);
+            border: none;
+            padding: 12px 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .tab.active {
+            background: linear-gradient(45deg, #FFD700, #FFA500);
+            color: #000;
+        }
+
+        .tab:hover:not(.active) {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Message Types */
+        .error, .success, .warning {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 8px;
+            font-weight: bold;
+            z-index: 10000;
+            animation: slideInRight 0.3s ease;
+        }
+
+        .error {
+            background: #f44336;
+            color: white;
+        }
+
+        .success {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .warning {
+            background: #FF9800;
+            color: white;
+        }
+
+        @keyframes slideInRight {
+            from { transform: translateX(100%); }
+            to { transform: translateX(0); }
+        }
+
+        /* Chat Styles */
+        .chat-suggestion-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 15px;
+            font-size: 11px;
+            cursor: pointer;
+            margin: 3px;
+            transition: all 0.3s ease;
+            display: inline-block;
+        }
+
+        .chat-suggestion-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-1px);
+        }
+
+        #chatMessages::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        #chatMessages::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+        }
+
+        #chatMessages::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 3px;
+        }
+
+        #chatInput:focus {
+            outline: none;
+            border-color: #FFD700;
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
+        }
+
+        #chatInput::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        #chatSendBtn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+        }
+
+        #chatSendBtn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1600px) { 
+            .main-grid { 
+                grid-template-columns: 450px 1fr 350px; 
+            } 
+        }
+
+        @media (max-width: 1400px) { 
+            .main-grid { 
+                grid-template-columns: 400px 1fr 300px; 
+            } 
+        }
+
+        @media (max-width: 1200px) { 
+            .main-grid { 
+                grid-template-columns: 1fr; 
+                gap: 20px; 
+            }
+            
+            .control-panel, 
+            .analysis-workspace, 
+            .chat-panel {
+                max-height: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔬 Enhanced Mainframe Analyzer</h1>
+            <p>Advanced mainframe analysis with field flow tracking, business rules, and dependency mapping</p>
+        </div>
+
+        <div class="main-grid">
+            <!-- Control Panel -->
+            <div class="control-panel">
+                <!-- Component Search Section -->
+                <div class="component-search-section">
+                    <h2 class="section-title">🎯 Component Analysis</h2>
+                    <div class="form-group">
+                        <label for="componentName">Enter Component Name:</label>
+                        <input type="text" id="componentName" class="component-input" 
+                               placeholder="e.g., CUSTOMER-RECORD, ACCOUNT-COPY, PAYROLL-PROC">
+                        <div id="componentSuggestions" class="component-suggestions"></div>
+                    </div>
+                    
+                    <!-- Token Usage Display -->
+                    <div id="tokenInfo" class="token-info" style="display: none;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                            <span style="font-weight: bold;">Token Management</span>
+                            <span id="tokenCount">0 / 4000</span>
+                        </div>
+                        <div class="token-bar">
+                            <div id="tokenFill" class="token-fill safe" style="width: 0%"></div>
+                        </div>
+                        <div id="tokenWarning" style="font-size: 11px; margin-top: 5px;"></div>
+                    </div>
+                    
+                    <button class="action-btn component-btn" id="analyzeComponentBtn" disabled>
+                        🔍 Analyze Component
+                    </button>
+                </div>
+
+                <!-- vLLM API Setup -->
+                <div style="margin-bottom: 25px; padding: 20px; background: rgba(0, 0, 0, 0.2); border-radius: 15px; border-left: 4px solid #4CAF50;">
+                    <h2 class="section-title">🚀 vLLM Server Setup</h2>
+                    <div class="form-group">
+                        <label for="vllmEndpoint">Server Endpoint:</label>
+                        <input type="text" id="vllmEndpoint" placeholder="http://localhost:8000" value="http://localhost:8000">
+                    </div>
+                    <div class="form-group">
+                        <label for="maxTokens">Max Tokens:</label>
+                        <input type="number" id="maxTokens" value="4000" min="1000" max="8000">
+                    </div>
+                    <button class="action-btn validate-btn" id="validateApiBtn">
+                        🔐 Test Connection
+                    </button>
+                    <div class="api-status disconnected" id="apiStatus">
+                        <span>🔴</span> Enter server details and test connection
+                    </div>
+                </div>
+
+                <!-- File Upload Section -->
+                <div style="margin-bottom: 25px;">
+                    <h2 class="section-title">📁 Upload Mainframe Files</h2>
+                    <div class="upload-area" id="uploadArea">
+                        <div>
+                            <h3 style="margin-bottom: 8px;">📤 Drop files here</h3>
+                            <p style="font-size: 14px;">COBOL (.cbl), Copybooks (.cpy), JCL (.jcl)</p>
+                        </div>
+                        <input type="file" id="fileInput" multiple accept=".cbl,.cob,.cpy,.copybook,.jcl,.txt,.proc" style="display: none;">
+                    </div>
+                    <div id="uploadedFiles" class="file-list"></div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div>
+                    <h3 class="section-title">⚡ Actions</h3>
+                    <button class="action-btn secondary-btn" id="bulkAnalyzeBtn" disabled>
+                        📊 Bulk Analyze
+                    </button>
+                    <button class="action-btn secondary-btn" id="exportBtn" disabled>
+                        📤 Export Results
+                    </button>
+                    <button class="action-btn secondary-btn" id="clearBtn">
+                        🗑️ Clear All Data
+                    </button>
+                </div>
+            </div>
+
+            <!-- Analysis Workspace -->
+            <div class="analysis-workspace">
+                <div class="tabs">
+                    <button class="tab active" data-tab="lifecycle">🔄 Analysis Results</button>
+                    <button class="tab" data-tab="fieldmatrix">📋 Field Matrix</button>
+                    <button class="tab" data-tab="usage">📈 Usage Patterns</button>
+                    <button class="tab" data-tab="dependencies">🔗 Dependencies</button>
+                </div>
+
+                <!-- Tab Contents -->
+                <div id="lifecycle" class="tab-content active">
+                    <div id="lifecycleContent">
+                        <h3>🎯 Component Analysis Results</h3>
+                        <p style="margin-bottom: 20px; line-height: 1.6;">
+                            Upload files, test your connection, and analyze components for detailed field flows and business rules.
+                        </p>
+                        
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #FFD700;">
+                            <h4 style="color: #FFD700; margin-bottom: 15px;">🚀 Analysis Features:</h4>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                                <div>
+                                    <strong style="color: #4CAF50;">📊 Field Flow Analysis:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Input/Output field tracking</li>
+                                        <li>• Derived and calculated fields</li>
+                                        <li>• Unused field identification</li>
+                                        <li>• Field transformation paths</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <strong style="color: #2196F3;">⚖️ Business Rules:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Validation logic extraction</li>
+                                        <li>• Decision point mapping</li>
+                                        <li>• Conditional processing</li>
+                                        <li>• Business calculation rules</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <strong style="color: #FF9800;">🔗 Dependencies:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Copybook dependencies</li>
+                                        <li>• Program call chains</li>
+                                        <li>• File references</li>
+                                        <li>• Database table usage</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <strong style="color: #9C27B0;">🧠 Smart Processing:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Token-aware chunking</li>
+                                        <li>• Progressive analysis</li>
+                                        <li>• Context preservation</li>
+                                        <li>• Quality validation</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="fieldmatrix" class="tab-content">
+                    <div id="fieldMatrixContent">
+                        <h3>📋 Field Matrix Analysis</h3>
+                        <p style="margin-bottom: 20px;">Field-level analysis with categorization will appear here after component analysis.</p>
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                            <p style="text-align: center; opacity: 0.8;">Field matrix will appear here after analysis.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="usage" class="tab-content">
+                    <div id="usageContent">
+                        <h3>📈 Usage Patterns Analysis</h3>
+                        <p style="margin-bottom: 20px;">Usage pattern analysis will appear here after component analysis.</p>
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                            <p style="text-align: center; opacity: 0.8;">Usage patterns will appear here after analysis.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="dependencies" class="tab-content">
+                    <div id="dependenciesContent">
+                        <h3>🔗 Dependency Analysis</h3>
+                        <p style="margin-bottom: 20px;">Dependency mapping will appear here after component analysis.</p>
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                            <p style="text-align: center; opacity: 0.8;">Dependency graph will appear here after analysis.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Loading Indicator -->
+                <div class="loading" id="loadingIndicator">
+                    <div class="spinner"></div>
+                    <h3>🤖 Analyzing Component</h3>
+                    <p id="loadingStatus">Processing component analysis...</p>
+                    <div id="progressBar" style="background: rgba(255,255,255,0.2); height: 6px; border-radius: 3px; margin: 15px 0; overflow: hidden;">
+                        <div id="progressFill" style="height: 100%; background: #4CAF50; width: 0%; transition: width 0.3s ease;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat Panel -->
+            <div class="chat-panel">
+                <div style="background: rgba(76, 175, 80, 0.2); border-radius: 10px; padding: 15px; margin-bottom: 15px; border-left: 4px solid #4CAF50;">
+                    <h3 style="margin-bottom: 8px; color: #FFD700;">💬 Analysis Chat</h3>
+                    <p style="font-size: 12px; opacity: 0.8;">Interactive chat will be enabled after analysis</p>
+                </div>
+                
+                <div style="flex: 1; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.05); border-radius: 10px;">
+                    <p style="opacity: 0.6;">Chat functionality will be enabled after component analysis...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Part 1: Basic structure and placeholder functionality
+        console.log('🎯 Enhanced Mainframe Analyzer - Part 1 Loaded');
+        console.log('This is the basic HTML structure. JavaScript functionality will be added in subsequent parts.');
+        
+        // Basic message display function
+        function showMessage(type, message, duration = 3000) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = type;
+            messageDiv.textContent = message;
+            document.body.appendChild(messageDiv);
+            
+            setTimeout(() => {
+                if (messageDiv.parentNode) {
+                    messageDiv.parentNode.removeChild(messageDiv);
+                }
+            }, duration);
+        }
+        
+        // Show initial message
+        showMessage('success', '🚀 Enhanced Mainframe Analyzer - Part 1 Ready! Complete JavaScript functionality will be added in subsequent parts.');
+
+// Enhanced Mainframe Analyzer - Part 2: Core JavaScript Class
+class EnhancedMainframeAnalyzer {
+    constructor() {
+        // Core properties
+        this.uploadedFiles = [];
+        this.analysisResults = {};
+        this.componentSuggestions = [];
+        this.serverValidated = false;
+        this.vllmEndpoint = 'http://localhost:8000';
+        this.maxTokens = 4000;
+        this.storageKey = 'enhanced_mainframe_analysis';
+        this.currentAnalyzedComponent = null;
+        
+        // Token management
+        this.averageCharsPerToken = 3; // Conservative estimate
+        this.tokenSafetyMargin = 0.7; // 70% usage max
+        
+        this.initializeBasicEventListeners();
+        this.loadStoredData();
+        this.initializeTokenManagement();
+        this.initializeChat();
+        
+        console.log('🚀 Enhanced Mainframe Analyzer Initialized');
+    }
+
+    // === BASIC EVENT LISTENERS ===
+    initializeBasicEventListeners() {
+        // API validation
+        document.getElementById('validateApiBtn').addEventListener('click', () => this.validateConnection());
+        document.getElementById('vllmEndpoint').addEventListener('input', () => this.onEndpointChange());
+        document.getElementById('maxTokens').addEventListener('input', () => this.onSettingsChange());
+        
+        // File upload handlers
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        
+        uploadArea.addEventListener('click', () => {
+            if (this.serverValidated) fileInput.click();
+        });
+        uploadArea.addEventListener('drop', (e) => this.handleFileDrop(e));
+        uploadArea.addEventListener('dragover', (e) => this.handleDragOver(e));
+        uploadArea.addEventListener('dragleave', (e) => this.handleDragLeave(e));
+        fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
+
+        // Component analysis
+        document.getElementById('componentName').addEventListener('input', () => this.onComponentInput());
+        document.getElementById('analyzeComponentBtn').addEventListener('click', () => this.analyzeComponent());
+        
+        // Quick actions
+        document.getElementById('bulkAnalyzeBtn').addEventListener('click', () => this.bulkAnalyze());
+        document.getElementById('exportBtn').addEventListener('click', () => this.exportResults());
+        document.getElementById('clearBtn').addEventListener('click', () => this.clearAllData());
+
+        // Tab navigation
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', (e) => this.switchTab(e));
+        });
+
+        // Hide suggestions when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.component-search-section')) {
+                document.getElementById('componentSuggestions').style.display = 'none';
+            }
+        });
+    }
+
+    initializeTokenManagement() {
+        this.updateTokenDisplay(0);
+        this.showSuccess('🚀 Enhanced Mainframe Analyzer Ready!');
+    }
+
+    // === TOKEN MANAGEMENT ===
+    estimateTokenCount(text) {
+        if (!text) return 0;
+        return Math.ceil(text.length / this.averageCharsPerToken);
+    }
+
+    updateTokenDisplay(currentTokens) {
+        const tokenInfo = document.getElementById('tokenInfo');
+        const tokenCount = document.getElementById('tokenCount');
+        const tokenFill = document.getElementById('tokenFill');
+        const tokenWarning = document.getElementById('tokenWarning');
+
+        tokenInfo.style.display = 'block';
+        tokenCount.textContent = `${currentTokens} / ${this.maxTokens}`;
+        
+        const percentage = (currentTokens / this.maxTokens) * 100;
+        tokenFill.style.width = `${Math.min(percentage, 100)}%`;
+        
+        tokenFill.className = 'token-fill';
+        if (percentage <= 50) {
+            tokenFill.classList.add('safe');
+            tokenWarning.textContent = '🟢 Optimal token usage - full analysis available';
+        } else if (percentage <= 70) {
+            tokenFill.classList.add('warning');
+            tokenWarning.textContent = '🟡 Moderate usage - intelligent chunking active';
+        } else {
+            tokenFill.classList.add('danger');
+            tokenWarning.textContent = '🔴 High usage - optimization required';
+        }
+    }
+
+    // === API CONNECTION ===
+    async validateConnection() {
+        const endpoint = document.getElementById('vllmEndpoint').value.trim();
+        if (!endpoint) {
+            this.showError('Please enter vLLM endpoint');
+            return;
+        }
+
+        this.updateConnectionStatus('connecting', 'Testing connection...');
+
+        try {
+            const response = await fetch(`${endpoint}/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    prompt: "Test connection. Respond with 'Connected'",
+                    max_tokens: 10,
+                    temperature: 0.1
+                }),
+                signal: AbortSignal.timeout(10000)
+            });
+
+            if (response.ok) {
+                this.serverValidated = true;
+                this.vllmEndpoint = endpoint;
+                this.updateConnectionStatus('connected', `✅ Connection verified`);
+                this.showSuccess('🚀 vLLM server connected successfully!');
+            } else {
+                throw new Error(`HTTP ${response.status}`);
+            }
+        } catch (error) {
+            this.serverValidated = false;
+            this.updateConnectionStatus('disconnected', `❌ Connection failed: ${error.message}`);
+            this.showError(`Connection failed: ${error.message}`);
+        }
+        
+        this.validateForm();
+    }
+
+    updateConnectionStatus(status, message) {
+        const statusElement = document.getElementById('apiStatus');
+        statusElement.className = `api-status ${status}`;
+        statusElement.innerHTML = message;
+    }
+
+    // === FILE UPLOAD ===
+    handleFileDrop(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const uploadArea = document.getElementById('uploadArea');
+        uploadArea.classList.remove('drag-over');
+        
+        if (!this.serverValidated) {
+            this.showError('Please validate API connection first');
+            return;
+        }
+        
+        const files = Array.from(e.dataTransfer.files);
+        this.processFiles(files);
+    }
+
+    handleDragOver(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        document.getElementById('uploadArea').classList.add('drag-over');
+    }
+
+    handleDragLeave(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        document.getElementById('uploadArea').classList.remove('drag-over');
+    }
+
+    handleFileSelect(e) {
+        if (!this.serverValidated) {
+            this.showError('Please validate API connection first');
+            return;
+        }
+        
+        const files = Array.from(e.target.files);
+        this.processFiles(files);
+    }
+
+    async processFiles(files) {
+        for (const file of files) {
+            try {
+                const content = await this.readFile(file);
+                const fileType = this.detectFileType(file.name, content);
+                
+                const fileObj = {
+                    name: file.name,
+                    content: content,
+                    size: file.size,
+                    type: fileType,
+                    uploadDate: new Date().toISOString(),
+                    id: Date.now() + Math.random()
+                };
+                
+                this.uploadedFiles.push(fileObj);
+                this.updateComponentSuggestions();
+                
+            } catch (error) {
+                this.showError(`Failed to read ${file.name}: ${error.message}`);
+            }
+        }
+        
+        this.displayUploadedFiles();
+        this.validateForm();
+        this.saveToStorage();
+        this.showSuccess(`📁 ${files.length} files uploaded successfully!`);
+    }
+
+    readFile(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = e => resolve(e.target.result);
+            reader.onerror = e => reject(new Error('File read failed'));
+            reader.readAsText(file);
+        });
+    }
+
+    detectFileType(fileName, content) {
+        const name = fileName.toLowerCase();
+        const upperContent = content.toUpperCase();
+        
+        if (name.includes('.cpy') || name.includes('copybook')) {
+            return 'Copybook';
+        } else if (name.includes('.jcl') || upperContent.includes('//JOB ')) {
+            return 'JCL Job';
+        } else if (name.includes('.cbl') || name.includes('.cob') || 
+                  upperContent.includes('IDENTIFICATION DIVISION') ||
+                  upperContent.includes('PROGRAM-ID')) {
+            return 'COBOL Program';
+        } else if (name.includes('.proc')) {
+            return 'JCL Procedure';
+        } else {
+            return 'Text File';
+        }
+    }
+
+    displayUploadedFiles() {
+        const container = document.getElementById('uploadedFiles');
+        if (this.uploadedFiles.length === 0) {
+            container.innerHTML = '';
+            return;
+        }
+        
+        let html = '';
+        this.uploadedFiles.forEach(file => {
+            html += `
+                <div class="file-item">
+                    <div class="file-info">
+                        <div class="file-name">${file.name}</div>
+                        <div class="file-details">${file.type} • ${Math.round(file.size/1024)}KB</div>
+                    </div>
+                    <button class="file-remove" onclick="analyzer.removeFile('${file.id}')">🗑️</button>
+                </div>
+            `;
+        });
+        
+        container.innerHTML = html;
+    }
+
+    removeFile(fileId) {
+        this.uploadedFiles = this.uploadedFiles.filter(f => f.id != fileId);
+        this.displayUploadedFiles();
+        this.updateComponentSuggestions();
+        this.validateForm();
+        this.saveToStorage();
+    }
+
+    // === COMPONENT SUGGESTIONS ===
+    updateComponentSuggestions() {
+        this.componentSuggestions = [];
+        
+        this.uploadedFiles.forEach(file => {
+            const content = file.content.toUpperCase();
+            const lines = content.split('\n');
+            
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                
+                // Extract COBOL field names
+                const fieldMatch = trimmed.match(/^\s*\d{2}\s+([A-Z][A-Z0-9\-_]{2,})/);
+                if (fieldMatch) {
+                    this.componentSuggestions.push({
+                        name: fieldMatch[1],
+                        type: 'FIELD',
+                        file: file.name
+                    });
+                }
+                
+                // Extract copybook names
+                const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]{2,})/);
+                if (copyMatch) {
+                    this.componentSuggestions.push({
+                        name: copyMatch[1],
+                        type: 'COPYBOOK',
+                        file: file.name
+                    });
+                }
+                
+                // Extract program names
+                const programMatch = trimmed.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]{2,})/);
+                if (programMatch) {
+                    this.componentSuggestions.push({
+                        name: programMatch[1],
+                        type: 'PROGRAM',
+                        file: file.name
+                    });
+                }
+            });
+        });
+        
+        // Remove duplicates
+        this.componentSuggestions = this.componentSuggestions.filter((item, index, self) => 
+            index === self.findIndex(t => t.name === item.name && t.type === item.type)
+        );
+    }
+
+    onComponentInput() {
+        const input = document.getElementById('componentName');
+        const value = input.value.trim().toUpperCase();
+        const suggestions = document.getElementById('componentSuggestions');
+        
+        if (value.length < 2) {
+            suggestions.style.display = 'none';
+            this.validateForm();
+            return;
+        }
+        
+        const filtered = this.componentSuggestions.filter(item => 
+            item.name.includes(value)
+        ).slice(0, 8);
+        
+        if (filtered.length > 0) {
+            let html = '';
+            filtered.forEach(item => {
+                html += `
+                    <div class="suggestion-item" onclick="analyzer.selectSuggestion('${item.name}')">
+                        <strong>${item.name}</strong> 
+                        <span style="opacity: 0.7;">(${item.type} in ${item.file})</span>
+                    </div>
+                `;
+            });
+            suggestions.innerHTML = html;
+            suggestions.style.display = 'block';
+        } else {
+            suggestions.style.display = 'none';
+        }
+        
+        this.validateForm();
+    }
+
+    selectSuggestion(componentName) {
+        document.getElementById('componentName').value = componentName;
+        document.getElementById('componentSuggestions').style.display = 'none';
+        this.validateForm();
+    }
+
+    // === FORM VALIDATION ===
+    validateForm() {
+        const hasFiles = this.uploadedFiles.length > 0;
+        const hasComponent = document.getElementById('componentName').value.trim().length > 0;
+        const hasConnection = this.serverValidated;
+        
+        document.getElementById('analyzeComponentBtn').disabled = !(hasFiles && hasComponent && hasConnection);
+        document.getElementById('bulkAnalyzeBtn').disabled = !(hasFiles && hasConnection);
+        document.getElementById('exportBtn').disabled = Object.keys(this.analysisResults).length === 0;
+    }
+
+    // === EVENT HANDLERS ===
+    onEndpointChange() {
+        this.serverValidated = false;
+        this.updateConnectionStatus('disconnected', '🔴 Connection not validated');
+        this.validateForm();
+    }
+
+    onSettingsChange() {
+        this.maxTokens = parseInt(document.getElementById('maxTokens').value) || 4000;
+        this.saveToStorage();
+    }
+
+    switchTab(e) {
+        const targetTab = e.target?.dataset?.tab || e.dataset?.tab;
+        if (!targetTab) return;
+        
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.classList.remove('active');
+        });
+        
+        const clickedTab = e.target || e;
+        if (clickedTab.classList) {
+            clickedTab.classList.add('active');
+        }
+        
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.remove('active');
+        });
+        
+        const targetContent = document.getElementById(targetTab);
+        if (targetContent) {
+            targetContent.classList.add('active');
+        }
+    }
+
+    // === UTILITY METHODS ===
+    showLoading() { 
+        document.getElementById('loadingIndicator').classList.add('show'); 
+    }
+    
+    hideLoading() { 
+        document.getElementById('loadingIndicator').classList.remove('show'); 
+    }
+    
+    updateLoadingStatus(status) { 
+        document.getElementById('loadingStatus').textContent = status; 
+    }
+
+    updateProgress(percentage) {
+        const progressFill = document.getElementById('progressFill');
+        if (progressFill) {
+            progressFill.style.width = `${percentage}%`;
+        }
+    }
+
+    showMessage(type, message, duration = 3000) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = type;
+        messageDiv.textContent = message;
+        document.body.appendChild(messageDiv);
+        
+        setTimeout(() => {
+            if (messageDiv.parentNode) {
+                messageDiv.parentNode.removeChild(messageDiv);
+            }
+        }, duration);
+    }
+    
+    showError(message) { this.showMessage('error', message, 5000); }
+    showSuccess(message) { this.showMessage('success', message, 3000); }
+    showWarning(message) { this.showMessage('warning', message, 4000); }
+    
+    sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+    // Enhanced Mainframe Analyzer - Part 3: Analysis Engine
+
+// === ENHANCED ANALYSIS ENGINE ===
+async analyzeComponent() {
+    const componentName = document.getElementById('componentName').value.trim();
+    if (!componentName) return;
+
+    this.showLoading();
+    this.updateProgress(0);
+
+    try {
+        const results = await this.runEnhancedAnalysis(componentName);
+        
+        this.analysisResults[componentName] = results;
+        this.currentAnalyzedComponent = componentName;
+        
+        this.displayAnalysisResults(componentName, results);
+        this.enableChat();
+        this.saveToStorage();
+        
+        this.hideLoading();
+        this.showSuccess(`✅ Enhanced analysis complete for ${componentName}!`);
+        
+    } catch (error) {
+        this.hideLoading();
+        this.showError(`Analysis failed: ${error.message}`);
+        console.error('Analysis error:', error);
+    }
+}
+
+async runEnhancedAnalysis(componentName) {
+    console.log(`Starting enhanced analysis for: ${componentName}`);
+    
+    // Stage 1: Find all relevant files and detect component type
+    this.updateLoadingStatus('🔍 Stage 1: Finding relevant files and detecting component type...');
+    this.updateProgress(15);
+    
+    const relevantFiles = this.findRelevantFiles(componentName);
+    if (relevantFiles.length === 0) {
+        throw new Error(`Component "${componentName}" not found in uploaded files`);
+    }
+
+    const componentType = this.detectComponentType(componentName, relevantFiles);
+    console.log(`Component type detected: ${componentType}`);
+
+    // Stage 2: Enhanced dependency extraction
+    this.updateLoadingStatus('🔗 Stage 2: Extracting dependencies from all files...');
+    this.updateProgress(35);
+    
+    const allDependencies = await this.extractAllDependencies();
+    console.log('All dependencies found:', allDependencies);
+
+    // Stage 3: Component-specific analysis based on type
+    this.updateLoadingStatus('⚡ Stage 3: Performing component-specific analysis...');
+    this.updateProgress(65);
+    
+    let specificAnalysis;
+    if (componentType === 'Copybook') {
+        specificAnalysis = await this.analyzeCopybookLifecycle(componentName, relevantFiles, allDependencies);
+    } else if (componentType === 'COBOL Program') {
+        specificAnalysis = await this.analyzeProgramLifecycle(componentName, relevantFiles, allDependencies);
+    } else {
+        specificAnalysis = await this.analyzeGenericComponent(componentName, relevantFiles, allDependencies);
+    }
+    
+    this.updateProgress(100);
+    
+    return {
+        componentName: componentName,
+        timestamp: new Date().toISOString(),
+        filesAnalyzed: relevantFiles.map(f => f.name),
+        componentType: componentType,
+        dependencies: allDependencies,
+        specificAnalysis: specificAnalysis,
+        qualityScore: this.calculateQualityScore(specificAnalysis),
+        completeness: this.assessCompleteness(specificAnalysis)
+    };
+}
+
+// === ENHANCED DEPENDENCY EXTRACTION ===
+async extractAllDependencies() {
+    console.log('Starting enhanced dependency extraction from all files...');
+    
+    const dependencies = {
+        copyStatements: new Set(),
+        callStatements: new Set(),
+        execStatements: new Set(),
+        jclDatasets: new Set(),
+        programIds: new Set(),
+        sqlTables: new Set(),
+        fileReferences: new Set()
+    };
+
+    // Process each uploaded file for dependencies
+    for (const file of this.uploadedFiles) {
+        const fileDeps = this.extractDependenciesFromFile(file);
+        
+        // Merge dependencies
+        Object.keys(fileDeps).forEach(depType => {
+            if (dependencies[depType]) {
+                fileDeps[depType].forEach(dep => dependencies[depType].add(dep));
+            }
+        });
+    }
+
+    // Convert Sets to Arrays and clean up
+    const cleanDependencies = {};
+    Object.keys(dependencies).forEach(key => {
+        cleanDependencies[key] = Array.from(dependencies[key])
+            .filter(dep => dep && dep.length > 1)
+            .slice(0, 50); // Reasonable limit
+    });
+
+    console.log('Enhanced dependencies extracted:', cleanDependencies);
+    return cleanDependencies;
+}
+
+extractDependenciesFromFile(file) {
+    const dependencies = {
+        copyStatements: [],
+        callStatements: [],
+        execStatements: [],
+        jclDatasets: [],
+        programIds: [],
+        sqlTables: [],
+        fileReferences: []
+    };
+
+    const lines = file.content.split('\n');
+    
+    lines.forEach((line, lineNum) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // COPY statements - Enhanced patterns
+        let copyMatch = trimmed.match(/COPY\s+(['"]*[A-Z][A-Z0-9\-_]{1,}['"]*)/);
+        if (copyMatch) {
+            const copyName = copyMatch[1].replace(/['"]/g, '');
+            dependencies.copyStatements.push(copyName);
+        }
+
+        // CALL statements - Enhanced patterns
+        let callMatch = trimmed.match(/CALL\s+['"]*([A-Z][A-Z0-9\-_]{1,})['"]*/) ||
+                       trimmed.match(/LINK\s+['"]*([A-Z][A-Z0-9\-_]{1,})['"]*/) ||
+                       trimmed.match(/XCTL\s+['"]*([A-Z][A-Z0-9\-_]{1,})['"]*/);
+        if (callMatch) {
+            dependencies.callStatements.push(callMatch[1]);
+        }
+
+        // JCL EXEC statements
+        let execMatch = trimmed.match(/EXEC\s+PGM=([A-Z][A-Z0-9\-_]{1,})/) ||
+                       trimmed.match(/\/\/\w+\s+EXEC\s+([A-Z][A-Z0-9\-_]{1,})/);
+        if (execMatch) {
+            dependencies.execStatements.push(execMatch[1]);
+        }
+
+        // JCL Dataset references
+        let datasetMatch = trimmed.match(/DSN=([A-Z][A-Z0-9\.\-_]{3,})/) ||
+                          trimmed.match(/DSNAME=([A-Z][A-Z0-9\.\-_]{3,})/);
+        if (datasetMatch) {
+            dependencies.jclDatasets.push(datasetMatch[1]);
+        }
+
+        // PROGRAM-ID
+        let programMatch = trimmed.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]{1,})/);
+        if (programMatch) {
+            dependencies.programIds.push(programMatch[1]);
+        }
+
+        // SQL Table references
+        let tableMatch = trimmed.match(/FROM\s+([A-Z][A-Z0-9_]{1,})/) ||
+                        trimmed.match(/INTO\s+([A-Z][A-Z0-9_]{1,})/) ||
+                        trimmed.match(/UPDATE\s+([A-Z][A-Z0-9_]{1,})/) ||
+                        trimmed.match(/DELETE\s+FROM\s+([A-Z][A-Z0-9_]{1,})/);
+        if (tableMatch) {
+            dependencies.sqlTables.push(tableMatch[1]);
+        }
+
+        // File references
+        let fileMatch = trimmed.match(/FD\s+([A-Z][A-Z0-9\-_]{1,})/) ||
+                       trimmed.match(/SELECT\s+([A-Z][A-Z0-9\-_]{1,})\s+ASSIGN/) ||
+                       trimmed.match(/OPEN\s+(?:INPUT|OUTPUT|I-O)\s+([A-Z][A-Z0-9\-_]{1,})/);
+        if (fileMatch) {
+            dependencies.fileReferences.push(fileMatch[1]);
+        }
+    });
+
+    return dependencies;
+}
+
+// === COPYBOOK LIFECYCLE ANALYSIS ===
+async analyzeCopybookLifecycle(copybookName, relevantFiles, allDependencies) {
+    console.log(`Analyzing copybook lifecycle for: ${copybookName}`);
+    
+    // Find the main copybook file
+    const copybookFile = relevantFiles.find(f => 
+        f.type === 'Copybook' && 
+        (f.name.toUpperCase().includes(copybookName.toUpperCase()) || 
+         f.content.toUpperCase().includes(copybookName.toUpperCase()))
+    );
+
+    if (!copybookFile) {
+        throw new Error(`Copybook file for ${copybookName} not found`);
+    }
+
+    // Extract fields from copybook
+    const copybookFields = this.extractFieldsFromCopybook(copybookFile);
+    console.log(`Found ${copybookFields.length} fields in copybook`);
+
+    // Find all programs that use this copybook
+    const usingPrograms = this.findProgramsUsingCopybook(copybookName);
+    console.log(`Found ${usingPrograms.length} programs using this copybook`);
+
+    // Analyze field usage across all programs
+    const fieldUsageAnalysis = await this.analyzeFieldUsageAcrossPrograms(copybookFields, usingPrograms, copybookName);
+
+    return {
+        analysisType: 'Copybook Lifecycle',
+        copybookFile: copybookFile.name,
+        totalFields: copybookFields.length,
+        usingPrograms: usingPrograms.map(p => p.name),
+        fieldUsageAnalysis: fieldUsageAnalysis,
+        fieldCategories: this.categorizeCopybookFields(fieldUsageAnalysis),
+        recommendations: this.generateCopybookRecommendations(fieldUsageAnalysis)
+    };
+}
+
+extractFieldsFromCopybook(copybookFile) {
+    const fields = [];
+    const lines = copybookFile.content.split('\n');
+    
+    lines.forEach((line, lineNum) => {
+        const trimmed = line.trim();
+        
+        // Match COBOL field definitions (level number + field name)
+        const fieldMatch = trimmed.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]*)/);
+        if (fieldMatch) {
+            const level = parseInt(fieldMatch[1]);
+            const fieldName = fieldMatch[2];
+            
+            // Extract additional field information
+            const picClause = trimmed.match(/PIC\s+([X9SV\(\)\+\-\.]+)/);
+            const valueClause = trimmed.match(/VALUE\s+([^\.]+)/);
+            const redefinesClause = trimmed.match(/REDEFINES\s+([A-Z][A-Z0-9\-_]*)/);
+            
+            fields.push({
+                name: fieldName,
+                level: level,
+                line: lineNum + 1,
+                picture: picClause ? picClause[1] : null,
+                value: valueClause ? valueClause[1].trim() : null,
+                redefines: redefinesClause ? redefinesClause[1] : null,
+                isGroup: level < 49 && !picClause,
+                fullLine: trimmed
+            });
+        }
+    });
+    
+    return fields;
+}
+
+findProgramsUsingCopybook(copybookName) {
+    const usingPrograms = [];
+    
+    this.uploadedFiles.forEach(file => {
+        if (file.type === 'COBOL Program') {
+            const content = file.content.toUpperCase();
+            
+            // Check for COPY statements referencing this copybook
+            const copyPattern = new RegExp(`COPY\\s+['"]*${copybookName.toUpperCase()}['"]*`, 'g');
+            if (copyPattern.test(content)) {
+                usingPrograms.push(file);
+            }
+        }
+    });
+    
+    return usingPrograms;
+}
+
+async analyzeFieldUsageAcrossPrograms(copybookFields, usingPrograms, copybookName) {
+    console.log(`Analyzing field usage across ${usingPrograms.length} programs`);
+    
+    const fieldUsage = {};
+    
+    // Initialize field usage tracking
+    copybookFields.forEach(field => {
+        fieldUsage[field.name] = {
+            fieldInfo: field,
+            usagePatterns: {
+                input: [],      // Where field receives data
+                output: [],     // Where field data is sent
+                update: [],     // Where field is modified
+                reference: [],  // Where field is referenced/read
+                condition: []   // Where field is used in conditions
+            },
+            totalReferences: 0,
+            isUsed: false,
+            isStatic: false
+        };
+    });
+
+    // Analyze each program for field usage
+    for (const program of usingPrograms) {
+        const programUsage = this.analyzeFieldUsageInProgram(program, copybookFields);
+        
+        // Merge program usage into overall field usage
+        Object.keys(programUsage).forEach(fieldName => {
+            if (fieldUsage[fieldName]) {
+                const usage = programUsage[fieldName];
+                fieldUsage[fieldName].usagePatterns.input.push(...usage.input);
+                fieldUsage[fieldName].usagePatterns.output.push(...usage.output);
+                fieldUsage[fieldName].usagePatterns.update.push(...usage.update);
+                fieldUsage[fieldName].usagePatterns.reference.push(...usage.reference);
+                fieldUsage[fieldName].usagePatterns.condition.push(...usage.condition);
+                fieldUsage[fieldName].totalReferences += usage.totalReferences;
+                fieldUsage[fieldName].isUsed = fieldUsage[fieldName].isUsed || usage.isUsed;
+            }
+        });
+    }
+
+    // Determine if fields are static (have VALUE clause but never updated)
+    Object.keys(fieldUsage).forEach(fieldName => {
+        const field = fieldUsage[fieldName];
+        const hasValue = field.fieldInfo.value !== null;
+        const neverUpdated = field.usagePatterns.update.length === 0 && field.usagePatterns.input.length === 0;
+        field.isStatic = hasValue && neverUpdated && field.isUsed;
+    });
+
+    return fieldUsage;
+}
+
+// Enhanced Mainframe Analyzer - Part 4: Field Usage Analysis
+
+analyzeFieldUsageInProgram(program, copybookFields) {
+    const fieldUsage = {};
+    const lines = program.content.split('\n');
+    
+    // Initialize tracking for each field
+    copybookFields.forEach(field => {
+        fieldUsage[field.name] = {
+            input: [],
+            output: [],
+            update: [],
+            reference: [],
+            condition: [],
+            totalReferences: 0,
+            isUsed: false
+        };
+    });
+
+    lines.forEach((line, lineNum) => {
+        const trimmed = line.trim().toUpperCase();
+        const originalLine = line.trim();
+        
+        copybookFields.forEach(field => {
+            const fieldName = field.name.toUpperCase();
+            
+            // Skip if field name not in line
+            if (!trimmed.includes(fieldName)) return;
+            
+            // Create word boundary pattern for exact field name matching
+            const fieldPattern = new RegExp(`\\b${fieldName}\\b`);
+            if (!fieldPattern.test(trimmed)) return;
+            
+            const usageInfo = {
+                program: program.name,
+                line: lineNum + 1,
+                context: originalLine,
+                statement: this.identifyStatementType(trimmed)
+            };
+
+            // Categorize usage type
+            if (this.isInputOperation(trimmed, fieldName)) {
+                fieldUsage[field.name].input.push(usageInfo);
+                fieldUsage[field.name].isUsed = true;
+            }
+            
+            if (this.isOutputOperation(trimmed, fieldName)) {
+                fieldUsage[field.name].output.push(usageInfo);
+                fieldUsage[field.name].isUsed = true;
+            }
+            
+            if (this.isUpdateOperation(trimmed, fieldName)) {
+                fieldUsage[field.name].update.push(usageInfo);
+                fieldUsage[field.name].isUsed = true;
+            }
+            
+            if (this.isConditionOperation(trimmed, fieldName)) {
+                fieldUsage[field.name].condition.push(usageInfo);
+                fieldUsage[field.name].isUsed = true;
+            }
+            
+            if (this.isReferenceOperation(trimmed, fieldName)) {
+                fieldUsage[field.name].reference.push(usageInfo);
+                fieldUsage[field.name].isUsed = true;
+            }
+            
+            fieldUsage[field.name].totalReferences++;
+        });
+    });
+
+    return fieldUsage;
+}
+
+// === USAGE PATTERN DETECTION ===
+isInputOperation(line, fieldName) {
+    const inputPatterns = [
+        `MOVE\\s+[^\\s]+\\s+TO\\s+${fieldName}`,
+        `READ\\s+[^\\s]+\\s+INTO\\s+${fieldName}`,
+        `ACCEPT\\s+${fieldName}`,
+        `STRING\\s+.+\\s+INTO\\s+${fieldName}`,
+        `UNSTRING\\s+.+\\s+INTO\\s+${fieldName}`,
+        `COMPUTE\\s+${fieldName}\\s*=`,
+        `ADD\\s+.+\\s+TO\\s+${fieldName}`,
+        `SUBTRACT\\s+.+\\s+FROM\\s+${fieldName}`,
+        `MULTIPLY\\s+.+\\s+BY\\s+${fieldName}`,
+        `DIVIDE\\s+.+\\s+INTO\\s+${fieldName}`
+    ];
+    
+    return inputPatterns.some(pattern => new RegExp(pattern).test(line));
+}
+
+isOutputOperation(line, fieldName) {
+    const outputPatterns = [
+        `MOVE\\s+${fieldName}\\s+TO`,
+        `DISPLAY\\s+${fieldName}`,
+        `WRITE\\s+${fieldName}`,
+        `STRING\\s+${fieldName}`,
+        `UNSTRING\\s+${fieldName}`,
+        `CALL\\s+.+\\s+USING\\s+.*${fieldName}`
+    ];
+    
+    return outputPatterns.some(pattern => new RegExp(pattern).test(line));
+}
+
+isUpdateOperation(line, fieldName) {
+    const updatePatterns = [
+        `MOVE\\s+.+\\s+TO\\s+${fieldName}`,
+        `COMPUTE\\s+${fieldName}\\s*=`,
+        `ADD\\s+.+\\s+(?:TO|GIVING)\\s+${fieldName}`,
+        `SUBTRACT\\s+.+\\s+(?:FROM|GIVING)\\s+${fieldName}`,
+        `MULTIPLY\\s+.+\\s+(?:BY|GIVING)\\s+${fieldName}`,
+        `DIVIDE\\s+.+\\s+(?:INTO|BY|GIVING)\\s+${fieldName}`,
+        `SET\\s+${fieldName}\\s+TO`
+    ];
+    
+    return updatePatterns.some(pattern => new RegExp(pattern).test(line));
+}
+
+isConditionOperation(line, fieldName) {
+    const conditionPatterns = [
+        `IF\\s+${fieldName}`,
+        `WHEN\\s+${fieldName}`,
+        `EVALUATE\\s+${fieldName}`,
+        `UNTIL\\s+${fieldName}`,
+        `WHILE\\s+${fieldName}`,
+        `${fieldName}\\s*=`,
+        `${fieldName}\\s*>`,
+        `${fieldName}\\s*<`,
+        `${fieldName}\\s*NOT\\s*=`
+    ];
+    
+    return conditionPatterns.some(pattern => new RegExp(pattern).test(line));
+}
+
+isReferenceOperation(line, fieldName) {
+    // This catches general references that don't fit other categories
+    return line.includes(fieldName) && 
+           !this.isInputOperation(line, fieldName) &&
+           !this.isOutputOperation(line, fieldName) &&
+           !this.isUpdateOperation(line, fieldName) &&
+           !this.isConditionOperation(line, fieldName);
+}
+
+identifyStatementType(line) {
+    if (line.includes('MOVE')) return 'MOVE';
+    if (line.includes('COMPUTE')) return 'COMPUTE';
+    if (line.includes('IF')) return 'IF';
+    if (line.includes('READ')) return 'READ';
+    if (line.includes('WRITE')) return 'WRITE';
+    if (line.includes('CALL')) return 'CALL';
+    if (line.includes('DISPLAY')) return 'DISPLAY';
+    if (line.includes('ADD')) return 'ADD';
+    if (line.includes('SUBTRACT')) return 'SUBTRACT';
+    if (line.includes('MULTIPLY')) return 'MULTIPLY';
+    if (line.includes('DIVIDE')) return 'DIVIDE';
+    return 'OTHER';
+}
+
+// === FIELD CATEGORIZATION ===
+categorizeCopybookFields(fieldUsageAnalysis) {
+    const categories = {
+        INPUT_FIELDS: [],
+        OUTPUT_FIELDS: [],
+        DERIVED_FIELDS: [],
+        CONDITION_FIELDS: [],
+        UNUSED_FIELDS: [],
+        STATIC_FIELDS: []
+    };
+
+    Object.keys(fieldUsageAnalysis).forEach(fieldName => {
+        const field = fieldUsageAnalysis[fieldName];
+        
+        if (!field.isUsed) {
+            categories.UNUSED_FIELDS.push(fieldName);
+        } else if (field.isStatic) {
+            categories.STATIC_FIELDS.push(fieldName);
+        } else {
+            // Categorize based on primary usage pattern
+            const hasInput = field.usagePatterns.input.length > 0;
+            const hasOutput = field.usagePatterns.output.length > 0;
+            const hasUpdate = field.usagePatterns.update.length > 0;
+            const hasCondition = field.usagePatterns.condition.length > 0;
+            
+            if (hasInput && !hasUpdate) {
+                categories.INPUT_FIELDS.push(fieldName);
+            } else if (hasOutput && !hasInput) {
+                categories.OUTPUT_FIELDS.push(fieldName);
+            } else if (hasUpdate || (hasInput && hasOutput)) {
+                categories.DERIVED_FIELDS.push(fieldName);
+            } else if (hasCondition && !hasInput && !hasOutput && !hasUpdate) {
+                categories.CONDITION_FIELDS.push(fieldName);
+            }
+        }
+    });
+
+    return categories;
+}
+
+// === PROGRAM LIFECYCLE ANALYSIS ===
+async analyzeProgramLifecycle(programName, relevantFiles, allDependencies) {
+    console.log(`Analyzing program lifecycle for: ${programName}`);
+    
+    const programFile = relevantFiles.find(f => 
+        f.type === 'COBOL Program' && 
+        (f.name.toUpperCase().includes(programName.toUpperCase()) || 
+         f.content.toUpperCase().includes(`PROGRAM-ID. ${programName.toUpperCase()}`))
+    );
+
+    if (!programFile) {
+        throw new Error(`Program file for ${programName} not found`);
+    }
+
+    // Extract program structure and flow
+    const programStructure = this.analyzeProgramStructure(programFile);
+    
+    // Find specific dependencies for this program
+    const programDependencies = this.filterDependenciesForProgram(allDependencies, programName, programFile);
+
+    return {
+        analysisType: 'Program Lifecycle',
+        programFile: programFile.name,
+        programStructure: programStructure,
+        dependencies: programDependencies,
+        businessLogic: this.extractBusinessLogic(programFile),
+        recommendations: this.generateProgramRecommendations(programStructure, programDependencies)
+    };
+}
+
+analyzeProgramStructure(programFile) {
+    const structure = {
+        divisions: {},
+        paragraphs: [],
+        copybooks: [],
+        fileOperations: [],
+        callOperations: [],
+        businessRules: []
+    };
+
+    const lines = programFile.content.split('\n');
+    let currentDivision = 'UNKNOWN';
+
+    lines.forEach((line, lineNum) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // Track divisions
+        if (trimmed.includes('IDENTIFICATION DIVISION')) {
+            currentDivision = 'IDENTIFICATION';
+            structure.divisions[currentDivision] = { start: lineNum + 1, content: [] };
+        } else if (trimmed.includes('ENVIRONMENT DIVISION')) {
+            currentDivision = 'ENVIRONMENT';
+            structure.divisions[currentDivision] = { start: lineNum + 1, content: [] };
+        } else if (trimmed.includes('DATA DIVISION')) {
+            currentDivision = 'DATA';
+            structure.divisions[currentDivision] = { start: lineNum + 1, content: [] };
+        } else if (trimmed.includes('PROCEDURE DIVISION')) {
+            currentDivision = 'PROCEDURE';
+            structure.divisions[currentDivision] = { start: lineNum + 1, content: [] };
+        }
+
+        // Add content to current division
+        if (structure.divisions[currentDivision]) {
+            structure.divisions[currentDivision].content.push(line.trim());
+        }
+
+        // Extract specific elements
+        const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]*)/);
+        if (copyMatch) {
+            structure.copybooks.push({
+                name: copyMatch[1],
+                line: lineNum + 1
+            });
+        }
+
+        const callMatch = trimmed.match(/CALL\s+['"]*([A-Z][A-Z0-9\-_]*)['"]*/) ||
+                         trimmed.match(/LINK\s+['"]*([A-Z][A-Z0-9\-_]*)['"]*/) ||
+                         trimmed.match(/XCTL\s+['"]*([A-Z][A-Z0-9\-_]*)['"]*/) ;
+        if (callMatch) {
+            structure.callOperations.push({
+                type: trimmed.includes('CALL') ? 'CALL' : trimmed.includes('LINK') ? 'LINK' : 'XCTL',
+                target: callMatch[1],
+                line: lineNum + 1
+            });
+        }
+
+        // File operations
+        if (trimmed.includes('READ') || trimmed.includes('WRITE') || trimmed.includes('OPEN') || trimmed.includes('CLOSE')) {
+            structure.fileOperations.push({
+                operation: trimmed.split(' ')[0],
+                line: lineNum + 1,
+                context: line.trim()
+            });
+        }
+
+        // Paragraph names
+        const paraMatch = trimmed.match(/^([A-Z][A-Z0-9\-_]*)\./);
+        if (paraMatch && currentDivision === 'PROCEDURE') {
+            structure.paragraphs.push({
+                name: paraMatch[1],
+                line: lineNum + 1
+            });
+        }
+    });
+
+    return structure;
+}
+
+// === GENERIC COMPONENT ANALYSIS ===
+async analyzeGenericComponent(componentName, relevantFiles, allDependencies) {
+    console.log(`Analyzing generic component: ${componentName}`);
+    
+    const componentFile = relevantFiles[0];
+    
+    const basicAnalysis = this.performBasicComponentAnalysis(componentFile, componentName);
+    
+    return {
+        analysisType: 'Generic Component',
+        componentFile: componentFile.name,
+        basicAnalysis: basicAnalysis,
+        dependencies: this.filterDependenciesForComponent(allDependencies, componentName),
+        recommendations: ['Consider uploading more specific files for detailed analysis']
+    };
+}
+
+performBasicComponentAnalysis(file, componentName) {
+    return {
+        fileType: file.type,
+        fileSize: file.size,
+        componentFound: file.content.toUpperCase().includes(componentName.toUpperCase()),
+        lineCount: file.content.split('\n').length
+    };
+}
+
+// === RECOMMENDATIONS GENERATION ===
+generateCopybookRecommendations(fieldUsageAnalysis) {
+    const recommendations = [];
+    
+    const unusedCount = Object.values(fieldUsageAnalysis).filter(f => !f.isUsed).length;
+    const staticCount = Object.values(fieldUsageAnalysis).filter(f => f.isStatic).length;
+    const totalFields = Object.keys(fieldUsageAnalysis).length;
+    
+    if (unusedCount > 0) {
+        recommendations.push({
+            type: 'UNUSED_FIELDS',
+            priority: 'HIGH',
+            message: `${unusedCount} fields are never used and can be removed`,
+            impact: 'Reduces copybook complexity and memory usage'
+        });
+    }
+    
+    if (staticCount > 0) {
+        recommendations.push({
+            type: 'STATIC_FIELDS',
+            priority: 'MEDIUM', 
+            message: `${staticCount} fields are static constants`,
+            impact: 'Consider moving to a constants copybook'
+        });
+    }
+    
+    if ((unusedCount + staticCount) / totalFields > 0.3) {
+        recommendations.push({
+            type: 'REFACTORING',
+            priority: 'MEDIUM',
+            message: 'High percentage of unused/static fields suggests refactoring opportunity',
+            impact: 'Significant optimization potential'
+        });
+    }
+    
+    return recommendations;
+}
+
+generateProgramRecommendations(structure, dependencies) {
+    const recommendations = [];
+    
+    if (structure.copybooks.length > 10) {
+        recommendations.push({
+            type: 'HIGH_COUPLING',
+            priority: 'MEDIUM',
+            message: 'Program has many copybook dependencies',
+            impact: 'Consider consolidating or refactoring'
+        });
+    }
+    
+    return recommendations;
+}
+
+// === UTILITY METHODS ===
+findRelevantFiles(componentName) {
+    const upperComponentName = componentName.toUpperCase();
+    
+    return this.uploadedFiles.filter(file => {
+        const content = file.content.toUpperCase();
+        const fileName = file.name.toUpperCase();
+        
+        return content.includes(upperComponentName) || 
+               fileName.includes(upperComponentName) ||
+               this.hasRelatedContent(content, upperComponentName);
+    });
+}
+
+hasRelatedContent(content, componentName) {
+    const patterns = [
+        `COPY\\s+${componentName}`,
+        `CALL\\s+['"]*${componentName}['"]*`,
+        `PROGRAM-ID\\.?\\s+${componentName}`,
+        `\\b${componentName}\\b`
+    ];
+    
+    return patterns.some(pattern => new RegExp(pattern, 'i').test(content));
+}
+
+detectComponentType(componentName, files) {
+    // Check if it's a copybook
+    const copybookFile = files.find(f => f.type === 'Copybook');
+    if (copybookFile) {
+        return 'Copybook';
+    }
+    
+    // Check if it's a program
+    const programFile = files.find(f => f.type === 'COBOL Program');
+    if (programFile) {
+        return 'COBOL Program';
+    }
+    
+    // Check if it's a field in any file
+    const hasFieldDefinition = files.some(f => {
+        const fieldPattern = new RegExp(`^\\s*\\d{2}\\s+${componentName}`, 'im');
+        return fieldPattern.test(f.content);
+    });
+    
+    if (hasFieldDefinition) {
+        return 'Field';
+    }
+    
+    return 'Component';
+}
+
+filterDependenciesForProgram(dependencies, programName, programFile) {
+    // Filter dependencies specific to this program
+    const filtered = {};
+    Object.keys(dependencies).forEach(key => {
+        filtered[key] = dependencies[key].filter(dep => 
+            programFile.content.toUpperCase().includes(dep.toUpperCase())
+        );
+    });
+    return filtered;
+}
+
+filterDependenciesForComponent(dependencies, componentName) {
+    // Basic filtering for generic components
+    return dependencies;
+}
+
+extractBusinessLogic(programFile) {
+    // Extract business logic patterns
+    const businessLogic = {
+        validationRules: [],
+        calculations: [],
+        decisions: []
+    };
+
+    const lines = programFile.content.split('\n');
+    lines.forEach((line, idx) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        if (trimmed.includes('IF ') || trimmed.includes('WHEN ')) {
+            businessLogic.decisions.push({
+                line: idx + 1,
+                context: line.trim()
+            });
+        }
+        
+        if (trimmed.includes('COMPUTE') || trimmed.includes('ADD') || trimmed.includes('MULTIPLY')) {
+            businessLogic.calculations.push({
+                line: idx + 1,
+                context: line.trim()
+            });
+        }
+    });
+
+    return businessLogic;
+}
+
+// Enhanced Mainframe Analyzer - Part 5: Display Methods & Storage
+
+// === DISPLAY METHODS ===
+displayAnalysisResults(componentName, results) {
+    console.log('Displaying analysis results for:', componentName);
+    
+    // Update main analysis tab
+    this.displayMainAnalysis(componentName, results);
+    
+    // Update field matrix tab
+    this.displayFieldMatrix(componentName, results);
+    
+    // Update usage patterns tab
+    this.displayUsagePatterns(componentName, results);
+    
+    // Update dependencies tab
+    this.displayDependencies(componentName, results);
+    
+    // Switch to analysis tab
+    this.switchTab({ target: { dataset: { tab: 'lifecycle' } } });
+}
+
+displayMainAnalysis(componentName, results) {
+    const container = document.getElementById('lifecycleContent');
+    
+    let html = `
+        <h3>🔄 Enhanced Analysis Results: ${componentName}</h3>
+        <p style="margin-bottom: 20px;">
+            Component type: <strong>${results.componentType}</strong> • 
+            Files analyzed: <strong>${results.filesAnalyzed.length}</strong> • 
+            Completed: <strong>${new Date(results.timestamp).toLocaleString()}</strong>
+        </p>
+        
+        <!-- Quality Metrics -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; margin-bottom: 25px;">
+            <div style="background: rgba(76, 175, 80, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #4CAF50;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${results.qualityScore}/10</div>
+                <div style="font-size: 11px;">Quality Score</div>
+            </div>
+            <div style="background: rgba(33, 150, 243, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #2196F3;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${results.completeness.score}%</div>
+                <div style="font-size: 11px;">Completeness</div>
+            </div>
+            <div style="background: rgba(255, 152, 0, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #FF9800;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${results.filesAnalyzed.length}</div>
+                <div style="font-size: 11px;">Files Analyzed</div>
+            </div>
+        </div>
+    `;
+
+    // Display specific analysis based on component type
+    if (results.componentType === 'Copybook' && results.specificAnalysis.fieldUsageAnalysis) {
+        html += this.displayCopybookAnalysis(results.specificAnalysis);
+    } else if (results.componentType === 'COBOL Program' && results.specificAnalysis.programStructure) {
+        html += this.displayProgramAnalysis(results.specificAnalysis);
+    } else {
+        html += this.displayGenericAnalysis(results.specificAnalysis);
+    }
+
+    // Display recommendations
+    if (results.specificAnalysis.recommendations && results.specificAnalysis.recommendations.length > 0) {
+        html += this.displayRecommendations(results.specificAnalysis.recommendations);
+    }
+    
+    container.innerHTML = html;
+}
+
+displayCopybookAnalysis(analysis) {
+    const fieldUsage = analysis.fieldUsageAnalysis;
+    const categories = analysis.fieldCategories;
+    const totalFields = analysis.totalFields;
+    const usingPrograms = analysis.usingPrograms;
+
+    let html = `
+        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #FFD700; margin-bottom: 20px;">
+            <h4 style="color: #FFD700; margin-bottom: 15px;">📚 Copybook Lifecycle Analysis</h4>
+            
+            <!-- Summary Stats -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                <div style="text-align: center; background: rgba(76, 175, 80, 0.1); padding: 10px; border-radius: 5px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #4CAF50;">${totalFields}</div>
+                    <div style="font-size: 11px;">Total Fields</div>
+                </div>
+                <div style="text-align: center; background: rgba(33, 150, 243, 0.1); padding: 10px; border-radius: 5px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #2196F3;">${usingPrograms.length}</div>
+                    <div style="font-size: 11px;">Using Programs</div>
+                </div>
+                <div style="text-align: center; background: rgba(244, 67, 54, 0.1); padding: 10px; border-radius: 5px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #f44336;">${categories.UNUSED_FIELDS.length}</div>
+                    <div style="font-size: 11px;">Unused Fields</div>
+                </div>
+                <div style="text-align: center; background: rgba(255, 152, 0, 0.1); padding: 10px; border-radius: 5px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #FF9800;">${categories.STATIC_FIELDS.length}</div>
+                    <div style="font-size: 11px;">Static Fields</div>
+                </div>
+            </div>
+
+            <!-- Using Programs -->
+            <div style="margin-bottom: 20px;">
+                <h5 style="color: #2196F3; margin-bottom: 10px;">📝 Programs Using This Copybook:</h5>
+                <div style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 5px; font-family: monospace; font-size: 12px;">
+                    ${usingPrograms.length > 0 ? usingPrograms.join(', ') : 'No programs found using this copybook'}
+                </div>
+            </div>
+
+            <!-- Field Categories -->
+            <div style="margin-bottom: 20px;">
+                <h5 style="color: #FFD700; margin-bottom: 15px;">🏷️ Field Categories:</h5>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+    `;
+
+    // Display each category
+    Object.keys(categories).forEach(category => {
+        const fields = categories[category];
+        if (fields.length > 0) {
+            const color = this.getCategoryColor(category);
+            const icon = this.getCategoryIcon(category);
+            
+            html += `
+                <div style="background: rgba(255, 255, 255, 0.05); padding: 12px; border-radius: 8px; border-left: 3px solid ${color};">
+                    <h6 style="color: ${color}; margin-bottom: 8px; font-size: 13px;">${icon} ${this.formatCategoryName(category)} (${fields.length})</h6>
+                    <div style="max-height: 120px; overflow-y: auto;">
+                        ${fields.slice(0, 10).map(field => `
+                            <div style="margin: 3px 0; padding: 3px 6px; background: rgba(0,0,0,0.2); border-radius: 3px; font-family: monospace; font-size: 11px;">
+                                ${field}
+                            </div>
+                        `).join('')}
+                        ${fields.length > 10 ? `<div style="font-size: 10px; opacity: 0.7; text-align: center; margin-top: 5px;">... and ${fields.length - 10} more</div>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+    });
+
+    html += `
+                </div>
+            </div>
+        </div>
+    `;
+
+    return html;
+}
+
+displayProgramAnalysis(analysis) {
+    const structure = analysis.programStructure;
+
+    return `
+        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #2196F3; margin-bottom: 20px;">
+            <h4 style="color: #2196F3; margin-bottom: 15px;">💼 Program Structure Analysis</h4>
+            
+            <!-- Program Stats -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                <div style="text-align: center; background: rgba(76, 175, 80, 0.1); padding: 10px; border-radius: 5px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #4CAF50;">${structure.copybooks.length}</div>
+                    <div style="font-size: 11px;">Copybooks</div>
+                </div>
+                <div style="text-align: center; background: rgba(33, 150, 243, 0.1); padding: 10px; border-radius: 5px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #2196F3;">${structure.callOperations.length}</div>
+                    <div style="font-size: 11px;">Call Operations</div>
+                </div>
+                <div style="text-align: center; background: rgba(255, 152, 0, 0.1); padding: 10px; border-radius: 5px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #FF9800;">${structure.fileOperations.length}</div>
+                    <div style="font-size: 11px;">File Operations</div>
+                </div>
+                <div style="text-align: center; background: rgba(156, 39, 176, 0.1); padding: 10px; border-radius: 5px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #9C27B0;">${structure.paragraphs.length}</div>
+                    <div style="font-size: 11px;">Paragraphs</div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+displayGenericAnalysis(analysis) {
+    return `
+        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #9C27B0;">
+            <h4 style="color: #9C27B0; margin-bottom: 15px;">🔍 Component Analysis</h4>
+            <p style="margin-bottom: 15px;">Analysis type: <strong>${analysis.analysisType}</strong></p>
+            <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px;">
+                <p style="text-align: center; opacity: 0.8;">
+                    Basic component analysis completed. Upload more specific files (COBOL programs, copybooks) for detailed lifecycle analysis.
+                </p>
+            </div>  
+            </div>`
+};
+
+// Enhanced Mainframe Analyzer - Part 6: Chat & Initialization
+
+// === ENHANCED CHAT FUNCTIONALITY ===
+initializeChat() {
+    const chatPanel = document.querySelector('.chat-panel');
+    chatPanel.innerHTML = `
+        <div style="background: rgba(76, 175, 80, 0.2); border-radius: 10px; padding: 15px; margin-bottom: 15px; border-left: 4px solid #4CAF50;">
+            <h3 style="margin-bottom: 8px; color: #FFD700;">💬 Analysis Chat</h3>
+            <p style="font-size: 12px; opacity: 0.8;">Ask detailed questions about your analysis</p>
+        </div>
+
+        <div style="margin-bottom: 15px;">
+            <div style="font-size: 11px; margin-bottom: 8px; opacity: 0.7;">Quick questions:</div>
+            <button class="chat-suggestion-btn" data-question="What fields are unused in this copybook?">Unused fields?</button>
+            <button class="chat-suggestion-btn" data-question="Show me the complete field flow for INPUT fields">Input field flow?</button>
+            <button class="chat-suggestion-btn" data-question="Which programs use this copybook the most?">Program usage?</button>
+            <button class="chat-suggestion-btn" data-question="What fields are static and never updated?">Static fields?</button>
+        </div>
+
+        <div id="chatMessages" style="flex: 1; overflow-y: auto; margin-bottom: 15px; max-height: 400px; padding-right: 10px;">
+            <div style="margin-bottom: 15px; padding: 12px; border-radius: 10px; max-width: 85%; background: rgba(76, 175, 80, 0.3); border-left: 4px solid #4CAF50;">
+                <div style="font-weight: bold; font-size: 12px; opacity: 0.8; margin-bottom: 5px;">Analysis Assistant</div>
+                <div style="font-size: 14px; line-height: 1.5;">
+                    👋 Welcome! I can help analyze your mainframe components with enhanced capabilities.
+                    <br><br>
+                    Once you analyze a component, I can answer questions about:
+                    <br>• <strong>Field lifecycle:</strong> Where fields are created, updated, referenced
+                    <br>• <strong>Cross-program usage:</strong> How fields flow between programs
+                    <br>• <strong>Unused/static fields:</strong> Optimization opportunities
+                    <br>• <strong>Dependencies:</strong> Program and copybook relationships
+                    <br><br>
+                    Upload files and analyze a component to get started!
+                </div>
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 10px; align-items: flex-start;">
+            <textarea 
+                id="chatInput" 
+                style="flex: 1; padding: 12px; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 8px; background: rgba(255, 255, 255, 0.1); color: white; font-size: 14px; resize: vertical; min-height: 40px; max-height: 100px; font-family: inherit;"
+                placeholder="Ask about field flows, usage patterns, dependencies..."
+                disabled
+                rows="2"
+            ></textarea>
+            <button id="chatSendBtn" style="background: linear-gradient(45deg, #4CAF50, #45a049); color: white; border: none; padding: 12px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.3s ease; white-space: nowrap; min-width: 80px;" disabled>
+                Send
+            </button>
+        </div>
+
+        <div style="font-size: 10px; opacity: 0.6; margin-top: 8px; text-align: center;">
+            Chat enabled after component analysis
+        </div>
+    `;
+
+    this.initializeChatEventListeners();
+}
+
+initializeChatEventListeners() {
+    const chatSendBtn = document.getElementById('chatSendBtn');
+    const chatInput = document.getElementById('chatInput');
+    
+    if (chatSendBtn && chatInput) {
+        chatSendBtn.addEventListener('click', () => this.sendChatMessage());
+        
+        chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.sendChatMessage();
+            }
+        });
+    }
+
+    // Chat suggestions
+    document.querySelectorAll('.chat-suggestion-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const question = e.target.dataset.question;
+            if (chatInput) {
+                chatInput.value = question;
+                this.sendChatMessage();
+            }
+        });
+    });
+}
+
+async sendChatMessage() {
+    const input = document.getElementById('chatInput');
+    const sendBtn = document.getElementById('chatSendBtn');
+    const message = input.value.trim();
+    
+    if (!message) {
+        this.showError('Please enter a message');
+        return;
+    }
+    
+    if (!this.currentAnalyzedComponent) {
+        this.showError('Please analyze a component first');
+        return;
+    }
+    
+    input.disabled = true;
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Processing...';
+    
+    this.addChatMessage('user', message);
+    input.value = '';
+    
+    this.showChatTyping();
+    
+    try {
+        const response = await this.processChatQuery(message);
+        this.hideChatTyping();
+        this.addChatMessage('assistant', response);
+    } catch (error) {
+        console.error('Chat error:', error);
+        this.hideChatTyping();
+        this.addChatMessage('assistant', `I apologize, but I encountered an error: ${error.message}. Please try rephrasing your question.`);
+    } finally {
+        input.disabled = false;
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Send';
+        input.focus();
+    }
+}
+
+async processChatQuery(question) {
+    const analysisData = this.analysisResults[this.currentAnalyzedComponent];
+    
+    // Create a comprehensive context for the chat
+    let context = `COMPONENT: ${this.currentAnalyzedComponent}
+COMPONENT TYPE: ${analysisData.componentType}
+FILES ANALYZED: ${analysisData.filesAnalyzed.join(', ')}
+
+`;
+
+    // Add specific analysis data based on component type
+    if (analysisData.componentType === 'Copybook' && analysisData.specificAnalysis.fieldUsageAnalysis) {
+        const fieldUsage = analysisData.specificAnalysis.fieldUsageAnalysis;
+        const categories = analysisData.specificAnalysis.fieldCategories;
+        
+        context += `COPYBOOK ANALYSIS:
+Total Fields: ${analysisData.specificAnalysis.totalFields}
+Using Programs: ${analysisData.specificAnalysis.usingPrograms.join(', ')}
+
+FIELD CATEGORIES:
+Input Fields: ${categories.INPUT_FIELDS.join(', ')}
+Output Fields: ${categories.OUTPUT_FIELDS.join(', ')}
+Derived Fields: ${categories.DERIVED_FIELDS.join(', ')}
+Unused Fields: ${categories.UNUSED_FIELDS.join(', ')}
+Static Fields: ${categories.STATIC_FIELDS.join(', ')}
+
+DETAILED FIELD USAGE:
+`;
+        
+        // Add detailed usage for top fields
+        Object.keys(fieldUsage).slice(0, 20).forEach(fieldName => {
+            const field = fieldUsage[fieldName];
+            context += `${fieldName}: Input(${field.usagePatterns.input.length}) Output(${field.usagePatterns.output.length}) Update(${field.usagePatterns.update.length}) Condition(${field.usagePatterns.condition.length}) Reference(${field.usagePatterns.reference.length}) Total(${field.totalReferences}) Used(${field.isUsed}) Static(${field.isStatic})\n`;
+        });
+    }
+
+    // Add dependencies
+    if (analysisData.dependencies) {
+        context += `\nDEPENDENCIES:
+Copy Statements: ${analysisData.dependencies.copyStatements.join(', ')}
+Call Statements: ${analysisData.dependencies.callStatements.join(', ')}
+Exec Statements: ${analysisData.dependencies.execStatements.join(', ')}
+Program IDs: ${analysisData.dependencies.programIds.join(', ')}
+`;
+    }
+
+    const chatPrompt = `ENHANCED MAINFRAME ANALYSIS CHAT
+
+CONTEXT:
+${context}
+
+USER QUESTION: "${question}"
+
+INSTRUCTIONS:
+Answer the user's question based on the analysis results above. Be specific and reference exact field names, programs, or usage patterns when available. 
+
+For copybook questions, focus on:
+- Field lifecycle (where created/updated/referenced)
+- Cross-program usage patterns
+- Unused/static field identification
+- Optimization opportunities
+
+For program questions, focus on:
+- Program structure and flow
+- Dependencies and relationships
+- Business logic patterns
+
+If the information isn't available in the analysis, say so clearly and suggest what additional files might help.
+
+Keep responses practical and use examples from the actual analysis data.`;
+
+    return await this.callvLLMAPI(chatPrompt);
+}
+
+addChatMessage(sender, content) {
+    const messagesContainer = document.getElementById('chatMessages');
+    if (!messagesContainer) return;
+    
+    const messageDiv = document.createElement('div');
+    messageDiv.style.cssText = `
+        margin-bottom: 15px; 
+        padding: 12px; 
+        border-radius: 10px; 
+        max-width: 85%; 
+        word-wrap: break-word; 
+        line-height: 1.5;
+        animation: fadeInUp 0.3s ease;
+        ${sender === 'user' ? 
+            'background: rgba(33, 150, 243, 0.3); border-left: 4px solid #2196F3; margin-left: auto; text-align: right;' : 
+            'background: rgba(76, 175, 80, 0.3); border-left: 4px solid #4CAF50;'
+        }
+    `;
+    
+    messageDiv.innerHTML = `
+        <div style="font-weight: bold; font-size: 12px; opacity: 0.8; margin-bottom: 5px;">
+            ${sender === 'user' ? 'You' : 'Analysis Assistant'}
+        </div>
+        <div style="font-size: 14px; line-height: 1.5;">
+            ${this.formatChatMessage(content)}
+        </div>
+    `;
+    
+    messagesContainer.appendChild(messageDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+formatChatMessage(content) {
+    return content
+        .replace(/\n/g, '<br>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong style="color: #FFD700;">$1</strong>')
+        .replace(/`([^`]+)`/g, '<code style="background: rgba(0,0,0,0.3); padding: 2px 4px; border-radius: 3px; color: #4CAF50;">$1</code>')
+        .replace(/^- /gm, '• ');
+}
+
+showChatTyping() {
+    const messagesContainer = document.getElementById('chatMessages');
+    if (!messagesContainer) return;
+    
+    this.hideChatTyping();
+    
+    const typingDiv = document.createElement('div');
+    typingDiv.id = 'typingIndicator';
+    typingDiv.style.cssText = `
+        margin-bottom: 15px; 
+        padding: 12px; 
+        border-radius: 10px; 
+        max-width: 85%; 
+        background: rgba(76, 175, 80, 0.3); 
+        border-left: 4px solid #4CAF50;
+    `;
+    
+    typingDiv.innerHTML = `
+        <div style="font-weight: bold; font-size: 12px; opacity: 0.8; margin-bottom: 5px;">Analysis Assistant</div>
+        <div style="font-size: 14px; line-height: 1.5;">
+            <span style="opacity: 0.7;">Analyzing your question...</span>
+            <span style="animation: blink 1s infinite; margin-left: 5px;">●●●</span>
+        </div>
+    `;
+    
+    messagesContainer.appendChild(typingDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+hideChatTyping() {
+    const typingIndicator = document.getElementById('typingIndicator');
+    if (typingIndicator && typingIndicator.parentNode) {
+        typingIndicator.parentNode.removeChild(typingIndicator);
+    }
+}
+
+enableChat() {
+    const chatInput = document.getElementById('chatInput');
+    const chatSendBtn = document.getElementById('chatSendBtn');
+    
+    if (chatInput && chatSendBtn) {
+        chatInput.disabled = false;
+        chatSendBtn.disabled = false;
+        
+        this.addChatMessage('assistant', 
+            `🎯 **Enhanced analysis complete for ${this.currentAnalyzedComponent}!**
+            
+I can now answer detailed questions about:
+• **Field lifecycle:** Where fields are created, updated, referenced across programs
+• **Cross-program usage:** How fields flow between different programs
+• **Unused/static fields:** Optimization opportunities and cleanup suggestions
+• **Dependencies:** Program and copybook relationships
+• **Usage patterns:** Detailed analysis of how components are used
+
+**Try asking:**
+• "What fields are unused and can be removed?"
+• "Show me which programs use INPUT_FIELDS the most"
+• "What fields are static and never updated?"
+• "Which fields flow from input to output?"`
+        );
+    }
+}
+
+// === API COMMUNICATION ===
+async callvLLMAPI(prompt) {
+    const response = await fetch(`${this.vllmEndpoint}/generate`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            prompt: prompt,
+            max_tokens: Math.floor(this.maxTokens * 0.6),
+            temperature: 0.3,
+            top_p: 0.95,
+            stop: ["Human:", "Assistant:"],
+            stream: false
+        }),
+        signal: AbortSignal.timeout(60000)
+    });
+
+    if (!response.ok) {
+        throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    
+    if (data.text) {
+        return data.text.trim();
+    } else if (data.choices && data.choices[0]) {
+        return data.choices[0].text.trim();
+    } else {
+        throw new Error('Invalid API response format');
+    }
+}
+
+// === BULK ANALYSIS AND EXPORT ===
+async bulkAnalyze() {
+    if (this.uploadedFiles.length === 0) {
+        this.showError('No files uploaded for bulk analysis');
+        return;
+    }
+
+    this.showLoading();
+    this.updateLoadingStatus('🔄 Starting bulk analysis...');
+
+    const components = this.componentSuggestions.filter(c => c.type === 'COPYBOOK' || c.type === 'PROGRAM').slice(0, 5);
+    let completed = 0;
+
+    try {
+        for (const component of components) {
+            this.updateLoadingStatus(`Analyzing ${component.name} (${completed + 1}/${components.length})...`);
+            this.updateProgress((completed / components.length) * 100);
+            
+            try {
+                // Set the component name and analyze
+                document.getElementById('componentName').value = component.name;
+                const results = await this.runEnhancedAnalysis(component.name);
+                this.analysisResults[component.name] = results;
+                completed++;
+                
+                await this.sleep(2000);
+            } catch (error) {
+                console.warn(`Failed to analyze ${component.name}:`, error);
+            }
+        }
+
+        this.hideLoading();
+        this.saveToStorage();
+        this.showSuccess(`✨ Bulk analysis complete! ${completed}/${components.length} components analyzed`);
+
+    } catch (error) {
+        this.hideLoading();
+        this.showError(`Bulk analysis failed: ${error.message}`);
+    }
+}
+
+exportResults() {
+    if (Object.keys(this.analysisResults).length === 0) {
+        this.showError('No analysis results to export');
+        return;
+    }
+
+    try {
+        const exportData = {
+            timestamp: new Date().toISOString(),
+            totalComponents: Object.keys(this.analysisResults).length,
+            totalFiles: this.uploadedFiles.length,
+            analysisResults: this.analysisResults,
+            summary: this.generateExportSummary(),
+            fileInfo: this.uploadedFiles.map(f => ({
+                name: f.name,
+                type: f.type,
+                size: f.size,
+                uploadDate: f.uploadDate
+            })),
+            systemInfo: {
+                vllmEndpoint: this.vllmEndpoint,
+                maxTokens: this.maxTokens,
+                version: '3.0.0-enhanced'
+            }
+        };
+
+        const dataStr = JSON.stringify(exportData, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(dataBlob);
+        link.download = `enhanced-mainframe-analysis-${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        this.showSuccess('📤 Enhanced analysis results exported successfully!');
+        
+    } catch (error) {
+        this.showError(`Export failed: ${error.message}`);
+    }
+}
+
+generateExportSummary() {
+    const summary = {
+        totalComponents: Object.keys(this.analysisResults).length,
+        componentTypes: {},
+        totalUnusedFields: 0,
+        totalStaticFields: 0,
+        recommendationsCount: 0
+    };
+
+    Object.values(this.analysisResults).forEach(result => {
+        // Count component types
+        summary.componentTypes[result.componentType] = (summary.componentTypes[result.componentType] || 0) + 1;
+        
+        // Count unused and static fields for copybooks
+        if (result.componentType === 'Copybook' && result.specificAnalysis.fieldCategories) {
+            summary.totalUnusedFields += result.specificAnalysis.fieldCategories.UNUSED_FIELDS.length;
+            summary.totalStaticFields += result.specificAnalysis.fieldCategories.STATIC_FIELDS.length;
+        }
+        
+        // Count recommendations
+        if (result.specificAnalysis.recommendations) {
+            summary.recommendationsCount += result.specificAnalysis.recommendations.length;
+        }
+    });
+
+    return summary;
+}
+
+calculateQualityScore(analysisResult) {
+    let score = 0;
+    
+    // Base score for having analysis
+    score += 30;
+    
+    // Add points for comprehensive analysis
+    if (analysisResult.fieldUsageAnalysis) {
+        score += 40;
+    }
+    
+    if (analysisResult.recommendations && analysisResult.recommendations.length > 0) {
+        score += 20;
+    }
+    
+    if (analysisResult.dependencies) {
+        score += 10;
+    }
+    
+    return Math.min(Math.round(score / 10), 10);
+}
+
+assessCompleteness(analysisResult) {
+    const checkpoints = {
+        'Field Analysis': !!analysisResult.fieldUsageAnalysis,
+        'Dependencies': !!analysisResult.dependencies,
+        'Recommendations': !!(analysisResult.recommendations && analysisResult.recommendations.length > 0),
+        'Structure Analysis': !!(analysisResult.programStructure || analysisResult.fieldCategories),
+        'Usage Patterns': !!(analysisResult.fieldUsageAnalysis || analysisResult.businessLogic)
+    };
+    
+    const completed = Object.values(checkpoints).filter(Boolean).length;
+    const total = Object.keys(checkpoints).length;
+    
+    return {
+        score: Math.round((completed / total) * 100),
+        checkpoints: checkpoints,
+        completed: completed,
+        total: total
+    };
+}
+
+}
+
+// === INITIALIZATION ===
+// Initialize the analyzer when the page loads
+document.addEventListener('DOMContentLoaded', function() {
+    // Create global analyzer instance
+    window.analyzer = new EnhancedMainframeAnalyzer();
+    
+    console.log('🚀 Enhanced Mainframe Analyzer - Complete System Ready!');
+    console.log('✅ Full system features:');
+    console.log('   • Enhanced dependency detection with proper patterns');
+    console.log('   • Copybook lifecycle analysis across programs');
+    console.log('   • Field usage tracking (input/output/update/reference/condition)');
+    console.log('   • Unused and static field identification');
+    console.log('   • Cross-program field flow analysis');
+    console.log('   • Interactive chat with comprehensive context');
+    console.log('   • Detailed field matrix and usage patterns');
+    console.log('   • Export capabilities with summary data');
+    console.log('   • Bulk analysis support');
+    console.log('   • Complete dependency mapping');
+    console.log('🎯 Ready for comprehensive mainframe analysis!');
+});
+
+// Fallback initialization if DOMContentLoaded already fired
+if (document.readyState === 'loading') {
+    // Document still loading, wait for DOMContentLoaded
+} else {
+    // Document already loaded
+    window.analyzer = new EnhancedMainframeAnalyzer();
+    console.log('🚀 Enhanced Mainframe Analyzer initialized (fallback)');
+}
+
+
+</script>
+</body>
+</html>
