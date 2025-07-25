@@ -2716,27 +2716,45 @@ Respond with valid JSON only.`;
                         throw new Error('Invalid LLM API response format');
                     }
 
+
+                try {
+                    return JSON.parse(resultText);
+                } catch (parseError) {
+                    console.warn('JSON parsing failed, attempting to fix quotes:', parseError);
+                    
+                    // Try to fix common JSON issues
+                    let fixedText = resultText
+                        // Fix unescaped quotes in string values
+                        .replace(/: "([^"]*)"([^"]*)"([^"]*)",/g, ': "$1\\"$2\\"$3",')
+                        // Fix trailing commas
+                        .replace(/,(\s*[}\]])/g, '$1')
+                        // Fix multiple spaces
+                        .replace(/\s+/g, ' ');
+                    
                     try {
-                        return JSON.parse(resultText);
-                    } catch (parseError) {
+                        return JSON.parse(fixedText);
+                    } catch (secondParseError) {
+                        // Extract JSON using regex as fallback
                         const jsonMatch = resultText.match(/\{[\s\S]*\}/);
                         if (jsonMatch) {
                             try {
                                 return JSON.parse(jsonMatch[0]);
-                            } catch (secondParseError) {
-                                console.warn('Failed to parse LLM JSON response:', resultText);
-                                return {
-                                    error: 'LLM response parsing failed',
-                                    rawResponse: resultText,
-                                    fallbackAnalysis: this.createFallbackAnalysis(resultText)
-                                };
+                            } catch (thirdParseError) {
+                                console.warn('All JSON parsing attempts failed, returning structured fallback');
+                                return this.createStructuredFallback(resultText);
                             }
-                        } else {
-                            return {
-                                rawAnalysis: resultText,
-                                parsedAnalysis: this.parseRawLLMResponse(resultText)
-                            };
                         }
+                        // Return fallback analysis
+                        return {
+                            error: 'JSON parsing failed',
+                            rawResponse: resultText,
+                            parsedData: this.extractDataFromText(resultText)
+                        };
+                    }
+                }
+                    } catch (parseError) {
+                        console.warn('LLM response parsing failed, returning fallback analysis:', parseError);
+                        return this.createFallbackAnalysis(resultText);
                     }
 
                 } catch (error) {
@@ -2748,6 +2766,34 @@ Respond with valid JSON only.`;
                     throw new Error(`LLM API failed after ${this.llmConfig.maxRetries} retries: ${error.message}`);
                 }
             }
+
+            createStructuredFallback(text) {
+    return {
+        totalFields: this.extractNumber(text, 'totalFields') || 0,
+        fieldCategories: this.extractFieldCategories(text),
+        error: 'Parsed from text due to JSON formatting issues',
+        rawAnalysis: text
+    };
+}
+
+extractFieldCategories(text) {
+    const categories = {};
+    const lines = text.split('\n');
+    let currentCategory = null;
+    
+    lines.forEach(line => {
+        if (line.includes('_FIELDS"')) {
+            currentCategory = line.match(/"([^"]+_FIELDS)"/)?.[1];
+            categories[currentCategory] = [];
+        } else if (currentCategory && line.includes('"RA-') || line.includes('"FILLER"')) {
+            const field = line.match(/"([^"]+)"/)?.[1];
+            if (field) categories[currentCategory].push(field);
+        }
+    });
+    
+    return categories;
+}
+
 
             createFallbackAnalysis(rawResponse) {
                 return {
@@ -4405,39 +4451,5 @@ Analysis Date: ${new Date().toLocaleString()}
             console.log('🚀 Enhanced LLM Mainframe Analyzer with Lifecycle initialized (fallback)');
         }
     </script>
-</body>
-</html>);
-                } else {
-                    // Fallback: generate basic lifecycle steps from lifecycle flow data
-                    if (lifecycleFlow.creationSources.length > 0) {
-                        html += `
-                            <div class="lifecycle-step active">
-                                <div class="lifecycle-step-icon">🌱</div>
-                                <div class="lifecycle-step-content">
-                                    <div class="lifecycle-step-title">Data Creation</div>
-                                    <div class="lifecycle-step-description">Initial data population and file creation</div>
-                                    <div class="lifecycle-step-programs">
-                                        ${lifecycleFlow.creationSources.map(s => s.program ? `<span class="program-tag">${s.program}</span>` : '').join('')}
-                                    </div>
-                                </div>
-                            </div>
-                        `;
-                    }
-
-                    if (lifecycleFlow.updatePrograms.length > 0) {
-                        html += `
-                            <div class="lifecycle-step active">
-                                <div class="lifecycle-step-icon">⚙️</div>
-                                <div class="lifecycle-step-content">
-                                    <div class="lifecycle-step-title">Data Processing</div>
-                                    <div class="lifecycle-step-description">Data validation, calculation, and transformation</div>
-                                    <div class="lifecycle-step-programs">
-                                        ${lifecycleFlow.updatePrograms.map(p => `<span class="program-tag">${p.program}</span>`).join('')}
-                                    </div>
-                                </div>
-                            }
-                        `;
-                    }
-</script>
 </body>
 </html>
