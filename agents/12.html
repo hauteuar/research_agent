@@ -1876,54 +1876,65 @@
             }
             // === NEW: FILE LIFECYCLE FLOW EXTRACTION ===
             async extractFileLifecycleFlow(componentName, relevantFiles) {
-                console.log('Extracting field lifecycle flow for copybook:', componentName);
+    console.log('Extracting field lifecycle flow for copybook:', componentName);
+    
+    const lifecycleFlow = {
+        componentName: componentName,
+        creationSources: [],
+        inputPrograms: [],
+        updatePrograms: [],
+        outputDestinations: [],
+        cicsScreens: [],
+        batchJobs: [],
+        purgeProcesses: [],
+        fieldUpdateTracking: {},
+        usagePattern: 'UNKNOWN',
+        copybookFields: []
+    };
+
+    try {
+        // Step 1: Extract all fields from the copybook
+        const copybookFields = this.extractCopybookFields(componentName, relevantFiles);
+        lifecycleFlow.copybookFields = Array.isArray(copybookFields) ? copybookFields : [];
+        
+        console.log(`Found ${lifecycleFlow.copybookFields.length} fields in copybook:`, 
+                    lifecycleFlow.copybookFields.map(f => f?.name || 'unnamed'));
+
+        if (lifecycleFlow.copybookFields.length === 0) {
+            console.warn('No fields found in copybook, returning basic lifecycle structure');
+            return lifecycleFlow;
+        }
+
+        // Step 2: Find all programs that use this copybook
+        const programsUsingCopybook = this.findProgramsUsingCopybook(componentName);
+        console.log(`Found ${programsUsingCopybook.length} programs using copybook:`, 
+                    programsUsingCopybook.map(p => p?.name || 'unnamed'));
+
+        // Step 3: Analyze how each field is used across all programs
+        for (const field of lifecycleFlow.copybookFields) {
+            if (!field || !field.name) continue;
+            
+            console.log(`Analyzing lifecycle of field: ${field.name}`);
+            
+            for (const program of programsUsingCopybook) {
+                if (!program) continue;
                 
-                const lifecycleFlow = {
-                    componentName: componentName,
-                    creationSources: [],
-                    inputPrograms: [],
-                    updatePrograms: [],
-                    outputDestinations: [],
-                    cicsScreens: [],
-                    batchJobs: [],
-                    purgeProcesses: [],
-                    fieldUpdateTracking: {},
-                    usagePattern: 'UNKNOWN',
-                    copybookFields: []
-                };
-
-                // Step 1: Extract all fields from the copybook
-                const copybookFields = this.extractCopybookFields(componentName, relevantFiles);
-                lifecycleFlow.copybookFields = copybookFields;
-                
-                console.log(`Found ${copybookFields.length} fields in copybook:`, copybookFields.map(f => f.name));
-
-                if (copybookFields.length === 0) {
-                    console.warn('No fields found in copybook, cannot analyze lifecycle');
-                    return lifecycleFlow;
-                }
-
-                // Step 2: Find all programs that use this copybook
-                const programsUsingCopybook = this.findProgramsUsingCopybook(componentName);
-                console.log(`Found ${programsUsingCopybook.length} programs using copybook:`, 
-                            programsUsingCopybook.map(p => p.name));
-
-                // Step 3: Analyze how each field is used across all programs
-                for (const field of copybookFields) {
-                    console.log(`Analyzing lifecycle of field: ${field.name}`);
-                    
-                    for (const program of programsUsingCopybook) {
-                        const fieldUsage = this.analyzeFieldUsageInProgram(field.name, program);
-                        this.mergeFieldUsageIntoLifecycle(lifecycleFlow, fieldUsage, program.name, field.name);
-                    }
-                }
-
-                // Step 4: Determine overall usage pattern based on field usage
-                lifecycleFlow.usagePattern = this.determineUsagePatternFromFields(lifecycleFlow);
-                
-                console.log('Field lifecycle flow analysis complete:', lifecycleFlow);
-                return lifecycleFlow;
+                const fieldUsage = this.analyzeFieldUsageInProgram(field.name, program);
+                this.mergeFieldUsageIntoLifecycle(lifecycleFlow, fieldUsage, program.name, field.name);
             }
+        }
+
+        // Step 4: Determine overall usage pattern based on field usage
+        lifecycleFlow.usagePattern = this.determineUsagePatternFromFields(lifecycleFlow);
+        
+    } catch (error) {
+        console.error('Error in extractFileLifecycleFlow:', error);
+        // Return the initialized structure even if there's an error
+    }
+    
+    console.log('Field lifecycle flow analysis complete:', lifecycleFlow);
+    return lifecycleFlow;
+}
 
             mergeFieldUsageIntoLifecycle(lifecycleFlow, fieldUsage, programName, fieldName) {
     // Track field-level usage
@@ -2927,21 +2938,123 @@ RESPOND WITH VALID JSON ONLY:`;
             }
 
             generateLifecycleFieldFlow(llmAnalysis, lifecycleFlow) {
-                const lifecycleFlow_fields = [];
-                
-                // Creation stage
-                if (lifecycleFlow.creationSources.length > 0) {
-                    lifecycleFlow_fields.push({
-                        stage: 'CREATION',
-                        icon: '🌱',
-                        title: 'Data Creation',
-                        description: 'Fields are initially populated',
-                        programs: lifecycleFlow.creationSources.map(s => s.program).filter(Boolean),
-                        fields: llmAnalysis?.usagePatternAnalysis?.creationFields || [],
-                        active: true
-                    });
-                }
+    const lifecycleFlow_fields = [];
+    
+    // Add safety checks for lifecycleFlow properties
+    if (!lifecycleFlow) {
+        console.warn('lifecycleFlow is null or undefined');
+        return lifecycleFlow_fields;
+    }
+    
+    // Creation stage
+    if (lifecycleFlow.creationSources && Array.isArray(lifecycleFlow.creationSources) && lifecycleFlow.creationSources.length > 0) {
+        const programs = lifecycleFlow.creationSources
+            .map(s => s.program)
+            .filter(p => p && typeof p === 'string');
+            
+        lifecycleFlow_fields.push({
+            stage: 'CREATION',
+            icon: '🌱',
+            title: 'Data Creation',
+            description: 'Fields are initially populated',
+            programs: programs,
+            fields: (llmAnalysis?.usagePatternAnalysis?.creationFields) || [],
+            active: true
+        });
+    }
 
+    // Processing stage
+    if (lifecycleFlow.updatePrograms && Array.isArray(lifecycleFlow.updatePrograms) && lifecycleFlow.updatePrograms.length > 0) {
+        const programs = lifecycleFlow.updatePrograms
+            .map(p => p.program)
+            .filter(p => p && typeof p === 'string');
+            
+        lifecycleFlow_fields.push({
+            stage: 'PROCESSING',
+            icon: '⚙️',
+            title: 'Data Processing',
+            description: 'Fields are calculated, validated, and transformed',
+            programs: programs,
+            fields: (llmAnalysis?.usagePatternAnalysis?.updateFields) || [],
+            active: lifecycleFlow.updatePrograms.length > 0
+        });
+    }
+
+    // CICS interaction stage
+    if (lifecycleFlow.cicsScreens && Array.isArray(lifecycleFlow.cicsScreens) && lifecycleFlow.cicsScreens.length > 0) {
+        const programs = [...new Set(lifecycleFlow.cicsScreens
+            .map(s => s.program)
+            .filter(p => p && typeof p === 'string'))];
+        const screens = lifecycleFlow.cicsScreens
+            .map(s => s.screen)
+            .filter(s => s && typeof s === 'string');
+            
+        lifecycleFlow_fields.push({
+            stage: 'INTERACTION',
+            icon: '🖥️',
+            title: 'User Interaction',
+            description: 'Data displayed to users and input collected',
+            programs: programs,
+            screens: screens,
+            fields: (llmAnalysis?.fieldCategories?.INPUT_FIELDS) || [],
+            active: lifecycleFlow.cicsScreens.length > 0
+        });
+    }
+
+    // Output stage
+    if (lifecycleFlow.inputPrograms && Array.isArray(lifecycleFlow.inputPrograms) && lifecycleFlow.inputPrograms.length > 0) {
+        const programs = lifecycleFlow.inputPrograms
+            .map(p => p.program)
+            .filter(p => p && typeof p === 'string');
+            
+        lifecycleFlow_fields.push({
+            stage: 'OUTPUT',
+            icon: '📤',
+            title: 'Data Output',
+            description: 'Data is read and output to reports or files',
+            programs: programs,
+            fields: (llmAnalysis?.usagePatternAnalysis?.outputFields) || [],
+            active: lifecycleFlow.inputPrograms.length > 0
+        });
+    }
+
+    // Batch processing stage
+    if (lifecycleFlow.batchJobs && Array.isArray(lifecycleFlow.batchJobs) && lifecycleFlow.batchJobs.length > 0) {
+        const programs = lifecycleFlow.batchJobs
+            .map(j => j.job)
+            .filter(j => j && typeof j === 'string');
+            
+        lifecycleFlow_fields.push({
+            stage: 'BATCH',
+            icon: '🔄',
+            title: 'Batch Processing',
+            description: 'Data processed in batch jobs',
+            programs: programs,
+            fields: [],
+            active: lifecycleFlow.batchJobs.length > 0
+        });
+    }
+
+    // Purge stage (if detected)
+    const hasPurgeOps = lifecycleFlow.purgeProcesses && Array.isArray(lifecycleFlow.purgeProcesses) && lifecycleFlow.purgeProcesses.length > 0;
+    if (hasPurgeOps) {
+        const programs = lifecycleFlow.purgeProcesses
+            .map(p => p.program)
+            .filter(p => p && typeof p === 'string');
+            
+        lifecycleFlow_fields.push({
+            stage: 'PURGE',
+            icon: '🗑️',
+            title: 'Data Purge',
+            description: 'Data is archived or deleted',
+            programs: programs,
+            fields: (llmAnalysis?.usagePatternAnalysis?.purgeFields) || [],
+            active: hasPurgeOps
+        });
+    }
+
+    return lifecycleFlow_fields;
+}
                 // Processing stage
                 if (lifecycleFlow.updatePrograms.length > 0) {
                     lifecycleFlow_fields.push({
@@ -4497,39 +4610,51 @@ Analysis Date: ${new Date().toLocaleString()}
             }
 
             displayLifecycleSummary(lifecycleFlow) {
-                return `
-                    <div style="background: rgba(139, 92, 246, 0.1); padding: 20px; border-radius: 10px; border-left: 4px solid #8b5cf6; margin-bottom: 20px;">
-                        <h4 style="color: #8b5cf6; margin-bottom: 15px;">🌊 File Lifecycle Summary</h4>
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;">
-                            <div style="text-align: center; background: rgba(34, 197, 94, 0.1); padding: 10px; border-radius: 5px;">
-                                <div style="font-size: 1.2rem; font-weight: bold; color: #22c55e;">${lifecycleFlow.creationSources.length}</div>
-                                <div style="font-size: 11px;">Creation Sources</div>
-                            </div>
-                            <div style="text-align: center; background: rgba(59, 130, 246, 0.1); padding: 10px; border-radius: 5px;">
-                                <div style="font-size: 1.2rem; font-weight: bold; color: #3b82f6;">${lifecycleFlow.inputPrograms.length}</div>
-                                <div style="font-size: 11px;">Input Programs</div>
-                            </div>
-                            <div style="text-align: center; background: rgba(245, 158, 11, 0.1); padding: 10px; border-radius: 5px;">
-                                <div style="font-size: 1.2rem; font-weight: bold; color: #f59e0b;">${lifecycleFlow.updatePrograms.length}</div>
-                                <div style="font-size: 11px;">Update Programs</div>
-                            </div>
-                            <div style="text-align: center; background: rgba(156, 39, 176, 0.1); padding: 10px; border-radius: 5px;">
-                                <div style="font-size: 1.2rem; font-weight: bold; color: #9c27b0;">${lifecycleFlow.cicsScreens.length}</div>
-                                <div style="font-size: 11px;">CICS Screens</div>
-                            </div>
-                            <div style="text-align: center; background: rgba(100, 116, 139, 0.1); padding: 10px; border-radius: 5px;">
-                                <div style="font-size: 1.2rem; font-weight: bold; color: #64748b;">${lifecycleFlow.batchJobs.length}</div>
-                                <div style="font-size: 11px;">Batch Jobs</div>
-                            </div>
-                        </div>
-                        <div style="margin-top: 15px; text-align: center;">
-                            <span style="background: ${this.getUsagePatternColor(lifecycleFlow.usagePattern)}; color: white; padding: 6px 12px; border-radius: 6px; font-weight: bold;">
-                                ${lifecycleFlow.usagePattern.replace(/_/g, ' ')}
-                            </span>
-                        </div>
-                    </div>
-                `;
-            }
+    // Add null checks for all arrays
+    const creationCount = (lifecycleFlow.creationSources && Array.isArray(lifecycleFlow.creationSources)) 
+        ? lifecycleFlow.creationSources.length : 0;
+    const inputCount = (lifecycleFlow.inputPrograms && Array.isArray(lifecycleFlow.inputPrograms)) 
+        ? lifecycleFlow.inputPrograms.length : 0;
+    const updateCount = (lifecycleFlow.updatePrograms && Array.isArray(lifecycleFlow.updatePrograms)) 
+        ? lifecycleFlow.updatePrograms.length : 0;
+    const cicsCount = (lifecycleFlow.cicsScreens && Array.isArray(lifecycleFlow.cicsScreens)) 
+        ? lifecycleFlow.cicsScreens.length : 0;
+    const batchCount = (lifecycleFlow.batchJobs && Array.isArray(lifecycleFlow.batchJobs)) 
+        ? lifecycleFlow.batchJobs.length : 0;
+
+    return `
+        <div style="background: rgba(139, 92, 246, 0.1); padding: 20px; border-radius: 10px; border-left: 4px solid #8b5cf6; margin-bottom: 20px;">
+            <h4 style="color: #8b5cf6; margin-bottom: 15px;">🌊 File Lifecycle Summary</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;">
+                <div style="text-align: center; background: rgba(34, 197, 94, 0.1); padding: 10px; border-radius: 5px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #22c55e;">${creationCount}</div>
+                    <div style="font-size: 11px;">Creation Sources</div>
+                </div>
+                <div style="text-align: center; background: rgba(59, 130, 246, 0.1); padding: 10px; border-radius: 5px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #3b82f6;">${inputCount}</div>
+                    <div style="font-size: 11px;">Input Programs</div>
+                </div>
+                <div style="text-align: center; background: rgba(245, 158, 11, 0.1); padding: 10px; border-radius: 5px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #f59e0b;">${updateCount}</div>
+                    <div style="font-size: 11px;">Update Programs</div>
+                </div>
+                <div style="text-align: center; background: rgba(156, 39, 176, 0.1); padding: 10px; border-radius: 5px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #9c27b0;">${cicsCount}</div>
+                    <div style="font-size: 11px;">CICS Screens</div>
+                </div>
+                <div style="text-align: center; background: rgba(100, 116, 139, 0.1); padding: 10px; border-radius: 5px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #64748b;">${batchCount}</div>
+                    <div style="font-size: 11px;">Batch Jobs</div>
+                </div>
+            </div>
+            <div style="margin-top: 15px; text-align: center;">
+                <span style="background: ${this.getUsagePatternColor(lifecycleFlow.usagePattern || 'UNKNOWN')}; color: white; padding: 6px 12px; border-radius: 6px; font-weight: bold;">
+                    ${(lifecycleFlow.usagePattern || 'UNKNOWN').replace(/_/g, ' ')}
+                </span>
+            </div>
+        </div>
+    `;
+}
 
             getUsagePatternColor(pattern) {
                 const colors = {
@@ -5086,73 +5211,59 @@ Analysis Date: ${new Date().toLocaleString()}
             }
 
             displayCompleteLifecycleFlow(lifecycleFlow, fieldUsagePatterns) {
-                let html = `
-                    <div class="lifecycle-flow">
-                        <h4 style="color: #8b5cf6; margin-bottom: 20px;">🌊 Complete File Lifecycle Flow</h4>
-                `;
+    if (!lifecycleFlow) {
+        return '<p>No lifecycle flow data available</p>';
+    }
 
-                // Generate lifecycle steps from field usage patterns if available
-                if (fieldUsagePatterns.lifecycleFieldFlow && fieldUsagePatterns.lifecycleFieldFlow.length > 0) {
-                    fieldUsagePatterns.lifecycleFieldFlow.forEach((step, index) => {
-                        html += `
-                            <div class="lifecycle-step ${step.active ? 'active' : ''}">
-                                <div class="lifecycle-step-icon">${step.icon}</div>
-                                <div class="lifecycle-step-content">
-                                    <div class="lifecycle-step-title">${step.title}</div>
-                                    <div class="lifecycle-step-description">${step.description}</div>
-                                    ${step.programs && step.programs.length > 0 ? `
-                                        <div class="lifecycle-step-programs">
-                                            ${step.programs.map(program => `<span class="program-tag">${program}</span>`).join('')}
-                                        </div>
-                                    ` : ''}
-                                    ${step.screens && step.screens.length > 0 ? `
-                                        <div class="lifecycle-step-programs">
-                                            ${step.screens.map(screen => `<span class="program-tag" style="background: rgba(156, 39, 176, 0.2); color: #c084fc;">${screen}</span>`).join('')}
-                                        </div>
-                                    ` : ''}
-                                </div>
+    let html = `
+        <div class="lifecycle-flow">
+            <h4 style="color: #8b5cf6; margin-bottom: 20px;">🌊 Complete File Lifecycle Flow</h4>
+    `;
+
+    // Generate lifecycle steps from field usage patterns if available
+    if (fieldUsagePatterns && fieldUsagePatterns.lifecycleFieldFlow && Array.isArray(fieldUsagePatterns.lifecycleFieldFlow) && fieldUsagePatterns.lifecycleFieldFlow.length > 0) {
+        fieldUsagePatterns.lifecycleFieldFlow.forEach((step, index) => {
+            const safePrograms = (step.programs && Array.isArray(step.programs)) ? step.programs : [];
+            const safeScreens = (step.screens && Array.isArray(step.screens)) ? step.screens : [];
+            
+            html += `
+                <div class="lifecycle-step ${step.active ? 'active' : ''}">
+                    <div class="lifecycle-step-icon">${step.icon || '📋'}</div>
+                    <div class="lifecycle-step-content">
+                        <div class="lifecycle-step-title">${step.title || 'Processing Step'}</div>
+                        <div class="lifecycle-step-description">${step.description || 'Processing data'}</div>
+                        ${safePrograms.length > 0 ? `
+                            <div class="lifecycle-step-programs">
+                                ${safePrograms.map(program => `<span class="program-tag">${program}</span>`).join('')}
                             </div>
-                        `;
-                    })
-
-                    if (lifecycleFlow.cicsScreens.length > 0) {
-                        html += `
-                            <div class="lifecycle-step active">
-                                <div class="lifecycle-step-icon">🖥️</div>
-                                <div class="lifecycle-step-content">
-                                    <div class="lifecycle-step-title">User Interaction</div>
-                                    <div class="lifecycle-step-description">Data display and user input collection</div>
-                                    <div class="lifecycle-step-programs">
-                                        ${lifecycleFlow.cicsScreens.map(s => `<span class="program-tag" style="background: rgba(156, 39, 176, 0.2); color: #c084fc;">${s.screen}</span>`).join('')}
-                                    </div>
-                                </div>
+                        ` : ''}
+                        ${safeScreens.length > 0 ? `
+                            <div class="lifecycle-step-programs">
+                                ${safeScreens.map(screen => `<span class="program-tag" style="background: rgba(156, 39, 176, 0.2); color: #c084fc;">${screen}</span>`).join('')}
                             </div>
-                        `;
-                    }
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        });
+    } else {
+        // Fallback: show basic lifecycle info
+        html += `
+            <div style="text-align: center; padding: 40px; background: rgba(255, 255, 255, 0.05); border-radius: 10px;">
+                <p style="opacity: 0.8;">Lifecycle flow visualization will appear here after field analysis completes.</p>
+            </div>
+        `;
+    }
 
-                    if (lifecycleFlow.inputPrograms.length > 0) {
-                        html += `
-                            <div class="lifecycle-step active">
-                                <div class="lifecycle-step-icon">📤</div>
-                                <div class="lifecycle-step-content">
-                                    <div class="lifecycle-step-title">Data Output</div>
-                                    <div class="lifecycle-step-description">Report generation and data extraction</div>
-                                    <div class="lifecycle-step-programs">
-                                        ${lifecycleFlow.inputPrograms.map(p => `<span class="program-tag">${p.program}</span>`).join('')}
-                                    </div>
-                                </div>
-                            </div>
-                        `;
-                    }
-                }
+    html += `</div>`;
 
-                html += `</div>`;
+    // Display field usage patterns
+    if (fieldUsagePatterns) {
+        html += this.displayFieldUsagePatternsDetailed(fieldUsagePatterns);
+    }
 
-                // Display field usage patterns
-                html += this.displayFieldUsagePatternsDetailed(fieldUsagePatterns);
-
-                return html;
-            }
+    return html;
+}
 
             displayFieldUsagePatternsDetailed(fieldUsagePatterns) {
                 return `
@@ -5394,41 +5505,46 @@ Analysis Date: ${new Date().toLocaleString()}
             }
 
             displayDependencyDetails(dependencies) {
-                let html = `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">`;
+    if (!dependencies || typeof dependencies !== 'object') {
+        return '<p>No dependency information available</p>';
+    }
 
-                const dependencyTypes = [
-                    { key: 'copyStatements', title: 'Copy Statements', icon: '📚', color: '#22c55e' },
-                    { key: 'callStatements', title: 'Call Statements', icon: '📞', color: '#3b82f6' },
-                    { key: 'execStatements', title: 'Exec Statements', icon: '⚡', color: '#f59e0b' },
-                    { key: 'programIds', title: 'Program IDs', icon: '💼', color: '#8b5cf6' },
-                    { key: 'fileReferences', title: 'File References', icon: '📁', color: '#ec4899' }
-                ];
+    let html = `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">`;
 
-                dependencyTypes.forEach(depType => {
-                    const deps = dependencies[depType.key] || [];
-                    if (deps.length > 0) {
-                        html += `
-                            <div style="background: rgba(30, 41, 59, 0.6); padding: 12px; border-radius: 8px; border-left: 3px solid ${depType.color};">
-                                <h6 style="color: ${depType.color}; margin-bottom: 8px; font-size: 13px;">
-                                    ${depType.icon} ${depType.title} (${deps.length})
-                                </h6>
-                                <div style="max-height: 120px; overflow-y: auto;">
-                                    ${deps.slice(0, 10).map(dep => `
-                                        <div style="margin: 2px 0; padding: 3px 6px; background: rgba(15, 23, 42, 0.8); border-radius: 3px; font-family: monospace; font-size: 11px;">
-                                            ${dep}
-                                        </div>
-                                    `).join('')}
-                                    ${deps.length > 10 ? `<div style="font-size: 10px; opacity: 0.7; text-align: center; margin-top: 5px;">... and ${deps.length - 10} more</div>` : ''}
-                                </div>
+    const dependencyTypes = [
+        { key: 'copyStatements', title: 'Copy Statements', icon: '📚', color: '#22c55e' },
+        { key: 'callStatements', title: 'Call Statements', icon: '📞', color: '#3b82f6' },
+        { key: 'execStatements', title: 'Exec Statements', icon: '⚡', color: '#f59e0b' },
+        { key: 'programIds', title: 'Program IDs', icon: '💼', color: '#8b5cf6' },
+        { key: 'fileReferences', title: 'File References', icon: '📁', color: '#ec4899' }
+    ];
+
+    dependencyTypes.forEach(depType => {
+        const deps = dependencies[depType.key];
+        const safeDepArray = (deps && Array.isArray(deps)) ? deps : [];
+        
+        if (safeDepArray.length > 0) {
+            html += `
+                <div style="background: rgba(30, 41, 59, 0.6); padding: 12px; border-radius: 8px; border-left: 3px solid ${depType.color};">
+                    <h6 style="color: ${depType.color}; margin-bottom: 8px; font-size: 13px;">
+                        ${depType.icon} ${depType.title} (${safeDepArray.length})
+                    </h6>
+                    <div style="max-height: 120px; overflow-y: auto;">
+                        ${safeDepArray.slice(0, 10).map(dep => `
+                            <div style="margin: 2px 0; padding: 3px 6px; background: rgba(15, 23, 42, 0.8); border-radius: 3px; font-family: monospace; font-size: 11px;">
+                                ${dep || 'N/A'}
                             </div>
-                        `;
-                    }
-                });
+                        `).join('')}
+                        ${safeDepArray.length > 10 ? `<div style="font-size: 10px; opacity: 0.7; text-align: center; margin-top: 5px;">... and ${safeDepArray.length - 10} more</div>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+    });
 
-                html += '</div>';
-                return html;
-            }
-
+    html += '</div>';
+    return html;
+}
             // === UTILITY METHODS FOR DISPLAY ===
             getCategoryColor(category) {
                 const colors = {
