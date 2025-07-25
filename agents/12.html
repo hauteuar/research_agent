@@ -2709,6 +2709,7 @@ Respond with valid JSON only.`;
 
                     const data = await response.json();
                     console.log('LLM API Response:', data); // Debug log
+                    console.log('Full response structure:', JSON.stringify(data, null, 2)); // Detailed debug
                     
                     // Extract text from different possible response formats
                     if (data.text) {
@@ -2719,12 +2720,18 @@ Respond with valid JSON only.`;
                         resultText = data.generated_text.trim();
                     } else if (data.response) {
                         resultText = data.response.trim();
+                    } else if (data.output) {
+                        resultText = data.output.trim();
+                    } else if (data.content) {
+                        resultText = data.content.trim();
+                    } else if (typeof data === 'string') {
+                        resultText = data.trim();
                     } else {
                         console.error('Unexpected LLM response format:', data);
                         resultText = JSON.stringify(data); // Fallback to stringified response
                     }
 
-                    console.log('Extracted resultText:', resultText.substring(0, 200) + '...'); // Debug log
+                    console.log('Extracted resultText (first 300 chars):', resultText.substring(0, 300) + '...'); // Debug log
 
                     // Try to parse as JSON
                     try {
@@ -2732,30 +2739,60 @@ Respond with valid JSON only.`;
                     } catch (parseError) {
                         console.warn('Initial JSON parse failed:', parseError.message);
                         
-                        // Try to extract JSON from the response
+                        // Try to clean up the text and extract JSON
+                        let cleanedText = resultText;
+                        
+                        // Remove any leading text before the first {
+                        const firstBrace = cleanedText.indexOf('{');
+                        if (firstBrace > 0) {
+                            cleanedText = cleanedText.substring(firstBrace);
+                        }
+                        
+                        // Remove any trailing text after the last }
+                        const lastBrace = cleanedText.lastIndexOf('}');
+                        if (lastBrace > 0 && lastBrace < cleanedText.length - 1) {
+                            cleanedText = cleanedText.substring(0, lastBrace + 1);
+                        }
+                        
+                        // Try to parse the cleaned text
+                        if (cleanedText.startsWith('{') && cleanedText.endsWith('}')) {
+                            try {
+                                const parsed = JSON.parse(cleanedText);
+                                console.log('Successfully parsed cleaned JSON');
+                                return parsed;
+                            } catch (secondParseError) {
+                                console.warn('Cleaned JSON parse failed:', secondParseError.message);
+                            }
+                        }
+                        
+                        // Try to extract JSON using regex
                         const jsonMatch = resultText.match(/\{[\s\S]*\}/);
                         if (jsonMatch) {
                             try {
                                 const parsed = JSON.parse(jsonMatch[0]);
-                                console.log('Successfully parsed extracted JSON');
+                                console.log('Successfully parsed regex extracted JSON');
                                 return parsed;
-                            } catch (secondParseError) {
-                                console.warn('Second JSON parse failed:', secondParseError.message);
-                                return {
-                                    error: 'LLM response parsing failed',
-                                    rawResponse: resultText,
-                                    parseError: parseError.message,
-                                    fallbackAnalysis: this.createFallbackAnalysis(resultText)
-                                };
+                            } catch (thirdParseError) {
+                                console.warn('Regex extracted JSON parse failed:', thirdParseError.message);
                             }
-                        } else {
-                            console.warn('No JSON structure found in response');
-                            return {
-                                rawAnalysis: resultText,
-                                parseError: parseError.message,
-                                parsedAnalysis: this.parseRawLLMResponse(resultText)
-                            };
                         }
+                        
+                        // If all JSON parsing fails, try to extract structured content
+                        const structuredContent = this.extractStructuredContent(resultText);
+                        if (structuredContent && Object.keys(structuredContent).length > 0) {
+                            console.log('Using structured content extraction');
+                            return structuredContent;
+                        }
+                        
+                        // Final fallback - return raw content with better structure
+                        console.warn('All parsing methods failed, returning structured fallback');
+                        return {
+                            error: 'LLM response parsing failed',
+                            rawResponse: resultText,
+                            parseError: parseError.message,
+                            fallbackAnalysis: this.createFallbackAnalysis(resultText),
+                            extractedContent: this.parseRawLLMResponse(resultText)
+                        };
                     }
 
                 } catch (error) {
@@ -2778,13 +2815,22 @@ Respond with valid JSON only.`;
             }
 
             createFallbackAnalysis(rawResponse) {
+                // Ensure rawResponse is a string
+                const responseText = typeof rawResponse === 'string' ? rawResponse : String(rawResponse || 'No response received');
+                
                 return {
                     analysisType: 'Fallback Analysis',
-                    summary: rawResponse.substring(0, 500),
-                    recommendations: ['Review raw LLM response for detailed analysis'],
-                    qualityScore: 5
+                    summary: responseText.substring(0, 500),
+                    recommendations: [
+                        'Review raw LLM response for detailed analysis',
+                        'Check LLM server configuration and response format',
+                        'Try adjusting max_tokens or temperature settings'
+                    ],
+                    qualityScore: 3,
+                    status: 'Partial - JSON parsing failed but response received',
+                    rawContent: responseText
                 };
-            }
+            }     
 
             parseRawLLMResponse(rawText) {
                 const lines = rawText.split('\n');
