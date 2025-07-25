@@ -2684,6 +2684,8 @@ Respond with valid JSON only.`;
             }
 
             async callLLMAPI(prompt, retries = 0) {
+                let resultText = ''; // Initialize resultText here to avoid reference errors
+                
                 try {
                     const response = await fetch(`${this.vllmEndpoint}/generate`, {
                         method: 'POST',
@@ -2706,46 +2708,72 @@ Respond with valid JSON only.`;
                     }
 
                     const data = await response.json();
+                    console.log('LLM API Response:', data); // Debug log
                     
-                    let resultText = '';
+                    // Extract text from different possible response formats
                     if (data.text) {
                         resultText = data.text.trim();
-                    } else if (data.choices && data.choices[0]) {
+                    } else if (data.choices && data.choices[0] && data.choices[0].text) {
                         resultText = data.choices[0].text.trim();
+                    } else if (data.generated_text) {
+                        resultText = data.generated_text.trim();
+                    } else if (data.response) {
+                        resultText = data.response.trim();
                     } else {
-                        throw new Error('Invalid LLM API response format');
+                        console.error('Unexpected LLM response format:', data);
+                        resultText = JSON.stringify(data); // Fallback to stringified response
                     }
 
+                    console.log('Extracted resultText:', resultText.substring(0, 200) + '...'); // Debug log
+
+                    // Try to parse as JSON
                     try {
                         return JSON.parse(resultText);
                     } catch (parseError) {
+                        console.warn('Initial JSON parse failed:', parseError.message);
+                        
+                        // Try to extract JSON from the response
                         const jsonMatch = resultText.match(/\{[\s\S]*\}/);
                         if (jsonMatch) {
                             try {
-                                return JSON.parse(jsonMatch[0]);
+                                const parsed = JSON.parse(jsonMatch[0]);
+                                console.log('Successfully parsed extracted JSON');
+                                return parsed;
                             } catch (secondParseError) {
-                                console.warn('Failed to parse LLM JSON response:', resultText);
+                                console.warn('Second JSON parse failed:', secondParseError.message);
                                 return {
                                     error: 'LLM response parsing failed',
                                     rawResponse: resultText,
+                                    parseError: parseError.message,
                                     fallbackAnalysis: this.createFallbackAnalysis(resultText)
                                 };
                             }
                         } else {
+                            console.warn('No JSON structure found in response');
                             return {
                                 rawAnalysis: resultText,
+                                parseError: parseError.message,
                                 parsedAnalysis: this.parseRawLLMResponse(resultText)
                             };
                         }
                     }
 
                 } catch (error) {
+                    console.error('LLM API call error:', error);
+                    
                     if (retries < this.llmConfig.maxRetries) {
                         console.warn(`LLM API call failed, retrying (${retries + 1}/${this.llmConfig.maxRetries}):`, error);
                         await this.sleep(2000);
                         return this.callLLMAPI(prompt, retries + 1);
                     }
-                    throw new Error(`LLM API failed after ${this.llmConfig.maxRetries} retries: ${error.message}`);
+                    
+                    // Return a structured error response instead of throwing
+                    return {
+                        error: 'LLM API call failed',
+                        message: error.message,
+                        rawResponse: resultText,
+                        fallbackAnalysis: this.createFallbackAnalysis(resultText || 'No response received')
+                    };
                 }
             }
 
