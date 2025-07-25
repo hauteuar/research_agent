@@ -1,0 +1,1503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Mainframe File Flow Analysis - Presentation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 25%, #334155 50%, #475569 75%, #64748b 100%);
+            color: #fff;
+            min-height: 100vh;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: 
+                radial-gradient(circle at 20% 50%, rgba(120, 119, 198, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.08) 0%, transparent 50%),
+                radial-gradient(circle at 40% 80%, rgba(120, 198, 121, 0.06) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .presentation-container {
+            position: relative;
+            z-index: 1;
+            max-width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .slide {
+            width: 100vw;
+            height: 100vh;
+            padding: 40px;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(20px);
+            position: relative;
+        }
+
+        .slide.active {
+            display: flex;
+        }
+
+        .slide-content {
+            width: 100%;
+            max-width: 1400px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+
+        /* Navigation */
+        .nav-controls {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 15px;
+            z-index: 1000;
+            background: rgba(15, 23, 42, 0.9);
+            padding: 15px 25px;
+            border-radius: 50px;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            backdrop-filter: blur(20px);
+        }
+
+        .nav-btn {
+            padding: 12px 20px;
+            background: rgba(6, 182, 212, 0.2);
+            border: 2px solid #06b6d4;
+            border-radius: 25px;
+            color: #06b6d4;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .nav-btn:hover {
+            background: rgba(6, 182, 212, 0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(6, 182, 212, 0.3);
+        }
+
+        .slide-counter {
+            background: rgba(139, 92, 246, 0.2);
+            border: 2px solid #8b5cf6;
+            border-radius: 25px;
+            padding: 12px 20px;
+            color: #8b5cf6;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        /* Title Slide */
+        .title-slide h1 {
+            font-size: 4rem;
+            margin-bottom: 30px;
+            background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 25%, #8b5cf6 50%, #ec4899 75%, #f59e0b 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+        }
+
+        .title-slide p {
+            font-size: 1.5rem;
+            opacity: 0.9;
+            margin-bottom: 40px;
+            max-width: 800px;
+        }
+
+        /* Generic Flow Styles */
+        .flow-diagram {
+            display: grid;
+            grid-template-columns: 250px 1fr 250px;
+            gap: 30px;
+            align-items: center;
+            margin: 40px 0;
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        .flow-box {
+            border-radius: 16px;
+            padding: 25px;
+            text-align: center;
+            border: 2px solid;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s ease;
+        }
+
+        .flow-box:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(6, 182, 212, 0.3);
+        }
+
+        .flow-input {
+            background: rgba(34, 197, 94, 0.2);
+            border-color: #22c55e;
+        }
+
+        .flow-process {
+            background: rgba(59, 130, 246, 0.2);
+            border-color: #3b82f6;
+        }
+
+        .flow-output {
+            background: rgba(139, 92, 246, 0.2);
+            border-color: #8b5cf6;
+        }
+
+        .flow-title {
+            font-size: 1.3rem;
+            font-weight: bold;
+            margin-bottom: 15px;
+        }
+
+        .flow-input .flow-title { color: #22c55e; }
+        .flow-process .flow-title { color: #3b82f6; }
+        .flow-output .flow-title { color: #8b5cf6; }
+
+        .flow-details {
+            font-size: 12px;
+            line-height: 1.5;
+            opacity: 0.9;
+        }
+
+        .flow-arrows {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 20px 0;
+            gap: 30px;
+        }
+
+        .arrow {
+            color: #06b6d4;
+            font-size: 2rem;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        /* Component Grid */
+        .component-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 25px;
+            width: 100%;
+            max-width: 1000px;
+            margin: 30px 0;
+        }
+
+        .component-card {
+            background: rgba(15, 23, 42, 0.8);
+            border-radius: 16px;
+            padding: 25px;
+            border-left: 5px solid;
+            transition: all 0.3s ease;
+            text-align: left;
+        }
+
+        .component-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.3);
+        }
+
+        .component-agent { border-left-color: #8b5cf6; }
+        .component-engine { border-left-color: #3b82f6; }
+        .component-flow { border-left-color: #22c55e; }
+        .component-api { border-left-color: #f59e0b; }
+
+        .component-title {
+            font-size: 1.4rem;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #FFD700;
+        }
+
+        .component-desc {
+            font-size: 14px;
+            line-height: 1.6;
+            opacity: 0.9;
+            margin-bottom: 15px;
+        }
+
+        .component-specs {
+            font-size: 12px;
+            opacity: 0.7;
+            font-family: monospace;
+            line-height: 1.5;
+        }
+
+        /* Gantt Timeline */
+        .gantt-container {
+            width: 100%;
+            max-width: 1300px;
+            background: rgba(15, 23, 42, 0.6);
+            border-radius: 20px;
+            padding: 30px;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }
+
+        .gantt-timeline {
+            display: grid;
+            grid-template-columns: 200px repeat(8, 1fr);
+            gap: 3px;
+            margin-bottom: 20px;
+        }
+
+        .gantt-header {
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.2) 0%, rgba(59, 130, 246, 0.1) 100%);
+            padding: 15px 8px;
+            text-align: center;
+            border-radius: 8px;
+            font-size: 11px;
+            color: #06b6d4;
+            font-weight: 700;
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            min-height: 70px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .gantt-row {
+            display: grid;
+            grid-template-columns: 200px repeat(8, 1fr);
+            gap: 3px;
+            margin-bottom: 12px;
+            align-items: center;
+        }
+
+        .gantt-label {
+            background: rgba(15, 23, 42, 0.8);
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 600;
+            border-left: 4px solid;
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+        }
+
+        .label-file { border-left-color: #22c55e; color: #22c55e; }
+        .label-program { border-left-color: #3b82f6; color: #3b82f6; }
+        .label-agent { border-left-color: #8b5cf6; color: #8b5cf6; }
+
+        .gantt-cell {
+            min-height: 60px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 6px;
+            position: relative;
+            border: 1px solid rgba(148, 163, 184, 0.1);
+        }
+
+        .gantt-bar {
+            height: 45px;
+            border-radius: 6px;
+            margin: 7px 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: 700;
+            color: white;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .bar-input { background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); }
+        .bar-process { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); }
+        .bar-agent { background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); }
+        .bar-output { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); }
+
+        /* Phase Steps */
+        .phase-steps {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            width: 100%;
+            max-width: 1200px;
+            margin: 30px 0;
+        }
+
+        .step-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            border: 2px solid transparent;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .step-card:hover {
+            border-color: #06b6d4;
+            transform: scale(1.02);
+            box-shadow: 0 10px 25px rgba(6, 182, 212, 0.3);
+        }
+
+        .step-card::after {
+            content: '→';
+            position: absolute;
+            right: -15px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 1.5rem;
+            color: #06b6d4;
+            opacity: 0.7;
+        }
+
+        .step-card:last-child::after {
+            display: none;
+        }
+
+        .step-name {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #FFD700;
+            font-size: 14px;
+        }
+
+        .step-desc {
+            font-size: 12px;
+            opacity: 0.8;
+            line-height: 1.4;
+        }
+
+        /* Agent Grid */
+        .agent-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 25px;
+            width: 100%;
+            max-width: 1200px;
+            margin: 30px 0;
+        }
+
+        .agent-card {
+            background: rgba(15, 23, 42, 0.8);
+            border-radius: 12px;
+            padding: 20px;
+            border-top: 4px solid #8b5cf6;
+            transition: transform 0.3s ease;
+            text-align: left;
+        }
+
+        .agent-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(139, 92, 246, 0.2);
+        }
+
+        .agent-card-title {
+            font-size: 1.1rem;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #8b5cf6;
+        }
+
+        .agent-steps {
+            list-style: none;
+            padding: 0;
+        }
+
+        .agent-steps li {
+            padding: 8px 0;
+            font-size: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+            padding-left: 20px;
+        }
+
+        .agent-steps li::before {
+            content: '🤖';
+            position: absolute;
+            left: 0;
+            top: 8px;
+        }
+
+        .agent-steps li:last-child {
+            border-bottom: none;
+        }
+
+        /* Real World Example */
+        .real-world-example {
+            background: rgba(255, 193, 7, 0.1);
+            border: 2px solid rgba(255, 193, 7, 0.3);
+            border-radius: 16px;
+            padding: 25px;
+            margin: 30px 0;
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        .example-title {
+            font-weight: bold;
+            color: #FFC107;
+            margin-bottom: 20px;
+            text-align: center;
+            font-size: 1.2rem;
+        }
+
+        .example-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+
+        .example-card {
+            background: rgba(15, 23, 42, 0.8);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: left;
+        }
+
+        .example-card-title {
+            font-weight: bold;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+
+        .example-card ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .example-card li {
+            padding: 5px 0;
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        /* Metrics */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            width: 100%;
+            max-width: 800px;
+            margin: 30px 0;
+        }
+
+        .metric-card {
+            background: rgba(15, 23, 42, 0.8);
+            padding: 25px;
+            border-radius: 12px;
+            text-align: center;
+            border-top: 4px solid #06b6d4;
+            transition: all 0.3s ease;
+        }
+
+        .metric-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(6, 182, 212, 0.2);
+        }
+
+        .metric-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #06b6d4;
+            margin-bottom: 10px;
+        }
+
+        .metric-label {
+            font-size: 13px;
+            opacity: 0.9;
+            line-height: 1.3;
+        }
+
+        /* Section Headers */
+        .section-title {
+            font-size: 2.5rem;
+            margin-bottom: 30px;
+            text-align: center;
+            font-weight: 700;
+            background: linear-gradient(135deg, #06b6d4 0%, #8b5cf6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .section-subtitle {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            margin-bottom: 40px;
+            text-align: center;
+            max-width: 800px;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1200px) {
+            .slide {
+                padding: 20px;
+            }
+            
+            .component-grid,
+            .agent-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .phase-steps {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .flow-diagram {
+                grid-template-columns: 1fr;
+                gap: 20px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .title-slide h1 {
+                font-size: 2.5rem;
+            }
+            
+            .section-title {
+                font-size: 2rem;
+            }
+            
+            .phase-steps,
+            .metrics-grid,
+            .example-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="presentation-container">
+        
+        <!-- Slide 1: Title Slide -->
+        <div class="slide active title-slide">
+            <div class="slide-content">
+                <h1>🌊 Enhanced Mainframe File Flow Analysis</h1>
+                <p>Complete Lifecycle Tracking: From Input Files Through Program Processing to Output & Backup</p>
+                
+                <div class="flow-diagram">
+                    <div class="flow-box flow-input">
+                        <div class="flow-title">📥 INPUT</div>
+                        <div class="flow-details">
+                            • COBOL Files<br>
+                            • Copybooks<br>
+                            • JCL Scripts<br>
+                            • Component Names
+                        </div>
+                    </div>
+                    
+                    <div class="flow-box flow-process">
+                        <div class="flow-title">⚙️ PROCESSING PIPELINE</div>
+                        <div class="flow-details">
+                            <strong>4-Stage Progressive Analysis</strong><br>
+                            Component ID → Chunk Analysis → Detail Processing → Validation<br><br>
+                            <strong>6 LLM Agents:</strong> Field Tracker • Dependency Mapper • Business Logic • Optimizer • Flow Analyzer • Chat Assistant
+                        </div>
+                    </div>
+                    
+                    <div class="flow-box flow-output">
+                        <div class="flow-title">📤 OUTPUT</div>
+                        <div class="flow-details">
+                            • Flow Analysis<br>
+                            • Quality Scores<br>
+                            • Dependencies<br>
+                            • Interactive Chat
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="flow-arrows">
+                    <div class="arrow">📥 INPUT</div>
+                    <div class="arrow">→</div>
+                    <div class="arrow">⚙️ PROCESS</div>
+                    <div class="arrow">→</div>
+                    <div class="arrow">📤 OUTPUT</div>
+                </div>
+                
+                <div style="font-size: 16px; opacity: 0.8; margin-top: 20px;">
+                    <strong>Real-world Example:</strong> TMS79RAU → TMSBMDS1-S4 → TMSTMSA-E → Backup Archive
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 2: Core Components -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2 class="section-title">🏗️ Core Analyzer Application Components</h2>
+                <p class="section-subtitle">Four essential components working together to provide comprehensive mainframe analysis</p>
+                
+                <div class="component-grid">
+                    <div class="component-card component-agent">
+                        <div class="component-title">🤖 LLM Analysis Agents</div>
+                        <div class="component-desc">
+                            Intelligent agents powered by vLLM that perform specialized analysis tasks on mainframe components.
+                        </div>
+                        <div class="component-specs">
+                            • Field Lifecycle Agent<br>
+                            • Dependency Mapping Agent<br>
+                            • Business Logic Extractor Agent<br>
+                            • Optimization Recommendation Agent
+                        </div>
+                    </div>
+
+                    <div class="component-card component-engine">
+                        <div class="component-title">🔍 Smart Indexing Engine</div>
+                        <div class="component-desc">
+                            Advanced component discovery and indexing system that catalogs fields, programs, and relationships.
+                        </div>
+                        <div class="component-specs">
+                            • Component Suggestion Engine<br>
+                            • Field Pattern Recognition<br>
+                            • Cross-Reference Indexing<br>
+                            • Real-time Search & Filter
+                        </div>
+                    </div>
+
+                    <div class="component-card component-flow">
+                        <div class="component-title">🌊 Flow Analysis Engine</div>
+                        <div class="component-desc">
+                            Progressive analysis pipeline that tracks data flow from input through processing to output.
+                        </div>
+                        <div class="component-specs">
+                            • 4-Stage Progressive Analysis<br>
+                            • Token-Optimized Processing<br>
+                            • Quality Scoring & Validation<br>
+                            • Interactive Flow Visualization
+                        </div>
+                    </div>
+
+                    <div class="component-card component-api">
+                        <div class="component-title">🔗 API Orchestration Layer</div>
+                        <div class="component-desc">
+                            Intelligent API management system that handles LLM calls, retries, and response validation.
+                        </div>
+                        <div class="component-specs">
+                            • vLLM API Integration<br>
+                            • Intelligent Retry Logic<br>
+                            • Response Parsing & Validation<br>
+                            • Token Usage Optimization
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 3: Complete Timeline -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2 class="section-title">📊 Complete File Flow Timeline</h2>
+                <p class="section-subtitle">Real-time processing timeline showing all components working in parallel</p>
+                
+                <div class="gantt-container">
+                    <div class="gantt-timeline">
+                        <div class="gantt-header">Component/Phase</div>
+                        <div class="gantt-header">0-60s<br>Upload<br>& Index</div>
+                        <div class="gantt-header">60-180s<br>Component<br>ID & Stage 1</div>
+                        <div class="gantt-header">180-300s<br>Stage 2<br>Chunk Processing</div>
+                        <div class="gantt-header">300-420s<br>Stage 3<br>Detail Analysis</div>
+                        <div class="gantt-header">420-540s<br>Stage 4<br>Validation</div>
+                        <div class="gantt-header">540-720s<br>Flow Analysis<br>& Dependencies</div>
+                        <div class="gantt-header">720s+<br>Interactive<br>Chat & Export</div>
+                    </div>
+
+                    <div class="gantt-row">
+                        <div class="gantt-label label-file">File Upload & Processing</div>
+                        <div class="gantt-cell"><div class="gantt-bar bar-input">UPLOAD</div></div>
+                        <div class="gantt-cell"></div>
+                        <div class="gantt-cell"></div>
+                        <div class="gantt-cell"></div>
+                        <div class="gantt-cell"></div>
+                        <div class="gantt-cell"></div>
+                        <div class="gantt-cell"></div>
+                    </div>
+
+                    <div class="gantt-row">
+                        <div class="gantt-label label-program">Smart Indexing Engine</div>
+                        <div class="gantt-cell"><div class="gantt-bar bar-process">INDEX</div></div>
+                        <div class="gantt-cell"></div>
+                        <div class="gantt-cell"></div>
+                        <div class="gantt-cell"></div>
+                        <div class="gantt-cell"></div>
+                        <div class="gantt-cell"></div>
+                        <div class="gantt-cell"></div>
+                    </div>
+
+                    <div class="gantt-row">
+                        <div class="gantt-label label-program">Progressive Analysis Pipeline</div>
+                        <div class="gantt-cell"></div>
+                        <div class="gantt-cell"><div class="gantt-bar bar-process">ST1</div></div>
+                        <div class="gantt-cell"><div class="gantt-bar bar-process">ST2</div></div>
+                        <div class="gantt-cell"><div class="gantt-bar bar-process">ST3</div></div>
+                        <div class="gantt-cell"><div class="gantt-bar bar-process">ST4</div></div>
+                        <div class="gantt-cell"></div>
+                        <div class="gantt-cell"></div>
+                    </div>
+
+                    <div class="gantt-row">
+                        <div class="gantt-label label-agent">Analysis Agents</div>
+                        <div class="gantt-cell"></div>
+                        <div class="gantt-cell"><div class="gantt-bar bar-agent">FIELD</div></div>
+                        <div class="gantt-cell"><div class="gantt-bar bar-agent">CHUNK</div></div>
+                        <div class="gantt-cell"><div class="gantt-bar bar-agent">DETAIL</div></div>
+                        <div class="gantt-cell"><div class="gantt-bar bar-agent">VALID</div></div>
+                        <div class="gantt-cell"><div class="gantt-bar bar-agent">FLOW</div></div>
+                        <div class="gantt-cell"><div class="gantt-bar bar-agent">CHAT</div></div>
+                    </div>
+
+                    <div class="gantt-row">
+                        <div class="gantt-label label-file">Flow Analysis Engine</div>
+                        <div class="gantt-cell"></div>
+                        <div class="gantt-cell"></div>
+                        <div class="gantt-cell"></div>
+                        <div class="gantt-cell"></div>
+                        <div class="gantt-cell"></div>
+                        <div class="gantt-cell"><div class="gantt-bar bar-output">ANALYZE</div></div>
+                        <div class="gantt-cell"><div class="gantt-bar bar-output">EXPORT</div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 4: Phase 1 - File Upload & Processing -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2 class="section-title">📥 Phase 1: File Upload & Processing</h2>
+                <p class="section-subtitle">Multi-format file ingestion with intelligent component discovery</p>
+                
+                <div class="flow-diagram">
+                    <div class="flow-box flow-input">
+                        <div class="flow-title">📁 INPUT</div>
+                        <div class="flow-details">Files Upload</div>
+                    </div>
+                    <div class="flow-box flow-process">
+                        <div class="flow-title">⚙️ PROCESSING</div>
+                        <div class="flow-details">Parse → Validate → Index → Suggest Components</div>
+                    </div>
+                    <div class="flow-box flow-output">
+                        <div class="flow-title">📊 OUTPUT</div>
+                        <div class="flow-details">Component List</div>
+                    </div>
+                </div>
+
+                <div class="real-world-example">
+                    <div class="example-title">🏦 Real-World Example: TMS Asset Management System</div>
+                    <div class="flow-diagram">
+                        <div class="flow-box" style="background: rgba(255, 193, 7, 0.2); border-color: #FFC107;">
+                            <div class="flow-title" style="color: #FFC107;">📄 TMS79RAU</div>
+                            <div class="flow-details">Master File<br>(38 fields)</div>
+                        </div>
+                        <div class="flow-box" style="background: rgba(255, 193, 7, 0.15); border-color: #FFC107;">
+                            <div class="flow-title" style="color: #FFC107;">📊 FIELD EXTRACTION</div>
+                            <div class="flow-details">CUSIP-ID → ACCOUNT-ID → RECORD-KEY-INDEX → ASSET-TYPE → SECURITY-CODE → POSITION-QTY</div>
+                        </div>
+                        <div class="flow-box" style="background: rgba(255, 193, 7, 0.2); border-color: #FFC107;">
+                            <div class="flow-title" style="color: #FFC107;">📋 COMPONENT</div>
+                            <div class="flow-details">Suggestions<br>Generated</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="phase-steps">
+                    <div class="step-card">
+                        <div class="step-name">File Upload & Processing</div>
+                        <div class="step-desc">Multi-format file upload with drag-and-drop support for COBOL, Copybooks, and JCL files</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-name">Smart Indexing Engine</div>
+                        <div class="step-desc">Intelligent component discovery and indexing with pattern recognition for fields and programs</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-name">Component Suggestion</div>
+                        <div class="step-desc">Auto-generate component suggestions based on discovered patterns and relationships</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-name">Validation & Staging</div>
+                        <div class="step-desc">Validate file formats and prepare for progressive analysis pipeline</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 5: Phase 2 - Progressive Analysis Pipeline -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2 class="section-title">⚙️ Phase 2: Progressive Analysis Pipeline</h2>
+                <p class="section-subtitle">4-Stage processing with intelligent chunking and LLM analysis</p>
+                
+                <div class="flow-diagram">
+                    <div class="flow-box flow-input">
+                        <div class="flow-title">🎯 INPUT</div>
+                        <div class="flow-details">Component Name</div>
+                    </div>
+                    <div class="flow-box flow-process">
+                        <div class="flow-title">🔄 PROCESSING</div>
+                        <div class="flow-details">Stage 1: ID → Stage 2: Chunk → Stage 3: Detail → Stage 4: Validate</div>
+                    </div>
+                    <div class="flow-box flow-output">
+                        <div class="flow-title">📈 OUTPUT</div>
+                        <div class="flow-details">Analysis Results</div>
+                    </div>
+                </div>
+
+                <div class="real-world-example">
+                    <div class="example-title">🏦 Real-World Example: TMSBMDS1-4 Business Processing</div>
+                    <div class="flow-diagram">
+                        <div class="flow-box" style="background: rgba(255, 193, 7, 0.2); border-color: #FFC107;">
+                            <div class="flow-title" style="color: #FFC107;">🎯 TMS79RAU</div>
+                            <div class="flow-details">Component<br>Selected</div>
+                        </div>
+                        <div class="flow-box" style="background: rgba(255, 193, 7, 0.15); border-color: #FFC107;">
+                            <div class="flow-title" style="color: #FFC107;">⚙️ BUSINESS PROCESSING</div>
+                            <div class="flow-details">TMSBMDS1 (Rules) → TMSBMDS2 (Validation) → TMSBMDS3 (Enrichment) → TMSBMDS4 (Transform)</div>
+                        </div>
+                        <div class="flow-box" style="background: rgba(255, 193, 7, 0.2); border-color: #FFC107;">
+                            <div class="flow-title" style="color: #FFC107;">📊 RISK SCORES</div>
+                            <div class="flow-details">& Validations<br>Generated</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="phase-steps">
+                    <div class="step-card">
+                        <div class="step-name">Stage 1: Component Identification</div>
+                        <div class="step-desc">Identify and locate target component across uploaded files with LLM assistance</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-name">Stage 2: Chunk Processing</div>
+                        <div class="step-desc">Process files in optimized chunks with overlapping context windows for comprehensive analysis</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-name">Stage 3: Detail Analysis</div>
+                        <div class="step-desc">Perform specialized analysis based on component type with deep LLM processing</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-name">Stage 4: Validation</div>
+                        <div class="step-desc">Validate results, calculate quality metrics, and generate recommendations</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 6: Phase 3 - Flow Analysis Engine -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2 class="section-title">🌊 Phase 3: Flow Analysis Engine</h2>
+                <p class="section-subtitle">Comprehensive lifecycle tracking and dependency mapping</p>
+                
+                <div class="flow-diagram">
+                    <div class="flow-box" style="background: rgba(245, 158, 11, 0.2); border-color: #f59e0b;">
+                        <div class="flow-title" style="color: #f59e0b;">📊 INPUT</div>
+                        <div class="flow-details">Analysis Data</div>
+                    </div>
+                    <div class="flow-box" style="background: rgba(245, 158, 11, 0.15); border-color: #f59e0b;">
+                        <div class="flow-title" style="color: #f59e0b;">🔄 PROCESSING</div>
+                        <div class="flow-details">Score → Flow → Dependencies → Business Rules → Assembly</div>
+                    </div>
+                    <div class="flow-box" style="background: rgba(245, 158, 11, 0.2); border-color: #f59e0b;">
+                        <div class="flow-title" style="color: #f59e0b;">📱 OUTPUT</div>
+                        <div class="flow-details">UI Display</div>
+                    </div>
+                </div>
+
+                <div class="real-world-example">
+                    <div class="example-title">🏦 Real-World Example: TMSTMSA Transaction Management</div>
+                    <div class="flow-diagram">
+                        <div class="flow-box" style="background: rgba(255, 193, 7, 0.2); border-color: #FFC107;">
+                            <div class="flow-title" style="color: #FFC107;">📊 PROCESSED</div>
+                            <div class="flow-details">TMS Data<br>Ready</div>
+                        </div>
+                        <div class="flow-box" style="background: rgba(255, 193, 7, 0.15); border-color: #FFC107;">
+                            <div class="flow-title" style="color: #FFC107;">🔄 TRANSACTION CONTROL</div>
+                            <div class="flow-details">TMSTMSA (Control) → Output Format → Quality Check → Distribution</div>
+                        </div>
+                        <div class="flow-box" style="background: rgba(255, 193, 7, 0.2); border-color: #FFC107;">
+                            <div class="flow-title" style="color: #FFC107;">📤 FORMATTED</div>
+                            <div class="flow-details">Output Files<br>Generated</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="phase-steps">
+                    <div class="step-card">
+                        <div class="step-name">Quality Scoring</div>
+                        <div class="step-desc">Calculate comprehensive quality scores and completeness metrics for analysis results</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-name">Flow Mapping</div>
+                        <div class="step-desc">Map complete field and data flow patterns across programs and processes</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-name">Dependency Analysis</div>
+                        <div class="step-desc">Comprehensive dependency mapping with relationship discovery and validation</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-name">Result Assembly</div>
+                        <div class="step-desc">Assemble all analysis results into structured format for UI display and export</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 7: Phase 4 - LLM Analysis Agents -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2 class="section-title">🤖 Phase 4: LLM Analysis Agents</h2>
+                <p class="section-subtitle">Specialized intelligence working in parallel for comprehensive analysis</p>
+                
+                <div class="flow-diagram">
+                    <div class="flow-box" style="background: rgba(239, 68, 68, 0.2); border-color: #ef4444;">
+                        <div class="flow-title" style="color: #ef4444;">🎯 INPUT</div>
+                        <div class="flow-details">Component Data</div>
+                    </div>
+                    <div class="flow-box" style="background: rgba(239, 68, 68, 0.15); border-color: #ef4444;">
+                        <div class="flow-title" style="color: #ef4444;">🤖 PROCESSING</div>
+                        <div class="flow-details">6 Specialized Agents: Field • Dependency • Business • Optimization • Flow • Chat</div>
+                    </div>
+                    <div class="flow-box" style="background: rgba(239, 68, 68, 0.2); border-color: #ef4444;">
+                        <div class="flow-title" style="color: #ef4444;">💬 OUTPUT</div>
+                        <div class="flow-details">Interactive Chat</div>
+                    </div>
+                </div>
+
+                <div class="real-world-example">
+                    <div class="example-title">🏦 Real-World Example: TMS Field Lifecycle Analysis</div>
+                    <div class="flow-diagram">
+                        <div class="flow-box" style="background: rgba(255, 193, 7, 0.2); border-color: #FFC107;">
+                            <div class="flow-title" style="color: #FFC107;">🎯 CUSIP-ID</div>
+                            <div class="flow-details">ACCOUNT-ID<br>Field Tracking</div>
+                        </div>
+                        <div class="flow-box" style="background: rgba(255, 193, 7, 0.15); border-color: #FFC107;">
+                            <div class="flow-title" style="color: #FFC107;">🤖 AGENT ANALYSIS</div>
+                            <div class="flow-details">Field Journey: TMS79RAU → TMSBMDS1-4 → TMSTMSA → Output • Unused Field Detection • Optimization</div>
+                        </div>
+                        <div class="flow-box" style="background: rgba(255, 193, 7, 0.2); border-color: #FFC107;">
+                            <div class="flow-title" style="color: #FFC107;">💡 OPTIMIZATION</div>
+                            <div class="flow-details">Recommendations<br>Generated</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="phase-steps">
+                    <div class="step-card">
+                        <div class="step-name">Field Lifecycle Agent</div>
+                        <div class="step-desc">Track complete field journey from creation through processing to final output</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-name">Dependency Mapping Agent</div>
+                        <div class="step-desc">Discover and map all relationships between components, programs, and copybooks</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-name">Business Logic Agent</div>
+                        <div class="step-desc">Extract business rules, validation logic, and decision patterns from COBOL code</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-name">Optimization Agent</div>
+                        <div class="step-desc">Identify optimization opportunities, unused fields, and performance improvements</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 8: LLM-Powered Analysis Agents in Flow -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2 class="section-title">🤖 LLM-Powered Analysis Agents in Flow</h2>
+                <p class="section-subtitle">Six specialized AI agents working together for comprehensive mainframe analysis</p>
+                
+                <div class="agent-grid">
+                    <div class="agent-card">
+                        <div class="agent-card-title">Field Lifecycle Agent</div>
+                        <ul class="agent-steps">
+                            <li>Track field creation in TMS79RAU master file</li>
+                            <li>Monitor field transformations through TMSBMDS1-4</li>
+                            <li>Identify field usage patterns and frequencies</li>
+                            <li>Map field dependencies across programs</li>
+                            <li>Generate field lifecycle reports</li>
+                        </ul>
+                    </div>
+
+                    <div class="agent-card">
+                        <div class="agent-card-title">Dependency Mapping Agent</div>
+                        <ul class="agent-steps">
+                            <li>Scan COPY statements across all programs</li>
+                            <li>Map CALL relationships between modules</li>
+                            <li>Identify file-to-program dependencies</li>
+                            <li>Track JCL execution dependencies</li>
+                            <li>Create visual dependency graphs</li>
+                        </ul>
+                    </div>
+
+                    <div class="agent-card">
+                        <div class="agent-card-title">Optimization Agent</div>
+                        <ul class="agent-steps">
+                            <li>Detect unused fields in copybooks</li>
+                            <li>Identify redundant processing steps</li>
+                            <li>Analyze performance bottlenecks</li>
+                            <li>Suggest consolidation opportunities</li>
+                            <li>Calculate optimization impact metrics</li>
+                        </ul>
+                    </div>
+
+                    <div class="agent-card">
+                        <div class="agent-card-title">Business Logic Agent</div>
+                        <ul class="agent-steps">
+                            <li>Extract business rules from COBOL logic</li>
+                            <li>Identify decision points and conditions</li>
+                            <li>Map validation rules to business requirements</li>
+                            <li>Track regulatory compliance checks</li>
+                            <li>Generate business process documentation</li>
+                        </ul>
+                    </div>
+
+                    <div class="agent-card">
+                        <div class="agent-card-title">Flow Validation Agent</div>
+                        <ul class="agent-steps">
+                            <li>Verify complete flow execution paths</li>
+                            <li>Validate data integrity at each stage</li>
+                            <li>Check error handling completeness</li>
+                            <li>Monitor transaction boundary consistency</li>
+                            <li>Generate flow quality scores</li>
+                        </ul>
+                    </div>
+
+                    <div class="agent-card">
+                        <div class="agent-card-title">Interactive Chat Agent</div>
+                        <ul class="agent-steps">
+                            <li>Answer questions about field lifecycles</li>
+                            <li>Explain dependency relationships</li>
+                            <li>Provide optimization recommendations</li>
+                            <li>Generate custom flow reports</li>
+                            <li>Assist with modernization planning</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div style="background: rgba(139, 92, 246, 0.1); border: 2px solid rgba(139, 92, 246, 0.3); border-radius: 16px; padding: 25px; margin-top: 30px; width: 100%; max-width: 1000px;">
+                    <div style="font-size: 1.3rem; color: #8b5cf6; margin-bottom: 15px; text-align: center; font-weight: 700;">
+                        🔄 Agent Coordination & Workflow
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; font-size: 12px;">
+                        <div style="background: rgba(15, 23, 42, 0.8); border-radius: 8px; padding: 15px;">
+                            <div style="font-weight: bold; margin-bottom: 8px; color: #22c55e;">🚀 Parallel Processing</div>
+                            <div style="opacity: 0.9;">Multiple agents work simultaneously on different aspects of the same component for faster analysis</div>
+                        </div>
+                        
+                        <div style="background: rgba(15, 23, 42, 0.8); border-radius: 8px; padding: 15px;">
+                            <div style="font-weight: bold; margin-bottom: 8px; color: #3b82f6;">🔗 Intelligent Coordination</div>
+                            <div style="opacity: 0.9;">Agents share context and findings to build comprehensive analysis results</div>
+                        </div>
+                        
+                        <div style="background: rgba(15, 23, 42, 0.8); border-radius: 8px; padding: 15px;">
+                            <div style="font-weight: bold; margin-bottom: 8px; color: #f59e0b;">📊 Result Synthesis</div>
+                            <div style="opacity: 0.9;">All agent findings are combined into unified reports and interactive chat responses</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 9: Phase 5 - Interactive System -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2 class="section-title">💬 Phase 5: Interactive Chat & Export</h2>
+                <p class="section-subtitle">Real-time interaction and comprehensive reporting capabilities</p>
+                
+                <div class="flow-diagram">
+                    <div class="flow-box flow-output">
+                        <div class="flow-title">💬 INPUT</div>
+                        <div class="flow-details">User Questions</div>
+                    </div>
+                    <div class="flow-box flow-output">
+                        <div class="flow-title">🤖 PROCESSING</div>
+                        <div class="flow-details">Context-aware Chat • Real-time Analysis • Export Generation</div>
+                    </div>
+                    <div class="flow-box flow-output">
+                        <div class="flow-title">📤 OUTPUT</div>
+                        <div class="flow-details">Answers & Reports</div>
+                    </div>
+                </div>
+
+                <div class="real-world-example">
+                    <div class="example-title">🏦 Real-World Example: TMSTMSB Backup & Archive</div>
+                    <div class="flow-diagram">
+                        <div class="flow-box" style="background: rgba(255, 193, 7, 0.2); border-color: #FFC107;">
+                            <div class="flow-title" style="color: #FFC107;">💬 "Show TMS</div>
+                            <div class="flow-details">field flow for<br>CUSIP-ID"</div>
+                        </div>
+                        <div class="flow-box" style="background: rgba(255, 193, 7, 0.15); border-color: #FFC107;">
+                            <div class="flow-title" style="color: #FFC107;">💾 BACKUP & CHAT</div>
+                            <div class="flow-details">TMSTMSB (Backup) → Archive → Chat Analysis → Export Reports (JSON/MD)</div>
+                        </div>
+                        <div class="flow-box" style="background: rgba(255, 193, 7, 0.2); border-color: #FFC107;">
+                            <div class="flow-title" style="color: #FFC107;">📋 COMPLETE</div>
+                            <div class="flow-details">TMS Analysis<br>Report</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="phase-steps">
+                    <div class="step-card">
+                        <div class="step-name">Interactive Chat Agent</div>
+                        <div class="step-desc">Context-aware chat system that answers questions about analysis results and field flows</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-name">Export & Monitoring</div>
+                        <div class="step-desc">Generate comprehensive reports in JSON and Markdown formats with ongoing monitoring</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-name">Flow Analyzer Agent</div>
+                        <div class="step-desc">Continuous process mapping and flow analysis with real-time updates</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-name">Analysis Updates</div>
+                        <div class="step-desc">Real-time analysis updates and continuous monitoring of component relationships</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 10: TMS Real-World Example -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2 class="section-title">🏦 TMS79RAU Processing Flow</h2>
+                <p class="section-subtitle">Real-world example of Restricted Asset Management System processing</p>
+                
+                <div class="real-world-example" style="max-width: 100%;">
+                    <div class="example-title">Complete TMS Processing Pipeline</div>
+                    <div class="example-grid">
+                        <div class="example-card" style="border-left: 4px solid #22c55e;">
+                            <div class="example-card-title" style="color: #22c55e;">🏦 Business Context</div>
+                            <ul>
+                                <li>• Restricted Asset Management System</li>
+                                <li>• Daily processing of 100K+ securities</li>
+                                <li>• Regulatory compliance requirements</li>
+                                <li>• Real-time risk calculations</li>
+                            </ul>
+                        </div>
+                        
+                        <div class="example-card" style="border-left: 4px solid #3b82f6;">
+                            <div class="example-card-title" style="color: #3b82f6;">📊 Key Fields Tracked</div>
+                            <ul>
+                                <li>• CUSIP-ID (X(12)) - Security identifier</li>
+                                <li>• ACCOUNT-ID (X(10)) - Client account</li>
+                                <li>• POSITION-QTY (9(15)V99) - Holdings</li>
+                                <li>• MARKET-VALUE (9(15)V99) - Current value</li>
+                            </ul>
+                        </div>
+                        
+                        <div class="example-card" style="border-left: 4px solid #f59e0b;">
+                            <div class="example-card-title" style="color: #f59e0b;">🔄 Processing Chain</div>
+                            <ul>
+                                <li>• TMS79RAU → TMSBMDS1 (Rules)</li>
+                                <li>• TMSBMDS2 (Validation) → TMSBMDS3 (Enrich)</li>
+                                <li>• TMSBMDS4 (Transform) → TMSTMSA (Output)</li>
+                                <li>• TMSTMSB (Backup) → Archive</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="background: rgba(139, 92, 246, 0.1); border: 2px solid rgba(139, 92, 246, 0.3); border-radius: 16px; padding: 25px; margin-top: 30px; width: 100%; max-width: 1200px;">
+                    <div style="font-size: 1.5rem; color: #8b5cf6; margin-bottom: 20px; text-align: center; font-weight: 700;">
+                        📊 Analysis Results Generated
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
+                        <div style="background: rgba(15, 23, 42, 0.8); border-radius: 12px; padding: 20px;">
+                            <div style="font-weight: bold; margin-bottom: 15px; color: #06b6d4;">🔍 Field Journey Analysis</div>
+                            <ul style="list-style: none; padding: 0; font-size: 12px; line-height: 1.6;">
+                                <li>• CUSIP-ID: Created in TMS79RAU → Used in all TMSBMDS programs → Final output in TMSTMSA</li>
+                                <li>• Quality Score: 9.2/10 (Excellent coverage)</li>
+                                <li>• Dependencies: 12 programs, 8 copybooks</li>
+                            </ul>
+                        </div>
+                        
+                        <div style="background: rgba(15, 23, 42, 0.8); border-radius: 12px; padding: 20px;">
+                            <div style="font-weight: bold; margin-bottom: 15px; color: #22c55e;">💡 Optimization Opportunities</div>
+                            <ul style="list-style: none; padding: 0; font-size: 12px; line-height: 1.6;">
+                                <li>• 3 unused fields detected in TMS79RAU</li>
+                                <li>• TMSBMDS2 validation can be optimized</li>
+                                <li>• Potential 15% performance improvement</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 11: Key Metrics & Performance -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2 class="section-title">📈 Key Metrics & Performance</h2>
+                <p class="section-subtitle">Comprehensive analysis capabilities and processing metrics</p>
+                
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-value">6</div>
+                        <div class="metric-label">Core Application<br>Components</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">4-8</div>
+                        <div class="metric-label">LLM API Calls<br>Per Analysis</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">10-15min</div>
+                        <div class="metric-label">Complete Analysis<br>Processing Time</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">4</div>
+                        <div class="metric-label">Progressive Analysis<br>Stages</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">6</div>
+                        <div class="metric-label">Specialized LLM<br>Analysis Agents</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">100%</div>
+                        <div class="metric-label">Field Lifecycle<br>Coverage</div>
+                    </div>
+                </div>
+
+                <div style="background: rgba(6, 182, 212, 0.1); border: 2px solid rgba(6, 182, 212, 0.3); border-radius: 16px; padding: 25px; margin-top: 40px; width: 100%; max-width: 1000px;">
+                    <div style="font-size: 1.5rem; color: #06b6d4; margin-bottom: 20px; text-align: center; font-weight: 700;">
+                        🎯 Analysis Capabilities
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; text-align: left;">
+                        <div>
+                            <div style="font-weight: bold; margin-bottom: 10px; color: #22c55e;">✅ What We Can Analyze</div>
+                            <ul style="list-style: none; padding: 0; font-size: 13px; line-height: 1.6;">
+                                <li>• COBOL programs and copybooks</li>
+                                <li>• JCL scripts and job flows</li>
+                                <li>• Field lifecycles and dependencies</li>
+                                <li>• Business logic extraction</li>
+                                <li>• Performance optimization opportunities</li>
+                                <li>• Cross-reference mapping</li>
+                            </ul>
+                        </div>
+                        
+                        <div>
+                            <div style="font-weight: bold; margin-bottom: 10px; color: #8b5cf6;">🚀 Key Benefits</div>
+                            <ul style="list-style: none; padding: 0; font-size: 13px; line-height: 1.6;">
+                                <li>• Automated mainframe documentation</li>
+                                <li>• Interactive chat for instant answers</li>
+                                <li>• Quality scoring and validation</li>
+                                <li>• Export in multiple formats</li>
+                                <li>• Real-time analysis updates</li>
+                                <li>• Modernization planning support</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 12: Thank You -->
+        <div class="slide">
+            <div class="slide-content">
+                <h1 style="font-size: 4rem; margin-bottom: 30px; background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 25%, #8b5cf6 50%, #ec4899 75%, #f59e0b 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800;">
+                    Thank You! 🎉
+                </h1>
+                
+                <p style="font-size: 1.5rem; opacity: 0.9; margin-bottom: 40px; max-width: 800px;">
+                    Enhanced Mainframe File Flow Analysis: Transforming Legacy Systems with AI
+                </p>
+                
+                <div style="background: rgba(15, 23, 42, 0.8); border-radius: 20px; padding: 30px; border: 1px solid rgba(148, 163, 184, 0.2); max-width: 800px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; margin-bottom: 20px; color: #06b6d4;">
+                        🌊 Ready to revolutionize your mainframe analysis?
+                    </div>
+                    
+                    <div style="font-size: 14px; opacity: 0.9; line-height: 1.6;">
+                        Our comprehensive solution brings modern AI capabilities to legacy mainframe systems, 
+                        providing unprecedented insights into your COBOL programs, field lifecycles, and business logic. 
+                        With 6 specialized LLM agents and real-time interactive analysis, you can finally understand 
+                        and optimize your critical mainframe applications.
+                    </div>
+                    
+                    <div style="margin-top: 25px; display: flex; justify-content: center; gap: 20px;">
+                        <div style="background: rgba(6, 182, 212, 0.2); border: 2px solid #06b6d4; border-radius: 15px; padding: 15px 25px; color: #06b6d4; font-weight: 600;">
+                            💬 Interactive Chat
+                        </div>
+                        <div style="background: rgba(139, 92, 246, 0.2); border: 2px solid #8b5cf6; border-radius: 15px; padding: 15px 25px; color: #8b5cf6; font-weight: 600;">
+                            🤖 AI-Powered Analysis
+                        </div>
+                        <div style="background: rgba(34, 197, 94, 0.2); border: 2px solid #22c55e; border-radius: 15px; padding: 15px 25px; color: #22c55e; font-weight: 600;">
+                            🌊 Complete Flow Analysis
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>subtitle">Real-time interaction and comprehensive reporting capabilities</p>
+                
+                <div class="flow-diagram">
+                    <div class="flow-box flow-output">
+                        <div class="flow-title">💬 INPUT</div>
+                        <div class="flow-details">User Questions</div>
+                    </div>
+                    <div class="flow-box flow-output">
+                        <div class="flow-title">🤖 PROCESSING</div>
+                        <div class="flow-details">Context-aware Chat • Real-time Analysis • Export Generation</div>
+                    </div>
+                    <div class="flow-box flow-output">
+                        <div class="flow-title">📤 OUTPUT</div>
+                        <div class="flow-details">Answers & Reports</div>
+                    </div>
+                </div>
+
+                <div class="real-world-example">
+                    <div class="example-title">🏦 Real-World Example: TMSTMSB Backup & Archive</div>
+                    <div class="flow-diagram">
+                        <div class="flow-box" style="background: rgba(255, 193, 7, 0.2); border-color: #FFC107;">
+                            <div class="flow-title" style="color: #FFC107;">💬 "Show TMS</div>
+                            <div class="flow-details">field flow for<br>CUSIP-ID"</div>
+                        </div>
+                        <div class="flow-box" style="background: rgba(255, 193, 7, 0.15); border-color: #FFC107;">
+                            <div class="flow-title" style="color: #FFC107;">💾 BACKUP & CHAT</div>
+                            <div class="flow-details">TMSTMSB (Backup) → Archive → Chat Analysis → Export Reports (JSON/MD)</div>
+                        </div>
+                        <div class="flow-box" style="background: rgba(255, 193, 7, 0.2); border-color: #FFC107;">
+                            <div class="flow-title" style="color: #FFC107;">📋 COMPLETE</div>
+                            <div class="flow-details">TMS Analysis<br>Report</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="phase-steps">
+                    <div class="step-card">
+                        <div class="step-name">Interactive Chat Agent</div>
+                        <div class="step-desc">Context-aware chat system that answers questions about analysis results and field flows</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-name">Export & Monitoring</div>
+                        <div class="step-desc">Generate comprehensive reports in JSON and Markdown formats with ongoing monitoring</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-name">Flow Analyzer Agent</div>
+                        <div class="step-desc">Continuous process mapping and flow analysis with real-time updates</div>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-name">Analysis Updates</div>
+                        <div class="step-desc">Real-time analysis updates and continuous monitoring of component relationships</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+       
+
+    <!-- Navigation Controls -->
+    <div class="nav-controls">
+        <button class="nav-btn" onclick="previousSlide()">← Previous</button>
+        <div class="slide-counter">
+            <span id="currentSlide">1</span> / <span id="totalSlides">11</span>
+        </div>
+        <button class="nav-btn" onclick="nextSlide()">Next →</button>
+    </div>
+
+    <script>
+        let currentSlideIndex = 0;
+        const slides = document.querySelectorAll('.slide');
+        const totalSlides = slides.length;
+        
+        document.getElementById('totalSlides').textContent = totalSlides;
+
+        function showSlide(index) {
+            slides.forEach((slide, i) => {
+                slide.classList.toggle('active', i === index);
+            });
+            document.getElementById('currentSlide').textContent = index + 1;
+        }
+
+        function nextSlide() {
+            currentSlideIndex = (currentSlideIndex + 1) % totalSlides;
+            showSlide(currentSlideIndex);
+        }
+
+        function previousSlide() {
+            currentSlideIndex = (currentSlideIndex - 1 + totalSlides) % totalSlides;
+            showSlide(currentSlideIndex);
+        }
+
+        // Keyboard navigation
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === ' ') {
+                e.preventDefault();
+                nextSlide();
+            } else if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                previousSlide();
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                currentSlideIndex = 0;
+                showSlide(currentSlideIndex);
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                currentSlideIndex = totalSlides - 1;
+                showSlide(currentSlideIndex);
+            }
+        });
+
+        // Touch navigation for mobile
+        let touchStartX = 0;
+        let touchEndX = 0;
+
+        document.addEventListener('touchstart', (e) => {
+            touchStartX = e.changedTouches[0].screenX;
+        });
+
+        document.addEventListener('touchend', (e) => {
+            touchEndX = e.changedTouches[0].screenX;
+            handleSwipe();
+        });
+
+        function handleSwipe() {
+            const swipeThreshold = 50;
+            const diff = touchStartX - touchEndX;
+            
+            if (Math.abs(diff) > swipeThreshold) {
+                if (diff > 0) {
+                    nextSlide(); // Swipe left - next slide
+                } else {
+                    previousSlide(); // Swipe right - previous slide
+                }
+            }
+        }
+
+        // Auto-advance option (uncomment to enable)
+        // setInterval(nextSlide, 30000); // Auto-advance every 30 seconds
+
+        // Initialize
+        showSlide(0);
+    </script>
+</body>
+</html>
