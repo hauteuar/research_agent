@@ -2709,10 +2709,18 @@ RESPOND WITH VALID JSON ONLY:`;
                     console.log('LLM API Response keys:', Object.keys(data));
                     
                     // Extract text from different possible response formats
+                    // Extract text from different possible response formats
                     if (data.text) {
                         resultText = data.text.trim();
-                    } else if (data.choices && data.choices[0] && data.choices[0].text) {
-                        resultText = data.choices[0].text.trim();
+                    } else if (data.choices && data.choices.length > 0) {
+                        // Handle OpenAI-style response format
+                        if (data.choices[0].text) {
+                            resultText = data.choices[0].text.trim();
+                        } else if (data.choices[0].message && data.choices[0].message.content) {
+                            resultText = data.choices[0].message.content.trim();
+                        } else {
+                            resultText = JSON.stringify(data.choices[0]).trim();
+                        }
                     } else if (data.generated_text) {
                         resultText = data.generated_text.trim();
                     } else if (data.response) {
@@ -2725,7 +2733,9 @@ RESPOND WITH VALID JSON ONLY:`;
                         resultText = data.trim();
                     } else {
                         console.error('Unexpected LLM response format:', data);
-                        resultText = JSON.stringify(data);
+                        // Try to extract any text content from the object
+                        const textContent = this.extractTextFromObject(data);
+                        resultText = textContent || JSON.stringify(data);
                     }
 
                     console.log(`Extracted resultText length: ${resultText.length} chars`);
@@ -2769,6 +2779,28 @@ RESPOND WITH VALID JSON ONLY:`;
                     };
                 }
             }
+
+            extractTextFromObject(obj) {
+                if (typeof obj === 'string') return obj;
+                if (!obj || typeof obj !== 'object') return null;
+                
+                // Common text field names in LLM responses
+                const textFields = ['text', 'content', 'generated_text', 'response', 'output', 'result'];
+                
+                for (const field of textFields) {
+                    if (obj[field] && typeof obj[field] === 'string') {
+                        return obj[field].trim();
+                    }
+                }
+                
+                // If it's an array, try the first element
+                if (Array.isArray(obj) && obj.length > 0) {
+                    return this.extractTextFromObject(obj[0]);
+                }
+                
+                return null;
+            }
+
             parseJSONResponse(text) {
                 const attempts = [
                     // Attempt 1: Direct parse
@@ -2819,27 +2851,57 @@ RESPOND WITH VALID JSON ONLY:`;
                 };
             }
 
-            cleanJSONText(text) {
-                // Remove any non-JSON text before first brace
-                const firstBrace = text.indexOf('{');
-                if (firstBrace > 0) {
-                    text = text.substring(firstBrace);
+            
+               cleanJSONText(text) {
+                    if (!text || typeof text !== 'string') return '{}';
+                    
+                    // Remove any text before the first {
+                    let startIndex = text.indexOf('{');
+                    if (startIndex === -1) {
+                        // No JSON object found, try to create one from key-value pairs
+                        return this.createJSONFromText(text);
+                    }
+                    
+                    if (startIndex > 0) {
+                        text = text.substring(startIndex);
+                    }
+                    
+                    // Find the last complete } that balances the braces
+                    let braceCount = 0;
+                    let lastValidIndex = -1;
+                    
+                    for (let i = 0; i < text.length; i++) {
+                        if (text[i] === '{') {
+                            braceCount++;
+                        } else if (text[i] === '}') {
+                            braceCount--;
+                            if (braceCount === 0) {
+                                lastValidIndex = i;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (lastValidIndex > 0) {
+                        text = text.substring(0, lastValidIndex + 1);
+                    }
+                    
+                    // Fix common JSON formatting issues
+                    text = text
+                        .replace(/,(\s*[\}\]])/g, '$1')  // Remove trailing commas
+                        .replace(/([{,]\s*)(\w+):/g, '$1"$2":')  // Quote unquoted keys
+                        .replace(/:\s*([^",\[\{][^,\]\}]*?)(\s*[,\]\}])/g, (match, value, ending) => {
+                            // Quote unquoted string values, but not numbers or booleans
+                            const trimmedValue = value.trim();
+                            if (trimmedValue === 'true' || trimmedValue === 'false' || 
+                                trimmedValue === 'null' || /^\d+(\.\d+)?$/.test(trimmedValue)) {
+                                return `: ${trimmedValue}${ending}`;
+                            }
+                            return `: "${trimmedValue}"${ending}`;
+                        });
+                    
+                    return text;
                 }
-                
-                // Remove any non-JSON text after last brace
-                const lastBrace = text.lastIndexOf('}');
-                if (lastBrace > 0 && lastBrace < text.length - 1) {
-                    text = text.substring(0, lastBrace + 1);
-                }
-                
-                // Fix common JSON issues
-                text = text
-                    .replace(/,(\s*[\}\]])/g, '$1')  // Remove trailing commas
-                    .replace(/(\w+):/g, '"$1":')     // Quote unquoted keys
-                    .replace(/:\s*([^",\[\{][^,\]\}]*)/g, ': "$1"'); // Quote unquoted string values
-                
-                return text;
-            }
 
             extractPartialObject(text) {
                 const result = {};
@@ -2915,23 +2977,26 @@ RESPOND WITH VALID JSON ONLY:`;
             createEnhancedFallback(rawText, parseError) {
                 console.log('Creating enhanced fallback analysis...');
                 
+                // Ensure we have valid text to work with
+                const safeRawText = rawText || 'No response content available';
+                
                 const fallback = {
                     analysisMethod: 'Enhanced Fallback Analysis',
                     status: 'Partial - JSON parsing failed but content extracted',
                     parseError: parseError,
-                    extractedData: this.extractPartialObject(rawText),
-                    rawResponse: rawText.substring(0, 2000) + (rawText.length > 2000 ? '...' : ''),
-                    recommendations: this.extractRecommendationsFromText(rawText),
+                    extractedData: this.extractPartialObject(safeRawText),
+                    rawResponse: safeRawText.substring(0, 2000) + (safeRawText.length > 2000 ? '...' : ''),
+                    recommendations: this.extractRecommendationsFromText(safeRawText),
                     qualityScore: 6,
                     completeness: 'Partial'
                 };
                 
                 // Try to extract additional structured information
-                if (rawText.includes('fieldCategories') || rawText.includes('FIELD')) {
+                if (safeRawText.includes('fieldCategories') || safeRawText.includes('FIELD')) {
                     fallback.hasFieldAnalysis = true;
                 }
                 
-                if (rawText.includes('businessLogic') || rawText.includes('BUSINESS')) {
+                if (safeRawText.includes('businessLogic') || safeRawText.includes('BUSINESS')) {
                     fallback.hasBusinessLogic = true;
                 }
                 
