@@ -1876,7 +1876,7 @@
             }
             // === NEW: FILE LIFECYCLE FLOW EXTRACTION ===
             async extractFileLifecycleFlow(componentName, relevantFiles) {
-                console.log('Extracting file lifecycle flow for:', componentName);
+                console.log('Extracting field lifecycle flow for copybook:', componentName);
                 
                 const lifecycleFlow = {
                     componentName: componentName,
@@ -1888,44 +1888,371 @@
                     batchJobs: [],
                     purgeProcesses: [],
                     fieldUpdateTracking: {},
-                    usagePattern: 'UNKNOWN'
+                    usagePattern: 'UNKNOWN',
+                    copybookFields: []
                 };
 
-                // IMPORTANT: Analyze ALL uploaded files, not just relevant ones
-                // This is crucial for copybooks that are used by many programs
-                const allFilesToAnalyze = this.uploadedFiles;
+                // Step 1: Extract all fields from the copybook
+                const copybookFields = this.extractCopybookFields(componentName, relevantFiles);
+                lifecycleFlow.copybookFields = copybookFields;
                 
-                console.log(`Analyzing ${allFilesToAnalyze.length} total files for lifecycle of ${componentName}`);
+                console.log(`Found ${copybookFields.length} fields in copybook:`, copybookFields.map(f => f.name));
 
-                // First pass: Find programs that use this component (especially for copybooks)
-                const programsUsingComponent = this.findAllProgramsUsingComponent(componentName);
-                console.log(`Found ${programsUsingComponent.length} programs using ${componentName}:`, 
-                            programsUsingComponent.map(p => p.name));
-
-                // Analyze each file for lifecycle information
-                for (const file of allFilesToAnalyze) {
-                    const fileLifecycle = this.analyzeFileForComponentLifecycle(file, componentName);
-                    this.mergeLifecycleData(lifecycleFlow, fileLifecycle, file.name);
+                if (copybookFields.length === 0) {
+                    console.warn('No fields found in copybook, cannot analyze lifecycle');
+                    return lifecycleFlow;
                 }
 
-                // Special handling for copybooks: analyze programs that COPY this component
-                if (this.isLikelyCopybook(componentName)) {
-                    console.log(`${componentName} appears to be a copybook, analyzing programs that use it...`);
+                // Step 2: Find all programs that use this copybook
+                const programsUsingCopybook = this.findProgramsUsingCopybook(componentName);
+                console.log(`Found ${programsUsingCopybook.length} programs using copybook:`, 
+                            programsUsingCopybook.map(p => p.name));
+
+                // Step 3: Analyze how each field is used across all programs
+                for (const field of copybookFields) {
+                    console.log(`Analyzing lifecycle of field: ${field.name}`);
                     
-                    for (const program of programsUsingComponent) {
-                        const programLifecycle = this.analyzeFileForComponentLifecycle(program, componentName);
-                        this.mergeLifecycleData(lifecycleFlow, programLifecycle, program.name);
+                    for (const program of programsUsingCopybook) {
+                        const fieldUsage = this.analyzeFieldUsageInProgram(field.name, program);
+                        this.mergeFieldUsageIntoLifecycle(lifecycleFlow, fieldUsage, program.name, field.name);
                     }
                 }
 
-                // Determine overall usage pattern
-                lifecycleFlow.usagePattern = this.determineUsagePattern(lifecycleFlow);
+                // Step 4: Determine overall usage pattern based on field usage
+                lifecycleFlow.usagePattern = this.determineUsagePatternFromFields(lifecycleFlow);
                 
-                // Find field-level lifecycle information
-                lifecycleFlow.fieldUpdateTracking = this.extractFieldUpdateTracking(allFilesToAnalyze, componentName);
-
-                console.log('Complete file lifecycle flow extracted:', lifecycleFlow);
+                console.log('Field lifecycle flow analysis complete:', lifecycleFlow);
                 return lifecycleFlow;
+            }
+
+            mergeFieldUsageIntoLifecycle(lifecycleFlow, fieldUsage, programName, fieldName) {
+    // Track field-level usage
+    if (!lifecycleFlow.fieldUpdateTracking[fieldName]) {
+        lifecycleFlow.fieldUpdateTracking[fieldName] = {
+            readBy: [],
+            writtenBy: [],
+            displayedBy: [],
+            inputBy: [],
+            validatedBy: [],
+            calculatedBy: [],
+            operations: []
+        };
+    }
+
+    const fieldTracking = lifecycleFlow.fieldUpdateTracking[fieldName];
+
+    // Merge program usage
+    if (fieldUsage.isRead && !fieldTracking.readBy.includes(programName)) {
+        fieldTracking.readBy.push(programName);
+        
+        if (!lifecycleFlow.inputPrograms.find(p => p.program === programName)) {
+            lifecycleFlow.inputPrograms.push({
+                program: programName,
+                operation: 'FIELD_READ',
+                fields: [fieldName]
+            });
+        }
+    }
+
+    if (fieldUsage.isWritten && !fieldTracking.writtenBy.includes(programName)) {
+        fieldTracking.writtenBy.push(programName);
+        
+        if (!lifecycleFlow.updatePrograms.find(p => p.program === programName)) {
+            lifecycleFlow.updatePrograms.push({
+                program: programName,
+                operation: 'FIELD_UPDATE',
+                fields: [fieldName]
+            });
+        }
+    }
+
+    if (fieldUsage.isDisplayed && !fieldTracking.displayedBy.includes(programName)) {
+        fieldTracking.displayedBy.push(programName);
+    }
+
+    if (fieldUsage.isInput && !fieldTracking.inputBy.includes(programName)) {
+        fieldTracking.inputBy.push(programName);
+        
+        if (!lifecycleFlow.creationSources.find(p => p.program === programName)) {
+            lifecycleFlow.creationSources.push({
+                program: programName,
+                operation: 'FIELD_INPUT',
+                fields: [fieldName]
+            });
+        }
+    }
+
+    if (fieldUsage.isValidated && !fieldTracking.validatedBy.includes(programName)) {
+        fieldTracking.validatedBy.push(programName);
+    }
+
+    if (fieldUsage.isCalculated && !fieldTracking.calculatedBy.includes(programName)) {
+        fieldTracking.calculatedBy.push(programName);
+    }
+
+    // Add all operations for this field
+    fieldTracking.operations = fieldTracking.operations.concat(fieldUsage.operations);
+
+    // Check for CICS operations
+    const cicsOperations = fieldUsage.operations.filter(op => 
+        op.type === 'cics_input' || op.type === 'cics_output'
+    );
+    
+    if (cicsOperations.length > 0 && !lifecycleFlow.cicsScreens.find(s => s.program === programName)) {
+        lifecycleFlow.cicsScreens.push({
+            screen: 'SCREEN_MAP', // Generic screen name
+            program: programName,
+            operation: 'CICS_INTERACTION',
+            fields: [fieldName]
+        });
+    }
+}
+
+determineUsagePatternFromFields(lifecycleFlow) {
+    const hasInput = lifecycleFlow.creationSources.length > 0;
+    const hasReading = lifecycleFlow.inputPrograms.length > 0;
+    const hasUpdating = lifecycleFlow.updatePrograms.length > 0;
+    const hasCics = lifecycleFlow.cicsScreens.length > 0;
+    const hasBatch = lifecycleFlow.batchJobs.length > 0;
+
+    // Count fields by their usage patterns
+    const fieldCount = Object.keys(lifecycleFlow.fieldUpdateTracking).length;
+    let readOnlyFields = 0;
+    let writeOnlyFields = 0;
+    let readWriteFields = 0;
+
+    Object.values(lifecycleFlow.fieldUpdateTracking).forEach(tracking => {
+        const isRead = tracking.readBy.length > 0;
+        const isWritten = tracking.writtenBy.length > 0;
+        
+        if (isRead && isWritten) {
+            readWriteFields++;
+        } else if (isRead) {
+            readOnlyFields++;
+        } else if (isWritten) {
+            writeOnlyFields++;
+        }
+    });
+
+    console.log(`Field usage summary: ${readOnlyFields} read-only, ${writeOnlyFields} write-only, ${readWriteFields} read-write fields`);
+
+    if (hasCics && hasInput && hasUpdating) {
+        return 'ONLINE_TRANSACTIONAL';
+    } else if (hasBatch && hasUpdating) {
+        return 'BATCH_PROCESSING';
+    } else if (readOnlyFields > readWriteFields && !hasUpdating) {
+        return 'READ_ONLY';
+    } else if (hasInput && !hasUpdating) {
+        return 'CREATION_ONLY';
+    } else if (hasUpdating && !hasInput) {
+        return 'UPDATE_ONLY';
+    } else if (hasInput && hasUpdating) {
+        return 'FULL_LIFECYCLE';
+    } else {
+        return 'REFERENCE_ONLY';
+    }
+}
+
+            analyzeFieldUsageInProgram(fieldName, programFile) {
+                const usage = {
+                    fieldName: fieldName,
+                    programName: '',
+                    isRead: false,
+                    isWritten: false,
+                    isDisplayed: false,
+                    isInput: false,
+                    isValidated: false,
+                    isCalculated: false,
+                    operations: []
+                };
+
+                const lines = programFile.content.split('\n');
+                const upperContent = programFile.content.toUpperCase();
+                const fieldUpper = fieldName.toUpperCase();
+                
+                // Get program name
+                const programMatch = upperContent.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]+)/);
+                usage.programName = programMatch ? programMatch[1] : programFile.name.replace(/\.[^/.]+$/, "");
+
+                lines.forEach((line, lineNum) => {
+                    const trimmed = line.trim().toUpperCase();
+                    
+                    // Skip if line doesn't contain our field
+                    if (!trimmed.includes(fieldUpper)) {
+                        return;
+                    }
+
+                    // Check for different types of field usage
+                    
+                    // MOVE operations (reading/writing)
+                    if (trimmed.includes('MOVE')) {
+                        const moveFromMatch = trimmed.match(new RegExp(`MOVE\\s+${fieldUpper}\\s+TO\\s+([A-Z][A-Z0-9\\-_]+)`));
+                        const moveToMatch = trimmed.match(new RegExp(`MOVE\\s+([A-Z][A-Z0-9\\-_]+)\\s+TO\\s+${fieldUpper}`));
+                        
+                        if (moveFromMatch) {
+                            usage.isRead = true;
+                            usage.operations.push({
+                                type: 'READ',
+                                operation: 'MOVE FROM',
+                                line: lineNum + 1,
+                                context: trimmed,
+                                target: moveFromMatch[1]
+                            });
+                        }
+                        
+                        if (moveToMatch) {
+                            usage.isWritten = true;
+                            usage.operations.push({
+                                type: 'write',
+                                operation: 'MOVE TO',
+                                line: lineNum + 1,
+                                context: trimmed,
+                                source: moveToMatch[1]
+                            });
+                        }
+                    }
+
+                    // DISPLAY operations (output)
+                    if (trimmed.includes('DISPLAY') && trimmed.includes(fieldUpper)) {
+                        usage.isDisplayed = true;
+                        usage.operations.push({
+                            type: 'display',
+                            operation: 'DISPLAY',
+                            line: lineNum + 1,
+                            context: trimmed
+                        });
+                    }
+
+                    // ACCEPT operations (input)
+                    if (trimmed.includes('ACCEPT') && trimmed.includes(fieldUpper)) {
+                        usage.isInput = true;
+                        usage.operations.push({
+                            type: 'input',
+                            operation: 'ACCEPT',
+                            line: lineNum + 1,
+                            context: trimmed
+                        });
+                    }
+
+                    // IF/WHEN conditions (validation/comparison)
+                    if ((trimmed.includes('IF') || trimmed.includes('WHEN')) && trimmed.includes(fieldUpper)) {
+                        usage.isValidated = true;
+                        usage.operations.push({
+                            type: 'validation',
+                            operation: 'CONDITION',
+                            line: lineNum + 1,
+                            context: trimmed
+                        });
+                    }
+
+                    // COMPUTE/ADD/SUBTRACT/MULTIPLY/DIVIDE (calculation)
+                    const calcOperations = ['COMPUTE', 'ADD', 'SUBTRACT', 'MULTIPLY', 'DIVIDE'];
+                    for (const op of calcOperations) {
+                        if (trimmed.includes(op) && trimmed.includes(fieldUpper)) {
+                            usage.isCalculated = true;
+                            usage.operations.push({
+                                type: 'calculation',
+                                operation: op,
+                                line: lineNum + 1,
+                                context: trimmed
+                            });
+                            break;
+                        }
+                    }
+
+                    // CICS SEND/RECEIVE MAP operations
+                    if (trimmed.includes('EXEC CICS')) {
+                        if (trimmed.includes('SEND MAP') && trimmed.includes(fieldUpper)) {
+                            usage.isDisplayed = true;
+                            usage.operations.push({
+                                type: 'cics_output',
+                                operation: 'CICS SEND MAP',
+                                line: lineNum + 1,
+                                context: trimmed
+                            });
+                        }
+                        
+                        if (trimmed.includes('RECEIVE MAP') && trimmed.includes(fieldUpper)) {
+                            usage.isInput = true;
+                            usage.operations.push({
+                                type: 'cics_input',
+                                operation: 'CICS RECEIVE MAP',
+                                line: lineNum + 1,
+                                context: trimmed
+                            });
+                        }
+                    }
+
+                    // File operations
+                    if (trimmed.includes('WRITE') && trimmed.includes(fieldUpper)) {
+                        usage.isWritten = true;
+                        usage.operations.push({
+                            type: 'file_write',
+                            operation: 'WRITE',
+                            line: lineNum + 1,
+                            context: trimmed
+                        });
+                    }
+
+                    if (trimmed.includes('READ') && trimmed.includes(fieldUpper)) {
+                        usage.isRead = true;
+                        usage.operations.push({
+                            type: 'file_read',
+                            operation: 'READ',
+                            line: lineNum + 1,
+                            context: trimmed
+                        });
+                    }
+                });
+
+                return usage;
+            }
+            extractCopybookFields(copybookName, relevantFiles) {
+                const fields = [];
+                
+                // Find the copybook file
+                const copybookFile = relevantFiles.find(f => 
+                    f.type === 'Copybook' || 
+                    f.name.toUpperCase().includes(copybookName.toUpperCase())
+                );
+                
+                if (!copybookFile) {
+                    console.warn('Copybook file not found');
+                    return fields;
+                }
+
+                const lines = copybookFile.content.split('\n');
+                
+                lines.forEach((line, index) => {
+                    const trimmed = line.trim();
+                    
+                    // Match COBOL field definitions (level number + field name)
+                    const fieldMatch = trimmed.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]*)/);
+                    if (fieldMatch) {
+                        const level = parseInt(fieldMatch[1]);
+                        const fieldName = fieldMatch[2];
+                        
+                        // Extract PIC clause if present
+                        const picMatch = trimmed.match(/PIC\s+([X9VS\(\)]+)/i);
+                        const picture = picMatch ? picMatch[1] : '';
+                        
+                        // Extract VALUE clause if present
+                        const valueMatch = trimmed.match(/VALUE\s+([^.]+)/i);
+                        const value = valueMatch ? valueMatch[1].trim() : '';
+                        
+                        fields.push({
+                            name: fieldName,
+                            level: level,
+                            picture: picture,
+                            value: value,
+                            lineNumber: index + 1,
+                            definition: trimmed
+                        });
+                    }
+                });
+                
+                console.log(`Extracted ${fields.length} fields from copybook`);
+                return fields;
             }
 
             findAllProgramsUsingComponent(componentName) {
@@ -3597,20 +3924,33 @@ Respond with valid JSON only.`;
             }
 
             findProgramsUsingCopybook(copybookName) {
-                const usingPrograms = [];
-                
-                this.uploadedFiles.forEach(file => {
-                    if (file.type === 'COBOL Program') {
-                        const content = file.content.toUpperCase();
-                        const copyPattern = new RegExp(`COPY\\s+['"]*${copybookName.toUpperCase()}['"]*`, 'g');
-                        if (copyPattern.test(content)) {
-                            usingPrograms.push(file);
-                        }
-                    }
-                });
-                
-                return usingPrograms;
+    const usingPrograms = [];
+    const copybookUpper = copybookName.toUpperCase().replace('.CPY', '');
+    
+    this.uploadedFiles.forEach(file => {
+        if (file.type === 'COBOL Program' || file.content.toUpperCase().includes('PROGRAM-ID')) {
+            const content = file.content.toUpperCase();
+            
+            // Check for COPY statements
+            const copyPatterns = [
+                `COPY ${copybookUpper}`,
+                `COPY "${copybookUpper}"`,
+                `COPY '${copybookUpper}'`,
+                `COPY ${copybookUpper}.`,
+                `INCLUDE ${copybookUpper}`
+            ];
+            
+            const usesCopybook = copyPatterns.some(pattern => content.includes(pattern));
+            
+            if (usesCopybook) {
+                console.log(`Program ${file.name} uses copybook ${copybookName}`);
+                usingPrograms.push(file);
             }
+        }
+    });
+    
+    return usingPrograms;
+}
 
             calculateQualityScore(analysisResult) {
                 if (!analysisResult) return 5;
