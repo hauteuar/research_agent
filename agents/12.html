@@ -2321,72 +2321,58 @@ Respond with valid JSON only.`;
 
                 const programContent = this.prepareContentForLLM(programFile.content, 'program');
 
-                const llmPrompt = `MAINFRAME COBOL PROGRAM LIFECYCLE ANALYSIS
+                const llmPrompt = `MAINFRAME COBOL PROGRAM LIFECYCLE ANALYSIS - JSON RESPONSE REQUIRED
 
-TASK: Analyze the COBOL program "${programName}" with complete file lifecycle context and provide detailed structural and business logic information.
+CRITICAL: Respond with ONLY valid JSON. No explanatory text before or after the JSON.
+
+TASK: Analyze COBOL program "${programName}" with complete lifecycle context.
 
 PROGRAM CONTENT:
 ${programContent}
 
-FILE LIFECYCLE CONTEXT:
-Usage Pattern: ${lifecycleFlow.usagePattern}
-Program Role: ${this.determineProgramRole(programName, lifecycleFlow)}
-Input Programs: ${lifecycleFlow.inputPrograms.map(p => p.program).join(', ')}
-Update Programs: ${lifecycleFlow.updatePrograms.map(p => p.program).join(', ')}
+LIFECYCLE CONTEXT:
+- Usage Pattern: ${lifecycleFlow.usagePattern}
+- Program Role: ${this.determineProgramRole(programName, lifecycleFlow)}
+- Dependencies: COPY: ${basicDependencies.copyStatements.slice(0,5).join(', ')}, CALL: ${basicDependencies.callStatements.slice(0,5).join(', ')}
 
-DEPENDENCIES FOUND:
-Copy Statements: ${basicDependencies.copyStatements.join(', ')}
-Call Statements: ${basicDependencies.callStatements.join(', ')}
-File References: ${basicDependencies.fileReferences.join(', ')}
-
-INSTRUCTIONS:
-1. Analyze program structure (divisions, sections, paragraphs) with lifecycle context
-2. Extract business logic and decision points related to file lifecycle
-3. Identify file operations and data flow in the context of lifecycle stages
-4. Map program dependencies and call patterns within the lifecycle
-5. Extract validation rules and calculations specific to lifecycle stages
-6. Determine if this program creates, reads, updates, or purges data
-7. Provide lifecycle-aware modernization recommendations
-
-OUTPUT FORMAT:
+REQUIRED JSON OUTPUT (complete this exact structure):
 {
   "programStructure": {
-    "divisions": [<division_names>],
-    "paragraphs": [<paragraph_names>],
-    "sections": [<section_names>]
+    "divisions": [],
+    "paragraphs": [],
+    "sections": []
   },
   "lifecycleRole": {
-    "primaryFunction": "<CREATE|READ|UPDATE|DELETE|PROCESS>",
-    "lifecycleStage": "<creation|processing|output|purge|maintenance>",
-    "dataFlowDirection": "<INPUT|OUTPUT|BIDIRECTIONAL>",
-    "processingType": "<ONLINE|BATCH|REPORT|UTILITY>"
+    "primaryFunction": "PROCESS",
+    "lifecycleStage": "processing",
+    "dataFlowDirection": "BIDIRECTIONAL",
+    "processingType": "BATCH"
   },
   "businessLogic": {
-    "validationRules": [<validation_rules_with_lifecycle_context>],
-    "calculations": [<calculation_logic_with_purpose>],
-    "decisionPoints": [<if_when_conditions_with_business_context>],
-    "fileOperations": [<file_create_read_update_delete_operations>]
+    "validationRules": [],
+    "calculations": [],
+    "decisionPoints": [],
+    "fileOperations": []
   },
   "dataFlow": {
-    "inputFiles": [<input_files_with_lifecycle_stage>],
-    "outputFiles": [<output_files_with_lifecycle_stage>],
-    "workingStorage": [<key_variables_with_purpose>],
-    "fieldTransformations": [<field_to_field_mappings>]
+    "inputFiles": [],
+    "outputFiles": [],
+    "fieldTransformations": []
   },
   "dependencies": {
-    "copybooks": [<used_copybooks_with_purpose>],
-    "calledPrograms": [<called_programs_with_function>],
-    "files": [<accessed_files_with_operation_type>]
+    "copybooks": [],
+    "calledPrograms": [],
+    "files": []
   },
-  "lifecycleRecommendations": [<lifecycle_specific_modernization_suggestions>],
-  "complexity": "<LOW|MEDIUM|HIGH>",
-  "qualityScore": <1-10>
+  "lifecycleRecommendations": [],
+  "complexity": "MEDIUM",
+  "qualityScore": 7
 }
 
-Respond with valid JSON only.`;
+RESPOND WITH VALID JSON ONLY:`;
 
                 return await this.callLLMAPI(llmPrompt);
-            }
+            } 
 
             determineProgramRole(programName, lifecycleFlow) {
                 const isInputProgram = lifecycleFlow.inputPrograms.find(p => p.program === programName);
@@ -2684,9 +2670,17 @@ Respond with valid JSON only.`;
             }
 
             async callLLMAPI(prompt, retries = 0) {
-                let resultText = ''; // Initialize resultText here to avoid reference errors
+                let resultText = '';
                 
                 try {
+                    // Increase max_tokens and use adaptive token allocation
+                    const adaptiveMaxTokens = Math.min(
+                        Math.floor(this.maxTokens * 0.9), // Use 90% of available tokens
+                        8000 // Hard cap at 8000 tokens
+                    );
+                    
+                    console.log(`Making LLM API call with ${adaptiveMaxTokens} max tokens...`);
+                    
                     const response = await fetch(`${this.vllmEndpoint}/generate`, {
                         method: 'POST',
                         headers: {
@@ -2694,11 +2688,15 @@ Respond with valid JSON only.`;
                         },
                         body: JSON.stringify({
                             prompt: prompt,
-                            max_tokens: Math.floor(this.maxTokens * 0.8),
+                            max_tokens: adaptiveMaxTokens,
                             temperature: this.llmConfig.temperature,
                             top_p: 0.95,
-                            stop: ["Human:", "Assistant:", "TASK:", "INSTRUCTIONS:"],
-                            stream: false
+                            // Remove stop sequences that might prematurely cut off JSON
+                            stop: [],
+                            stream: false,
+                            // Add these parameters to improve completion
+                            frequency_penalty: 0.1,
+                            presence_penalty: 0.1
                         }),
                         signal: AbortSignal.timeout(this.llmConfig.analysisTimeout)
                     });
@@ -2708,8 +2706,7 @@ Respond with valid JSON only.`;
                     }
 
                     const data = await response.json();
-                    console.log('LLM API Response:', data); // Debug log
-                    console.log('Full response structure:', JSON.stringify(data, null, 2)); // Detailed debug
+                    console.log('LLM API Response keys:', Object.keys(data));
                     
                     // Extract text from different possible response formats
                     if (data.text) {
@@ -2728,71 +2725,31 @@ Respond with valid JSON only.`;
                         resultText = data.trim();
                     } else {
                         console.error('Unexpected LLM response format:', data);
-                        resultText = JSON.stringify(data); // Fallback to stringified response
+                        resultText = JSON.stringify(data);
                     }
 
-                    console.log('Extracted resultText (first 300 chars):', resultText.substring(0, 300) + '...'); // Debug log
+                    console.log(`Extracted resultText length: ${resultText.length} chars`);
+                    console.log('First 200 chars:', resultText.substring(0, 200));
+                    console.log('Last 200 chars:', resultText.substring(Math.max(0, resultText.length - 200)));
+
+                    // Check if response appears to be cut off
+                    const isCutOff = this.detectCutOffResponse(resultText);
+                    if (isCutOff && retries < this.llmConfig.maxRetries) {
+                        console.warn('Response appears to be cut off, attempting continuation...');
+                        const continuedResponse = await this.continueResponse(resultText, prompt, retries);
+                        if (continuedResponse) {
+                            resultText = continuedResponse;
+                        }
+                    }
 
                     // Try to parse as JSON
-                    try {
-                        return JSON.parse(resultText);
-                    } catch (parseError) {
-                        console.warn('Initial JSON parse failed:', parseError.message);
-                        
-                        // Try to clean up the text and extract JSON
-                        let cleanedText = resultText;
-                        
-                        // Remove any leading text before the first {
-                        const firstBrace = cleanedText.indexOf('{');
-                        if (firstBrace > 0) {
-                            cleanedText = cleanedText.substring(firstBrace);
-                        }
-                        
-                        // Remove any trailing text after the last }
-                        const lastBrace = cleanedText.lastIndexOf('}');
-                        if (lastBrace > 0 && lastBrace < cleanedText.length - 1) {
-                            cleanedText = cleanedText.substring(0, lastBrace + 1);
-                        }
-                        
-                        // Try to parse the cleaned text
-                        if (cleanedText.startsWith('{') && cleanedText.endsWith('}')) {
-                            try {
-                                const parsed = JSON.parse(cleanedText);
-                                console.log('Successfully parsed cleaned JSON');
-                                return parsed;
-                            } catch (secondParseError) {
-                                console.warn('Cleaned JSON parse failed:', secondParseError.message);
-                            }
-                        }
-                        
-                        // Try to extract JSON using regex
-                        const jsonMatch = resultText.match(/\{[\s\S]*\}/);
-                        if (jsonMatch) {
-                            try {
-                                const parsed = JSON.parse(jsonMatch[0]);
-                                console.log('Successfully parsed regex extracted JSON');
-                                return parsed;
-                            } catch (thirdParseError) {
-                                console.warn('Regex extracted JSON parse failed:', thirdParseError.message);
-                            }
-                        }
-                        
-                        // If all JSON parsing fails, try to extract structured content
-                        const structuredContent = this.extractStructuredContent(resultText);
-                        if (structuredContent && Object.keys(structuredContent).length > 0) {
-                            console.log('Using structured content extraction');
-                            return structuredContent;
-                        }
-                        
-                        // Final fallback - return raw content with better structure
-                        console.warn('All parsing methods failed, returning structured fallback');
-                        return {
-                            error: 'LLM response parsing failed',
-                            rawResponse: resultText,
-                            parseError: parseError.message,
-                            fallbackAnalysis: this.createFallbackAnalysis(resultText),
-                            extractedContent: this.parseRawLLMResponse(resultText)
-                        };
+                    const parsedResult = this.parseJSONResponse(resultText);
+                    if (parsedResult.success) {
+                        console.log('Successfully parsed JSON response');
+                        return parsedResult.data;
+                    } else {
+                        console.warn('JSON parsing failed, using fallback analysis');
+                        return this.createEnhancedFallback(resultText, parsedResult.error);
                     }
 
                 } catch (error) {
@@ -2804,7 +2761,6 @@ Respond with valid JSON only.`;
                         return this.callLLMAPI(prompt, retries + 1);
                     }
                     
-                    // Return a structured error response instead of throwing
                     return {
                         error: 'LLM API call failed',
                         message: error.message,
@@ -2812,6 +2768,192 @@ Respond with valid JSON only.`;
                         fallbackAnalysis: this.createFallbackAnalysis(resultText || 'No response received')
                     };
                 }
+            }
+            parseJSONResponse(text) {
+                const attempts = [
+                    // Attempt 1: Direct parse
+                    () => JSON.parse(text),
+                    
+                    // Attempt 2: Extract JSON from text
+                    () => {
+                        const jsonMatch = text.match(/\{[\s\S]*\}/);
+                        if (jsonMatch) {
+                            return JSON.parse(jsonMatch[0]);
+                        }
+                        throw new Error('No JSON found');
+                    },
+                    
+                    // Attempt 3: Clean and parse
+                    () => {
+                        const cleaned = this.cleanJSONText(text);
+                        return JSON.parse(cleaned);
+                    },
+                    
+                    // Attempt 4: Fix structure and parse
+                    () => {
+                        const fixed = this.fixJSONStructure(text);
+                        return JSON.parse(fixed);
+                    },
+                    
+                    // Attempt 5: Extract partial object
+                    () => {
+                        return this.extractPartialObject(text);
+                    }
+                ];
+
+                for (let i = 0; i < attempts.length; i++) {
+                    try {
+                        const result = attempts[i]();
+                        if (result && typeof result === 'object') {
+                            return { success: true, data: result };
+                        }
+                    } catch (error) {
+                        console.warn(`JSON parse attempt ${i + 1} failed:`, error.message);
+                    }
+                }
+
+                return { 
+                    success: false, 
+                    error: 'All JSON parsing attempts failed',
+                    rawText: text 
+                };
+            }
+
+            cleanJSONText(text) {
+                // Remove any non-JSON text before first brace
+                const firstBrace = text.indexOf('{');
+                if (firstBrace > 0) {
+                    text = text.substring(firstBrace);
+                }
+                
+                // Remove any non-JSON text after last brace
+                const lastBrace = text.lastIndexOf('}');
+                if (lastBrace > 0 && lastBrace < text.length - 1) {
+                    text = text.substring(0, lastBrace + 1);
+                }
+                
+                // Fix common JSON issues
+                text = text
+                    .replace(/,(\s*[\}\]])/g, '$1')  // Remove trailing commas
+                    .replace(/(\w+):/g, '"$1":')     // Quote unquoted keys
+                    .replace(/:\s*([^",\[\{][^,\]\}]*)/g, ': "$1"'); // Quote unquoted string values
+                
+                return text;
+            }
+
+            extractPartialObject(text) {
+                const result = {};
+                
+                // Extract field categories
+                const fieldCategoriesMatch = text.match(/"fieldCategories":\s*\{([^}]+)\}/);
+                if (fieldCategoriesMatch) {
+                    try {
+                        result.fieldCategories = JSON.parse(`{${fieldCategoriesMatch[1]}}`);
+                    } catch (e) {
+                        result.fieldCategories = this.parseFieldCategories(fieldCategoriesMatch[1]);
+                    }
+                }
+                
+                // Extract other common fields
+                const commonFields = ['totalFields', 'qualityScore', 'complexity', 'componentType'];
+                commonFields.forEach(field => {
+                    const regex = new RegExp(`"${field}":\\s*([^,\\n\\}]+)`);
+                    const match = text.match(regex);
+                    if (match) {
+                        try {
+                            result[field] = JSON.parse(match[1]);
+                        } catch (e) {
+                            result[field] = match[1].replace(/"/g, '');
+                        }
+                    }
+                });
+                
+                // Extract recommendations
+                const recommendationsMatch = text.match(/"recommendations":\s*\[(.*?)\]/s);
+                if (recommendationsMatch) {
+                    try {
+                        result.recommendations = JSON.parse(`[${recommendationsMatch[1]}]`);
+                    } catch (e) {
+                        result.recommendations = this.extractArrayItems(recommendationsMatch[1]);
+                    }
+                }
+                
+                return result;
+            }
+
+            parseFieldCategories(categoriesText) {
+                const categories = {};
+                const categoryMatches = categoriesText.match(/"(\w+)":\s*\[(.*?)\]/g);
+                
+                if (categoryMatches) {
+                    categoryMatches.forEach(match => {
+                        const parts = match.match(/"(\w+)":\s*\[(.*?)\]/);
+                        if (parts) {
+                            const categoryName = parts[1];
+                            const itemsText = parts[2];
+                            categories[categoryName] = this.extractArrayItems(itemsText);
+                        }
+                    });
+                }
+                
+                return categories;
+            }
+
+            extractArrayItems(arrayText) {
+                const items = [];
+                const itemMatches = arrayText.match(/"([^"]+)"/g);
+                
+                if (itemMatches) {
+                    itemMatches.forEach(match => {
+                        items.push(match.replace(/"/g, ''));
+                    });
+                }
+                
+                return items;
+            }
+
+            createEnhancedFallback(rawText, parseError) {
+                console.log('Creating enhanced fallback analysis...');
+                
+                const fallback = {
+                    analysisMethod: 'Enhanced Fallback Analysis',
+                    status: 'Partial - JSON parsing failed but content extracted',
+                    parseError: parseError,
+                    extractedData: this.extractPartialObject(rawText),
+                    rawResponse: rawText.substring(0, 2000) + (rawText.length > 2000 ? '...' : ''),
+                    recommendations: this.extractRecommendationsFromText(rawText),
+                    qualityScore: 6,
+                    completeness: 'Partial'
+                };
+                
+                // Try to extract additional structured information
+                if (rawText.includes('fieldCategories') || rawText.includes('FIELD')) {
+                    fallback.hasFieldAnalysis = true;
+                }
+                
+                if (rawText.includes('businessLogic') || rawText.includes('BUSINESS')) {
+                    fallback.hasBusinessLogic = true;
+                }
+                
+                return fallback;
+            }
+
+            extractRecommendationsFromText(text) {
+                const recommendations = [];
+                const lines = text.split('\n');
+                
+                lines.forEach(line => {
+                    if (line.includes('recommend') || line.includes('RECOMMEND') || 
+                        line.includes('suggest') || line.includes('SUGGEST') ||
+                        line.includes('consider') || line.includes('CONSIDER')) {
+                        const cleaned = line.replace(/[\[\]"{}]/g, '').trim();
+                        if (cleaned.length > 10) {
+                            recommendations.push(cleaned);
+                        }
+                    }
+                });
+                
+                return recommendations.slice(0, 5); // Limit to 5 recommendations
             }
 
             createFallbackAnalysis(rawResponse) {
@@ -2831,6 +2973,163 @@ Respond with valid JSON only.`;
                     rawContent: responseText
                 };
             }     
+            
+            detectCutOffResponse(text) {
+                if (!text || text.length < 100) return true;
+                
+                // Check for incomplete JSON structure
+                const openBraces = (text.match(/\{/g) || []).length;
+                const closeBraces = (text.match(/\}/g) || []).length;
+                const openBrackets = (text.match(/\[/g) || []).length;
+                const closeBrackets = (text.match(/\]/g) || []).length;
+                
+                // If braces/brackets don't match, likely cut off
+                if (openBraces !== closeBraces || openBrackets !== closeBrackets) {
+                    return true;
+                }
+                
+                // Check for incomplete field endings
+                const incompletePatterns = [
+                    /,\s*$/,  // Ends with comma
+                    /:\s*$/,  // Ends with colon
+                    /"\s*$/,  // Ends with quote
+                    /\[\s*$/  // Ends with open bracket
+                ];
+                
+                return incompletePatterns.some(pattern => pattern.test(text.trim()));
+            }
+
+             async continueResponse(partialResponse, originalPrompt, retries) {
+                try {
+                    console.log('Attempting to continue incomplete response...');
+                    
+                    const continuationPrompt = `CONTINUE RESPONSE FROM WHERE IT LEFT OFF
+
+ORIGINAL PROMPT: ${originalPrompt.substring(0, 500)}...
+
+PARTIAL RESPONSE SO FAR:
+${partialResponse}
+
+INSTRUCTIONS:
+Continue the JSON response from exactly where it left off. Do not repeat any content from the partial response above. Just continue with the missing parts to complete the JSON structure. Start immediately with the continuation (no explanatory text).
+
+Continue from here:`;
+
+                    const response = await fetch(`${this.vllmEndpoint}/generate`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            prompt: continuationPrompt,
+                            max_tokens: Math.floor(this.maxTokens * 0.5), // Use fewer tokens for continuation
+                            temperature: 0.1, // Lower temperature for consistency
+                            top_p: 0.8,
+                            stop: [],
+                            stream: false
+                        }),
+                        signal: AbortSignal.timeout(60000)
+                    });
+
+                    if (!response.ok) {
+                        console.warn('Continuation request failed');
+                        return null;
+                    }
+
+                    const data = await response.json();
+                    let continuationText = '';
+                    
+                    if (data.text) {
+                        continuationText = data.text.trim();
+                    } else if (data.choices && data.choices[0] && data.choices[0].text) {
+                        continuationText = data.choices[0].text.trim();
+                    } else if (data.generated_text) {
+                        continuationText = data.generated_text.trim();
+                    }
+
+                    if (continuationText) {
+                        console.log('Got continuation text, combining responses...');
+                        return this.combineResponses(partialResponse, continuationText);
+                    }
+
+                    return null;
+
+                } catch (error) {
+                    console.error('Continuation request failed:', error);
+                    return null;
+                }
+            }
+
+            combineResponses(partial, continuation) {
+                // Remove any duplicate opening braces or structure
+                let cleanContinuation = continuation;
+                
+                // If continuation starts with JSON structure, merge carefully
+                if (cleanContinuation.startsWith('{')) {
+                    // This means the continuation started a new JSON object
+                    // We need to merge the content intelligently
+                    return this.mergePartialJSON(partial, cleanContinuation);
+                }
+                
+                // Simple concatenation for most cases
+                let combined = partial + cleanContinuation;
+                
+                // Try to fix common structural issues
+                combined = this.fixJSONStructure(combined);
+                
+                console.log('Combined response length:', combined.length);
+                return combined;
+            }
+
+            mergePartialJSON(partial, continuation) {
+                try {
+                    // Extract content from the continuation JSON
+                    const continuationData = JSON.parse(continuation);
+                    
+                    // Try to parse partial response up to the last valid structure
+                    let partialData = {};
+                    const lastBrace = partial.lastIndexOf('}');
+                    if (lastBrace > 0) {
+                        const partialToLastBrace = partial.substring(0, lastBrace + 1);
+                        try {
+                            partialData = JSON.parse(partialToLastBrace);
+                        } catch (e) {
+                            // If that fails, try to build partial object
+                            partialData = this.extractPartialObject(partial);
+                        }
+                    }
+                    
+                    // Merge the objects
+                    const merged = { ...partialData, ...continuationData };
+                    return JSON.stringify(merged, null, 2);
+                    
+                } catch (error) {
+                    console.warn('Smart merge failed, using simple concatenation');
+                    return partial + continuation;
+                }
+            }
+
+            fixJSONStructure(text) {
+                // Remove any text before the first {
+                const firstBrace = text.indexOf('{');
+                if (firstBrace > 0) {
+                    text = text.substring(firstBrace);
+                }
+                
+                // Try to balance braces
+                const openBraces = (text.match(/\{/g) || []).length;
+                const closeBraces = (text.match(/\}/g) || []).length;
+                
+                if (openBraces > closeBraces) {
+                    // Add missing closing braces
+                    text += '}}'.repeat(openBraces - closeBraces);
+                }
+                
+                // Remove trailing commas before closing braces
+                text = text.replace(/,(\s*[\}\]])/g, '$1');
+                
+                return text;
+            }
 
             parseRawLLMResponse(rawText) {
                 const lines = rawText.split('\n');
@@ -3530,85 +3829,269 @@ Analysis Date: ${new Date().toLocaleString()}
             }
 
             displayLLMCopybookAnalysisWithLifecycle(llmAnalysis, lifecycleFlow) {
-                if (!llmAnalysis || llmAnalysis.error) {
-                    return `
-                        <div style="background: rgba(244, 67, 54, 0.1); padding: 20px; border-radius: 10px; border-left: 4px solid #f44336;">
-                            <h4 style="color: #f44336; margin-bottom: 15px;">⚠️ LLM Analysis Error</h4>
-                            <p>LLM analysis encountered an issue. Raw response available in export.</p>
+    if (!llmAnalysis || llmAnalysis.error) {
+        return `
+            <div style="background: rgba(244, 67, 54, 0.1); padding: 20px; border-radius: 10px; border-left: 4px solid #f44336;">
+                <h4 style="color: #f44336; margin-bottom: 15px;">⚠️ LLM Analysis Issue</h4>
+                ${llmAnalysis?.error ? `
+                    <p style="margin-bottom: 15px;">LLM analysis encountered an issue: ${llmAnalysis.error}</p>
+                    ${llmAnalysis.extractedData ? `
+                        <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; margin-top: 15px;">
+                            <h5 style="color: #FFD700; margin-bottom: 10px;">🔧 Extracted Information:</h5>
+                            ${this.displayExtractedData(llmAnalysis.extractedData)}
                         </div>
-                    `;
-                }
+                    ` : ''}
+                    ${llmAnalysis.rawResponse ? `
+                        <details style="margin-top: 15px;">
+                            <summary style="cursor: pointer; color: #FFD700;">📄 View Raw LLM Response</summary>
+                            <pre style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 5px; font-size: 11px; max-height: 200px; overflow-y: auto; margin-top: 10px;">${llmAnalysis.rawResponse.substring(0, 1000)}${llmAnalysis.rawResponse.length > 1000 ? '...\n\n[Truncated - Full response available in export]' : ''}</pre>
+                        </details>
+                    ` : ''}
+                ` : `
+                    <p>LLM analysis data not available. Raw response may be accessible through export.</p>
+                `}
+            </div>
+        `;
+    }
 
-                let html = `
-                    <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #FFD700; margin-bottom: 20px;">
-                        <h4 style="color: #FFD700; margin-bottom: 15px;">🤖 LLM Copybook Analysis with Lifecycle Context</h4>
+    let html = `
+        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #FFD700; margin-bottom: 20px;">
+            <h4 style="color: #FFD700; margin-bottom: 15px;">🤖 LLM Copybook Analysis with Lifecycle Context</h4>
+    `;
+
+    // Display field categories if available
+    if (llmAnalysis.fieldCategories || llmAnalysis.extractedData?.fieldCategories) {
+        const fieldCategories = llmAnalysis.fieldCategories || llmAnalysis.extractedData.fieldCategories;
+        const totalFields = llmAnalysis.totalFields || llmAnalysis.extractedData?.totalFields || 0;
+        
+        html += `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                <div style="text-align: center; background: rgba(76, 175, 80, 0.1); padding: 10px; border-radius: 5px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #4CAF50;">${totalFields}</div>
+                    <div style="font-size: 11px;">Total Fields</div>
+                </div>
+        `;
+
+        Object.entries(fieldCategories).forEach(([category, fields]) => {
+            if (fields && fields.length > 0) {
+                const color = this.getCategoryColor(category);
+                html += `
+                    <div style="text-align: center; background: rgba(${this.hexToRgb(color)}, 0.1); padding: 10px; border-radius: 5px;">
+                        <div style="font-size: 1.2rem; font-weight: bold; color: ${color};">${fields.length}</div>
+                        <div style="font-size: 11px;">${this.formatCategoryName(category)}</div>
+                    </div>
                 `;
-
-                // Display field categories if available
-                if (llmAnalysis.fieldCategories) {
-                    const totalFields = llmAnalysis.totalFields || 0;
-                    
-                    html += `
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; margin-bottom: 20px;">
-                            <div style="text-align: center; background: rgba(76, 175, 80, 0.1); padding: 10px; border-radius: 5px;">
-                                <div style="font-size: 1.2rem; font-weight: bold; color: #4CAF50;">${totalFields}</div>
-                                <div style="font-size: 11px;">Total Fields</div>
-                            </div>
-                    `;
-
-                    Object.entries(llmAnalysis.fieldCategories).forEach(([category, fields]) => {
-                        if (fields && fields.length > 0) {
-                            const color = this.getCategoryColor(category);
-                            html += `
-                                <div style="text-align: center; background: rgba(${this.hexToRgb(color)}, 0.1); padding: 10px; border-radius: 5px;">
-                                    <div style="font-size: 1.2rem; font-weight: bold; color: ${color};">${fields.length}</div>
-                                    <div style="font-size: 11px;">${this.formatCategoryName(category)}</div>
-                                </div>
-                            `;
-                        }
-                    });
-
-                    html += `</div>`;
-
-                    // Display lifecycle-aware field categorization
-                    if (llmAnalysis.usagePatternAnalysis) {
-                        html += this.displayLifecycleFieldAnalysis(llmAnalysis.usagePatternAnalysis);
-                    }
-
-                    // Display detailed field categories
-                    html += `
-                        <div style="margin-bottom: 20px;">
-                            <h5 style="color: #FFD700; margin-bottom: 15px;">🏷️ LLM Field Categorization with Lifecycle Context:</h5>
-                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
-                    `;
-
-                    Object.entries(llmAnalysis.fieldCategories).forEach(([category, fields]) => {
-                        if (fields && fields.length > 0) {
-                            const color = this.getCategoryColor(category);
-                            const icon = this.getCategoryIcon(category);
-                            
-                            html += `
-                                <div style="background: rgba(255, 255, 255, 0.05); padding: 12px; border-radius: 8px; border-left: 3px solid ${color};">
-                                    <h6 style="color: ${color}; margin-bottom: 8px; font-size: 13px;">${icon} ${this.formatCategoryName(category)} (${fields.length})</h6>
-                                    <div style="max-height: 120px; overflow-y: auto;">
-                                        ${fields.slice(0, 10).map(field => `
-                                            <div style="margin: 3px 0; padding: 3px 6px; background: rgba(0,0,0,0.2); border-radius: 3px; font-family: monospace; font-size: 11px;">
-                                                ${field}
-                                            </div>
-                                        `).join('')}
-                                        ${fields.length > 10 ? `<div style="font-size: 10px; opacity: 0.7; text-align: center; margin-top: 5px;">... and ${fields.length - 10} more</div>` : ''}
-                                    </div>
-                                </div>
-                            `;
-                        }
-                    });
-
-                    html += `</div></div>`;
-                }
-
-                html += '</div>';
-                return html;
             }
+        });
+
+        html += `</div>`;
+
+        // Display lifecycle-aware field categorization
+        if (llmAnalysis.usagePatternAnalysis) {
+            html += this.displayLifecycleFieldAnalysis(llmAnalysis.usagePatternAnalysis);
+        }
+
+        // Display detailed field categories
+        html += `
+            <div style="margin-bottom: 20px;">
+                <h5 style="color: #FFD700; margin-bottom: 15px;">🏷️ LLM Field Categorization with Lifecycle Context:</h5>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+        `;
+
+        Object.entries(fieldCategories).forEach(([category, fields]) => {
+            if (fields && fields.length > 0) {
+                const color = this.getCategoryColor(category);
+                const icon = this.getCategoryIcon(category);
+                
+                html += `
+                    <div style="background: rgba(255, 255, 255, 0.05); padding: 12px; border-radius: 8px; border-left: 3px solid ${color};">
+                        <h6 style="color: ${color}; margin-bottom: 8px; font-size: 13px;">${icon} ${this.formatCategoryName(category)} (${fields.length})</h6>
+                        <div style="max-height: 120px; overflow-y: auto;">
+                            ${fields.slice(0, 10).map(field => `
+                                <div style="margin: 3px 0; padding: 3px 6px; background: rgba(0,0,0,0.2); border-radius: 3px; font-family: monospace; font-size: 11px;">
+                                    ${field}
+                                </div>
+                            `).join('')}
+                            ${fields.length > 10 ? `<div style="font-size: 10px; opacity: 0.7; text-align: center; margin-top: 5px;">... and ${fields.length - 10} more</div>` : ''}
+                        </div>
+                    </div>
+                `;
+            }
+        });
+
+        html += `</div></div>`;
+    }
+
+    // Display business rules if available
+    if (llmAnalysis.businessRules && llmAnalysis.businessRules.length > 0) {
+        html += `
+            <div style="margin-bottom: 20px;">
+                <h5 style="color: #9C27B0; margin-bottom: 15px;">⚖️ Business Rules with Lifecycle Context:</h5>
+                <div style="background: rgba(156, 39, 176, 0.1); padding: 15px; border-radius: 8px; border-left: 3px solid #9C27B0;">
+                    ${llmAnalysis.businessRules.slice(0, 5).map((rule, index) => `
+                        <div style="margin-bottom: 12px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 6px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                <strong style="color: #c084fc;">Business Rule ${index + 1}</strong>
+                                <span style="font-size: 10px; background: #9C27B0; color: white; padding: 2px 6px; border-radius: 3px;">LIFECYCLE</span>
+                            </div>
+                            <div style="font-size: 12px; line-height: 1.5;">${rule}</div>
+                        </div>
+                    `).join('')}
+                    ${llmAnalysis.businessRules.length > 5 ? `
+                        <div style="text-align: center; margin-top: 10px; opacity: 0.7; font-size: 11px;">
+                            ... and ${llmAnalysis.businessRules.length - 5} more business rules
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    // Display field details if available
+    if (llmAnalysis.fieldDetails && Object.keys(llmAnalysis.fieldDetails).length > 0) {
+        const fieldCount = Object.keys(llmAnalysis.fieldDetails).length;
+        html += `
+            <div style="margin-bottom: 20px;">
+                <h5 style="color: #00bcd4; margin-bottom: 15px;">📊 Detailed Field Analysis (${fieldCount} fields):</h5>
+                <div style="background: rgba(0, 188, 212, 0.1); padding: 15px; border-radius: 8px; border-left: 3px solid #00bcd4; max-height: 300px; overflow-y: auto;">
+                    ${Object.entries(llmAnalysis.fieldDetails).slice(0, 10).map(([fieldName, details]) => `
+                        <div style="margin-bottom: 10px; padding: 8px; background: rgba(0,0,0,0.2); border-radius: 4px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                <strong style="color: #4dd0e1; font-family: monospace;">${fieldName}</strong>
+                                <div style="display: flex; gap: 5px;">
+                                    ${details.level ? `<span style="font-size: 9px; background: #00bcd4; color: white; padding: 1px 4px; border-radius: 2px;">L${details.level}</span>` : ''}
+                                    ${details.category ? `<span style="font-size: 9px; background: ${this.getCategoryColor(details.category)}; color: white; padding: 1px 4px; border-radius: 2px;">${details.category}</span>` : ''}
+                                </div>
+                            </div>
+                            <div style="font-size: 10px; display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 5px;">
+                                ${details.picture ? `<div><span style="color: #90caf9;">PIC:</span> ${details.picture}</div>` : ''}
+                                ${details.value ? `<div><span style="color: #90caf9;">VALUE:</span> ${details.value}</div>` : ''}
+                                ${details.lifecycleStage ? `<div><span style="color: #90caf9;">STAGE:</span> ${details.lifecycleStage}</div>` : ''}
+                            </div>
+                            ${details.businessRole ? `
+                                <div style="font-size: 10px; margin-top: 5px; color: #e1f5fe;">${details.businessRole}</div>
+                            ` : ''}
+                        </div>
+                    `).join('')}
+                    ${fieldCount > 10 ? `
+                        <div style="text-align: center; margin-top: 10px; opacity: 0.7; font-size: 11px;">
+                            ... and ${fieldCount - 10} more fields available in Field Matrix tab
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    // Display lifecycle recommendations if available
+    if (llmAnalysis.lifecycleRecommendations && llmAnalysis.lifecycleRecommendations.length > 0) {
+        html += `
+            <div style="margin-bottom: 20px;">
+                <h5 style="color: #8b5cf6; margin-bottom: 15px;">🌊 Lifecycle Optimization Recommendations:</h5>
+                <div style="background: rgba(139, 92, 246, 0.1); padding: 15px; border-radius: 8px; border-left: 3px solid #8b5cf6;">
+                    ${llmAnalysis.lifecycleRecommendations.slice(0, 5).map((rec, index) => `
+                        <div style="margin-bottom: 12px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 6px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                <strong style="color: #a78bfa;">Lifecycle Recommendation ${index + 1}</strong>
+                                <span style="font-size: 10px; background: #8b5cf6; color: white; padding: 2px 6px; border-radius: 3px;">OPTIMIZATION</span>
+                            </div>
+                            <div style="font-size: 12px; line-height: 1.5;">${rec}</div>
+                        </div>
+                    `).join('')}
+                    ${llmAnalysis.lifecycleRecommendations.length > 5 ? `
+                        <div style="text-align: center; margin-top: 10px; opacity: 0.7; font-size: 11px;">
+                            ... and ${llmAnalysis.lifecycleRecommendations.length - 5} more recommendations
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    // Display usage pattern analysis if available
+    if (llmAnalysis.usagePatternAnalysis && Object.keys(llmAnalysis.usagePatternAnalysis).length > 0) {
+        html += `
+            <div style="margin-bottom: 20px;">
+                <h5 style="color: #f59e0b; margin-bottom: 15px;">📈 Usage Pattern Analysis:</h5>
+                <div style="background: rgba(245, 158, 11, 0.1); padding: 15px; border-radius: 8px; border-left: 3px solid #f59e0b;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;">
+                        ${llmAnalysis.usagePatternAnalysis.creationFields ? `
+                            <div style="text-align: center; background: rgba(34, 197, 94, 0.1); padding: 10px; border-radius: 6px;">
+                                <div style="font-size: 1.1rem; font-weight: bold; color: #22c55e;">${llmAnalysis.usagePatternAnalysis.creationFields.length}</div>
+                                <div style="font-size: 10px;">🌱 Creation Fields</div>
+                            </div>
+                        ` : ''}
+                        ${llmAnalysis.usagePatternAnalysis.updateFields ? `
+                            <div style="text-align: center; background: rgba(245, 158, 11, 0.1); padding: 10px; border-radius: 6px;">
+                                <div style="font-size: 1.1rem; font-weight: bold; color: #f59e0b;">${llmAnalysis.usagePatternAnalysis.updateFields.length}</div>
+                                <div style="font-size: 10px;">⚙️ Update Fields</div>
+                            </div>
+                        ` : ''}
+                        ${llmAnalysis.usagePatternAnalysis.outputFields ? `
+                            <div style="text-align: center; background: rgba(59, 130, 246, 0.1); padding: 10px; border-radius: 6px;">
+                                <div style="font-size: 1.1rem; font-weight: bold; color: #3b82f6;">${llmAnalysis.usagePatternAnalysis.outputFields.length}</div>
+                                <div style="font-size: 10px;">📤 Output Fields</div>
+                            </div>
+                        ` : ''}
+                        ${llmAnalysis.usagePatternAnalysis.purgeFields ? `
+                            <div style="text-align: center; background: rgba(239, 68, 68, 0.1); padding: 10px; border-radius: 6px;">
+                                <div style="font-size: 1.1rem; font-weight: bold; color: #ef4444;">${llmAnalysis.usagePatternAnalysis.purgeFields.length}</div>
+                                <div style="font-size: 10px;">🗑️ Purge Fields</div>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // Display extracted data fallback if main analysis failed but we have partial data
+    if (llmAnalysis.extractedData && (!llmAnalysis.fieldCategories || Object.keys(llmAnalysis.fieldCategories || {}).length === 0)) {
+        html += `
+            <div style="margin-bottom: 20px;">
+                <h5 style="color: #ff9800; margin-bottom: 15px;">🔧 Extracted Information (Fallback Analysis):</h5>
+                <div style="background: rgba(255, 152, 0, 0.1); padding: 15px; border-radius: 8px; border-left: 3px solid #ff9800;">
+                    ${this.displayExtractedData(llmAnalysis.extractedData)}
+                </div>
+            </div>
+        `;
+    }
+
+    // Display quality score and analysis metadata
+    if (llmAnalysis.qualityScore || llmAnalysis.analysisMethod) {
+        html += `
+            <div style="margin-bottom: 20px;">
+                <h5 style="color: #64748b; margin-bottom: 15px;">📊 Analysis Metadata:</h5>
+                <div style="background: rgba(100, 116, 139, 0.1); padding: 15px; border-radius: 8px; border-left: 3px solid #64748b;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;">
+                        ${llmAnalysis.qualityScore ? `
+                            <div style="text-align: center;">
+                                <div style="font-size: 1.1rem; font-weight: bold; color: #FFD700;">${llmAnalysis.qualityScore}/10</div>
+                                <div style="font-size: 10px; color: #94a3b8;">Quality Score</div>
+                            </div>
+                        ` : ''}
+                        ${llmAnalysis.analysisMethod ? `
+                            <div style="text-align: center;">
+                                <div style="font-size: 10px; font-weight: bold; color: #94a3b8;">${llmAnalysis.analysisMethod}</div>
+                                <div style="font-size: 10px; color: #94a3b8;">Analysis Method</div>
+                            </div>
+                        ` : ''}
+                        ${llmAnalysis.status ? `
+                            <div style="text-align: center;">
+                                <div style="font-size: 10px; font-weight: bold; color: #94a3b8;">${llmAnalysis.status}</div>
+                                <div style="font-size: 10px; color: #94a3b8;">Status</div>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    html += '</div>';
+    return html;
+}
+
 
             displayLifecycleFieldAnalysis(usagePatternAnalysis) {
                 return `
