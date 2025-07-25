@@ -1876,7 +1876,7 @@
             }
             // === NEW: FILE LIFECYCLE FLOW EXTRACTION ===
             async extractFileLifecycleFlow(componentName, relevantFiles) {
-                console.log('Extracting file lifecycle flow...');
+                console.log('Extracting file lifecycle flow for:', componentName);
                 
                 const lifecycleFlow = {
                     componentName: componentName,
@@ -1891,145 +1891,286 @@
                     usagePattern: 'UNKNOWN'
                 };
 
-                // Analyze each relevant file for lifecycle information
-                for (const file of relevantFiles) {
-                    const fileLifecycle = this.analyzeFileForLifecycle(file, componentName);
+                // IMPORTANT: Analyze ALL uploaded files, not just relevant ones
+                // This is crucial for copybooks that are used by many programs
+                const allFilesToAnalyze = this.uploadedFiles;
+                
+                console.log(`Analyzing ${allFilesToAnalyze.length} total files for lifecycle of ${componentName}`);
+
+                // First pass: Find programs that use this component (especially for copybooks)
+                const programsUsingComponent = this.findAllProgramsUsingComponent(componentName);
+                console.log(`Found ${programsUsingComponent.length} programs using ${componentName}:`, 
+                            programsUsingComponent.map(p => p.name));
+
+                // Analyze each file for lifecycle information
+                for (const file of allFilesToAnalyze) {
+                    const fileLifecycle = this.analyzeFileForComponentLifecycle(file, componentName);
                     this.mergeLifecycleData(lifecycleFlow, fileLifecycle, file.name);
+                }
+
+                // Special handling for copybooks: analyze programs that COPY this component
+                if (this.isLikelyCopybook(componentName)) {
+                    console.log(`${componentName} appears to be a copybook, analyzing programs that use it...`);
+                    
+                    for (const program of programsUsingComponent) {
+                        const programLifecycle = this.analyzeFileForComponentLifecycle(program, componentName);
+                        this.mergeLifecycleData(lifecycleFlow, programLifecycle, program.name);
+                    }
                 }
 
                 // Determine overall usage pattern
                 lifecycleFlow.usagePattern = this.determineUsagePattern(lifecycleFlow);
                 
                 // Find field-level lifecycle information
-                lifecycleFlow.fieldUpdateTracking = this.extractFieldUpdateTracking(relevantFiles, componentName);
+                lifecycleFlow.fieldUpdateTracking = this.extractFieldUpdateTracking(allFilesToAnalyze, componentName);
 
-                console.log('File lifecycle flow extracted:', lifecycleFlow);
+                console.log('Complete file lifecycle flow extracted:', lifecycleFlow);
                 return lifecycleFlow;
             }
 
-            analyzeFileForLifecycle(file, componentName) {
-                const fileLifecycle = {
-                    creation: [],
-                    reading: [],
-                    updating: [],
-                    deletion: [],
-                    cicsOps: [],
-                    batchOps: [],
-                    fieldOps: {}
-                };
-
-                const lines = file.content.split('\n');
-                const upperContent = file.content.toUpperCase();
-                let currentProgram = '';
-
-                lines.forEach((line, lineNum) => {
-                    const trimmed = line.trim().toUpperCase();
-                    
-                    // Track current program
-                    const programMatch = trimmed.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]+)/);
-                    if (programMatch) {
-                        currentProgram = programMatch[1];
-                    }
-
-                    // File creation operations
-                    if (trimmed.includes('OPEN OUTPUT') || trimmed.includes('WRITE ')) {
-                        const fileMatch = trimmed.match(/(?:OPEN OUTPUT|WRITE)\s+([A-Z][A-Z0-9\-_]+)/);
-                        if (fileMatch) {
-                            fileLifecycle.creation.push({
-                                operation: trimmed.includes('OPEN OUTPUT') ? 'OPEN_OUTPUT' : 'WRITE',
-                                target: fileMatch[1],
-                                program: currentProgram,
-                                line: lineNum + 1
-                            });
-                        }
-                    }
-
-                    // File reading operations
-                    if (trimmed.includes('OPEN INPUT') || trimmed.includes('READ ')) {
-                        const fileMatch = trimmed.match(/(?:OPEN INPUT|READ)\s+([A-Z][A-Z0-9\-_]+)/);
-                        if (fileMatch) {
-                            fileLifecycle.reading.push({
-                                operation: trimmed.includes('OPEN INPUT') ? 'OPEN_INPUT' : 'READ',
-                                target: fileMatch[1],
-                                program: currentProgram,
-                                line: lineNum + 1
-                            });
-                        }
-                    }
-
-                    // File updating operations
-                    if (trimmed.includes('REWRITE') || trimmed.includes('OPEN I-O')) {
-                        const fileMatch = trimmed.match(/(?:REWRITE|OPEN I-O)\s+([A-Z][A-Z0-9\-_]+)/);
-                        if (fileMatch) {
-                            fileLifecycle.updating.push({
-                                operation: trimmed.includes('REWRITE') ? 'REWRITE' : 'OPEN_IO',
-                                target: fileMatch[1],
-                                program: currentProgram,
-                                line: lineNum + 1
-                            });
-                        }
-                    }
-
-                    // CICS operations
-                    if (trimmed.includes('EXEC CICS')) {
-                        if (trimmed.includes('SEND MAP')) {
-                            const mapMatch = trimmed.match(/MAP\s*\(\s*['"]*([A-Z][A-Z0-9\-_]+)['"]*\s*\)/);
-                            if (mapMatch) {
-                                fileLifecycle.cicsOps.push({
-                                    operation: 'SEND_MAP',
-                                    target: mapMatch[1],
-                                    program: currentProgram,
-                                    line: lineNum + 1
-                                });
-                            }
-                        }
-                        if (trimmed.includes('RECEIVE MAP')) {
-                            const mapMatch = trimmed.match(/MAP\s*\(\s*['"]*([A-Z][A-Z0-9\-_]+)['"]*\s*\)/);
-                            if (mapMatch) {
-                                fileLifecycle.cicsOps.push({
-                                    operation: 'RECEIVE_MAP',
-                                    target: mapMatch[1],
-                                    program: currentProgram,
-                                    line: lineNum + 1
-                                });
-                            }
-                        }
-                    }
-
-                    // JCL batch operations
-                    if (trimmed.includes('//EXEC PGM=')) {
-                        const programMatch = trimmed.match(/\/\/EXEC\s+PGM=([A-Z][A-Z0-9\-_]+)/);
-                        if (programMatch) {
-                            fileLifecycle.batchOps.push({
-                                operation: 'EXEC_PGM',
-                                target: programMatch[1],
-                                program: 'JCL',
-                                line: lineNum + 1
-                            });
-                        }
-                    }
-
-                    // Field-level operations
-                    const moveMatch = trimmed.match(/MOVE\s+([A-Z][A-Z0-9\-_]+)\s+TO\s+([A-Z][A-Z0-9\-_]+)/);
-                    if (moveMatch) {
-                        const sourceField = moveMatch[1];
-                        const targetField = moveMatch[2];
+            findAllProgramsUsingComponent(componentName) {
+                const usingPrograms = [];
+                
+                this.uploadedFiles.forEach(file => {
+                    if (file.type === 'COBOL Program' || file.type === 'Text File') {
+                        const content = file.content.toUpperCase();
+                        const componentUpper = componentName.toUpperCase();
                         
-                        if (!fileLifecycle.fieldOps[targetField]) {
-                            fileLifecycle.fieldOps[targetField] = [];
+                        // Check for COPY statements
+                        const copyPatterns = [
+                            new RegExp(`COPY\\s+['"]*${componentUpper}['"]*`, 'g'),
+                            new RegExp(`COPY\\s+${componentUpper}\\s`, 'g'),
+                            new RegExp(`COPY\\s+${componentUpper}\\.`, 'g'),
+                            new RegExp(`INCLUDE\\s+['"]*${componentUpper}['"]*`, 'g')
+                        ];
+                        
+                        const usesCopybook = copyPatterns.some(pattern => pattern.test(content));
+                        
+                        // Check for file operations on this component
+                        const filePatterns = [
+                            new RegExp(`FD\\s+${componentUpper}`, 'g'),
+                            new RegExp(`SELECT\\s+${componentUpper}`, 'g'),
+                            new RegExp(`OPEN\\s+(?:INPUT|OUTPUT|I-O)\\s+${componentUpper}`, 'g'),
+                            new RegExp(`READ\\s+${componentUpper}`, 'g'),
+                            new RegExp(`WRITE\\s+${componentUpper}`, 'g'),
+                            new RegExp(`REWRITE\\s+${componentUpper}`, 'g')
+                        ];
+                        
+                        const usesFile = filePatterns.some(pattern => pattern.test(content));
+                        
+                        if (usesCopybook || usesFile) {
+                            usingPrograms.push(file);
                         }
-                        fileLifecycle.fieldOps[targetField].push({
-                            operation: 'MOVE',
-                            source: sourceField,
-                            program: currentProgram,
-                            line: lineNum + 1
-                        });
                     }
                 });
-
-                return fileLifecycle;
+                
+                return usingPrograms;
             }
 
+            analyzeFileForComponentLifecycle(file, componentName) {
+    const fileLifecycle = {
+        creation: [],
+        reading: [],
+        updating: [],
+        deletion: [],
+        cicsOps: [],
+        batchOps: [],
+        fieldOps: {}
+    };
+
+    const lines = file.content.split('\n');
+    const upperContent = file.content.toUpperCase();
+    const componentUpper = componentName.toUpperCase();
+    let currentProgram = '';
+
+    // Extract program name from this file
+    const programMatch = upperContent.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]+)/);
+    if (programMatch) {
+        currentProgram = programMatch[1];
+    } else {
+        // Use filename as fallback
+        currentProgram = file.name.replace(/\.[^/.]+$/, "").toUpperCase();
+    }
+
+    console.log(`Analyzing ${file.name} (${currentProgram}) for ${componentName} lifecycle...`);
+
+    lines.forEach((line, lineNum) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // Skip if this line doesn't relate to our component
+        if (!trimmed.includes(componentUpper)) {
+            return;
+        }
+
+        // File creation operations
+        if (trimmed.includes('OPEN OUTPUT') && trimmed.includes(componentUpper)) {
+            fileLifecycle.creation.push({
+                operation: 'OPEN_OUTPUT',
+                target: componentUpper,
+                program: currentProgram,
+                line: lineNum + 1,
+                context: trimmed
+            });
+        }
+
+        if (trimmed.includes('WRITE') && trimmed.includes(componentUpper)) {
+            fileLifecycle.creation.push({
+                operation: 'WRITE',
+                target: componentUpper,
+                program: currentProgram,
+                line: lineNum + 1,
+                context: trimmed
+            });
+        }
+
+        // File reading operations
+        if (trimmed.includes('OPEN INPUT') && trimmed.includes(componentUpper)) {
+            fileLifecycle.reading.push({
+                operation: 'OPEN_INPUT',
+                target: componentUpper,
+                program: currentProgram,
+                line: lineNum + 1,
+                context: trimmed
+            });
+        }
+
+        if (trimmed.includes('READ') && trimmed.includes(componentUpper)) {
+            fileLifecycle.reading.push({
+                operation: 'READ',
+                target: componentUpper,
+                program: currentProgram,
+                line: lineNum + 1,
+                context: trimmed
+            });
+        }
+
+        // File updating operations
+        if ((trimmed.includes('REWRITE') || trimmed.includes('OPEN I-O')) && trimmed.includes(componentUpper)) {
+            fileLifecycle.updating.push({
+                operation: trimmed.includes('REWRITE') ? 'REWRITE' : 'OPEN_IO',
+                target: componentUpper,
+                program: currentProgram,
+                line: lineNum + 1,
+                context: trimmed
+            });
+        }
+
+        // COPY statement - this indicates the program uses the copybook structure
+        if (trimmed.includes('COPY') && trimmed.includes(componentUpper)) {
+            // Programs that copy a structure typically read/process its data
+            fileLifecycle.reading.push({
+                operation: 'COPY_USAGE',
+                target: componentUpper,
+                program: currentProgram,
+                line: lineNum + 1,
+                context: trimmed
+            });
+        }
+
+        // CICS operations
+        if (trimmed.includes('EXEC CICS')) {
+            if (trimmed.includes('SEND MAP') && trimmed.includes(componentUpper)) {
+                const mapMatch = trimmed.match(/MAP\s*\(\s*['"]*([A-Z][A-Z0-9\-_]+)['"]*\s*\)/);
+                fileLifecycle.cicsOps.push({
+                    operation: 'SEND_MAP',
+                    target: mapMatch ? mapMatch[1] : componentUpper,
+                    program: currentProgram,
+                    line: lineNum + 1,
+                    context: trimmed
+                });
+            }
+            
+            if (trimmed.includes('RECEIVE MAP') && trimmed.includes(componentUpper)) {
+                const mapMatch = trimmed.match(/MAP\s*\(\s*['"]*([A-Z][A-Z0-9\-_]+)['"]*\s*\)/);
+                fileLifecycle.cicsOps.push({
+                    operation: 'RECEIVE_MAP',
+                    target: mapMatch ? mapMatch[1] : componentUpper,
+                    program: currentProgram,
+                    line: lineNum + 1,
+                    context: trimmed
+                });
+            }
+        }
+
+        // JCL batch operations
+        if (trimmed.includes('//EXEC PGM=')) {
+            const programMatch = trimmed.match(/\/\/EXEC\s+PGM=([A-Z][A-Z0-9\-_]+)/);
+            if (programMatch) {
+                fileLifecycle.batchOps.push({
+                    operation: 'EXEC_PGM',
+                    target: programMatch[1],
+                    program: 'JCL',
+                    line: lineNum + 1,
+                    context: trimmed
+                });
+            }
+        }
+
+        // Field-level operations involving the component
+        const moveMatch = trimmed.match(/MOVE\s+([A-Z][A-Z0-9\-_]+)\s+TO\s+([A-Z][A-Z0-9\-_]+)/);
+        if (moveMatch) {
+            const sourceField = moveMatch[1];
+            const targetField = moveMatch[2];
+            
+            // Check if either field relates to our component
+            if (sourceField.includes(componentUpper.replace('.CPY', '').replace('-', '')) || 
+                targetField.includes(componentUpper.replace('.CPY', '').replace('-', ''))) {
+                
+                if (!fileLifecycle.fieldOps[targetField]) {
+                    fileLifecycle.fieldOps[targetField] = [];
+                }
+                fileLifecycle.fieldOps[targetField].push({
+                    operation: 'MOVE',
+                    source: sourceField,
+                    program: currentProgram,
+                    line: lineNum + 1,
+                    context: trimmed
+                });
+            }
+        }
+    });
+
+    console.log(`Found lifecycle operations in ${file.name}:`, {
+        creation: fileLifecycle.creation.length,
+        reading: fileLifecycle.reading.length,
+        updating: fileLifecycle.updating.length,
+        cicsOps: fileLifecycle.cicsOps.length,
+        batchOps: fileLifecycle.batchOps.length
+    });
+
+    return fileLifecycle;
+}
+
+isLikelyCopybook(componentName) {
+    // Check file extension or name patterns
+    const nameUpper = componentName.toUpperCase();
+    
+    // Extension-based detection
+    if (nameUpper.endsWith('.CPY') || nameUpper.endsWith('.COPYBOOK') || nameUpper.endsWith('.COPY')) {
+        return true;
+    }
+    
+    // Look for the actual file in uploaded files
+    const componentFile = this.uploadedFiles.find(f => 
+        f.name.toUpperCase().includes(nameUpper) || 
+        f.content.toUpperCase().includes(nameUpper)
+    );
+    
+    if (componentFile && componentFile.type === 'Copybook') {
+        return true;
+    }
+    
+    // Check if other files reference this component with COPY statements
+    const copyReferences = this.uploadedFiles.filter(f => {
+        const content = f.content.toUpperCase();
+        return content.includes(`COPY ${nameUpper}`) || 
+               content.includes(`COPY "${nameUpper}"`) || 
+               content.includes(`COPY '${nameUpper}'`);
+    });
+    
+    return copyReferences.length > 0;
+}
+            
             mergeLifecycleData(lifecycleFlow, fileLifecycle, fileName) {
                 // Merge creation sources
                 fileLifecycle.creation.forEach(op => {
@@ -2039,13 +2180,14 @@
                     });
                 });
 
-                // Merge reading programs
+                // Merge reading programs (include COPY usage)
                 fileLifecycle.reading.forEach(op => {
                     if (op.program && !lifecycleFlow.inputPrograms.find(p => p.program === op.program)) {
                         lifecycleFlow.inputPrograms.push({
                             program: op.program,
                             operation: op.operation,
-                            sourceFile: fileName
+                            sourceFile: fileName,
+                            context: op.context
                         });
                     }
                 });
@@ -2056,19 +2198,21 @@
                         lifecycleFlow.updatePrograms.push({
                             program: op.program,
                             operation: op.operation,
-                            sourceFile: fileName
+                            sourceFile: fileName,
+                            context: op.context
                         });
                     }
                 });
 
                 // Merge CICS screens
                 fileLifecycle.cicsOps.forEach(op => {
-                    if (!lifecycleFlow.cicsScreens.find(s => s.target === op.target)) {
+                    if (!lifecycleFlow.cicsScreens.find(s => s.target === op.target && s.program === op.program)) {
                         lifecycleFlow.cicsScreens.push({
                             screen: op.target,
                             operation: op.operation,
                             program: op.program,
-                            sourceFile: fileName
+                            sourceFile: fileName,
+                            context: op.context
                         });
                     }
                 });
@@ -2079,7 +2223,8 @@
                         lifecycleFlow.batchJobs.push({
                             job: op.target,
                             operation: op.operation,
-                            sourceFile: fileName
+                            sourceFile: fileName,
+                            context: op.context
                         });
                     }
                 });
