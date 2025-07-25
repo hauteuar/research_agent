@@ -2802,34 +2802,33 @@ RESPOND WITH VALID JSON ONLY:`;
             }
 
             parseJSONResponse(text) {
+                if (!text || typeof text !== 'string') {
+                    return { success: false, error: 'No text provided', rawText: text };
+                }
+
+                // First, try to extract JSON from the text
+                const jsonMatch = text.match(/\{[\s\S]*\}/);
+                let jsonText = jsonMatch ? jsonMatch[0] : text;
+
                 const attempts = [
                     // Attempt 1: Direct parse
-                    () => JSON.parse(text),
+                    () => JSON.parse(jsonText),
                     
-                    // Attempt 2: Extract JSON from text
+                    // Attempt 2: Clean and parse
                     () => {
-                        const jsonMatch = text.match(/\{[\s\S]*\}/);
-                        if (jsonMatch) {
-                            return JSON.parse(jsonMatch[0]);
-                        }
-                        throw new Error('No JSON found');
-                    },
-                    
-                    // Attempt 3: Clean and parse
-                    () => {
-                        const cleaned = this.cleanJSONText(text);
+                        const cleaned = this.aggressiveJSONClean(jsonText);
+                        console.log('Cleaned JSON attempt:', cleaned.substring(0, 200));
                         return JSON.parse(cleaned);
                     },
                     
-                    // Attempt 4: Fix structure and parse
+                    // Attempt 3: Extract partial structure
                     () => {
-                        const fixed = this.fixJSONStructure(text);
-                        return JSON.parse(fixed);
+                        return this.extractValidJSONStructure(text);
                     },
                     
-                    // Attempt 5: Extract partial object
+                    // Attempt 4: Create fallback structure
                     () => {
-                        return this.extractPartialObject(text);
+                        return this.createFallbackStructure(text);
                     }
                 ];
 
@@ -2837,6 +2836,7 @@ RESPOND WITH VALID JSON ONLY:`;
                     try {
                         const result = attempts[i]();
                         if (result && typeof result === 'object') {
+                            console.log(`JSON parse attempt ${i + 1} succeeded`);
                             return { success: true, data: result };
                         }
                     } catch (error) {
@@ -2847,12 +2847,178 @@ RESPOND WITH VALID JSON ONLY:`;
                 return { 
                     success: false, 
                     error: 'All JSON parsing attempts failed',
-                    rawText: text 
+                    rawText: text.substring(0, 1000)
+                };
+            }
+            
+
+            aggressiveJSONClean(text) {
+                if (!text) return '{}';
+                
+                // Extract content between first { and last }
+                const firstBrace = text.indexOf('{');
+                const lastBrace = text.lastIndexOf('}');
+                
+                if (firstBrace === -1 || lastBrace === -1 || firstBrace >= lastBrace) {
+                    return '{}';
+                }
+                
+                let jsonText = text.substring(firstBrace, lastBrace + 1);
+                
+                // Remove any text that looks like error messages or validation warnings
+                jsonText = jsonText.replace(/VALIDATION[^"]*?(?="|,|})/g, '"VALIDATION_ERROR"');
+                
+                // Fix common issues
+                jsonText = jsonText
+                    // Remove trailing commas
+                    .replace(/,(\s*[\}\]])/g, '$1')
+                    // Quote unquoted property names
+                    .replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":')
+                    // Fix unquoted string values (but preserve numbers, booleans, null)
+                    .replace(/:\s*([^",\[\{][^,\]\}]*?)(\s*[,\]\}])/g, (match, value, ending) => {
+                        const trimmed = value.trim();
+                        if (!trimmed) return `: ""${ending}`;
+                        if (trimmed === 'true' || trimmed === 'false' || trimmed === 'null') {
+                            return `: ${trimmed}${ending}`;
+                        }
+                        if (/^\d+(\.\d+)?$/.test(trimmed)) {
+                            return `: ${trimmed}${ending}`;
+                        }
+                        // Quote the value and escape any quotes inside
+                        const escaped = trimmed.replace(/"/g, '\\"');
+                        return `: "${escaped}"${ending}`;
+                    })
+                    // Fix array formatting
+                    .replace(/\[\s*([^"]\w+[^"]*?)\s*\]/g, (match, content) => {
+                        const items = content.split(',').map(item => {
+                            const trimmed = item.trim();
+                            if (trimmed === 'true' || trimmed === 'false' || trimmed === 'null' || /^\d+(\.\d+)?$/.test(trimmed)) {
+                                return trimmed;
+                            }
+                            return `"${trimmed.replace(/"/g, '\\"')}"`;
+                        });
+                        return `[${items.join(', ')}]`;
+                    });
+                
+                return jsonText;
+            }
+            
+           extractValidJSONStructure(text) {
+                const structure = {
+                    analysisMethod: 'Extracted Structure',
+                    status: 'Partial extraction successful'
+                };
+                
+                // Extract field categories
+                const fieldCategoriesMatch = text.match(/"fieldCategories":\s*\{([^}]+)\}/);
+                if (fieldCategoriesMatch) {
+                    structure.fieldCategories = this.parseFieldCategories(fieldCategoriesMatch[1]);
+                }
+                
+                // Extract total fields
+                const totalFieldsMatch = text.match(/"totalFields":\s*(\d+)/);
+                if (totalFieldsMatch) {
+                    structure.totalFields = parseInt(totalFieldsMatch[1]);
+                }
+                
+                // Extract quality score
+                const qualityMatch = text.match(/"qualityScore":\s*(\d+)/);
+                if (qualityMatch) {
+                    structure.qualityScore = parseInt(qualityMatch[1]);
+                }
+                
+                // Extract recommendations
+                const recMatch = text.match(/"recommendations":\s*\[(.*?)\]/s);
+                if (recMatch) {
+                    structure.recommendations = this.parseArrayContent(recMatch[1]);
+                }
+                
+                // Extract business rules
+                const rulesMatch = text.match(/"businessRules":\s*\[(.*?)\]/s);
+                if (rulesMatch) {
+                    structure.businessRules = this.parseArrayContent(rulesMatch[1]);
+                }
+                
+                return structure;
+            }
+           
+            parseFieldCategories(categoriesText) {
+                const categories = {};
+                
+                // Match category patterns like "INPUT_FIELDS": [...]
+                const categoryPattern = /"([A-Z_]+)":\s*\[(.*?)\]/g;
+                let match;
+                
+                while ((match = categoryPattern.exec(categoriesText)) !== null) {
+                    const categoryName = match[1];
+                    const itemsText = match[2];
+                    categories[categoryName] = this.parseArrayContent(itemsText);
+                }
+                
+                return categories;
+            }
+
+            parseArrayContent(arrayText) {
+                if (!arrayText || !arrayText.trim()) return [];
+                
+                const items = [];
+                // Match quoted strings
+                const quotedPattern = /"([^"]+)"/g;
+                let match;
+                
+                while ((match = quotedPattern.exec(arrayText)) !== null) {
+                    items.push(match[1]);
+                }
+                
+                // If no quoted items found, try splitting by comma
+                if (items.length === 0) {
+                    const splitItems = arrayText.split(',');
+                    for (const item of splitItems) {
+                        const cleaned = item.trim().replace(/['"]/g, '');
+                        if (cleaned && cleaned !== 'null' && cleaned !== 'undefined') {
+                            items.push(cleaned);
+                        }
+                    }
+                }
+                
+                return items;
+            }
+
+            createFallbackStructure(text) {
+                return {
+                    analysisMethod: 'Fallback Structure',
+                    status: 'JSON parsing failed, using text analysis',
+                    textContent: text.substring(0, 500),
+                    recommendations: [
+                        'Review the raw LLM response for detailed analysis',
+                        'Check LLM response format configuration',
+                        'Consider adjusting prompt for better JSON output'
+                    ],
+                    qualityScore: 4,
+                    hasContent: text && text.length > 0,
+                    extractedInfo: this.extractBasicInfo(text)
                 };
             }
 
-            
-               cleanJSONText(text) {
+            extractBasicInfo(text) {
+                const info = {};
+                
+                // Look for common patterns
+                if (text.includes('field') || text.includes('FIELD')) {
+                    info.hasFieldInfo = true;
+                }
+                if (text.includes('business') || text.includes('BUSINESS')) {
+                    info.hasBusinessInfo = true;
+                }
+                if (text.includes('recommend') || text.includes('RECOMMEND')) {
+                    info.hasRecommendations = true;
+                }
+                
+                return info;
+            }
+           
+           
+            cleanJSONText(text) {
                     if (!text || typeof text !== 'string') return '{}';
                     
                     // Remove any text before the first {
@@ -3087,7 +3253,7 @@ Continue from here:`;
                         },
                         body: JSON.stringify({
                             prompt: continuationPrompt,
-                            max_tokens: Math.floor(this.maxTokens * 0.5), // Use fewer tokens for continuation
+                            max_tokens: Math.floor(this.maxTokens * 0.3), // Use fewer tokens for continuation
                             temperature: 0.1, // Lower temperature for consistency
                             top_p: 0.8,
                             stop: [],
