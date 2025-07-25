@@ -5339,38 +5339,4 @@ Analysis Date: ${new Date().toLocaleString()}
         }
     </script>
 </body>
-</html>);
-                } else {
-                    // Fallback: generate basic lifecycle steps from lifecycle flow data
-                    if (lifecycleFlow.creationSources.length > 0) {
-                        html += `
-                            <div class="lifecycle-step active">
-                                <div class="lifecycle-step-icon">🌱</div>
-                                <div class="lifecycle-step-content">
-                                    <div class="lifecycle-step-title">Data Creation</div>
-                                    <div class="lifecycle-step-description">Initial data population and file creation</div>
-                                    <div class="lifecycle-step-programs">
-                                        ${lifecycleFlow.creationSources.map(s => s.program ? `<span class="program-tag">${s.program}</span>` : '').join('')}
-                                    </div>
-                                </div>
-                            </div>
-                        `;
-                    }
-
-                    if (lifecycleFlow.updatePrograms.length > 0) {
-                        html += `
-                            <div class="lifecycle-step active">
-                                <div class="lifecycle-step-icon">⚙️</div>
-                                <div class="lifecycle-step-content">
-                                    <div class="lifecycle-step-title">Data Processing</div>
-                                    <div class="lifecycle-step-description">Data validation, calculation, and transformation</div>
-                                    <div class="lifecycle-step-programs">
-                                        ${lifecycleFlow.updatePrograms.map(p => `<span class="program-tag">${p.program}</span>`).join('')}
-                                    </div>
-                                </div>
-                            }
-                        `;
-                    }
-</script>
-</body>
 </html>
