@@ -1994,10 +1994,14 @@ extractCopybookFields(copybookName, relevantFiles) {
     lines.forEach((line, index) => {
         const trimmed = line.trim();
         
-        // FOCUS ON 01-LEVEL FIELDS ONLY (main record structures)
-        const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]*)/);
-        if (field01Match) {
-            const fieldName = field01Match[1];
+        // EXTRACT ALL FIELD LEVELS (01, 05, 10, 15, 20, etc.)
+        const fieldMatch = trimmed.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]*)/);
+        if (fieldMatch) {
+            const level = parseInt(fieldMatch[1]);
+            const fieldName = fieldMatch[2];
+            
+            // Skip 88-level conditions for now (they're conditional values)
+            if (level === 88) return;
             
             // Extract PIC clause if present
             const picMatch = trimmed.match(/PIC\s+([X9VS\(\)]+)/i);
@@ -2007,15 +2011,31 @@ extractCopybookFields(copybookName, relevantFiles) {
             const valueMatch = trimmed.match(/VALUE\s+([^.]+)/i);
             const value = valueMatch ? valueMatch[1].trim() : '';
             
-            // Check if it's a record layout (no PIC clause typically means group item)
-            const isRecordLayout = !picture && !value;
+            // Extract OCCURS clause if present
+            const occursMatch = trimmed.match(/OCCURS\s+(\d+)/i);
+            const occurs = occursMatch ? parseInt(occursMatch[1]) : 0;
+            
+            // Extract REDEFINES clause if present
+            const redefinesMatch = trimmed.match(/REDEFINES\s+([A-Z][A-Z0-9\-_]*)/i);
+            const redefines = redefinesMatch ? redefinesMatch[1] : '';
+            
+            // Determine field type
+            const isRecordLayout = level === 1 && !picture && !value;
+            const isGroupField = !picture && !value && level > 1;
+            const isElementaryField = !!picture;
+            const isConstant = !!value;
             
             fields.push({
                 name: fieldName,
-                level: 1, // Always 01 level
+                level: level,
                 picture: picture,
                 value: value,
+                occurs: occurs,
+                redefines: redefines,
                 isRecordLayout: isRecordLayout,
+                isGroupField: isGroupField,
+                isElementaryField: isElementaryField,
+                isConstant: isConstant,
                 lineNumber: index + 1,
                 definition: trimmed,
                 // Add lifecycle tracking properties
@@ -2030,7 +2050,7 @@ extractCopybookFields(copybookName, relevantFiles) {
         }
     });
     
-    console.log(`Extracted ${fields.length} 01-level fields from copybook ${copybookName}`);
+    console.log(`Extracted ${fields.length} fields (all levels) from copybook ${copybookName}`);
     return fields;
 }
 
@@ -3876,61 +3896,62 @@ parseJSONResponse(text) {
         };
     }
 
-    console.log('Attempting to parse LLM response...');
+    console.log('=== JSON PARSING DEBUG ===');
     console.log('Raw text length:', text.length);
-    console.log('First 300 chars:', text.substring(0, 300));
-    console.log('Last 300 chars:', text.substring(Math.max(0, text.length - 300)));
+    console.log('First 500 chars:', text.substring(0, 500));
+    console.log('Last 500 chars:', text.substring(Math.max(0, text.length - 500)));
 
-    // Step 1: Try to extract JSON block
-    let jsonText = this.extractJSONFromText(text);
-    
-    // Step 2: Multiple parsing attempts
-    const attempts = [
-        // Attempt 1: Direct parse
-        () => {
-            console.log('Parse attempt 1: Direct JSON parse');
-            return JSON.parse(jsonText);
-        },
-        
-        // Attempt 2: Clean common issues
-        () => {
-            console.log('Parse attempt 2: Clean and parse');
-            const cleaned = this.cleanJSONText(jsonText);
-            return JSON.parse(cleaned);
-        },
-        
-        // Attempt 3: Fix specific issues
-        () => {
-            console.log('Parse attempt 3: Fix specific issues');
-            const fixed = this.fixCommonJSONIssues(jsonText);
-            return JSON.parse(fixed);
-        },
-        
-        // Attempt 4: Extract partial structure
-        () => {
-            console.log('Parse attempt 4: Extract partial structure');
-            return this.extractPartialJSONStructure(text);
-        }
+    // Step 1: Try multiple JSON extraction methods
+    const extractionMethods = [
+        () => this.extractJSONMethod1(text), // Look for complete { ... } blocks
+        () => this.extractJSONMethod2(text), // Look for specific start/end markers
+        () => this.extractJSONMethod3(text), // Clean and extract partial JSON
+        () => this.extractJSONMethod4(text)  // Regex-based extraction
     ];
 
-    for (let i = 0; i < attempts.length; i++) {
+    for (let i = 0; i < extractionMethods.length; i++) {
         try {
-            const result = attempts[i]();
-            if (result && typeof result === 'object') {
-                console.log(`JSON parse attempt ${i + 1} succeeded`);
-                return { success: true, data: result };
+            console.log(`Trying extraction method ${i + 1}...`);
+            const jsonText = extractionMethods[i]();
+            
+            if (jsonText) {
+                console.log(`Method ${i + 1} extracted JSON:`, jsonText.substring(0, 200) + '...');
+                
+                // Try to parse the extracted JSON
+                const parseAttempts = [
+                    () => JSON.parse(jsonText),
+                    () => JSON.parse(this.cleanJSONText(jsonText)),
+                    () => JSON.parse(this.fixCommonJSONIssues(jsonText)),
+                    () => this.parsePartialJSON(jsonText)
+                ];
+                
+                for (let j = 0; j < parseAttempts.length; j++) {
+                    try {
+                        console.log(`Trying parse method ${j + 1} on extraction ${i + 1}...`);
+                        const result = parseAttempts[j]();
+                        
+                        if (result && typeof result === 'object') {
+                            console.log('✅ JSON parsing successful!');
+                            console.log('Parsed keys:', Object.keys(result));
+                            return { success: true, data: result };
+                        }
+                    } catch (parseError) {
+                        console.warn(`Parse method ${j + 1} failed:`, parseError.message);
+                    }
+                }
             }
-        } catch (error) {
-            console.warn(`JSON parse attempt ${i + 1} failed:`, error.message);
+        } catch (extractError) {
+            console.warn(`Extraction method ${i + 1} failed:`, extractError.message);
         }
     }
 
-    // If all parsing fails, create structured fallback
+    // If all methods fail, create structured fallback
+    console.error('❌ All JSON parsing methods failed');
     return { 
         success: false, 
         error: 'All JSON parsing attempts failed',
-        fallbackData: this.createStructuredFallback(text),
-        rawText: text.substring(0, 1000)
+        fallbackData: this.createStructuredFallbackFromText(text),
+        rawText: text.substring(0, 2000)
     };
 }
 
@@ -3946,6 +3967,179 @@ extractJSONFromText(text) {
     }
     
     return text.substring(jsonStart, jsonEnd + 1);
+}
+
+extractJSONMethod1(text) {
+    const jsonStart = text.indexOf('{');
+    const jsonEnd = text.lastIndexOf('}');
+    
+    if (jsonStart === -1 || jsonEnd === -1 || jsonStart >= jsonEnd) {
+        return null;
+    }
+    
+    let jsonText = text.substring(jsonStart, jsonEnd + 1);
+    
+    // Balance braces
+    let braceCount = 0;
+    let balancedEnd = -1;
+    
+    for (let i = 0; i < jsonText.length; i++) {
+        if (jsonText[i] === '{') braceCount++;
+        if (jsonText[i] === '}') braceCount--;
+        if (braceCount === 0) {
+            balancedEnd = i;
+            break;
+        }
+    }
+    
+    if (balancedEnd > 0) {
+        jsonText = jsonText.substring(0, balancedEnd + 1);
+    }
+    
+    return jsonText;
+}
+
+// === 4. JSON EXTRACTION METHOD 2 - Marker Based ===
+extractJSONMethod2(text) {
+    // Look for common JSON start patterns
+    const patterns = [
+        /{\s*"componentName"/i,
+        /{\s*"component"/i,
+        /{\s*"analysis"/i,
+        /REQUIRED JSON RESPONSE[:\s]*({.*})/is,
+        /JSON[:\s]*({.*})/is
+    ];
+    
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match) {
+            if (match[1]) {
+                return match[1]; // Captured group
+            } else {
+                // Find JSON starting from match position
+                const startIndex = text.indexOf(match[0]);
+                const remaining = text.substring(startIndex);
+                const jsonStart = remaining.indexOf('{');
+                if (jsonStart >= 0) {
+                    return this.extractJSONMethod1(remaining.substring(jsonStart));
+                }
+            }
+        }
+    }
+    
+    return null;
+}
+
+// === 5. JSON EXTRACTION METHOD 3 - Line Based ===
+extractJSONMethod3(text) {
+    const lines = text.split('\n');
+    let jsonLines = [];
+    let inJSON = false;
+    let braceCount = 0;
+    
+    for (const line of lines) {
+        const trimmed = line.trim();
+        
+        // Start JSON capture
+        if (!inJSON && trimmed.includes('{')) {
+            inJSON = true;
+            jsonLines = [line];
+            braceCount = (line.match(/{/g) || []).length - (line.match(/}/g) || []).length;
+        } else if (inJSON) {
+            jsonLines.push(line);
+            braceCount += (line.match(/{/g) || []).length - (line.match(/}/g) || []).length;
+            
+            // End JSON capture when braces are balanced
+            if (braceCount === 0) {
+                break;
+            }
+        }
+    }
+    
+    return inJSON ? jsonLines.join('\n') : null;
+}
+
+// === 6. JSON EXTRACTION METHOD 4 - Regex Based ===
+extractJSONMethod4(text) {
+    // Try to find JSON-like structures with regex
+    const jsonRegex = /{[^{}]*(?:{[^{}]*}[^{}]*)*}/g;
+    const matches = text.match(jsonRegex);
+    
+    if (matches && matches.length > 0) {
+        // Return the largest match (likely the main JSON)
+        return matches.reduce((a, b) => a.length > b.length ? a : b);
+    }
+    
+    return null;
+}
+
+// === 7. ENHANCED PARTIAL JSON PARSER ===
+parsePartialJSON(text) {
+    console.log('Attempting partial JSON parsing...');
+    
+    const partial = {
+        componentName: this.extractValue(text, 'componentName') || this.currentAnalyzedComponent,
+        componentType: this.extractValue(text, 'componentType') || 'Unknown',
+        analysisScope: this.extractValue(text, 'analysisScope') || 'PARTIAL_EXTRACTION',
+        totalFields: parseInt(this.extractValue(text, 'totalFields')) || 0,
+        status: 'Partial extraction from LLM response'
+    };
+    
+    // Try to extract arrays
+    partial.recommendations = this.extractArrayFromText(text, 'recommendations');
+    partial.primaryFields = this.extractFieldsFromText(text);
+    
+    // Try to extract quality score
+    const qualityMatch = text.match(/"qualityScore":\s*(\d+)/i);
+    if (qualityMatch) {
+        partial.qualityScore = parseInt(qualityMatch[1]);
+    }
+    
+    // Extract dependency information
+    partial.dependencyStatus = this.extractDependencyStatusFromText(text);
+    
+    console.log('Partial JSON extraction result:', partial);
+    return partial;
+}
+
+extractFieldsFromText(text) {
+    const fields = [];
+    
+    // Look for field patterns in the text
+    const fieldPatterns = [
+        /"name":\s*"([^"]+)"/gi,
+        /field[:\s]*([A-Z][A-Z0-9\-_]+)/gi,
+        /01\s+([A-Z][A-Z0-9\-_]+)/gi
+    ];
+    
+    const foundFields = new Set();
+    
+    for (const pattern of fieldPatterns) {
+        let match;
+        while ((match = pattern.exec(text)) !== null) {
+            const fieldName = match[1];
+            if (fieldName && !foundFields.has(fieldName)) {
+                foundFields.add(fieldName);
+                fields.push({
+                    name: fieldName,
+                    level: 1,
+                    businessPurpose: 'Extracted from LLM response',
+                    usagePattern: 'UNKNOWN'
+                });
+            }
+        }
+    }
+    
+    return fields;
+}
+
+extractDependencyStatusFromText(text) {
+    return {
+        foundCopybooks: this.extractArrayFromText(text, 'foundCopybooks'),
+        missingCopybooks: this.extractArrayFromText(text, 'missingCopybooks'),
+        foundPrograms: this.extractArrayFromText(text, 'foundPrograms'),
+        missingPrograms: this.extractArrayFromText(text, 'missingPrograms')
+    };
 }
 
 // === CLEAN JSON TEXT ===
@@ -4020,6 +4214,45 @@ extractValue(text, key) {
     return null;
 }
 
+extractArrayFromText(text, arrayName) {
+    const patterns = [
+        new RegExp(`"${arrayName}":\\s*\\[(.*?)\\]`, 'is'),
+        new RegExp(`${arrayName}[:\\s]*\\[(.*?)\\]`, 'is'),
+        new RegExp(`${arrayName}[:\\s]*([^,\\n]+)`, 'i')
+    ];
+    
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match) {
+            const arrayContent = match[1];
+            const items = [];
+            
+            // Extract quoted strings
+            const quotedPattern = /"([^"]+)"/g;
+            let quotedMatch;
+            
+            while ((quotedMatch = quotedPattern.exec(arrayContent)) !== null) {
+                items.push(quotedMatch[1]);
+            }
+            
+            if (items.length > 0) {
+                return items;
+            }
+            
+            // If no quoted strings, try comma-separated values
+            const commaSeparated = arrayContent.split(',').map(item => 
+                item.trim().replace(/['"]/g, '')
+            ).filter(item => item.length > 0);
+            
+            if (commaSeparated.length > 0) {
+                return commaSeparated;
+            }
+        }
+    }
+    
+    return [];
+}
+
 // === EXTRACT ARRAY FROM TEXT ===
 extractArray(text, arrayName) {
     const arrayPattern = new RegExp(`"${arrayName}":\\s*\\[(.*?)\\]`, 's');
@@ -4039,6 +4272,79 @@ extractArray(text, arrayName) {
     }
     
     return items;
+}
+createStructuredFallbackFromText(text) {
+    console.log('Creating structured fallback from LLM text...');
+    
+    const fallback = {
+        componentName: this.currentAnalyzedComponent || 'Unknown',
+        componentType: 'Unknown',
+        analysisScope: 'FALLBACK_TEXT_ANALYSIS',
+        status: 'JSON parsing failed - extracted from text analysis',
+        totalFields: 0,
+        qualityScore: 5
+    };
+    
+    // Try to extract key information from the text
+    if (text.toLowerCase().includes('copybook')) {
+        fallback.componentType = 'Copybook';
+    } else if (text.toLowerCase().includes('program')) {
+        fallback.componentType = 'COBOL Program';
+    }
+    
+    // Count field references
+    const fieldMatches = text.match(/\b[A-Z][A-Z0-9\-_]{3,}\b/g) || [];
+    fallback.totalFields = Math.min(fieldMatches.length, 20); // Cap at reasonable number
+    
+    // Extract recommendations from text
+    fallback.recommendations = this.extractRecommendationsFromText(text);
+    
+    // Look for analysis content
+    if (text.includes('business') || text.includes('purpose')) {
+        fallback.hasBusinessAnalysis = true;
+    }
+    
+    if (text.includes('depend') || text.includes('copy') || text.includes('call')) {
+        fallback.hasDependencyAnalysis = true;
+    }
+    
+    console.log('Fallback analysis created:', fallback);
+    return fallback;
+}
+
+// === 12. EXTRACT RECOMMENDATIONS FROM TEXT ===
+extractRecommendationsFromText(text) {
+    const recommendations = [];
+    
+    // Look for recommendation patterns
+    const patterns = [
+        /recommend[a-z]*[:\s]*([^.]+)/gi,
+        /suggest[a-z]*[:\s]*([^.]+)/gi,
+        /should[:\s]*([^.]+)/gi,
+        /consider[:\s]*([^.]+)/gi
+    ];
+    
+    for (const pattern of patterns) {
+        let match;
+        while ((match = pattern.exec(text)) !== null && recommendations.length < 5) {
+            const rec = match[1].trim();
+            if (rec.length > 10 && rec.length < 200) {
+                recommendations.push(rec);
+            }
+        }
+    }
+    
+    // If no patterns found, provide generic recommendations
+    if (recommendations.length === 0) {
+        recommendations.push(
+            'Review the component structure and dependencies',
+            'Validate field usage patterns across programs',
+            'Check for missing dependencies and resolve them',
+            'Consider optimization opportunities based on usage patterns'
+        );
+    }
+    
+    return recommendations.slice(0, 5); // Limit to 5 recommendations
 }
 
 // === CREATE STRUCTURED FALLBACK ===
@@ -4119,8 +4425,8 @@ createComponentFallback(componentName, componentType, lifecycleFlow) {
 // ===================================================================
 
 // === COPYBOOK ANALYSIS WITH LLM ===
-async analyzeCopybookWithLLMAndLifecycle(copybookName, relevantFiles, basicDependencies, lifecycleFlow) {
-    console.log(`LLM analyzing copybook with focused scope: ${copybookName}`);
+analyzeCopybookWithLLMAndLifecycle(copybookName, relevantFiles, basicDependencies, lifecycleFlow) {
+    console.log(`LLM analyzing copybook with ALL field levels: ${copybookName}`);
     
     const copybookFile = relevantFiles.find(f => 
         f.type === 'Copybook' && 
@@ -4132,76 +4438,64 @@ async analyzeCopybookWithLLMAndLifecycle(copybookName, relevantFiles, basicDepen
         throw new Error(`Copybook file for ${copybookName} not found`);
     }
 
-    // Focus on 01-level fields only
-    const fields01 = lifecycleFlow.primaryFields || [];
-    const fieldNames = fields01.map(f => f.name).join(', ');
+    // Get ALL field levels (not just 01)
+    const allFields = lifecycleFlow.primaryFields || [];
+    const field01Names = allFields.filter(f => f.level === 1).map(f => f.name).join(', ');
+    const fieldLevels = allFields.map(f => `${f.level}-${f.name}`).join(', ');
     
     const copybookContent = this.prepareContentForLLM(copybookFile.content, 'copybook');
     const foundDeps = basicDependencies.found || basicDependencies;
     const missingDeps = basicDependencies.missing || {};
 
-    const llmPrompt = `MAINFRAME COPYBOOK ANALYSIS - FOCUSED SCOPE
+    const llmPrompt = `You are a mainframe copybook analysis expert. Analyze the copybook and return ONLY valid JSON.
 
-COMPONENT: ${copybookName}
-SCOPE: Analyze only this specific copybook and its 01-level record structures
+COPYBOOK: ${copybookName}
+ALL FIELDS FOUND: ${fieldLevels}
+01-LEVEL RECORDS: ${field01Names}
 
-COPYBOOK CONTENT (01-LEVEL FIELDS FOCUS):
+COPYBOOK CONTENT:
 ${copybookContent}
 
-01-LEVEL FIELDS IDENTIFIED: ${fieldNames}
+DEPENDENCIES:
+Found: ${(foundDeps.copyStatements || []).join(', ') || 'None'}
+Missing: ${(missingDeps.copyStatements || []).join(', ') || 'None'}
 
-DEPENDENCIES ANALYSIS:
-FOUND DEPENDENCIES:
-- Copybooks Available: ${(foundDeps.copyStatements || []).join(', ') || 'None'}
-- Programs Available: ${(foundDeps.callStatements || []).join(', ') || 'None'}
-
-MISSING DEPENDENCIES:
-- Missing Copybooks: ${(missingDeps.copyStatements || []).join(', ') || 'None'}
-- Missing Programs: ${(missingDeps.callStatements || []).join(', ') || 'None'}
-
-PROGRAMS USING THIS COPYBOOK:
-${lifecycleFlow.inputPrograms.map(p => p.program).join(', ') || 'None found'}
-
-TASK: Provide focused analysis for this copybook component only.
-
-REQUIRED JSON RESPONSE (must be valid JSON):
+RETURN ONLY THIS JSON STRUCTURE (no other text):
 {
   "componentName": "${copybookName}",
   "componentType": "Copybook",
-  "analysisScope": "01_LEVEL_FIELDS",
-  "totalFields": ${fields01.length},
+  "analysisScope": "ALL_FIELD_LEVELS",
+  "totalFields": ${allFields.length},
   "primaryFields": [
-    ${fields01.map(f => `{
-      "name": "${f.name}",
+    {
+      "name": "SAMPLE-FIELD",
       "level": 1,
-      "isRecordLayout": ${f.isRecordLayout},
-      "businessPurpose": "Describe business purpose of ${f.name}",
-      "usagePattern": "INPUT|OUTPUT|BOTH|REFERENCE"
-    }`).join(',\n    ')}
+      "isRecordLayout": true,
+      "businessPurpose": "Main record structure for business data",
+      "usagePattern": "INPUT"
+    }
   ],
+  "fieldHierarchy": {
+    "level01Count": ${allFields.filter(f => f.level === 1).length},
+    "level05Count": ${allFields.filter(f => f.level === 5).length},
+    "elementaryFieldCount": ${allFields.filter(f => f.isElementaryField).length},
+    "groupFieldCount": ${allFields.filter(f => f.isGroupField).length}
+  },
   "dependencyStatus": {
     "foundCopybooks": [${(foundDeps.copyStatements || []).map(c => `"${c}"`).join(', ')}],
-    "missingCopybooks": [${(missingDeps.copyStatements || []).map(c => `"${c}"`).join(', ')}],
-    "foundPrograms": [${(foundDeps.callStatements || []).map(p => `"${p}"`).join(', ')}],
-    "missingPrograms": [${(missingDeps.callStatements || []).map(p => `"${p}"`).join(', ')}]
-  },
-  "lifecycleAnalysis": {
-    "creationPrograms": [${lifecycleFlow.creationSources.map(s => `"${s.program}"`).join(', ')}],
-    "updatePrograms": [${lifecycleFlow.updatePrograms.map(u => `"${u.program}"`).join(', ')}],
-    "readPrograms": [${lifecycleFlow.inputPrograms.map(i => `"${i.program}"`).join(', ')}]
+    "missingCopybooks": [${(missingDeps.copyStatements || []).map(c => `"${c}"`).join(', ')}]
   },
   "recommendations": [
-    "Component-specific recommendation for ${copybookName}",
-    "Field-level optimization suggestions",
-    "Dependency management recommendations"
+    "Optimize field access patterns for ${copybookName}",
+    "Review dependency management for missing copybooks",
+    "Consider field usage consolidation"
   ],
   "qualityScore": 8
+}`;
+
+    return this.callLLMAPI(llmPrompt);
 }
 
-CRITICAL: Return only valid JSON. No text before or after the JSON object.`;
-
-    return await this.callLLMAPI(llmPrompt);
-}
 
 // === PROGRAM ANALYSIS WITH LLM ===
 async analyzeProgramWithLLMAndLifecycle(programName, relevantFiles, basicDependencies, lifecycleFlow) {
