@@ -2738,8 +2738,11 @@ ${Object.keys(lifecycleFlow.fieldUpdateTracking).slice(0, 10).map(field =>
 ).join('\n')}
 
 DEPENDENCIES FOUND:
-Copy Statements: ${basicDependencies.copyStatements.join(', ')}
-Call Statements: ${basicDependencies.callStatements.join(', ')}
+Copy Statements: ${(basicDependencies.copyStatements || []).join(', ')}
+Call Statements: ${(basicDependencies.callStatements || []).join(', ')}
+Exec Statements: ${(basicDependencies.execStatements || []).join(', ')}
+Program IDs: ${(basicDependencies.programIds || []).join(', ')}
+File References: ${(basicDependencies.fileReferences || []).join(', ')}
 
 INSTRUCTIONS:
 1. Extract ALL fields from the copybook with their levels, pictures, and values
