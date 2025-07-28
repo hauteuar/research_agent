@@ -3985,8 +3985,175 @@ parseSmartPlainText(text) {
         operations: analysis.fieldOperations.length,
         recommendations: analysis.recommendations.length
     });
+
     
     return analysis;
+}
+
+extractDependenciesFromText(text) {
+    const dependencies = {
+        foundCopybooks: [],
+        missingCopybooks: [],
+        foundPrograms: [],
+        missingPrograms: [],
+        foundFiles: [],
+        missingFiles: []
+    };
+    
+    const lines = text.split('\n');
+    
+    lines.forEach((line, index) => {
+        const upperLine = line.toUpperCase();
+        const lowerLine = line.toLowerCase();
+        
+        // Extract copybook dependencies
+        const copybookPatterns = [
+            // "COPY COPYBOOK-NAME"
+            /COPY\s+([A-Z][A-Z0-9\-_]{2,})/g,
+            // "copybook COPYBOOK-NAME"
+            /copybook\s+([A-Z][A-Z0-9\-_]{2,})/gi,
+            // "includes COPYBOOK-NAME"
+            /includes?\s+([A-Z][A-Z0-9\-_]{2,})/gi,
+            // "uses copybook COPYBOOK-NAME"
+            /uses?\s+copybook\s+([A-Z][A-Z0-9\-_]{2,})/gi
+        ];
+        
+        copybookPatterns.forEach(pattern => {
+            let match;
+            while ((match = pattern.exec(line)) !== null) {
+                const copybookName = match[1];
+                
+                // Determine if found or missing based on context
+                if (lowerLine.includes('missing') || lowerLine.includes('not found') || 
+                    lowerLine.includes('unavailable') || lowerLine.includes('absent')) {
+                    if (!dependencies.missingCopybooks.includes(copybookName)) {
+                        dependencies.missingCopybooks.push(copybookName);
+                    }
+                } else if (lowerLine.includes('found') || lowerLine.includes('available') || 
+                          lowerLine.includes('present') || lowerLine.includes('exists')) {
+                    if (!dependencies.foundCopybooks.includes(copybookName)) {
+                        dependencies.foundCopybooks.push(copybookName);
+                    }
+                } else {
+                    // Default to found if no context clues
+                    if (!dependencies.foundCopybooks.includes(copybookName)) {
+                        dependencies.foundCopybooks.push(copybookName);
+                    }
+                }
+            }
+        });
+        
+        // Extract program dependencies
+        const programPatterns = [
+            // "CALL PROGRAM-NAME"
+            /CALL\s+([A-Z][A-Z0-9\-_]{2,})/g,
+            // "calls program PROGRAM-NAME"
+            /calls?\s+(?:program\s+)?([A-Z][A-Z0-9\-_]{3,})/gi,
+            // "program PROGRAM-NAME is called"
+            /program\s+([A-Z][A-Z0-9\-_]{3,})\s+is\s+called/gi,
+            // "invokes PROGRAM-NAME"
+            /invokes?\s+([A-Z][A-Z0-9\-_]{3,})/gi,
+            // "executes PROGRAM-NAME"
+            /executes?\s+([A-Z][A-Z0-9\-_]{3,})/gi
+        ];
+        
+        programPatterns.forEach(pattern => {
+            let match;
+            while ((match = pattern.exec(line)) !== null) {
+                const programName = match[1];
+                
+                // Skip if it looks like a field name
+                if (programName.includes('-RECORD') || programName.includes('-FIELD')) {
+                    return;
+                }
+                
+                // Determine if found or missing based on context
+                if (lowerLine.includes('missing') || lowerLine.includes('not found') || 
+                    lowerLine.includes('unavailable') || lowerLine.includes('absent')) {
+                    if (!dependencies.missingPrograms.includes(programName)) {
+                        dependencies.missingPrograms.push(programName);
+                    }
+                } else if (lowerLine.includes('found') || lowerLine.includes('available') || 
+                          lowerLine.includes('present') || lowerLine.includes('exists')) {
+                    if (!dependencies.foundPrograms.includes(programName)) {
+                        dependencies.foundPrograms.push(programName);
+                    }
+                } else {
+                    // Default to found if no context clues
+                    if (!dependencies.foundPrograms.includes(programName)) {
+                        dependencies.foundPrograms.push(programName);
+                    }
+                }
+            }
+        });
+        
+        // Extract file dependencies
+        const filePatterns = [
+            // "file FILE-NAME"
+            /file\s+([A-Z][A-Z0-9\-_]{2,})/gi,
+            // "dataset FILE-NAME"
+            /dataset\s+([A-Z][A-Z0-9\-_\.]{2,})/gi,
+            // "DD FILE-NAME"
+            /DD\s+([A-Z][A-Z0-9\-_]{2,})/gi,
+            // "reads from FILE-NAME"
+            /reads?\s+from\s+([A-Z][A-Z0-9\-_]{2,})/gi,
+            // "writes to FILE-NAME"
+            /writes?\s+to\s+([A-Z][A-Z0-9\-_]{2,})/gi
+        ];
+        
+        filePatterns.forEach(pattern => {
+            let match;
+            while ((match = pattern.exec(line)) !== null) {
+                const fileName = match[1];
+                
+                // Skip if it looks like a program or field name
+                if (fileName.includes('-RECORD') || fileName.includes('-FIELD') || 
+                    fileName.length < 3) {
+                    return;
+                }
+                
+                // Determine if found or missing based on context
+                if (lowerLine.includes('missing') || lowerLine.includes('not found') || 
+                    lowerLine.includes('unavailable') || lowerLine.includes('absent')) {
+                    if (!dependencies.missingFiles.includes(fileName)) {
+                        dependencies.missingFiles.push(fileName);
+                    }
+                } else if (lowerLine.includes('found') || lowerLine.includes('available') || 
+                          lowerLine.includes('present') || lowerLine.includes('exists')) {
+                    if (!dependencies.foundFiles.includes(fileName)) {
+                        dependencies.foundFiles.push(fileName);
+                    }
+                } else {
+                    // Default to found if no context clues
+                    if (!dependencies.foundFiles.includes(fileName)) {
+                        dependencies.foundFiles.push(fileName);
+                    }
+                }
+            }
+        });
+    });
+    
+    // Look for dependency summary sections
+    const dependencySections = this.extractDependencySections(text);
+    if (dependencySections) {
+        // Merge with extracted dependencies
+        Object.keys(dependencySections).forEach(key => {
+            if (dependencySections[key] && dependencySections[key].length > 0) {
+                dependencies[key] = [...new Set([...dependencies[key], ...dependencySections[key]])];
+            }
+        });
+    }
+    
+    console.log('📋 Dependencies extracted from text:', {
+        foundCopybooks: dependencies.foundCopybooks.length,
+        missingCopybooks: dependencies.missingCopybooks.length,
+        foundPrograms: dependencies.foundPrograms.length,
+        missingPrograms: dependencies.missingPrograms.length,
+        foundFiles: dependencies.foundFiles.length,
+        missingFiles: dependencies.missingFiles.length
+    });
+    
+    return dependencies;
 }
 
 extractProgramAnalysis(text) {
@@ -4532,6 +4699,71 @@ parsePartialJSON(text) {
     
     console.log('Partial JSON extraction result:', partial);
     return partial;
+}
+
+extractDependencySections(text) {
+    const sections = {
+        foundCopybooks: [],
+        missingCopybooks: [],
+        foundPrograms: [],
+        missingPrograms: [],
+        foundFiles: [],
+        missingFiles: []
+    };
+    
+    // Look for structured dependency sections
+    const dependencyPatterns = [
+        // "Dependencies found: COPY1, COPY2, COPY3"
+        /dependencies?\s+found[:\s]+([A-Z][A-Z0-9\-_,\s]+)/gi,
+        // "Missing dependencies: COPY1, COPY2"
+        /missing\s+dependencies?[:\s]+([A-Z][A-Z0-9\-_,\s]+)/gi,
+        // "Available copybooks: COPY1, COPY2"
+        /available\s+copybooks?[:\s]+([A-Z][A-Z0-9\-_,\s]+)/gi,
+        // "Missing copybooks: COPY1, COPY2"
+        /missing\s+copybooks?[:\s]+([A-Z][A-Z0-9\-_,\s]+)/gi,
+        // "Called programs: PROG1, PROG2"
+        /called\s+programs?[:\s]+([A-Z][A-Z0-9\-_,\s]+)/gi,
+        // "Missing programs: PROG1, PROG2"
+        /missing\s+programs?[:\s]+([A-Z][A-Z0-9\-_,\s]+)/gi
+    ];
+    
+    dependencyPatterns.forEach(pattern => {
+        let match;
+        while ((match = pattern.exec(text)) !== null) {
+            const items = match[1].split(/[,\s]+/).filter(item => 
+                item.trim().length > 2 && /^[A-Z][A-Z0-9\-_]*$/.test(item.trim())
+            );
+            
+            const patternText = match[0].toLowerCase();
+            
+            if (patternText.includes('missing')) {
+                if (patternText.includes('copybook')) {
+                    sections.missingCopybooks.push(...items);
+                } else if (patternText.includes('program')) {
+                    sections.missingPrograms.push(...items);
+                } else {
+                    // Generic missing dependencies
+                    sections.missingCopybooks.push(...items);
+                }
+            } else {
+                if (patternText.includes('copybook')) {
+                    sections.foundCopybooks.push(...items);
+                } else if (patternText.includes('program')) {
+                    sections.foundPrograms.push(...items);
+                } else {
+                    // Generic found dependencies
+                    sections.foundCopybooks.push(...items);
+                }
+            }
+        }
+    });
+    
+    // Remove duplicates
+    Object.keys(sections).forEach(key => {
+        sections[key] = [...new Set(sections[key])];
+    });
+    
+    return sections;
 }
 
 extractFieldsFromText(text) {
