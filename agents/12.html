@@ -3660,7 +3660,7 @@ RESPOND WITH VALID JSON ONLY:`;
                 
                 // Ensure we have valid text to work with
                 const safeRawText = rawText || 'No response content available';
-                
+                console.log('Safe raw text :', safeRawText);
                 const fallback = {
                     analysisMethod: 'Enhanced Fallback Analysis',
                     status: 'Partial - JSON parsing failed but content extracted',
