@@ -6085,15 +6085,17 @@ displayDetailedFieldMatrix(primaryFields) {
     return `
         <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
             <h4 style="color: #FFD700; margin-bottom: 15px;">🤖 Field Analysis Matrix (${primaryFields.length} fields)</h4>
-            <div style="overflow-x: auto;">
+            
+            <!-- Field Table -->
+            <div style="overflow-x: auto; margin-bottom: 20px;">
                 <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
                     <thead>
                         <tr style="background: rgba(0,0,0,0.3);">
                             <th style="padding: 8px; text-align: left; border: 1px solid rgba(255,255,255,0.1); color: #FFD700;">Field Name</th>
                             <th style="padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); color: #4CAF50;">Level</th>
-                            <th style="padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); color: #2196F3;">Type</th>
+                            <th style="padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); color: #2196F3;">Usage Pattern</th>
                             <th style="padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); color: #FF9800;">Picture</th>
-                            <th style="padding: 8px; text-align: left; border: 1px solid rgba(255,255,255,0.1); color: #9C27B0;">Purpose</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid rgba(255,255,255,0.1); color: #9C27B0;">Business Purpose</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -6103,18 +6105,18 @@ displayDetailedFieldMatrix(primaryFields) {
                                     ${field.name || field.fieldName || 'Unknown'}
                                 </td>
                                 <td style="padding: 6px 8px; text-align: center; color: #4CAF50;">
-                                    ${field.level || (field.name && field.name.includes('RECORD') ? '01' : '05')}
+                                    ${field.level || '05'}
                                 </td>
-                                <td style="padding: 6px 8px; text-align: center; font-size: 10px;">
-                                    ${field.isRecordLayout ? 'RECORD' : 
-                                      field.isElementaryField ? 'ELEMENT' : 
-                                      field.isGroupField ? 'GROUP' : 'FIELD'}
+                                <td style="padding: 6px 8px; text-align: center;">
+                                    <span style="padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: bold; color: white; background: ${this.getUsagePatternColor(field.usagePattern || 'UNKNOWN')};">
+                                        ${field.usagePattern || 'UNKNOWN'}
+                                    </span>
                                 </td>
                                 <td style="padding: 6px 8px; text-align: center; font-family: monospace; font-size: 10px; color: #FF9800;">
                                     ${field.picture || field.pic || '-'}
                                 </td>
                                 <td style="padding: 6px 8px; font-size: 10px; max-width: 200px; word-wrap: break-word;">
-                                    ${field.businessPurpose || field.purpose || field.description || 'Field analysis'}
+                                    ${field.businessPurpose || field.purpose || field.description || 'Business field'}
                                 </td>
                             </tr>
                         `).join('')}
@@ -6122,27 +6124,7 @@ displayDetailedFieldMatrix(primaryFields) {
                 </table>
             </div>
             
-            <!-- Field Statistics -->
-            <div style="margin-top: 15px; display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 10px;">
-                <div style="text-align: center; background: rgba(76, 175, 80, 0.1); padding: 8px; border-radius: 4px;">
-                    <div style="font-size: 12px; font-weight: bold; color: #4CAF50;">
-                        ${primaryFields.filter(f => f.level === 1 || f.isRecordLayout).length}
-                    </div>
-                    <div style="font-size: 9px;">01-Level Records</div>
-                </div>
-                <div style="text-align: center; background: rgba(33, 150, 243, 0.1); padding: 8px; border-radius: 4px;">
-                    <div style="font-size: 12px; font-weight: bold; color: #2196F3;">
-                        ${primaryFields.filter(f => f.isElementaryField || f.picture).length}
-                    </div>
-                    <div style="font-size: 9px;">Elementary Fields</div>
-                </div>
-                <div style="text-align: center; background: rgba(255, 152, 0, 0.1); padding: 8px; border-radius: 4px;">
-                    <div style="font-size: 12px; font-weight: bold; color: #FF9800;">
-                        ${primaryFields.filter(f => f.isGroupField || (!f.picture && !f.isRecordLayout)).length}
-                    </div>
-                    <div style="font-size: 9px;">Group Fields</div>
-                </div>
-            </div>
+            ${this.displayFieldCategorization(primaryFields)}
         </div>
     `;
 }
@@ -6167,6 +6149,158 @@ displayUsagePatterns(componentName, results) {
     }
     
     container.innerHTML = html;
+}
+displayFieldCategorization(primaryFields) {
+    // Categorize fields by usage pattern
+    const categories = {
+        INPUT: primaryFields.filter(f => f.usagePattern === 'INPUT'),
+        OUTPUT: primaryFields.filter(f => f.usagePattern === 'OUTPUT'),
+        REFERENCE: primaryFields.filter(f => f.usagePattern === 'REFERENCE'),
+        STATIC: primaryFields.filter(f => f.usagePattern === 'STATIC'),
+        UNUSED: primaryFields.filter(f => f.usagePattern === 'UNUSED'),
+        MIXED: primaryFields.filter(f => f.usagePattern === 'MIXED' || !f.usagePattern)
+    };
+
+    return `
+        <!-- Field Categorization -->
+        <div style="margin-top: 20px;">
+            <h5 style="color: #FFD700; margin-bottom: 15px;">📊 Field Usage Categorization</h5>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                
+                <!-- Input Fields -->
+                <div style="background: rgba(34, 197, 94, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #22c55e;">
+                    <h6 style="color: #22c55e; margin-bottom: 10px;">📥 Input Fields (${categories.INPUT.length})</h6>
+                    <div style="max-height: 100px; overflow-y: auto;">
+                        ${categories.INPUT.length > 0 ? 
+                            categories.INPUT.map(field => `
+                                <div style="font-size: 10px; font-family: monospace; padding: 2px 4px; margin: 2px 0; background: rgba(0,0,0,0.2); border-radius: 2px;">
+                                    ${field.name}
+                                </div>
+                            `).join('') : 
+                            '<div style="font-size: 11px; opacity: 0.7;">No input fields identified</div>'
+                        }
+                    </div>
+                </div>
+                
+                <!-- Output Fields -->
+                <div style="background: rgba(59, 130, 246, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #3b82f6;">
+                    <h6 style="color: #3b82f6; margin-bottom: 10px;">📤 Output Fields (${categories.OUTPUT.length})</h6>
+                    <div style="max-height: 100px; overflow-y: auto;">
+                        ${categories.OUTPUT.length > 0 ? 
+                            categories.OUTPUT.map(field => `
+                                <div style="font-size: 10px; font-family: monospace; padding: 2px 4px; margin: 2px 0; background: rgba(0,0,0,0.2); border-radius: 2px;">
+                                    ${field.name}
+                                </div>
+                            `).join('') : 
+                            '<div style="font-size: 11px; opacity: 0.7;">No output fields identified</div>'
+                        }
+                    </div>
+                </div>
+                
+                <!-- Reference Fields -->
+                <div style="background: rgba(245, 158, 11, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b;">
+                    <h6 style="color: #f59e0b; margin-bottom: 10px;">📋 Reference Fields (${categories.REFERENCE.length})</h6>
+                    <div style="max-height: 100px; overflow-y: auto;">
+                        ${categories.REFERENCE.length > 0 ? 
+                            categories.REFERENCE.map(field => `
+                                <div style="font-size: 10px; font-family: monospace; padding: 2px 4px; margin: 2px 0; background: rgba(0,0,0,0.2); border-radius: 2px;">
+                                    ${field.name}
+                                </div>
+                            `).join('') : 
+                            '<div style="font-size: 11px; opacity: 0.7;">No reference fields identified</div>'
+                        }
+                    </div>
+                </div>
+                
+                <!-- Static Fields -->
+                <div style="background: rgba(156, 39, 176, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #9C27B0;">
+                    <h6 style="color: #9C27B0; margin-bottom: 10px;">🔒 Static Fields (${categories.STATIC.length})</h6>
+                    <div style="max-height: 100px; overflow-y: auto;">
+                        ${categories.STATIC.length > 0 ? 
+                            categories.STATIC.map(field => `
+                                <div style="font-size: 10px; font-family: monospace; padding: 2px 4px; margin: 2px 0; background: rgba(0,0,0,0.2); border-radius: 2px;">
+                                    ${field.name}
+                                </div>
+                            `).join('') : 
+                            '<div style="font-size: 11px; opacity: 0.7;">No static fields identified</div>'
+                        }
+                    </div>
+                </div>
+                
+                <!-- Unused Fields -->
+                <div style="background: rgba(107, 114, 128, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #6b7280;">
+                    <h6 style="color: #6b7280; margin-bottom: 10px;">❌ Unused Fields (${categories.UNUSED.length})</h6>
+                    <div style="max-height: 100px; overflow-y: auto;">
+                        ${categories.UNUSED.length > 0 ? 
+                            categories.UNUSED.map(field => `
+                                <div style="font-size: 10px; font-family: monospace; padding: 2px 4px; margin: 2px 0; background: rgba(0,0,0,0.2); border-radius: 2px;">
+                                    ${field.name}
+                                </div>
+                            `).join('') : 
+                            '<div style="font-size: 11px; opacity: 0.7;">No unused fields identified</div>'
+                        }
+                    </div>
+                </div>
+                
+                <!-- Mixed Usage Fields -->
+                ${categories.MIXED.length > 0 ? `
+                    <div style="background: rgba(139, 92, 246, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #8b5cf6;">
+                        <h6 style="color: #8b5cf6; margin-bottom: 10px;">🔄 Mixed Usage (${categories.MIXED.length})</h6>
+                        <div style="max-height: 100px; overflow-y: auto;">
+                            ${categories.MIXED.map(field => `
+                                <div style="font-size: 10px; font-family: monospace; padding: 2px 4px; margin: 2px 0; background: rgba(0,0,0,0.2); border-radius: 2px;">
+                                    ${field.name}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        </div>
+        
+        <!-- Usage Statistics -->
+        <div style="margin-top: 20px; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px;">
+            <h6 style="color: #FFD700; margin-bottom: 10px;">📈 Field Usage Statistics</h6>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; font-size: 11px;">
+                <div style="text-align: center;">
+                    <div style="font-weight: bold; color: #22c55e;">${categories.INPUT.length}</div>
+                    <div style="opacity: 0.8;">Input</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-weight: bold; color: #3b82f6;">${categories.OUTPUT.length}</div>
+                    <div style="opacity: 0.8;">Output</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-weight: bold; color: #f59e0b;">${categories.REFERENCE.length}</div>
+                    <div style="opacity: 0.8;">Reference</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-weight: bold; color: #9C27B0;">${categories.STATIC.length}</div>
+                    <div style="opacity: 0.8;">Static</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-weight: bold; color: #6b7280;">${categories.UNUSED.length}</div>
+                    <div style="opacity: 0.8;">Unused</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-weight: bold; color: #FFD700;">${((categories.INPUT.length + categories.OUTPUT.length + categories.REFERENCE.length) / primaryFields.length * 100).toFixed(1)}%</div>
+                    <div style="opacity: 0.8;">Utilization</div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+getUsagePatternColor(pattern) {
+    const colors = {
+        'INPUT': '#22c55e',
+        'OUTPUT': '#3b82f6', 
+        'REFERENCE': '#f59e0b',
+        'STATIC': '#9C27B0',
+        'UNUSED': '#6b7280',
+        'MIXED': '#8b5cf6',
+        'UNKNOWN': '#64748b'
+    };
+    return colors[pattern] || '#64748b';
 }
 
 displayUsagePatternDetails(lifecycleFlow) {
