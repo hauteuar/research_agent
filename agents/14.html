@@ -2240,7 +2240,7 @@ analyzeFieldUsageInProgram(fieldName, programFile) {
 
 // === EXTRACT LIFECYCLE FLOW FOR COMPONENT ===
 async extractFileLifecycleFlow(componentName, relevantFiles) {
-    console.log('Extracting focused lifecycle flow for component:', componentName);
+    console.log('Extracting enhanced lifecycle flow for component:', componentName);
     
     const lifecycleFlow = {
         componentName: componentName,
@@ -2253,9 +2253,7 @@ async extractFileLifecycleFlow(componentName, relevantFiles) {
         batchJobs: [],
         purgeProcesses: [],
         usagePattern: 'UNKNOWN',
-        // For copybooks - focus on 01-level fields
         primaryFields: [],
-        // Dependencies - distinguish between found and missing
         foundDependencies: {
             copybooks: [],
             programs: [],
@@ -2270,31 +2268,189 @@ async extractFileLifecycleFlow(componentName, relevantFiles) {
 
     try {
         if (lifecycleFlow.componentType === 'Copybook') {
-            // Focus on 01-level fields for copybooks
-            const fields01 = this.extractCopybookFields(componentName, relevantFiles);
-            lifecycleFlow.primaryFields = fields01;
+            // Enhanced copybook analysis
+            const fields = this.extractCopybookFields(componentName, relevantFiles);
+            lifecycleFlow.primaryFields = fields;
             
-            console.log(`Analyzing ${fields01.length} 01-level fields for lifecycle`);
+            console.log(`Analyzing lifecycle for ${fields.length} fields`);
             
-            // Analyze each 01-level field's lifecycle
-            for (const field of fields01) {
-                console.log(`Analyzing lifecycle of 01-level field: ${field.name}`);
+            // Find programs that use this copybook
+            const usingPrograms = this.findProgramsUsingCopybook(componentName);
+            console.log(`Found ${usingPrograms.length} programs using copybook ${componentName}`);
+            
+            // Analyze each program to see how it uses the copybook
+            for (const program of usingPrograms) {
+                const programAnalysis = this.analyzeProgram(program, componentName);
+                
+                // Categorize program based on its operations
+                if (programAnalysis.hasCreateOperations) {
+                    lifecycleFlow.creationSources.push({
+                        program: program.name,
+                        operation: 'FILE_CREATE',
+                        evidence: programAnalysis.createOperations,
+                        type: 'PROGRAM'
+                    });
+                }
+                
+                if (programAnalysis.hasReadOperations) {
+                    lifecycleFlow.inputPrograms.push({
+                        program: program.name,
+                        operation: 'FILE_READ',
+                        evidence: programAnalysis.readOperations,
+                        type: 'PROGRAM'
+                    });
+                }
+                
+                if (programAnalysis.hasUpdateOperations) {
+                    lifecycleFlow.updatePrograms.push({
+                        program: program.name,
+                        operation: 'FILE_UPDATE',
+                        evidence: programAnalysis.updateOperations,
+                        type: 'PROGRAM'
+                    });
+                }
+                
+                if (programAnalysis.hasCicsOperations) {
+                    lifecycleFlow.cicsScreens.push({
+                        screen: programAnalysis.cicsScreen || 'UNKNOWN_SCREEN',
+                        program: program.name,
+                        operation: 'CICS_OPERATION',
+                        evidence: programAnalysis.cicsOperations
+                    });
+                }
+                
+                if (programAnalysis.hasBatchOperations) {
+                    lifecycleFlow.batchJobs.push({
+                        job: programAnalysis.batchJob || 'BATCH_JOB',
+                        program: program.name,
+                        operation: 'BATCH_PROCESSING',
+                        evidence: programAnalysis.batchOperations
+                    });
+                }
+            }
+            
+            // Analyze field-level lifecycle for important fields
+            for (const field of fields.slice(0, 10)) { // Limit to first 10 fields
                 await this.analyzeFieldLifecycleInPrograms(field, lifecycleFlow);
             }
+            
         } else if (lifecycleFlow.componentType === 'COBOL Program') {
-            // For programs, analyze the main program logic
+            // Enhanced program analysis
             await this.analyzeProgramSpecificLifecycle(componentName, relevantFiles, lifecycleFlow);
         }
 
         // Determine usage pattern based on actual analysis
         lifecycleFlow.usagePattern = this.determineUsagePatternFromAnalysis(lifecycleFlow);
         
+        console.log('Enhanced lifecycle flow analysis complete:', {
+            creationSources: lifecycleFlow.creationSources.length,
+            inputPrograms: lifecycleFlow.inputPrograms.length,
+            updatePrograms: lifecycleFlow.updatePrograms.length,
+            cicsScreens: lifecycleFlow.cicsScreens.length,
+            usagePattern: lifecycleFlow.usagePattern
+        });
+        
     } catch (error) {
         console.error('Error in extractFileLifecycleFlow:', error);
     }
     
-    console.log('Component-focused lifecycle flow analysis complete:', lifecycleFlow);
     return lifecycleFlow;
+}
+
+// Add this new function to analyze individual programs
+analyzeProgram(programFile, copybookName) {
+    const analysis = {
+        hasCreateOperations: false,
+        hasReadOperations: false,
+        hasUpdateOperations: false,
+        hasCicsOperations: false,
+        hasBatchOperations: false,
+        createOperations: [],
+        readOperations: [],
+        updateOperations: [],
+        cicsOperations: [],
+        batchOperations: [],
+        cicsScreen: null,
+        batchJob: null
+    };
+
+    const lines = programFile.content.split('\n');
+    const upperContent = programFile.content.toUpperCase();
+    
+    lines.forEach((line, lineNum) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // Look for CREATE operations
+        if (trimmed.includes('OPEN OUTPUT') || trimmed.includes('WRITE ') || 
+            trimmed.includes('CREATE ') || trimmed.includes('INITIALIZE ')) {
+            analysis.hasCreateOperations = true;
+            analysis.createOperations.push({
+                type: 'create',
+                operation: trimmed.includes('OPEN OUTPUT') ? 'OPEN OUTPUT' : 
+                          trimmed.includes('WRITE') ? 'WRITE' : 'CREATE',
+                line: lineNum + 1,
+                context: trimmed
+            });
+        }
+        
+        // Look for READ operations
+        if (trimmed.includes('OPEN INPUT') || trimmed.includes('READ ') || 
+            trimmed.includes('ACCEPT ') || trimmed.includes('MOVE ') && trimmed.includes(' TO ')) {
+            analysis.hasReadOperations = true;
+            analysis.readOperations.push({
+                type: 'read',
+                operation: trimmed.includes('OPEN INPUT') ? 'OPEN INPUT' : 
+                          trimmed.includes('READ') ? 'READ' : 'MOVE',
+                line: lineNum + 1,
+                context: trimmed
+            });
+        }
+        
+        // Look for UPDATE operations
+        if (trimmed.includes('OPEN I-O') || trimmed.includes('REWRITE') || 
+            trimmed.includes('UPDATE ') || trimmed.includes('MODIFY ')) {
+            analysis.hasUpdateOperations = true;
+            analysis.updateOperations.push({
+                type: 'update',
+                operation: trimmed.includes('OPEN I-O') ? 'OPEN I-O' : 
+                          trimmed.includes('REWRITE') ? 'REWRITE' : 'UPDATE',
+                line: lineNum + 1,
+                context: trimmed
+            });
+        }
+        
+        // Look for CICS operations
+        if (trimmed.includes('EXEC CICS')) {
+            analysis.hasCicsOperations = true;
+            analysis.cicsOperations.push({
+                type: 'cics',
+                operation: 'EXEC CICS',
+                line: lineNum + 1,
+                context: trimmed
+            });
+            
+            // Extract screen name if available
+            const mapMatch = trimmed.match(/MAP\s*\(\s*['"]*([A-Z][A-Z0-9\-_]*)['"]*\s*\)/);
+            if (mapMatch && !analysis.cicsScreen) {
+                analysis.cicsScreen = mapMatch[1];
+            }
+        }
+        
+        // Look for BATCH operations  
+        if (trimmed.includes('SORT ') || trimmed.includes('MERGE ') || 
+            trimmed.includes('//EXEC ') || trimmed.includes('SYSIN ')) {
+            analysis.hasBatchOperations = true;
+            analysis.batchOperations.push({
+                type: 'batch',
+                operation: trimmed.includes('SORT') ? 'SORT' : 
+                          trimmed.includes('MERGE') ? 'MERGE' : 'BATCH',
+                line: lineNum + 1,
+                context: trimmed
+            });
+        }
+    });
+
+    return analysis;
 }
 
 async analyzeProgramSpecificLifecycle(componentName, relevantFiles, lifecycleFlow) {
@@ -3896,17 +4052,28 @@ parseJSONResponse(text) {
         };
     }
 
-    console.log('=== JSON PARSING DEBUG ===');
+    console.log('=== ENHANCED JSON PARSING ===');
     console.log('Raw text length:', text.length);
-    console.log('First 500 chars:', text.substring(0, 500));
-    console.log('Last 500 chars:', text.substring(Math.max(0, text.length - 500)));
+    console.log('First 300 chars:', text.substring(0, 300));
 
-    // Step 1: Try JSON parsing first (existing methods)
+    // Step 1: Try direct JSON parsing first
+    try {
+        const directParse = JSON.parse(text);
+        if (directParse && typeof directParse === 'object') {
+            console.log('✅ Direct JSON parsing successful!');
+            return { success: true, data: directParse };
+        }
+    } catch (e) {
+        console.log('Direct JSON parsing failed:', e.message);
+    }
+
+    // Step 2: Extract JSON from text using multiple methods
     const extractionMethods = [
         () => this.extractJSONMethod1(text),
         () => this.extractJSONMethod2(text),
         () => this.extractJSONMethod3(text),
-        () => this.extractJSONMethod4(text)
+        () => this.extractJSONMethod4(text),
+        () => this.extractJSONMethod5(text) // New method
     ];
 
     for (let i = 0; i < extractionMethods.length; i++) {
@@ -3919,13 +4086,14 @@ parseJSONResponse(text) {
                     () => JSON.parse(jsonText),
                     () => JSON.parse(this.cleanJSONText(jsonText)),
                     () => JSON.parse(this.fixCommonJSONIssues(jsonText)),
+                    () => JSON.parse(this.aggressiveJSONClean(jsonText)) // New cleaning method
                 ];
                 
                 for (let j = 0; j < parseAttempts.length; j++) {
                     try {
                         const result = parseAttempts[j]();
                         if (result && typeof result === 'object') {
-                            console.log('✅ JSON parsing successful!');
+                            console.log(`✅ JSON parsing successful with method ${i + 1}, parse ${j + 1}!`);
                             return { success: true, data: result };
                         }
                     } catch (parseError) {
@@ -3938,16 +4106,147 @@ parseJSONResponse(text) {
         }
     }
 
-    // Step 2: JSON failed, use SMART PLAIN TEXT PARSING
-    console.log('🔍 JSON parsing failed, using smart plain text analysis...');
-    const plainTextAnalysis = this.parseSmartPlainText(text);
+    // Step 3: If JSON parsing completely fails, create structured data from text
+    console.log('🔍 All JSON parsing failed, creating structured response from text analysis...');
     
-    return { 
-        success: true, // Mark as successful since we have good data
-        data: plainTextAnalysis,
-        source: 'PlainTextParser',
-        rawText: text.substring(0, 2000)
+    // Determine if this is a copybook or program analysis
+    const iscopybookAnalysis = text.toLowerCase().includes('copybook') || 
+                              text.toLowerCase().includes('field') ||
+                              this.currentAnalyzedComponent && 
+                              this.analysisResults[this.currentAnalyzedComponent]?.componentType === 'Copybook';
+    
+    if (iscopybookAnalysis) {
+        const structuredResponse = this.createStructuredCopybookResponseFromText(text);
+        return { 
+            success: true, 
+            data: structuredResponse,
+            source: 'StructuredTextAnalysis'
+        };
+    } else {
+        const plainTextAnalysis = this.parseSmartPlainText(text);
+        return { 
+            success: true, 
+            data: plainTextAnalysis,
+            source: 'PlainTextParser'
+        };
+    }
+}
+
+extractJSONMethod5(text) {
+    // Look for JSON structure with specific field patterns
+    const jsonPattern = /\{\s*["']componentName["'][\s\S]*?\}\s*$/;
+    const match = text.match(jsonPattern);
+    
+    if (match) {
+        return match[0];
+    }
+    
+    // Try to find JSON between common delimiters
+    const patterns = [
+        /```json\s*([\s\S]*?)\s*```/,
+        /```\s*([\s\S]*?)\s*```/,
+        /RESPONSE:\s*([\s\S]*?)$/,
+        /JSON:\s*([\s\S]*?)$/
+    ];
+    
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match && match[1]) {
+            try {
+                JSON.parse(match[1]);
+                return match[1];
+            } catch (e) {
+                continue;
+            }
+        }
+    }
+    
+    return null;
+}
+
+// Add aggressive JSON cleaning method
+aggressiveJSONClean(text) {
+    return text
+        // Remove all non-JSON content before first {
+        .replace(/^[^{]*/, '')
+        // Remove all content after last }
+        .replace(/}[^}]*$/, '}')
+        // Fix common LLM response issues
+        .replace(/,(\s*[\}\]])/g, '$1')
+        .replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":')
+        .replace(/:\s*'([^']*)'/g, ': "$1"')
+        .replace(/:\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*([,\}])/g, ': "$1"$2')
+        .replace(/\n/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+// Add structured copybook response creator
+createStructuredCopybookResponseFromText(text) {
+    console.log('Creating structured copybook response from text');
+    
+    const componentName = this.currentAnalyzedComponent || 'Unknown';
+    
+    // Extract field information from text
+    const extractedFields = this.extractFieldsFromAnalysisText({ rawResponse: text });
+    
+    // Get real lifecycle data if available
+    const analysisResults = this.analysisResults[componentName];
+    const lifecycleFields = analysisResults?.lifecycleFlow?.primaryFields || [];
+    
+    // Combine extracted fields with lifecycle fields
+    const allFields = [...extractedFields];
+    lifecycleFields.forEach(lf => {
+        if (!allFields.find(f => f.name === lf.name)) {
+            allFields.push({
+                name: lf.name,
+                level: lf.level,
+                businessPurpose: lf.businessPurpose || 'Field from copybook analysis',
+                usagePattern: lf.usagePattern || 'ANALYZED',
+                picture: lf.picture || ''
+            });
+        }
+    });
+
+    // Categorize fields (simplified)
+    const fieldCategories = {
+        inputFields: allFields.filter(f => (f.usagePattern || '').includes('INPUT')).map(f => f.name),
+        outputFields: allFields.filter(f => (f.usagePattern || '').includes('OUTPUT')).map(f => f.name),
+        referenceFields: allFields.filter(f => (f.usagePattern || '').includes('REFERENCE')).map(f => f.name),
+        staticFields: allFields.filter(f => (f.usagePattern || '').includes('STATIC')).map(f => f.name),
+        unusedFields: allFields.filter(f => (f.usagePattern || '').includes('UNUSED')).map(f => f.name)
     };
+
+    const structuredResponse = {
+        componentName: componentName,
+        componentType: "Copybook",
+        analysisScope: "STRUCTURED_FROM_TEXT",
+        totalFields: allFields.length,
+        primaryFields: allFields.slice(0, 20), // Limit to 20 fields
+        fieldCategories: fieldCategories,
+        programUsage: {
+            totalPrograms: analysisResults?.lifecycleFlow?.inputPrograms?.length || 0,
+            programNames: analysisResults?.lifecycleFlow?.inputPrograms?.map(p => p.program) || []
+        },
+        recommendations: [
+            `Analysis extracted ${allFields.length} fields from copybook`,
+            `${fieldCategories.inputFields.length} fields identified for input operations`,
+            `${fieldCategories.outputFields.length} fields identified for output operations`,
+            `${fieldCategories.unusedFields.length} fields appear to be unused`,
+            'Review field usage patterns for optimization opportunities'
+        ],
+        qualityScore: 6,
+        source: 'StructuredFromText',
+        textAnalysisNote: 'Response created from LLM text analysis due to JSON parsing issues'
+    };
+
+    console.log('Structured copybook response created:', {
+        fields: structuredResponse.totalFields,
+        categories: Object.keys(fieldCategories),
+        recommendations: structuredResponse.recommendations.length
+    });
+
+    return structuredResponse;
 }
 
 parseSmartPlainText(text) {
@@ -5089,8 +5388,8 @@ createComponentFallback(componentName, componentType, lifecycleFlow) {
 // ===================================================================
 
 // === COPYBOOK ANALYSIS WITH LLM ===
-analyzeCopybookWithLLMAndLifecycle(copybookName, relevantFiles, basicDependencies, lifecycleFlow) {
-    console.log(`LLM analyzing copybook with ALL field levels: ${copybookName}`);
+async analyzeCopybookWithLLMAndLifecycle(copybookName, relevantFiles, basicDependencies, lifecycleFlow) {
+    console.log(`LLM analyzing copybook with focused JSON output: ${copybookName}`);
     
     const copybookFile = relevantFiles.find(f => 
         f.type === 'Copybook' && 
@@ -5102,64 +5401,136 @@ analyzeCopybookWithLLMAndLifecycle(copybookName, relevantFiles, basicDependencie
         throw new Error(`Copybook file for ${copybookName} not found`);
     }
 
-    // Get ALL field levels (not just 01)
-    const allFields = lifecycleFlow.primaryFields || [];
-    const field01Names = allFields.filter(f => f.level === 1).map(f => f.name).join(', ');
-    const fieldLevels = allFields.map(f => `${f.level}-${f.name}`).join(', ');
+    // Extract actual field names from the copybook content
+    const extractedFields = this.extractCopybookFields(copybookName, relevantFiles);
+    const programsUsingCopybook = this.findProgramsUsingCopybook(copybookName);
+    
+    console.log(`Found ${extractedFields.length} fields and ${programsUsingCopybook.length} programs using copybook`);
+    
+    // Analyze field usage with real program analysis
+    const fieldUsageAnalysis = this.analyzeFieldUsageAcrossPrograms(extractedFields, copybookName);
     
     const copybookContent = this.prepareContentForLLM(copybookFile.content, 'copybook');
     const foundDeps = basicDependencies.found || basicDependencies;
     const missingDeps = basicDependencies.missing || {};
 
-    const llmPrompt = `You are a mainframe copybook analysis expert. Analyze the copybook and return ONLY valid JSON.
+    // Create a more structured prompt with exact field names
+    const fieldNames = extractedFields.map(f => f.name).slice(0, 20); // Limit to first 20 fields
+    const programNames = programsUsingCopybook.map(p => p.name).slice(0, 10); // Limit to first 10 programs
 
-COPYBOOK: ${copybookName}
-ALL FIELDS FOUND: ${fieldLevels}
-01-LEVEL RECORDS: ${field01Names}
+    const llmPrompt = `CRITICAL: Return ONLY valid JSON. No explanatory text before or after.
 
-COPYBOOK CONTENT:
-${copybookContent}
+COPYBOOK ANALYSIS FOR: ${copybookName}
 
-DEPENDENCIES:
-Found: ${(foundDeps.copyStatements || []).join(', ') || 'None'}
-Missing: ${(missingDeps.copyStatements || []).join(', ') || 'None'}
+FIELD NAMES FOUND: ${fieldNames.join(', ')}
+PROGRAMS USING COPYBOOK: ${programNames.join(', ')}
 
-RETURN ONLY THIS JSON STRUCTURE (no other text):
+FIELD USAGE SUMMARY:
+- Input Fields: ${fieldUsageAnalysis.inputFields.join(', ') || 'None'}
+- Output Fields: ${fieldUsageAnalysis.outputFields.join(', ') || 'None'}
+- Reference Fields: ${fieldUsageAnalysis.referenceFields.join(', ') || 'None'}
+- Static Fields: ${fieldUsageAnalysis.staticFields.join(', ') || 'None'}
+- Unused Fields: ${fieldUsageAnalysis.unusedFields.join(', ') || 'None'}
+
+RETURN EXACTLY THIS JSON STRUCTURE:
 {
   "componentName": "${copybookName}",
   "componentType": "Copybook",
-  "analysisScope": "ALL_FIELD_LEVELS",
-  "totalFields": ${allFields.length},
+  "analysisScope": "FIELD_USAGE_ANALYSIS",
+  "totalFields": ${extractedFields.length},
   "primaryFields": [
-    {
-      "name": "SAMPLE-FIELD",
-      "level": 1,
-      "isRecordLayout": true,
-      "businessPurpose": "Main record structure for business data",
-      "usagePattern": "INPUT"
-    }
+${extractedFields.slice(0, 15).map(field => `    {
+      "name": "${field.name}",
+      "level": ${field.level},
+      "picture": "${field.picture || ''}",
+      "isRecordLayout": ${field.isRecordLayout},
+      "isElementaryField": ${field.isElementaryField},
+      "usagePattern": "${this.determineFieldUsagePattern(field, fieldUsageAnalysis)}",
+      "businessPurpose": "${this.generateFieldPurpose(field).replace(/"/g, "'")}"
+    }`).join(',\n')}
   ],
-  "fieldHierarchy": {
-    "level01Count": ${allFields.filter(f => f.level === 1).length},
-    "level05Count": ${allFields.filter(f => f.level === 5).length},
-    "elementaryFieldCount": ${allFields.filter(f => f.isElementaryField).length},
-    "groupFieldCount": ${allFields.filter(f => f.isGroupField).length}
+  "fieldCategories": {
+    "inputFields": [${fieldUsageAnalysis.inputFields.map(f => `"${f}"`).join(', ')}],
+    "outputFields": [${fieldUsageAnalysis.outputFields.map(f => `"${f}"`).join(', ')}],
+    "referenceFields": [${fieldUsageAnalysis.referenceFields.map(f => `"${f}"`).join(', ')}],
+    "staticFields": [${fieldUsageAnalysis.staticFields.map(f => `"${f}"`).join(', ')}],
+    "unusedFields": [${fieldUsageAnalysis.unusedFields.map(f => `"${f}"`).join(', ')}]
   },
-  "dependencyStatus": {
-    "foundCopybooks": [${(foundDeps.copyStatements || []).map(c => `"${c}"`).join(', ')}],
-    "missingCopybooks": [${(missingDeps.copyStatements || []).map(c => `"${c}"`).join(', ')}]
+  "programUsage": {
+    "totalPrograms": ${programsUsingCopybook.length},
+    "programNames": [${programNames.map(p => `"${p}"`).join(', ')}]
   },
   "recommendations": [
-    "Optimize field access patterns for ${copybookName}",
-    "Review dependency management for missing copybooks",
-    "Consider field usage consolidation"
+    "Review ${fieldUsageAnalysis.unusedFields.length} unused fields for potential removal",
+    "Optimize access patterns for ${fieldUsageAnalysis.inputFields.length} input fields",
+    "Document business rules for ${fieldUsageAnalysis.referenceFields.length} reference fields",
+    "Validate ${fieldUsageAnalysis.outputFields.length} output field formats"
   ],
   "qualityScore": 8
-}`;
-
-    return this.callLLMAPI(llmPrompt);
 }
 
+CRITICAL: Respond with ONLY the JSON above. No additional text.`;
+
+    try {
+        const response = await this.callLLMAPI(llmPrompt);
+        console.log('LLM response type:', typeof response);
+        console.log('LLM response keys:', response ? Object.keys(response) : 'No keys');
+        
+        // If we get a good JSON response, return it
+        if (response && typeof response === 'object' && response.componentName) {
+            return response;
+        }
+        
+        // Otherwise, create a structured fallback with real data
+        console.warn('LLM response not valid JSON, creating structured fallback');
+        return this.createStructuredCopybookFallback(copybookName, extractedFields, fieldUsageAnalysis, programsUsingCopybook);
+        
+    } catch (error) {
+        console.error('LLM API call failed:', error);
+        return this.createStructuredCopybookFallback(copybookName, extractedFields, fieldUsageAnalysis, programsUsingCopybook);
+    }
+}
+
+// Add this new fallback function
+createStructuredCopybookFallback(copybookName, extractedFields, fieldUsageAnalysis, programsUsingCopybook) {
+    console.log('Creating structured copybook fallback with real data');
+    
+    return {
+        componentName: copybookName,
+        componentType: "Copybook",
+        analysisScope: "FALLBACK_WITH_REAL_DATA",
+        totalFields: extractedFields.length,
+        primaryFields: extractedFields.slice(0, 15).map(field => ({
+            name: field.name,
+            level: field.level,
+            picture: field.picture || '',
+            isRecordLayout: field.isRecordLayout,
+            isElementaryField: field.isElementaryField,
+            usagePattern: this.determineFieldUsagePattern(field, fieldUsageAnalysis),
+            businessPurpose: this.generateFieldPurpose(field)
+        })),
+        fieldCategories: {
+            inputFields: fieldUsageAnalysis.inputFields || [],
+            outputFields: fieldUsageAnalysis.outputFields || [],
+            referenceFields: fieldUsageAnalysis.referenceFields || [],
+            staticFields: fieldUsageAnalysis.staticFields || [],
+            unusedFields: fieldUsageAnalysis.unusedFields || []
+        },
+        programUsage: {
+            totalPrograms: programsUsingCopybook.length,
+            programNames: programsUsingCopybook.map(p => p.name).slice(0, 10)
+        },
+        recommendations: [
+            `Found ${extractedFields.length} fields in copybook analysis`,
+            `${fieldUsageAnalysis.unusedFields.length} fields appear unused and could be reviewed`,
+            `${fieldUsageAnalysis.inputFields.length} fields are used for input operations`,
+            `${fieldUsageAnalysis.outputFields.length} fields are used for output operations`,
+            `${programsUsingCopybook.length} programs reference this copybook`
+        ],
+        qualityScore: 7,
+        source: 'StructuredFallback'
+    };
+}
 
 // === PROGRAM ANALYSIS WITH LLM ===
 async analyzeProgramWithLLMAndLifecycle(programName, relevantFiles, basicDependencies, lifecycleFlow) {
