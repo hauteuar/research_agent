@@ -5455,7 +5455,7 @@ displayAnalysisResults(componentName, results) {
     this.displayFieldMatrix(componentName, results);
     this.displayUsagePatterns(componentName, results);
     this.displayDependencies(componentName, results);
-    
+    this.displayFileLifecycle(componentName, results);
     // Switch to main results tab
     this.switchTab({ target: { dataset: { tab: 'lifecycle' } } });
 }
@@ -6072,31 +6072,76 @@ displayFieldMatrix(componentName, results) {
     container.innerHTML = html;
 }
 
+// Replace the displayDetailedFieldMatrix function with this fixed version
 displayDetailedFieldMatrix(primaryFields) {
+    if (!primaryFields || !Array.isArray(primaryFields) || primaryFields.length === 0) {
+        return `
+            <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; text-align: center;">
+                <p style="opacity: 0.8;">No field data available for matrix display.</p>
+            </div>
+        `;
+    }
+
     return `
         <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
-            <h4 style="color: #FFD700; margin-bottom: 15px;">🤖 Field Analysis Matrix</h4>
+            <h4 style="color: #FFD700; margin-bottom: 15px;">🤖 Field Analysis Matrix (${primaryFields.length} fields)</h4>
             <div style="overflow-x: auto;">
                 <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
                     <thead>
                         <tr style="background: rgba(0,0,0,0.3);">
                             <th style="padding: 8px; text-align: left; border: 1px solid rgba(255,255,255,0.1); color: #FFD700;">Field Name</th>
                             <th style="padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); color: #4CAF50;">Level</th>
-                            <th style="padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); color: #2196F3;">Usage Pattern</th>
-                            <th style="padding: 8px; text-align: left; border: 1px solid rgba(255,255,255,0.1); color: #FF9800;">Business Purpose</th>
+                            <th style="padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); color: #2196F3;">Type</th>
+                            <th style="padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); color: #FF9800;">Picture</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid rgba(255,255,255,0.1); color: #9C27B0;">Purpose</th>
                         </tr>
                     </thead>
                     <tbody>
                         ${primaryFields.map(field => `
                             <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
-                                <td style="padding: 6px 8px; font-family: monospace; font-weight: bold;">${field.name}</td>
-                                <td style="padding: 6px 8px; text-align: center;">${field.level || '01'}</td>
-                                <td style="padding: 6px 8px; text-align: center; color: #2196F3; font-weight: bold; font-size: 10px;">${field.usagePattern || 'UNKNOWN'}</td>
-                                <td style="padding: 6px 8px; font-size: 10px; max-width: 200px; word-wrap: break-word;">${field.businessPurpose || 'Not specified'}</td>
+                                <td style="padding: 6px 8px; font-family: monospace; font-weight: bold; color: #4dd0e1;">
+                                    ${field.name || field.fieldName || 'Unknown'}
+                                </td>
+                                <td style="padding: 6px 8px; text-align: center; color: #4CAF50;">
+                                    ${field.level || (field.name && field.name.includes('RECORD') ? '01' : '05')}
+                                </td>
+                                <td style="padding: 6px 8px; text-align: center; font-size: 10px;">
+                                    ${field.isRecordLayout ? 'RECORD' : 
+                                      field.isElementaryField ? 'ELEMENT' : 
+                                      field.isGroupField ? 'GROUP' : 'FIELD'}
+                                </td>
+                                <td style="padding: 6px 8px; text-align: center; font-family: monospace; font-size: 10px; color: #FF9800;">
+                                    ${field.picture || field.pic || '-'}
+                                </td>
+                                <td style="padding: 6px 8px; font-size: 10px; max-width: 200px; word-wrap: break-word;">
+                                    ${field.businessPurpose || field.purpose || field.description || 'Field analysis'}
+                                </td>
                             </tr>
                         `).join('')}
                     </tbody>
                 </table>
+            </div>
+            
+            <!-- Field Statistics -->
+            <div style="margin-top: 15px; display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 10px;">
+                <div style="text-align: center; background: rgba(76, 175, 80, 0.1); padding: 8px; border-radius: 4px;">
+                    <div style="font-size: 12px; font-weight: bold; color: #4CAF50;">
+                        ${primaryFields.filter(f => f.level === 1 || f.isRecordLayout).length}
+                    </div>
+                    <div style="font-size: 9px;">01-Level Records</div>
+                </div>
+                <div style="text-align: center; background: rgba(33, 150, 243, 0.1); padding: 8px; border-radius: 4px;">
+                    <div style="font-size: 12px; font-weight: bold; color: #2196F3;">
+                        ${primaryFields.filter(f => f.isElementaryField || f.picture).length}
+                    </div>
+                    <div style="font-size: 9px;">Elementary Fields</div>
+                </div>
+                <div style="text-align: center; background: rgba(255, 152, 0, 0.1); padding: 8px; border-radius: 4px;">
+                    <div style="font-size: 12px; font-weight: bold; color: #FF9800;">
+                        ${primaryFields.filter(f => f.isGroupField || (!f.picture && !f.isRecordLayout)).length}
+                    </div>
+                    <div style="font-size: 9px;">Group Fields</div>
+                </div>
             </div>
         </div>
     `;
@@ -6186,6 +6231,171 @@ displayDependencies(componentName, results) {
     
     container.innerHTML = html;
 }
+
+
+// Add this function after displayDependencies function (around line 3100)
+displayFileLifecycle(componentName, results) {
+    const container = document.getElementById('fileflowContent');
+    if (!container) return;
+    
+    let html = `
+        <h3>🌊 File Lifecycle Flow: ${componentName}</h3>
+        <p style="margin-bottom: 20px;">Complete lifecycle from creation through usage patterns.</p>
+    `;
+    
+    if (results.lifecycleFlow) {
+        html += this.displayFileLifecycleDetails(results.lifecycleFlow);
+    } else {
+        html += `
+            <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; text-align: center;">
+                <p style="opacity: 0.8;">Lifecycle flow analysis will appear here after component analysis.</p>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+}
+
+// Add this function for detailed lifecycle display
+displayFileLifecycleDetails(lifecycleFlow) {
+    const creationSources = lifecycleFlow.creationSources || [];
+    const inputPrograms = lifecycleFlow.inputPrograms || [];
+    const updatePrograms = lifecycleFlow.updatePrograms || [];
+    const cicsScreens = lifecycleFlow.cicsScreens || [];
+    const batchJobs = lifecycleFlow.batchJobs || [];
+    
+    return `
+        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+            <h4 style="color: #8b5cf6; margin-bottom: 15px;">🌊 Complete Lifecycle Flow</h4>
+            
+            <!-- Usage Pattern Summary -->
+            <div style="margin-bottom: 20px; text-align: center;">
+                <span style="background: ${this.getUsagePatternColor(lifecycleFlow.usagePattern)}; color: white; padding: 8px 16px; border-radius: 8px; font-weight: bold;">
+                    ${(lifecycleFlow.usagePattern || 'UNKNOWN').replace(/_/g, ' ')}
+                </span>
+            </div>
+            
+            <!-- Lifecycle Stages -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                
+                <!-- Creation Stage -->
+                <div style="background: rgba(34, 197, 94, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #22c55e;">
+                    <h5 style="color: #22c55e; margin-bottom: 10px;">🌱 Creation Sources (${creationSources.length})</h5>
+                    ${creationSources.length > 0 ? `
+                        <div style="max-height: 120px; overflow-y: auto;">
+                            ${creationSources.map(source => `
+                                <div style="margin-bottom: 8px; padding: 6px; background: rgba(0,0,0,0.2); border-radius: 4px;">
+                                    <div style="font-weight: bold; color: #4dd0e1; font-size: 11px;">${source.program}</div>
+                                    <div style="font-size: 9px; opacity: 0.8;">${source.operation} ${source.field || source.file || ''}</div>
+                                    ${source.evidence && source.evidence.length > 0 ? `
+                                        <div style="font-size: 8px; margin-top: 2px; color: #22c55e;">
+                                            Line ${source.evidence[0].line}: ${source.evidence[0].operation}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : '<div style="font-size: 11px; opacity: 0.7;">No creation sources identified</div>'}
+                </div>
+                
+                <!-- Reading Stage -->
+                <div style="background: rgba(59, 130, 246, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #3b82f6;">
+                    <h5 style="color: #3b82f6; margin-bottom: 10px;">📖 Reading Programs (${inputPrograms.length})</h5>
+                    ${inputPrograms.length > 0 ? `
+                        <div style="max-height: 120px; overflow-y: auto;">
+                            ${inputPrograms.map(input => `
+                                <div style="margin-bottom: 8px; padding: 6px; background: rgba(0,0,0,0.2); border-radius: 4px;">
+                                    <div style="font-weight: bold; color: #4dd0e1; font-size: 11px;">${input.program}</div>
+                                    <div style="font-size: 9px; opacity: 0.8;">${input.operation} ${input.field || input.file || ''}</div>
+                                    ${input.evidence && input.evidence.length > 0 ? `
+                                        <div style="font-size: 8px; margin-top: 2px; color: #3b82f6;">
+                                            Line ${input.evidence[0].line}: ${input.evidence[0].operation}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : '<div style="font-size: 11px; opacity: 0.7;">No reading programs identified</div>'}
+                </div>
+                
+                <!-- Update Stage -->
+                <div style="background: rgba(245, 158, 11, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b;">
+                    <h5 style="color: #f59e0b; margin-bottom: 10px;">⚙️ Update Programs (${updatePrograms.length})</h5>
+                    ${updatePrograms.length > 0 ? `
+                        <div style="max-height: 120px; overflow-y: auto;">
+                            ${updatePrograms.map(update => `
+                                <div style="margin-bottom: 8px; padding: 6px; background: rgba(0,0,0,0.2); border-radius: 4px;">
+                                    <div style="font-weight: bold; color: #4dd0e1; font-size: 11px;">${update.program}</div>
+                                    <div style="font-size: 9px; opacity: 0.8;">${update.operation} ${update.field || update.file || ''}</div>
+                                    ${update.evidence && update.evidence.length > 0 ? `
+                                        <div style="font-size: 8px; margin-top: 2px; color: #f59e0b;">
+                                            Line ${update.evidence[0].line}: ${update.evidence[0].operation}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : '<div style="font-size: 11px; opacity: 0.7;">No update programs identified</div>'}
+                </div>
+            </div>
+            
+            <!-- CICS and Batch Processing -->
+            ${(cicsScreens.length > 0 || batchJobs.length > 0) ? `
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div style="background: rgba(156, 39, 176, 0.1); padding: 15px; border-radius: 8px;">
+                        <h5 style="color: #9C27B0; margin-bottom: 10px;">💻 CICS Screens (${cicsScreens.length})</h5>
+                        ${cicsScreens.length > 0 ? 
+                            cicsScreens.map(screen => `
+                                <div style="font-size: 10px; margin-bottom: 4px;">
+                                    <strong>${screen.screen || 'Screen'}</strong> - ${screen.operation}
+                                </div>
+                            `).join('') : 
+                            '<div style="font-size: 11px; opacity: 0.7;">No CICS screen operations</div>'
+                        }
+                    </div>
+                    
+                    <div style="background: rgba(103, 58, 183, 0.1); padding: 15px; border-radius: 8px;">
+                        <h5 style="color: #673AB7; margin-bottom: 10px;">⚡ Batch Jobs (${batchJobs.length})</h5>
+                        ${batchJobs.length > 0 ? 
+                            batchJobs.map(job => `
+                                <div style="font-size: 10px; margin-bottom: 4px;">
+                                    <strong>${job.job || 'Job'}</strong> - ${job.operation}
+                                </div>
+                            `).join('') : 
+                            '<div style="font-size: 11px; opacity: 0.7;">No batch job operations</div>'
+                        }
+                    </div>
+                </div>
+            ` : ''}
+            
+            <!-- Field Lifecycle (for copybooks) -->
+            ${lifecycleFlow.primaryFields && lifecycleFlow.primaryFields.length > 0 ? `
+                <div style="margin-top: 20px;">
+                    <h5 style="color: #FFD700; margin-bottom: 10px;">📋 Field Lifecycle Summary</h5>
+                    <div style="background: rgba(255, 193, 7, 0.1); padding: 15px; border-radius: 8px;">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; font-size: 11px;">
+                            ${lifecycleFlow.primaryFields.slice(0, 6).map(field => `
+                                <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px;">
+                                    <div style="font-weight: bold; color: #FFD700; margin-bottom: 4px;">${field.name}</div>
+                                    <div style="font-size: 9px;">
+                                        ${field.lifecycle ? `
+                                            <div>📖 Read: ${field.lifecycle.readBy.length}</div>
+                                            <div>✏️ Update: ${field.lifecycle.updatedBy.length}</div>
+                                            <div>👁️ Display: ${field.lifecycle.displayedBy.length}</div>
+                                        ` : 'Lifecycle tracking available'}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+// Update the displayAnalysisResults function (around line 2800) - add this line:
+// In displayAnalysisResults function, after displayDependencies line, add:
 
 // === BULK ANALYSIS AND EXPORT ===
 async bulkAnalyze() {
