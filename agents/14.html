@@ -4181,6 +4181,319 @@ aggressiveJSONClean(text) {
         .trim();
 }
 
+// Add this function after the analyzeCopybookWithLLMAndLifecycle function (around line 1700)
+
+analyzeFieldUsageAcrossPrograms(extractedFields, copybookName) {
+    const analysis = {
+        inputFields: [],
+        outputFields: [],
+        referenceFields: [],
+        staticFields: [],
+        unusedFields: [],
+        fieldUsageDetails: {}
+    };
+    
+    // Get programs that use this copybook
+    const usingPrograms = this.findProgramsUsingCopybook(copybookName);
+    console.log(`Analyzing field usage across ${usingPrograms.length} programs for copybook ${copybookName}`);
+    
+    extractedFields.forEach(field => {
+        const fieldName = field.name;
+        let usageCount = 0;
+        let isInput = false;
+        let isOutput = false;
+        let isReference = false;
+        let isStatic = field.value ? true : false;
+        
+        const usageDetails = {
+            readBy: [],
+            writtenBy: [],
+            referencedBy: [],
+            operations: []
+        };
+        
+        // Analyze usage in each program
+        usingPrograms.forEach(program => {
+            const fieldUsage = this.analyzeFieldUsageInProgram(fieldName, program);
+            
+            if (fieldUsage.operations.length > 0) {
+                usageCount++;
+                
+                // Check for input operations (field receives data)
+                if (fieldUsage.isInput || fieldUsage.isWritten) {
+                    isInput = true;
+                    usageDetails.writtenBy.push(program.name);
+                }
+                
+                // Check for output operations (field sends data)
+                if (fieldUsage.isDisplayed || fieldUsage.isRead) {
+                    isOutput = true;
+                    usageDetails.readBy.push(program.name);
+                }
+                
+                // Check for reference operations (field used in conditions)
+                if (fieldUsage.isValidated) {
+                    isReference = true;
+                    usageDetails.referencedBy.push(program.name);
+                }
+                
+                // Collect all operations
+                usageDetails.operations.push(...fieldUsage.operations);
+            }
+        });
+        
+        // Categorize field based on usage pattern
+        if (usageCount === 0) {
+            analysis.unusedFields.push(fieldName);
+        } else if (isStatic) {
+            analysis.staticFields.push(fieldName);
+        } else if (isInput && !isOutput && !isReference) {
+            analysis.inputFields.push(fieldName);
+        } else if (isOutput && !isInput && !isReference) {
+            analysis.outputFields.push(fieldName);
+        } else if (isReference) {
+            analysis.referenceFields.push(fieldName);
+        } else if (isInput && isOutput) {
+            // Field is both input and output - categorize as reference
+            analysis.referenceFields.push(fieldName);
+        } else {
+            // Default to reference if used but pattern unclear
+            analysis.referenceFields.push(fieldName);
+        }
+        
+        analysis.fieldUsageDetails[fieldName] = usageDetails;
+    });
+    
+    console.log('Field usage analysis complete:', {
+        input: analysis.inputFields.length,
+        output: analysis.outputFields.length,
+        reference: analysis.referenceFields.length,
+        static: analysis.staticFields.length,
+        unused: analysis.unusedFields.length,
+        totalPrograms: usingPrograms.length
+    });
+    
+    return analysis;
+}
+
+// Also add the missing helper functions:
+
+determineFieldUsagePattern(field, fieldUsageAnalysis) {
+    const fieldName = field.name;
+    
+    if (fieldUsageAnalysis.inputFields.includes(fieldName)) {
+        return 'INPUT';
+    } else if (fieldUsageAnalysis.outputFields.includes(fieldName)) {
+        return 'OUTPUT';
+    } else if (fieldUsageAnalysis.referenceFields.includes(fieldName)) {
+        return 'REFERENCE';
+    } else if (fieldUsageAnalysis.staticFields.includes(fieldName)) {
+        return 'STATIC';
+    } else if (fieldUsageAnalysis.unusedFields.includes(fieldName)) {
+        return 'UNUSED';
+    } else {
+        return 'MIXED';
+    }
+}
+
+generateFieldPurpose(field) {
+    const fieldName = field.name;
+    
+    // Generate purpose based on field name patterns and characteristics
+    if (fieldName.includes('RECORD') || fieldName.includes('REC')) {
+        return `Main record structure for ${fieldName.toLowerCase().replace(/-/g, ' ')} data`;
+    } else if (fieldName.includes('ID') || fieldName.includes('KEY')) {
+        return `Unique identifier for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
+    } else if (fieldName.includes('DATE') || fieldName.includes('TIME') || fieldName.includes('DT')) {
+        return `Date/time field for ${fieldName.toLowerCase().replace(/-/g, ' ')} tracking`;
+    } else if (fieldName.includes('AMT') || fieldName.includes('AMOUNT') || fieldName.includes('AMT')) {
+        return `Monetary amount for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
+    } else if (fieldName.includes('DESC') || fieldName.includes('NAME') || fieldName.includes('DESCR')) {
+        return `Descriptive text for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
+    } else if (fieldName.includes('FLAG') || fieldName.includes('IND') || fieldName.includes('SW')) {
+        return `Status indicator for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
+    } else if (fieldName.includes('CODE') || fieldName.includes('CD') || fieldName.includes('TYPE')) {
+        return `Coded value for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
+    } else if (fieldName.includes('COUNT') || fieldName.includes('CNT') || fieldName.includes('NUM')) {
+        return `Counter/number field for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
+    } else if (fieldName.includes('ADDR') || fieldName.includes('ADDRESS')) {
+        return `Address information for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
+    } else if (fieldName.includes('PHONE') || fieldName.includes('TEL')) {
+        return `Phone number field for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
+    } else if (fieldName.includes('STATUS') || fieldName.includes('STAT')) {
+        return `Status field for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
+    } else if (field.picture && field.picture.includes('9')) {
+        return `Numeric field for ${fieldName.toLowerCase().replace(/-/g, ' ')} calculations`;
+    } else if (field.picture && field.picture.includes('X')) {
+        return `Text field for ${fieldName.toLowerCase().replace(/-/g, ' ')} data`;
+    } else if (field.level === 1) {
+        return `Primary record layout for ${fieldName.toLowerCase().replace(/-/g, ' ')} structure`;
+    } else if (field.level <= 10) {
+        return `Group field organizing ${fieldName.toLowerCase().replace(/-/g, ' ')} data`;
+    } else {
+        return `Business data field for ${fieldName.toLowerCase().replace(/-/g, ' ')} processing`;
+    }
+}
+
+// Enhanced analyzeFieldUsageInProgram function (if not already present)
+analyzeFieldUsageInProgram(fieldName, programFile) {
+    const usage = {
+        fieldName: fieldName,
+        programName: '',
+        isRead: false,
+        isWritten: false,
+        isDisplayed: false,
+        isInput: false,
+        isValidated: false,
+        isCalculated: false,
+        operations: []
+    };
+
+    if (!programFile || !programFile.content) {
+        console.warn('Program file or content is missing for field analysis');
+        return usage;
+    }
+
+    const lines = programFile.content.split('\n');
+    const upperContent = programFile.content.toUpperCase();
+    const fieldUpper = fieldName.toUpperCase();
+    
+    // Get program name
+    const programMatch = upperContent.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]+)/);
+    usage.programName = programMatch ? programMatch[1] : programFile.name.replace(/\.[^/.]+$/, "");
+
+    lines.forEach((line, lineNum) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // Skip if line doesn't contain our field
+        if (!trimmed.includes(fieldUpper)) {
+            return;
+        }
+
+        // MOVE operations (reading/writing)
+        if (trimmed.includes('MOVE')) {
+            const moveFromMatch = trimmed.match(new RegExp(`MOVE\\s+${fieldUpper}\\s+TO\\s+([A-Z][A-Z0-9\\-_]+)`));
+            const moveToMatch = trimmed.match(new RegExp(`MOVE\\s+([A-Z][A-Z0-9\\-_]+)\\s+TO\\s+${fieldUpper}`));
+            
+            if (moveFromMatch) {
+                usage.isRead = true;
+                usage.operations.push({
+                    type: 'read',
+                    operation: 'MOVE FROM',
+                    line: lineNum + 1,
+                    context: trimmed.substring(0, 80),
+                    target: moveFromMatch[1]
+                });
+            }
+            
+            if (moveToMatch) {
+                usage.isWritten = true;
+                usage.operations.push({
+                    type: 'write',
+                    operation: 'MOVE TO',
+                    line: lineNum + 1,
+                    context: trimmed.substring(0, 80),
+                    source: moveToMatch[1]
+                });
+            }
+        }
+
+        // DISPLAY operations (output)
+        if (trimmed.includes('DISPLAY') && trimmed.includes(fieldUpper)) {
+            usage.isDisplayed = true;
+            usage.operations.push({
+                type: 'display',
+                operation: 'DISPLAY',
+                line: lineNum + 1,
+                context: trimmed.substring(0, 80)
+            });
+        }
+
+        // ACCEPT operations (input)
+        if (trimmed.includes('ACCEPT') && trimmed.includes(fieldUpper)) {
+            usage.isInput = true;
+            usage.operations.push({
+                type: 'input',
+                operation: 'ACCEPT',
+                line: lineNum + 1,
+                context: trimmed.substring(0, 80)
+            });
+        }
+
+        // IF/WHEN conditions (validation/comparison)
+        if ((trimmed.includes('IF') || trimmed.includes('WHEN')) && trimmed.includes(fieldUpper)) {
+            usage.isValidated = true;
+            usage.operations.push({
+                type: 'validation',
+                operation: 'CONDITION',
+                line: lineNum + 1,
+                context: trimmed.substring(0, 80)
+            });
+        }
+
+        // COMPUTE/ADD/SUBTRACT/MULTIPLY/DIVIDE (calculation)
+        const calcOperations = ['COMPUTE', 'ADD', 'SUBTRACT', 'MULTIPLY', 'DIVIDE'];
+        for (const op of calcOperations) {
+            if (trimmed.includes(op) && trimmed.includes(fieldUpper)) {
+                usage.isCalculated = true;
+                usage.operations.push({
+                    type: 'calculation',
+                    operation: op,
+                    line: lineNum + 1,
+                    context: trimmed.substring(0, 80)
+                });
+                break;
+            }
+        }
+
+        // CICS SEND/RECEIVE MAP operations
+        if (trimmed.includes('EXEC CICS')) {
+            if (trimmed.includes('SEND MAP') && trimmed.includes(fieldUpper)) {
+                usage.isDisplayed = true;
+                usage.operations.push({
+                    type: 'cics_output',
+                    operation: 'CICS SEND MAP',
+                    line: lineNum + 1,
+                    context: trimmed.substring(0, 80)
+                });
+            }
+            
+            if (trimmed.includes('RECEIVE MAP') && trimmed.includes(fieldUpper)) {
+                usage.isInput = true;
+                usage.operations.push({
+                    type: 'cics_input',
+                    operation: 'CICS RECEIVE MAP',
+                    line: lineNum + 1,
+                    context: trimmed.substring(0, 80)
+                });
+            }
+        }
+
+        // File operations
+        if (trimmed.includes('WRITE') && trimmed.includes(fieldUpper)) {
+            usage.isWritten = true;
+            usage.operations.push({
+                type: 'file_write',
+                operation: 'WRITE',
+                line: lineNum + 1,
+                context: trimmed.substring(0, 80)
+            });
+        }
+
+        if (trimmed.includes('READ') && trimmed.includes(fieldUpper)) {
+            usage.isRead = true;
+            usage.operations.push({
+                type: 'file_read',
+                operation: 'READ',
+                line: lineNum + 1,
+                context: trimmed.substring(0, 80)
+            });
+        }
+    });
+
+    return usage;
+}
+
 // Add structured copybook response creator
 createStructuredCopybookResponseFromText(text) {
     console.log('Creating structured copybook response from text');
