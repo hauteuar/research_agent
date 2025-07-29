@@ -6059,18 +6059,218 @@ displayFieldMatrix(componentName, results) {
         <p style="margin-bottom: 20px;">Field-level analysis with lifecycle context.</p>
     `;
     
-    if (results.componentType === 'Copybook' && results.llmAnalysis && results.llmAnalysis.primaryFields) {
-        html += this.displayDetailedFieldMatrix(results.llmAnalysis.primaryFields);
+    // Extract field data from multiple sources
+    let fieldsToDisplay = [];
+    
+    // Try to get fields from LLM analysis first
+    if (results.llmAnalysis && results.llmAnalysis.primaryFields) {
+        fieldsToDisplay = results.llmAnalysis.primaryFields;
+    } else if (results.llmAnalysis && results.llmAnalysis.fieldDetails) {
+        fieldsToDisplay = results.llmAnalysis.fieldDetails;
+    } else if (results.lifecycleFlow && results.lifecycleFlow.primaryFields) {
+        // Fallback to lifecycle flow fields
+        fieldsToDisplay = results.lifecycleFlow.primaryFields;
+    } else {
+        // Last resort: extract from any available analysis data
+        fieldsToDisplay = this.extractFieldsFromAnalysisText(results.llmAnalysis || {});
+    }
+    
+    console.log('Fields to display in matrix:', fieldsToDisplay);
+    
+    if (results.componentType === 'Copybook' && fieldsToDisplay.length > 0) {
+        html += this.displayEnhancedFieldMatrix(fieldsToDisplay, results.llmAnalysis);
     } else {
         html += `
             <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; text-align: center;">
-                <p style="opacity: 0.8;">Field matrix analysis is available for copybook components with field analysis.</p>
+                <p style="opacity: 0.8;">
+                    ${results.componentType === 'Copybook' ? 
+                        'Field matrix requires copybook field analysis. The analysis may need to be re-run or fields extracted differently.' : 
+                        'Field matrix analysis is available for copybook components.'}
+                </p>
+                ${results.llmAnalysis && Object.keys(results.llmAnalysis).length > 0 ? `
+                    <div style="margin-top: 15px; padding: 10px; background: rgba(255, 193, 7, 0.1); border-radius: 6px;">
+                        <p style="font-size: 12px; color: #FFC107;">Debug Info:</p>
+                        <p style="font-size: 10px; opacity: 0.8;">Analysis keys: ${Object.keys(results.llmAnalysis).join(', ')}</p>
+                    </div>
+                ` : ''}
             </div>
         `;
     }
     
     container.innerHTML = html;
 }
+
+displayEnhancedFieldMatrix(fieldsToDisplay, llmAnalysis) {
+    if (!fieldsToDisplay || fieldsToDisplay.length === 0) {
+        return `
+            <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; text-align: center;">
+                <p style="opacity: 0.8;">No fields available for matrix display.</p>
+            </div>
+        `;
+    }
+
+    return `
+        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+            <h4 style="color: #FFD700; margin-bottom: 15px;">🤖 Field Analysis Matrix (${fieldsToDisplay.length} fields)</h4>
+            
+            <!-- Field Table -->
+            <div style="overflow-x: auto; margin-bottom: 20px;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                    <thead>
+                        <tr style="background: rgba(0,0,0,0.3);">
+                            <th style="padding: 8px; text-align: left; border: 1px solid rgba(255,255,255,0.1); color: #FFD700;">Field Name</th>
+                            <th style="padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); color: #4CAF50;">Level</th>
+                            <th style="padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); color: #2196F3;">Usage Pattern</th>
+                            <th style="padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); color: #FF9800;">Picture</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid rgba(255,255,255,0.1); color: #9C27B0;">Business Purpose</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${fieldsToDisplay.map((field, index) => {
+                            // Handle multiple field object formats
+                            const fieldName = field.name || field.fieldName || field.field || `Field-${index + 1}`;
+                            const fieldLevel = field.level || (fieldName.includes('RECORD') ? 1 : 5);
+                            const fieldPattern = field.usagePattern || field.usage || field.pattern || 'ANALYZED';
+                            const fieldPicture = field.picture || field.pic || field.format || '-';
+                            const fieldPurpose = field.businessPurpose || field.purpose || field.description || 'Business field analysis';
+                            
+                            return `
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                                    <td style="padding: 6px 8px; font-family: monospace; font-weight: bold; color: #4dd0e1;">
+                                        ${fieldName}
+                                    </td>
+                                    <td style="padding: 6px 8px; text-align: center; color: #4CAF50;">
+                                        ${fieldLevel}
+                                    </td>
+                                    <td style="padding: 6px 8px; text-align: center;">
+                                        <span style="padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: bold; color: white; background: ${this.getUsagePatternColor(fieldPattern)};">
+                                            ${fieldPattern}
+                                        </span>
+                                    </td>
+                                    <td style="padding: 6px 8px; text-align: center; font-family: monospace; font-size: 10px; color: #FF9800;">
+                                        ${fieldPicture}
+                                    </td>
+                                    <td style="padding: 6px 8px; font-size: 10px; max-width: 200px; word-wrap: break-word;">
+                                        ${fieldPurpose}
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+            
+            ${this.displayFieldCategorizationFromData(fieldsToDisplay, llmAnalysis)}
+        </div>
+    `;
+}
+
+displayFieldCategorizationFromData(fieldsToDisplay, llmAnalysis) {
+    // Categorize fields by usage pattern from the actual field data
+    const categories = {
+        INPUT: fieldsToDisplay.filter(f => (f.usagePattern || '').includes('INPUT')),
+        OUTPUT: fieldsToDisplay.filter(f => (f.usagePattern || '').includes('OUTPUT')),
+        REFERENCE: fieldsToDisplay.filter(f => (f.usagePattern || '').includes('REFERENCE')),
+        STATIC: fieldsToDisplay.filter(f => (f.usagePattern || '').includes('STATIC')),
+        UNUSED: fieldsToDisplay.filter(f => (f.usagePattern || '').includes('UNUSED')),
+        OTHER: fieldsToDisplay.filter(f => {
+            const pattern = f.usagePattern || '';
+            return !pattern.includes('INPUT') && !pattern.includes('OUTPUT') && 
+                   !pattern.includes('REFERENCE') && !pattern.includes('STATIC') && !pattern.includes('UNUSED');
+        })
+    };
+
+    // Also try to use fieldCategories from LLM if available
+    if (llmAnalysis && llmAnalysis.fieldCategories) {
+        const llmCategories = llmAnalysis.fieldCategories;
+        
+        return `
+            <!-- Field Categorization from LLM Analysis -->
+            <div style="margin-top: 20px;">
+                <h5 style="color: #FFD700; margin-bottom: 15px;">📊 Field Usage Categorization</h5>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                    
+                    <!-- Input Fields -->
+                    <div style="background: rgba(34, 197, 94, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #22c55e;">
+                        <h6 style="color: #22c55e; margin-bottom: 10px;">📥 Input Fields (${(llmCategories.inputFields || []).length})</h6>
+                        <div style="max-height: 100px; overflow-y: auto;">
+                            ${(llmCategories.inputFields || []).length > 0 ? 
+                                (llmCategories.inputFields || []).map(field => `
+                                    <div style="font-size: 10px; font-family: monospace; padding: 2px 4px; margin: 2px 0; background: rgba(0,0,0,0.2); border-radius: 2px;">
+                                        ${field}
+                                    </div>
+                                `).join('') : 
+                                '<div style="font-size: 11px; opacity: 0.7;">No input fields identified</div>'
+                            }
+                        </div>
+                    </div>
+                    
+                    <!-- Output Fields -->
+                    <div style="background: rgba(59, 130, 246, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #3b82f6;">
+                        <h6 style="color: #3b82f6; margin-bottom: 10px;">📤 Output Fields (${(llmCategories.outputFields || []).length})</h6>
+                        <div style="max-height: 100px; overflow-y: auto;">
+                            ${(llmCategories.outputFields || []).length > 0 ? 
+                                (llmCategories.outputFields || []).map(field => `
+                                    <div style="font-size: 10px; font-family: monospace; padding: 2px 4px; margin: 2px 0; background: rgba(0,0,0,0.2); border-radius: 2px;">
+                                        ${field}
+                                    </div>
+                                `).join('') : 
+                                '<div style="font-size: 11px; opacity: 0.7;">No output fields identified</div>'
+                            }
+                        </div>
+                    </div>
+                    
+                    <!-- Reference Fields -->
+                    <div style="background: rgba(245, 158, 11, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b;">
+                        <h6 style="color: #f59e0b; margin-bottom: 10px;">📋 Reference Fields (${(llmCategories.referenceFields || []).length})</h6>
+                        <div style="max-height: 100px; overflow-y: auto;">
+                            ${(llmCategories.referenceFields || []).length > 0 ? 
+                                (llmCategories.referenceFields || []).map(field => `
+                                    <div style="font-size: 10px; font-family: monospace; padding: 2px 4px; margin: 2px 0; background: rgba(0,0,0,0.2); border-radius: 2px;">
+                                        ${field}
+                                    </div>
+                                `).join('') : 
+                                '<div style="font-size: 11px; opacity: 0.7;">No reference fields identified</div>'
+                            }
+                        </div>
+                    </div>
+                    
+                    <!-- Static Fields -->
+                    <div style="background: rgba(156, 39, 176, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #9C27B0;">
+                        <h6 style="color: #9C27B0; margin-bottom: 10px;">🔒 Static Fields (${(llmCategories.staticFields || []).length})</h6>
+                        <div style="max-height: 100px; overflow-y: auto;">
+                            ${(llmCategories.staticFields || []).length > 0 ? 
+                                (llmCategories.staticFields || []).map(field => `
+                                    <div style="font-size: 10px; font-family: monospace; padding: 2px 4px; margin: 2px 0; background: rgba(0,0,0,0.2); border-radius: 2px;">
+                                        ${field}
+                                    </div>
+                                `).join('') : 
+                                '<div style="font-size: 11px; opacity: 0.7;">No static fields identified</div>'
+                            }
+                        </div>
+                    </div>
+                    
+                    <!-- Unused Fields -->
+                    <div style="background: rgba(107, 114, 128, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #6b7280;">
+                        <h6 style="color: #6b7280; margin-bottom: 10px;">❌ Unused Fields (${(llmCategories.unusedFields || []).length})</h6>
+                        <div style="max-height: 100px; overflow-y: auto;">
+                            ${(llmCategories.unusedFields || []).length > 0 ? 
+                                (llmCategories.unusedFields || []).map(field => `
+                                    <div style="font-size: 10px; font-family: monospace; padding: 2px 4px; margin: 2px 0; background: rgba(0,0,0,0.2); border-radius: 2px;">
+                                        ${field}
+                                    </div>
+                                `).join('') : 
+                                '<div style="font-size: 11px; opacity: 0.7;">No unused fields identified</div>'
+                            }
+
+                        </div>
+                    }
+                </div>
+            </div>      
+        `;
+                    }
+    }  
+    
 
 // Replace the displayDetailedFieldMatrix function with this fixed version
 displayDetailedFieldMatrix(primaryFields) {
