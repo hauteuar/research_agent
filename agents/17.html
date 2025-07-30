@@ -2945,99 +2945,119 @@ intelligentChunkContent(content, componentType) {
     return content.substring(0, maxChars);
 }
 
-// === ENHANCED FIELD-WISE LIFECYCLE ANALYSIS ===
-async analyzeFieldWiseLifecycle(componentName, relevantFiles) {
-    const fieldLifecycle = {
-        inputFields: [],     // Fields populated from external sources
-        referenceFields: [], // Fields used for lookups/comparisons
-        updatedFields: [],   // Fields modified during processing
-        derivedFields: [],   // Fields calculated from other fields
-        staticFields: [],    // Fields with constant values
-        unusedFields: []     // Fields never referenced
-    };
+
+
+
+// === EXTRACT COPYBOOK FIELDS ===
+extractCopybookFields(componentName, relevantFiles) {
+    const fields = [];
     
-    // Extract all fields from copybook
-    const extractedFields = this.extractCopybookFields(componentName, relevantFiles);
-    const usingPrograms = this.findProgramsUsingCopybook(componentName);
-    
-    console.log(`Analyzing ${extractedFields.length} fields across ${usingPrograms.length} programs`);
-    
-    for (const field of extractedFields) {
-        const fieldAnalysis = {
-            name: field.name,
-            level: field.level,
-            picture: field.picture,
-            usagePatterns: [],
-            sourcePrograms: [],
-            targetPrograms: [],
-            operations: []
-        };
+    for (const file of relevantFiles) {
+        const lines = file.content.split('\n');
         
-        // Analyze field usage in each program
-        for (const program of usingPrograms) {
-            const usage = this.analyzeFieldUsageInProgram(field.name, program);
+        lines.forEach((line, index) => {
+            const trimmed = line.trim().toUpperCase();
+            // Match COBOL field definitions (level number + field name)
+            const fieldMatch = trimmed.match(/^\s*(\d+)\s+([A-Z][A-Z0-9\-_]+)(?:\s+PIC\s+([X9\(\)V]+))?(?:\s+VALUE\s+(.+))?/);
             
-            if (usage.operations.length > 0) {
-                fieldAnalysis.usagePatterns.push(usage);
+            if (fieldMatch) {
+                const level = parseInt(fieldMatch[1]);
+                const name = fieldMatch[2];
+                const picture = fieldMatch[3] || '';
+                const value = fieldMatch[4] || '';
                 
-                // Categorize based on operations
-                const isInput = usage.isInput || usage.isWritten;
-                const isOutput = usage.isDisplayed || usage.isRead;
-                const isCalculated = usage.isCalculated;
-                const isValidated = usage.isValidated;
-                
-                if (isInput && !isOutput) {
-                    fieldAnalysis.category = 'INPUT';
-                } else if (isOutput && !isInput) {
-                    fieldAnalysis.category = 'OUTPUT';
-                } else if (isCalculated) {
-                    fieldAnalysis.category = 'DERIVED';
-                } else if (isValidated) {
-                    fieldAnalysis.category = 'REFERENCE';
-                } else if (field.value) {
-                    fieldAnalysis.category = 'STATIC';
-                } else if (isInput && isOutput) {
-                    fieldAnalysis.category = 'UPDATED';
-                } else {
-                    fieldAnalysis.category = 'UNUSED';
+                // Only include reasonable field levels (01-88)
+                if (level >= 1 && level <= 88) {
+                    fields.push({
+                        name: name,
+                        level: level,
+                        picture: picture,
+                        value: value,
+                        lineNumber: index + 1,
+                        file: file.name,
+                        isElementaryField: level > 1 && !picture.includes('OCCURS')
+                    });
                 }
             }
-        }
-        
-        // If no usage found, mark as unused
-        if (fieldAnalysis.usagePatterns.length === 0) {
-            fieldAnalysis.category = 'UNUSED';
-        }
-        
-        // Add to appropriate category
-        switch (fieldAnalysis.category) {
-            case 'INPUT':
-                fieldLifecycle.inputFields.push(fieldAnalysis);
-                break;
-            case 'REFERENCE':
-                fieldLifecycle.referenceFields.push(fieldAnalysis);
-                break;
-            case 'UPDATED':
-                fieldLifecycle.updatedFields.push(fieldAnalysis);
-                break;
-            case 'DERIVED':
-                fieldLifecycle.derivedFields.push(fieldAnalysis);
-                break;
-            case 'STATIC':
-                fieldLifecycle.staticFields.push(fieldAnalysis);
-                break;
-            case 'UNUSED':
-                fieldLifecycle.unusedFields.push(fieldAnalysis);
-                break;
-            default:
-                fieldLifecycle.referenceFields.push(fieldAnalysis);
+        });
+    }
+    
+    return fields;
+}
+
+// === FIND PROGRAMS USING COPYBOOK ===
+findProgramsUsingCopybook(componentName) {
+    const usingPrograms = [];
+    
+    for (const file of this.uploadedFiles) {
+        if (file.type === 'COBOL Program' || file.type === 'JCL Job') {
+            const content = file.content.toUpperCase();
+            
+            // Check if this program uses the copybook
+            if (content.includes(`COPY ${componentName}`) || 
+                content.includes(`INCLUDE ${componentName}`) ||
+                content.includes(componentName)) {
+                
+                usingPrograms.push({
+                    name: file.name.replace(/\.[^/.]+$/, ""), // Remove extension
+                    content: file.content,
+                    type: file.type
+                });
+            }
         }
     }
     
-    return fieldLifecycle;
+    return usingPrograms;
 }
 
-
+// === ANALYZE FIELD USAGE IN PROGRAM ===
+analyzeFieldUsageInProgram(fieldName, program) {
+    const usage = {
+        program: program.name,
+        operations: [],
+        isInput: false,
+        isOutput: false,
+        isWritten: false,
+        isRead: false,
+        isDisplayed: false,
+        isCalculated: false,
+        isValidated: false
+    };
+    
+    const content = program.content.toUpperCase();
+    const lines = content.split('\n');
+    
+    lines.forEach((line, index) => {
+        const trimmed = line.trim();
+        
+        if (trimmed.includes(fieldName)) {
+            // Analyze the operation type
+            if (trimmed.includes('MOVE') && trimmed.includes(`TO ${fieldName}`)) {
+                usage.operations.push({ type: 'WRITE', line: index + 1 });
+                usage.isWritten = true;
+                usage.isInput = true;
+            } else if (trimmed.includes('MOVE') && trimmed.includes(`${fieldName} TO`)) {
+                usage.operations.push({ type: 'READ', line: index + 1 });
+                usage.isRead = true;
+                usage.isOutput = true;
+            } else if (trimmed.includes('DISPLAY') && trimmed.includes(fieldName)) {
+                usage.operations.push({ type: 'DISPLAY', line: index + 1 });
+                usage.isDisplayed = true;
+                usage.isOutput = true;
+            } else if (trimmed.includes('COMPUTE') && trimmed.includes(fieldName)) {
+                usage.operations.push({ type: 'COMPUTE', line: index + 1 });
+                usage.isCalculated = true;
+            } else if (trimmed.includes('IF') && trimmed.includes(fieldName)) {
+                usage.operations.push({ type: 'VALIDATE', line: index + 1 });
+                usage.isValidated = true;
+            } else if (trimmed.includes(fieldName)) {
+                usage.operations.push({ type: 'REFERENCE', line: index + 1 });
+            }
+        }
+    });
+    
+    return usage;
+}
 
 // === DISPLAY ANALYSIS RESULTS ===
 // === ENHANCED FILE LIFECYCLE FLOW DIAGRAM ===
