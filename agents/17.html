@@ -2315,7 +2315,16 @@ try {
     this.saveToStorage();
     
     this.hideLoading();
+    // Enhanced results with field analysis
+if (results.componentType === 'Copybook' && results.lifecycleFlow?.fieldAnalysis) {
+    // Store detailed field categorization
+    this.currentFieldAnalysis = results.lifecycleFlow.fieldAnalysis;
     
+    // Update chat context
+    this.enableEnhancedChat(componentName, results);
+} else {
+    this.enableChat();
+}
     // Show success with details
     const displayName = this.getFriendlyName(componentName);
     const successMessage = `✅ Analysis complete for ${displayName}! 
@@ -2361,17 +2370,51 @@ async runLLMEnhancedAnalysisWithLifecycle(componentName) {
         const dependencyAnalysis = await this.extractRealDependencies(componentName, relevantFiles);
 
         // Stage 3: Real LLM analysis
-        this.updateLoadingStatus('🤖 Stage 3: Running LLM analysis...');
-        
-        const llmAnalysis = await this.performRealLLMAnalysis(componentName, componentType, relevantFiles);
+        // Stage 3: Extract enhanced lifecycle flow (KEEP AS STAGE 3)
+this.updateLoadingStatus('🌊 Stage 3: Analyzing enhanced component lifecycle...');
+this.updateProgress(50);
 
-        // Stage 4: Extract lifecycle flow from real data
-        this.updateLoadingStatus('🌊 Stage 4: Analyzing lifecycle flow...');
-        
-        const lifecycleFlow = await this.extractRealLifecycleFlow(componentName, componentType, relevantFiles, llmAnalysis);
+const lifecycleFlow = await this.extractFileLifecycleFlow(componentName, relevantFiles);
 
-        // Stage 5: Finalize results
-        this.updateLoadingStatus('📊 Stage 5: Finalizing analysis...');
+// Add field-wise analysis for copybooks (ENHANCEMENT)
+if (componentType === 'Copybook') {
+    this.updateLoadingStatus('🔍 Stage 3b: Analyzing field-wise lifecycle...');
+    lifecycleFlow.fieldAnalysis = await this.analyzeFieldWiseLifecycle(componentName, relevantFiles);
+}
+
+// Stage 4: LLM analysis with enhanced context (KEEP AS STAGE 4)
+this.updateLoadingStatus('🤖 Stage 4: Enhanced LLM analysis...');
+this.updateProgress(75);
+
+let llmAnalysis;
+try {
+    if (componentType === 'Copybook') {
+        llmAnalysis = await this.analyzeCopybookWithLLMAndLifecycle(
+            componentName, relevantFiles, dependencyAnalysis, lifecycleFlow
+        );
+    } else if (componentType === 'COBOL Program') {
+        llmAnalysis = await this.analyzeProgramWithLLMAndLifecycle(
+            componentName, relevantFiles, dependencyAnalysis, lifecycleFlow
+        );
+    } else {
+        llmAnalysis = await this.analyzeGenericComponentWithLLM(
+            componentName, relevantFiles, dependencyAnalysis
+        );
+    }
+} catch (llmError) {
+    console.error('LLM analysis failed:', llmError);
+    llmAnalysis = {
+        error: true,
+        message: llmError.message,
+        fallbackData: this.createComponentFallback(componentName, componentType, lifecycleFlow)
+    };
+}
+
+// Stage 5: Finalize results (KEEP AS STAGE 5)
+this.updateLoadingStatus('📊 Stage 5: Finalizing enhanced analysis...');
+this.updateProgress(90);
+
+        
         
         const qualityScore = this.calculateQualityScore(llmAnalysis, dependencyAnalysis);
         
@@ -2397,6 +2440,7 @@ async runLLMEnhancedAnalysisWithLifecycle(componentName) {
 }
 
 // === REAL DEPENDENCY EXTRACTION ===
+// === REAL LLM ANALYSIS WITH INTELLIGENT CHUNKING ===
 async extractRealDependencies(componentName, relevantFiles) {
     const found = {
         copyStatements: [],
@@ -2461,9 +2505,9 @@ async extractRealDependencies(componentName, relevantFiles) {
     };
 }
 
-// === REAL LLM ANALYSIS ===
+// === INTELLIGENT CHUNKING FOR LLM ANALYSIS ===
 async performRealLLMAnalysis(componentName, componentType, relevantFiles) {
-    // Prepare context from actual files
+    // Prepare context from actual files with intelligent chunking
     let fileContext = `COMPONENT ANALYSIS REQUEST
 Component: ${componentName}
 Type: ${componentType}
@@ -2473,7 +2517,9 @@ UPLOADED FILE CONTENTS:
 
     relevantFiles.forEach(file => {
         fileContext += `\n--- FILE: ${file.name} (${file.type}) ---\n`;
-        fileContext += file.content.substring(0, 2000); // Limit content to avoid token overflow
+        // Use intelligent chunking to get relevant parts
+        const relevantContent = this.intelligentChunkContent(file.content, componentType);
+        fileContext += relevantContent;
         fileContext += '\n';
     });
 
@@ -2522,6 +2568,156 @@ Respond with a JSON object containing:
         return this.createBasicAnalysis(componentName, componentType, relevantFiles);
     }
 }
+
+// === INTELLIGENT CONTENT CHUNKING ===
+intelligentChunkContent(content, componentType) {
+    const maxChars = this.maxTokens * this.averageCharsPerToken * 0.6;
+    
+    if (content.length <= maxChars) {
+        return content;
+    }
+    
+    if (componentType === 'Copybook') {
+        // Focus on field definitions and structures
+        const lines = content.split('\n');
+        const importantLines = [];
+        
+        lines.forEach((line, index) => {
+            const trimmed = line.trim().toUpperCase();
+            
+            // Include 01-level fields and their subordinates
+            if (trimmed.match(/^\s*\d+\s+[A-Z]/)) {
+                importantLines.push(line);
+                
+                // Include next few lines for complete field definition
+                for (let i = 1; i <= 3 && (index + i) < lines.length; i++) {
+                    const nextLine = lines[index + i].trim();
+                    if (nextLine.includes('PIC ') || nextLine.includes('VALUE ') || 
+                        nextLine.includes('OCCURS ') || nextLine.includes('REDEFINES ')) {
+                        importantLines.push(lines[index + i]);
+                    }
+                }
+            }
+        });
+        
+        let result = importantLines.join('\n');
+        return result.substring(0, maxChars);
+        
+    } else if (componentType === 'COBOL Program') {
+        // Focus on working storage and procedure division
+        const workingStorageIndex = content.toUpperCase().indexOf('WORKING-STORAGE');
+        const procedureIndex = content.toUpperCase().indexOf('PROCEDURE DIVISION');
+        
+        let importantContent = '';
+        
+        if (workingStorageIndex > -1) {
+            const wsContent = content.substring(workingStorageIndex, procedureIndex > -1 ? procedureIndex : content.length);
+            importantContent += wsContent.substring(0, maxChars / 2);
+        }
+        
+        if (procedureIndex > -1) {
+            const procContent = content.substring(procedureIndex);
+            importantContent += procContent.substring(0, maxChars / 2);
+        }
+        
+        return importantContent || content.substring(0, maxChars);
+    }
+    
+    return content.substring(0, maxChars);
+}
+
+// === ENHANCED FIELD-WISE LIFECYCLE ANALYSIS ===
+async analyzeFieldWiseLifecycle(componentName, relevantFiles) {
+    const fieldLifecycle = {
+        inputFields: [],     // Fields populated from external sources
+        referenceFields: [], // Fields used for lookups/comparisons
+        updatedFields: [],   // Fields modified during processing
+        derivedFields: [],   // Fields calculated from other fields
+        staticFields: [],    // Fields with constant values
+        unusedFields: []     // Fields never referenced
+    };
+    
+    // Extract all fields from copybook
+    const extractedFields = this.extractCopybookFields(componentName, relevantFiles);
+    const usingPrograms = this.findProgramsUsingCopybook(componentName);
+    
+    console.log(`Analyzing ${extractedFields.length} fields across ${usingPrograms.length} programs`);
+    
+    for (const field of extractedFields) {
+        const fieldAnalysis = {
+            name: field.name,
+            level: field.level,
+            picture: field.picture,
+            usagePatterns: [],
+            sourcePrograms: [],
+            targetPrograms: [],
+            operations: []
+        };
+        
+        // Analyze field usage in each program
+        for (const program of usingPrograms) {
+            const usage = this.analyzeFieldUsageInProgram(field.name, program);
+            
+            if (usage.operations.length > 0) {
+                fieldAnalysis.usagePatterns.push(usage);
+                
+                // Categorize based on operations
+                const isInput = usage.isInput || usage.isWritten;
+                const isOutput = usage.isDisplayed || usage.isRead;
+                const isCalculated = usage.isCalculated;
+                const isValidated = usage.isValidated;
+                
+                if (isInput && !isOutput) {
+                    fieldAnalysis.category = 'INPUT';
+                } else if (isOutput && !isInput) {
+                    fieldAnalysis.category = 'OUTPUT';
+                } else if (isCalculated) {
+                    fieldAnalysis.category = 'DERIVED';
+                } else if (isValidated) {
+                    fieldAnalysis.category = 'REFERENCE';
+                } else if (field.value) {
+                    fieldAnalysis.category = 'STATIC';
+                } else if (isInput && isOutput) {
+                    fieldAnalysis.category = 'UPDATED';
+                } else {
+                    fieldAnalysis.category = 'UNUSED';
+                }
+            }
+        }
+        
+        // If no usage found, mark as unused
+        if (fieldAnalysis.usagePatterns.length === 0) {
+            fieldAnalysis.category = 'UNUSED';
+        }
+        
+        // Add to appropriate category
+        switch (fieldAnalysis.category) {
+            case 'INPUT':
+                fieldLifecycle.inputFields.push(fieldAnalysis);
+                break;
+            case 'REFERENCE':
+                fieldLifecycle.referenceFields.push(fieldAnalysis);
+                break;
+            case 'UPDATED':
+                fieldLifecycle.updatedFields.push(fieldAnalysis);
+                break;
+            case 'DERIVED':
+                fieldLifecycle.derivedFields.push(fieldAnalysis);
+                break;
+            case 'STATIC':
+                fieldLifecycle.staticFields.push(fieldAnalysis);
+                break;
+            case 'UNUSED':
+                fieldLifecycle.unusedFields.push(fieldAnalysis);
+                break;
+            default:
+                fieldLifecycle.referenceFields.push(fieldAnalysis);
+        }
+    }
+    
+    return fieldLifecycle;
+}
+
 
 // === PARSE UNSTRUCTURED LLM RESPONSE ===
 parseUnstructuredLLMResponse(response, componentName, componentType) {
@@ -2701,22 +2897,206 @@ calculateQualityScore(llmAnalysis, dependencyAnalysis) {
 }
 
 // === DISPLAY ANALYSIS RESULTS ===
-displayAnalysisResults(componentName, results) {
-console.log('Displaying analysis results for:', componentName);
-this.displayMainAnalysis(componentName, results);
-this.displayFieldMatrix(componentName, results);
-this.displayUsagePatterns(componentName, results);
-this.displayDependencies(componentName, results);
-this.displayFileLifecycle(componentName, results);
+// === ENHANCED FILE LIFECYCLE FLOW DIAGRAM ===
+displayFileLifecycleDetails(lifecycleFlow) {
+    const creationSources = lifecycleFlow.creationSources || [];
+    const inputPrograms = lifecycleFlow.inputPrograms || [];
+    const updatePrograms = lifecycleFlow.updatePrograms || [];
+    const cicsScreens = lifecycleFlow.cicsScreens || [];
+    const batchJobs = lifecycleFlow.batchJobs || [];
+    
+    return `
+        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+            <h4 style="color: #8b5cf6; margin-bottom: 15px;">🌊 Complete Lifecycle Flow</h4>
+            
+            <!-- Flow Diagram -->
+            <div style="margin-bottom: 25px;">
+                <h5 style="color: #FFD700; margin-bottom: 15px;">📊 Visual Flow Diagram</h5>
+                ${this.createLifecycleFlowDiagram(lifecycleFlow)}
+            </div>
+            
+            <!-- Detailed Field Summary -->
+            ${this.displayFieldLifecycleSummary(lifecycleFlow)}
+            
+            <!-- Program Flow Summary -->
+            ${this.displayProgramFlowSummary(lifecycleFlow)}
+        </div>
+    `;
+}
 
-// Expand the main analysis section
-const lifecycleContent = document.getElementById('lifecycle-section-content');
-const lifecycleToggle = document.getElementById('lifecycle-section-toggle');
-if (lifecycleContent && lifecycleToggle) {
-    lifecycleContent.classList.remove('collapsed');
-    lifecycleToggle.textContent = '▼';
+// === CREATE LIFECYCLE FLOW DIAGRAM ===
+createLifecycleFlowDiagram(lifecycleFlow) {
+    const stages = [
+        { name: 'Creation', programs: lifecycleFlow.creationSources || [], color: '#22c55e', icon: '🌱' },
+        { name: 'Input', programs: lifecycleFlow.inputPrograms || [], color: '#3b82f6', icon: '📥' },
+        { name: 'Processing', programs: lifecycleFlow.updatePrograms || [], color: '#f59e0b', icon: '⚙️' },
+        { name: 'Output', programs: [], color: '#8b5cf6', icon: '📤' }
+    ];
+    
+    return `
+        <div style="background: rgba(0,0,0,0.2); padding: 20px; border-radius: 12px; position: relative;">
+            <!-- Flow Stages -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                ${stages.map((stage, index) => `
+                    <div style="display: flex; flex-direction: column; align-items: center; flex: 1;">
+                        <!-- Stage Circle -->
+                        <div style="
+                            width: 80px; 
+                            height: 80px; 
+                            background: ${stage.color}; 
+                            border-radius: 50%; 
+                            display: flex; 
+                            align-items: center; 
+                            justify-content: center; 
+                            font-size: 24px; 
+                            margin-bottom: 8px;
+                            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+                        ">
+                            ${stage.icon}
+                        </div>
+                        
+                        <!-- Stage Name -->
+                        <div style="font-weight: bold; color: ${stage.color}; margin-bottom: 5px;">
+                            ${stage.name}
+                        </div>
+                        
+                        <!-- Program Count -->
+                        <div style="font-size: 12px; opacity: 0.8;">
+                            ${stage.programs.length} programs
+                        </div>
+                        
+                        <!-- Arrow to next stage -->
+                        ${index < stages.length - 1 ? `
+                            <div style="
+                                position: absolute; 
+                                top: 40px; 
+                                left: ${(index + 1) * 25 - 2}%; 
+                                width: 0; 
+                                height: 0; 
+                                border-left: 10px solid transparent; 
+                                border-right: 10px solid transparent; 
+                                border-top: 15px solid #64748b;
+                                transform: rotate(90deg);
+                            "></div>
+                        ` : ''}
+                    </div>
+                `).join('')}
+            </div>
+            
+            <!-- Component in Center -->
+            <div style="text-align: center; margin: 20px 0;">
+                <div style="
+                    display: inline-block; 
+                    background: linear-gradient(135deg, #FFD700, #FFA500); 
+                    color: #000; 
+                    padding: 12px 24px; 
+                    border-radius: 25px; 
+                    font-weight: bold; 
+                    font-size: 16px;
+                    box-shadow: 0 6px 12px rgba(255, 215, 0, 0.3);
+                ">
+                    📋 ${lifecycleFlow.componentName}
+                </div>
+            </div>
+        </div>
+    `;
 }
+
+// === FIELD LIFECYCLE SUMMARY ===
+displayFieldLifecycleSummary(lifecycleFlow) {
+    if (!lifecycleFlow.fieldAnalysis) {
+        return '';
+    }
+    
+    const fieldAnalysis = lifecycleFlow.fieldAnalysis;
+    
+    return `
+        <div style="margin-top: 25px;">
+            <h5 style="color: #4CAF50; margin-bottom: 15px;">📋 Field Lifecycle Summary</h5>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                
+                <!-- Input Fields -->
+                <div style="background: rgba(34, 197, 94, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #22c55e;">
+                    <h6 style="color: #22c55e; margin-bottom: 10px;">📥 Input Fields (${fieldAnalysis.inputFields?.length || 0})</h6>
+                    <div style="max-height: 100px; overflow-y: auto;">
+                        ${(fieldAnalysis.inputFields || []).slice(0, 5).map(field => `
+                            <div style="font-size: 10px; font-family: monospace; padding: 2px 4px; margin: 2px 0; background: rgba(0,0,0,0.2); border-radius: 2px;">
+                                ${field.name} (${field.level})
+                            </div>
+                        `).join('')}
+                        ${(fieldAnalysis.inputFields?.length || 0) > 5 ? `<div style="font-size: 9px; opacity: 0.7;">+${(fieldAnalysis.inputFields?.length || 0) - 5} more</div>` : ''}
+                    </div>
+                </div>
+                
+                <!-- Reference Fields -->
+                <div style="background: rgba(245, 158, 11, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b;">
+                    <h6 style="color: #f59e0b; margin-bottom: 10px;">🔍 Reference Fields (${fieldAnalysis.referenceFields?.length || 0})</h6>
+                    <div style="max-height: 100px; overflow-y: auto;">
+                        ${(fieldAnalysis.referenceFields || []).slice(0, 5).map(field => `
+                            <div style="font-size: 10px; font-family: monospace; padding: 2px 4px; margin: 2px 0; background: rgba(0,0,0,0.2); border-radius: 2px;">
+                                ${field.name} (${field.level})
+                            </div>
+                        `).join('')}
+                        ${(fieldAnalysis.referenceFields?.length || 0) > 5 ? `<div style="font-size: 9px; opacity: 0.7;">+${(fieldAnalysis.referenceFields?.length || 0) - 5} more</div>` : ''}
+                    </div>
+                </div>
+                
+                <!-- Updated Fields -->
+                <div style="background: rgba(156, 39, 176, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #9C27B0;">
+                    <h6 style="color: #9C27B0; margin-bottom: 10px;">✏️ Updated Fields (${fieldAnalysis.updatedFields?.length || 0})</h6>
+                    <div style="max-height: 100px; overflow-y: auto;">
+                        ${(fieldAnalysis.updatedFields || []).slice(0, 5).map(field => `
+                            <div style="font-size: 10px; font-family: monospace; padding: 2px 4px; margin: 2px 0; background: rgba(0,0,0,0.2); border-radius: 2px;">
+                                ${field.name} (${field.level})
+                            </div>
+                        `).join('')}
+                        ${(fieldAnalysis.updatedFields?.length || 0) > 5 ? `<div style="font-size: 9px; opacity: 0.7;">+${(fieldAnalysis.updatedFields?.length || 0) - 5} more</div>` : ''}
+                    </div>
+                </div>
+                
+                <!-- Derived Fields -->
+                <div style="background: rgba(59, 130, 246, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #3b82f6;">
+                    <h6 style="color: #3b82f6; margin-bottom: 10px;">🧮 Derived Fields (${fieldAnalysis.derivedFields?.length || 0})</h6>
+                    <div style="max-height: 100px; overflow-y: auto;">
+                        ${(fieldAnalysis.derivedFields || []).slice(0, 5).map(field => `
+                            <div style="font-size: 10px; font-family: monospace; padding: 2px 4px; margin: 2px 0; background: rgba(0,0,0,0.2); border-radius: 2px;">
+                                ${field.name} (${field.level})
+                            </div>
+                        `).join('')}
+                        ${(fieldAnalysis.derivedFields?.length || 0) > 5 ? `<div style="font-size: 9px; opacity: 0.7;">+${(fieldAnalysis.derivedFields?.length || 0) - 5} more</div>` : ''}
+                    </div>
+                </div>
+                
+                <!-- Static Fields -->
+                <div style="background: rgba(107, 114, 128, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #6b7280;">
+                    <h6 style="color: #6b7280; margin-bottom: 10px;">🔒 Static Fields (${fieldAnalysis.staticFields?.length || 0})</h6>
+                    <div style="max-height: 100px; overflow-y: auto;">
+                        ${(fieldAnalysis.staticFields || []).slice(0, 5).map(field => `
+                            <div style="font-size: 10px; font-family: monospace; padding: 2px 4px; margin: 2px 0; background: rgba(0,0,0,0.2); border-radius: 2px;">
+                                ${field.name} (${field.level})
+                            </div>
+                        `).join('')}
+                        ${(fieldAnalysis.staticFields?.length || 0) > 5 ? `<div style="font-size: 9px; opacity: 0.7;">+${(fieldAnalysis.staticFields?.length || 0) - 5} more</div>` : ''}
+                    </div>
+                </div>
+                
+                <!-- Unused Fields -->
+                <div style="background: rgba(239, 68, 68, 0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #ef4444;">
+                    <h6 style="color: #ef4444; margin-bottom: 10px;">❌ Unused Fields (${fieldAnalysis.unusedFields?.length || 0})</h6>
+                    <div style="max-height: 100px; overflow-y: auto;">
+                        ${(fieldAnalysis.unusedFields || []).slice(0, 5).map(field => `
+                            <div style="font-size: 10px; font-family: monospace; padding: 2px 4px; margin: 2px 0; background: rgba(0,0,0,0.2); border-radius: 2px;">
+                                ${field.name} (${field.level})
+                            </div>
+                        `).join('')}
+                        ${(fieldAnalysis.unusedFields?.length || 0) > 5 ? `<div style="font-size: 9px; opacity: 0.7;">+${(fieldAnalysis.unusedFields?.length || 0) - 5} more</div>` : ''}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
 }
+
 // === DISPLAY MAIN ANALYSIS ===
 displayMainAnalysis(componentName, results) {
 const container = document.getElementById('lifecycleContent');
