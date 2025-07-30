@@ -2215,20 +2215,21 @@ document.head.insertAdjacentHTML('beforeend', additionalChatStyles);
 }
 async callLLMAPI(prompt) {
 try {
-const response = await fetch(${this.vllmEndpoint}/generate, {
-method: 'POST',
-headers: {
-'Content-Type': 'application/json'
-},
-body: JSON.stringify({
-prompt: prompt,
-max_tokens: Math.min(this.maxTokens * 0.5, 2000), // Conservative for chat
-temperature: 0.3, // Slightly higher for more natural chat
-top_p: 0.9,
-stream: false
-}),
-signal: AbortSignal.timeout(30000) // 30 second timeout for chat
-});
+
+        const response = await fetch(`${this.vllmEndpoint}/generate`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                prompt: prompt,
+                max_tokens: Math.min(this.maxTokens * 0.5, 2000), // Conservative for chat
+                temperature: 0.3, // Slightly higher for more natural chat
+                top_p: 0.9,
+                stream: false
+            }),
+            signal: AbortSignal.timeout(30000) // 30 second timeout for chat
+        });
     if (!response.ok) {
         throw new Error(`LLM API request failed: ${response.status}`);
     }
@@ -2257,10 +2258,9 @@ signal: AbortSignal.timeout(30000) // 30 second timeout for chat
 } catch (error) {
     console.error('Chat LLM API call failed:', error);
     throw error;
-
-
 }
 }
+
 // Continue the EnhancedMainframeAnalyzer class - Analysis Core & Display Methods
 // === MAIN COMPONENT ANALYSIS METHOD ===
 async analyzeComponent() {
