@@ -2337,229 +2337,369 @@ updateProgress(percentage) {
 // Simple progress update - can be enhanced with actual progress bar
 console.log("Progress: ${percentage}%");
 }
-// === MOCK ANALYSIS METHOD (Simplified for demo) ===
+
+
+// === REAL LLM ANALYSIS METHOD ===
 async runLLMEnhancedAnalysisWithLifecycle(componentName) {
-console.log("Starting focused LLM analysis for: ${componentName}");
-try {
-    // Stage 1: Find relevant files and component type
-    this.updateLoadingStatus('🔍 Stage 1: Analyzing component scope...');
-    await this.sleep(1000);
+    console.log(`Starting real LLM analysis for: ${componentName}`);
     
-    const relevantFiles = this.findRelevantFiles(componentName);
-    const componentType = this.detectComponentType(componentName, relevantFiles);
-    console.log(`Component type: ${componentType}`);
+    try {
+        // Stage 1: Find relevant files and component type
+        this.updateLoadingStatus('🔍 Stage 1: Analyzing component scope...');
+        
+        const relevantFiles = this.findRelevantFiles(componentName);
+        if (relevantFiles.length === 0) {
+            throw new Error(`Component "${componentName}" not found in uploaded files`);
+        }
+        
+        const componentType = this.detectComponentType(componentName, relevantFiles);
+        console.log(`Component type: ${componentType}, Files: ${relevantFiles.length}`);
 
-    // Stage 2: Extract dependencies (simplified)
-    this.updateLoadingStatus('🔗 Stage 2: Analyzing dependencies...');
-    await this.sleep(1000);
-    
-    const dependencyAnalysis = this.createMockDependencyAnalysis();
+        // Stage 2: Extract real dependencies
+        this.updateLoadingStatus('🔗 Stage 2: Extracting dependencies...');
+        
+        const dependencyAnalysis = await this.extractRealDependencies(componentName, relevantFiles);
 
-    // Stage 3: Extract lifecycle flow (simplified)
-    this.updateLoadingStatus('🌊 Stage 3: Analyzing component lifecycle...');
-    await this.sleep(1000);
-    
-    const lifecycleFlow = this.createMockLifecycleFlow(componentName, componentType);
+        // Stage 3: Real LLM analysis
+        this.updateLoadingStatus('🤖 Stage 3: Running LLM analysis...');
+        
+        const llmAnalysis = await this.performRealLLMAnalysis(componentName, componentType, relevantFiles);
 
-    // Stage 4: LLM analysis (simplified)
-    this.updateLoadingStatus('🤖 Stage 4: LLM analysis...');
-    await this.sleep(2000);
-    
-    const llmAnalysis = this.createMockLLMAnalysis(componentName, componentType);
+        // Stage 4: Extract lifecycle flow from real data
+        this.updateLoadingStatus('🌊 Stage 4: Analyzing lifecycle flow...');
+        
+        const lifecycleFlow = await this.extractRealLifecycleFlow(componentName, componentType, relevantFiles, llmAnalysis);
 
-    // Stage 5: Finalize results
-    this.updateLoadingStatus('📊 Stage 5: Finalizing analysis...');
-    await this.sleep(500);
-    
-    const results = {
-        componentName: componentName,
-        timestamp: new Date().toISOString(),
-        filesAnalyzed: relevantFiles.map(f => f.name),
-        componentType: componentType,
-        dependencyAnalysis: dependencyAnalysis,
-        lifecycleFlow: lifecycleFlow,
-        llmAnalysis: llmAnalysis,
-        qualityScore: 8,
-        completeness: { score: 85, checkpoints: {}, completed: 5, total: 6 },
-        analysisMethod: 'LLM-Enhanced-Focused'
+        // Stage 5: Finalize results
+        this.updateLoadingStatus('📊 Stage 5: Finalizing analysis...');
+        
+        const qualityScore = this.calculateQualityScore(llmAnalysis, dependencyAnalysis);
+        
+        const results = {
+            componentName: componentName,
+            timestamp: new Date().toISOString(),
+            filesAnalyzed: relevantFiles.map(f => f.name),
+            componentType: componentType,
+            dependencyAnalysis: dependencyAnalysis,
+            lifecycleFlow: lifecycleFlow,
+            llmAnalysis: llmAnalysis,
+            qualityScore: qualityScore,
+            completeness: { score: 85, checkpoints: {}, completed: 5, total: 6 },
+            analysisMethod: 'LLM-Enhanced-Real'
+        };
+
+        return results;
+
+    } catch (error) {
+        console.error('Real analysis failed:', error);
+        throw new Error(`Analysis failed: ${error.message}`);
+    }
+}
+
+// === REAL DEPENDENCY EXTRACTION ===
+async extractRealDependencies(componentName, relevantFiles) {
+    const found = {
+        copyStatements: [],
+        callStatements: [],
+        programIds: [],
+        fileReferences: []
+    };
+    const missing = {
+        copyStatements: [],
+        callStatements: [],
+        programIds: [],
+        fileReferences: []
     };
 
-    return results;
+    // Extract dependencies from actual file content
+    for (const file of relevantFiles) {
+        const content = file.content.toUpperCase();
+        const lines = content.split('\n');
+        
+        lines.forEach(line => {
+            const trimmed = line.trim();
+            
+            // Extract COPY statements
+            const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]+)/);
+            if (copyMatch && !found.copyStatements.includes(copyMatch[1])) {
+                // Check if copybook exists in uploaded files
+                const exists = this.uploadedFiles.some(f => 
+                    f.name.toUpperCase().includes(copyMatch[1]) || 
+                    f.content.toUpperCase().includes(copyMatch[1])
+                );
+                
+                if (exists) {
+                    found.copyStatements.push(copyMatch[1]);
+                } else {
+                    missing.copyStatements.push(copyMatch[1]);
+                }
+            }
+            
+            // Extract CALL statements
+            const callMatch = trimmed.match(/CALL\s+['"]*([A-Z][A-Z0-9\-_]+)['"]*/) || 
+                            trimmed.match(/PERFORM\s+([A-Z][A-Z0-9\-_]+)/);
+            if (callMatch && !found.callStatements.includes(callMatch[1])) {
+                found.callStatements.push(callMatch[1]);
+            }
+            
+            // Extract file references
+            const fileMatch = trimmed.match(/FD\s+([A-Z][A-Z0-9\-_]+)/) ||
+                            trimmed.match(/SELECT\s+([A-Z][A-Z0-9\-_]+)/);
+            if (fileMatch && !found.fileReferences.includes(fileMatch[1])) {
+                found.fileReferences.push(fileMatch[1]);
+            }
+        });
+    }
 
-} catch (error) {
-    console.error('Analysis failed:', error);
-    throw new Error(`Analysis failed: ${error.message}`);
+    return {
+        found: found,
+        missing: missing,
+        summary: {
+            foundCount: found.copyStatements.length + found.callStatements.length + found.fileReferences.length,
+            missingCount: missing.copyStatements.length + missing.callStatements.length + missing.fileReferences.length
+        }
+    };
 }
-}
-// === MOCK DATA CREATORS (for demo purposes) ===
-createMockDependencyAnalysis() {
-return {
-found: {
-copyStatements: ['CUSTOMER-COPY', 'ACCOUNT-COPY', 'COMMON-COPY'],
-callStatements: ['VALDATE', 'UPDPROC', 'RPTGEN'],
-programIds: ['CUSTMAINT', 'ACCTPROC'],
-fileReferences: ['CUSTFILE', 'ACCTFILE']
-},
-missing: {
-copyStatements: ['MISSING-COPY'],
-callStatements: ['NOTFOUND-PROG'],
-programIds: [],
-fileReferences: ['TEMPFILE']
-},
-summary: {
-foundCount: 9,
-missingCount: 2
-}
-};
-}
-createMockLifecycleFlow(componentName, componentType) {
-return {
-componentName: componentName,
-componentType: componentType,
-scope: 'COMPONENT_FOCUSED',
-usagePattern: 'FULL_LIFECYCLE',
-creationSources: [
-{ program: 'CUSTCREATE', operation: 'FILE_CREATE', evidence: [{ line: 145, operation: 'OPEN OUTPUT' }] },
-{ program: 'INITPROC', operation: 'FIELD_INPUT', evidence: [{ line: 67, operation: 'MOVE TO' }] }
-],
-inputPrograms: [
-{ program: 'CUSTREPORT', operation: 'FILE_READ', evidence: [{ line: 89, operation: 'READ' }] },
-{ program: 'CUSTINQ', operation: 'FIELD_READ', evidence: [{ line: 234, operation: 'MOVE FROM' }] }
-],
-updatePrograms: [
-{ program: 'CUSTUPDATE', operation: 'FILE_UPDATE', evidence: [{ line: 156, operation: 'REWRITE' }] },
-{ program: 'CUSTMAINT', operation: 'FIELD_UPDATE', evidence: [{ line: 78, operation: 'MOVE TO' }] }
-],
-cicsScreens: [
-{ screen: 'CUSTSCR1', program: 'CUSTONLINE', operation: 'SCREEN_INPUT' }
-],
-batchJobs: [
-{ job: 'CUSTBATCH', program: 'CUSTPROC', operation: 'BATCH_PROCESSING' }
-],
-primaryFields: componentType === 'Copybook' ? [
-{ name: 'CUST-ID', level: 5, isElementaryField: true, businessPurpose: 'Customer unique identifier', usagePattern: 'REFERENCE' },
-{ name: 'CUST-NAME', level: 5, isElementaryField: true, businessPurpose: 'Customer full name', usagePattern: 'INPUT' },
-{ name: 'CUST-ADDR', level: 5, isElementaryField: true, businessPurpose: 'Customer address information', usagePattern: 'MIXED' },
-{ name: 'CUST-PHONE', level: 5, isElementaryField: true, businessPurpose: 'Customer contact number', usagePattern: 'OUTPUT' }
-] : []
-};
-}
-createMockLLMAnalysis(componentName, componentType) {
-if (componentType === 'Copybook') {
-return {
-componentName: componentName,
-componentType: "Copybook",
-analysisScope: "FIELD_USAGE_ANALYSIS",
-totalFields: 4,
-primaryFields: [
+
+// === REAL LLM ANALYSIS ===
+async performRealLLMAnalysis(componentName, componentType, relevantFiles) {
+    // Prepare context from actual files
+    let fileContext = `COMPONENT ANALYSIS REQUEST
+Component: ${componentName}
+Type: ${componentType}
+
+UPLOADED FILE CONTENTS:
+`;
+
+    relevantFiles.forEach(file => {
+        fileContext += `\n--- FILE: ${file.name} (${file.type}) ---\n`;
+        fileContext += file.content.substring(0, 2000); // Limit content to avoid token overflow
+        fileContext += '\n';
+    });
+
+    const analysisPrompt = `${fileContext}
+
+ANALYSIS REQUIREMENTS:
+1. Analyze the actual component "${componentName}" found in the uploaded files
+2. Extract real field information if it's a copybook (01-level fields)
+3. Identify actual program structure if it's a COBOL program
+4. Find real business logic, validations, and calculations
+5. Provide specific recommendations based on the actual code
+
+IMPORTANT: Only analyze what exists in the uploaded files. Do not create fictional data.
+
+Respond with a JSON object containing:
 {
-name: "CUST-ID",
-level: 5,
-picture: "X(10)",
-isRecordLayout: false,
-isElementaryField: true,
-usagePattern: "REFERENCE",
-businessPurpose: "Unique customer identifier for record linkage"
-},
-{
-name: "CUST-NAME",
-level: 5,
-picture: "X(50)",
-isRecordLayout: false,
-isElementaryField: true,
-usagePattern: "INPUT",
-businessPurpose: "Customer full name for identification and reporting"
-},
-{
-name: "CUST-ADDR",
-level: 5,
-picture: "X(100)",
-isRecordLayout: false,
-isElementaryField: true,
-usagePattern: "MIXED",
-businessPurpose: "Customer mailing address for correspondence"
-},
-{
-name: "CUST-PHONE",
-level: 5,
-picture: "X(15)",
-isRecordLayout: false,
-isElementaryField: true,
-usagePattern: "OUTPUT",
-businessPurpose: "Customer contact telephone number"
+  "componentName": "${componentName}",
+  "componentType": "${componentType}",
+  "analysisScope": "REAL_FILE_ANALYSIS",
+  "primaryFields": [...real fields found...],
+  "businessLogic": {...actual logic found...},
+  "recommendations": [...specific to this component...],
+  "qualityScore": <1-10 based on actual code quality>
+}`;
+
+    try {
+        const response = await this.callLLMAPI(analysisPrompt);
+        
+        // Try to parse JSON response
+        try {
+            const jsonMatch = response.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                const parsed = JSON.parse(jsonMatch[0]);
+                return parsed;
+            }
+        } catch (parseError) {
+            console.warn('Failed to parse LLM JSON response, using fallback');
+        }
+        
+        // Fallback: create structured response from LLM text
+        return this.parseUnstructuredLLMResponse(response, componentName, componentType);
+        
+    } catch (error) {
+        console.error('LLM analysis failed:', error);
+        // Return basic analysis based on file content
+        return this.createBasicAnalysis(componentName, componentType, relevantFiles);
+    }
 }
-],
-fieldCategories: {
-inputFields: ["CUST-NAME"],
-outputFields: ["CUST-PHONE"],
-referenceFields: ["CUST-ID"],
-staticFields: [],
-unusedFields: []
-},
-programUsage: {
-totalPrograms: 5,
-programNames: ["CUSTCREATE", "CUSTUPDATE", "CUSTREPORT", "CUSTINQ", "CUSTONLINE"]
-},
-recommendations: [
-"Consider indexing CUST-ID field for improved performance",
-"Validate CUST-PHONE format consistency across programs",
-"Review CUST-ADDR field length for international addresses",
-"Implement data quality checks for CUST-NAME field"
-],
-qualityScore: 8
-};
-} else if (componentType === 'COBOL Program') {
-return {
-componentName: componentName,
-componentType: "COBOL Program",
-programStructure: {
-divisions: ["IDENTIFICATION", "ENVIRONMENT", "DATA", "PROCEDURE"],
-paragraphs: ["MAIN-PROCESS", "VALIDATE-INPUT", "UPDATE-RECORDS", "ERROR-HANDLING"],
-sections: ["INPUT-OUTPUT", "WORKING-STORAGE"]
-},
-lifecycleRole: {
-primaryFunction: "UPDATE",
-lifecycleStage: "processing",
-dataFlowDirection: "BIDIRECTIONAL",
-processingType: "BATCH"
-},
-businessLogic: {
-validationRules: ["Customer ID format validation", "Phone number format check"],
-calculations: ["Address formatting", "Name standardization"],
-decisionPoints: ["Record exists check", "Update vs Insert logic"],
-fileOperations: ["Customer file read", "Customer file update"]
-},
-dependencies: {
-copybooks: ["CUSTOMER-COPY", "COMMON-COPY"],
-calledPrograms: ["VALDATE", "UPDPROC"],
-missingCopybooks: [],
-missingPrograms: ["NOTFOUND-PROG"]
-},
-recommendations: [
-"Add comprehensive error handling for file operations",
-"Implement logging for audit trail requirements",
-"Consider modularizing validation logic",
-"Add performance monitoring for batch processing"
-],
-complexity: "MEDIUM",
-qualityScore: 7
-};
-} else {
-return {
-componentName: componentName,
-componentType: componentType,
-purpose: "General mainframe component analysis",
-keyElements: ["File operations", "Data processing", "Business logic"],
-patterns: ["Standard COBOL structure", "File I/O operations", "Error handling"],
-recommendations: [
-"Review component structure and dependencies",
-"Validate field usage patterns",
-"Consider modernization opportunities"
-],
-qualityScore: 6
-};
+
+// === PARSE UNSTRUCTURED LLM RESPONSE ===
+parseUnstructuredLLMResponse(response, componentName, componentType) {
+    const recommendations = [];
+    const lines = response.split('\n');
+    
+    lines.forEach(line => {
+        if (line.includes('recommend') || line.includes('should') || line.includes('consider')) {
+            recommendations.push(line.trim());
+        }
+    });
+
+    return {
+        componentName: componentName,
+        componentType: componentType,
+        analysisScope: "REAL_FILE_ANALYSIS",
+        purpose: "Analysis based on uploaded files",
+        keyElements: ["File structure", "Code patterns", "Dependencies"],
+        recommendations: recommendations.slice(0, 5), // Limit to 5 recommendations
+        qualityScore: 6
+    };
 }
+
+// === CREATE BASIC ANALYSIS FROM FILE CONTENT ===
+createBasicAnalysis(componentName, componentType, relevantFiles) {
+    const analysis = {
+        componentName: componentName,
+        componentType: componentType,
+        analysisScope: "FILE_CONTENT_ANALYSIS",
+        recommendations: []
+    };
+
+    if (componentType === 'Copybook') {
+        // Extract real fields from copybook
+        const fields = [];
+        relevantFiles.forEach(file => {
+            const lines = file.content.split('\n');
+            lines.forEach((line, index) => {
+                const fieldMatch = line.trim().match(/^\s*(\d+)\s+([A-Z][A-Z0-9\-_]+)/);
+                if (fieldMatch) {
+                    fields.push({
+                        name: fieldMatch[2],
+                        level: parseInt(fieldMatch[1]),
+                        isElementaryField: parseInt(fieldMatch[1]) > 1,
+                        usagePattern: "FOUND_IN_FILE",
+                        businessPurpose: `Field from ${file.name}`
+                    });
+                }
+            });
+        });
+        
+        analysis.primaryFields = fields.filter(f => f.level <= 10); // Reasonable field levels
+        analysis.totalFields = fields.length;
+        analysis.fieldCategories = {
+            inputFields: fields.filter(f => f.name.includes('INPUT')).map(f => f.name),
+            outputFields: fields.filter(f => f.name.includes('OUTPUT')).map(f => f.name),
+            referenceFields: fields.filter(f => f.name.includes('ID') || f.name.includes('KEY')).map(f => f.name),
+            staticFields: [],
+            unusedFields: []
+        };
+        
+        analysis.recommendations = [
+            `Analyzed ${fields.length} fields in ${componentName}`,
+            "Review field usage patterns across programs",
+            "Consider field naming standards validation",
+            "Validate field length requirements"
+        ];
+    } else if (componentType === 'COBOL Program') {
+        // Extract real program structure
+        analysis.programStructure = {
+            divisions: [],
+            paragraphs: [],
+            sections: []
+        };
+        
+        relevantFiles.forEach(file => {
+            const content = file.content.toUpperCase();
+            if (content.includes('IDENTIFICATION DIVISION')) analysis.programStructure.divisions.push('IDENTIFICATION');
+            if (content.includes('ENVIRONMENT DIVISION')) analysis.programStructure.divisions.push('ENVIRONMENT');
+            if (content.includes('DATA DIVISION')) analysis.programStructure.divisions.push('DATA');
+            if (content.includes('PROCEDURE DIVISION')) analysis.programStructure.divisions.push('PROCEDURE');
+        });
+        
+        analysis.recommendations = [
+            `Analyzed COBOL program structure for ${componentName}`,
+            "Review program complexity and modularity",
+            "Consider error handling improvements",
+            "Validate program documentation"
+        ];
+    }
+
+    analysis.qualityScore = Math.min(8, Math.max(4, analysis.recommendations.length + 2));
+    return analysis;
 }
+
+// === EXTRACT REAL LIFECYCLE FLOW ===
+async extractRealLifecycleFlow(componentName, componentType, relevantFiles, llmAnalysis) {
+    const lifecycleFlow = {
+        componentName: componentName,
+        componentType: componentType,
+        scope: 'REAL_FILE_ANALYSIS',
+        usagePattern: 'ANALYZED_FROM_FILES',
+        creationSources: [],
+        inputPrograms: [],
+        updatePrograms: [],
+        cicsScreens: [],
+        batchJobs: [],
+        primaryFields: llmAnalysis.primaryFields || []
+    };
+
+    // Extract real lifecycle patterns from file content
+    relevantFiles.forEach(file => {
+        const content = file.content.toUpperCase();
+        const lines = content.split('\n');
+        
+        lines.forEach((line, index) => {
+            const trimmed = line.trim();
+            
+            // Look for creation patterns
+            if (trimmed.includes('OPEN OUTPUT') || trimmed.includes('WRITE')) {
+                lifecycleFlow.creationSources.push({
+                    program: file.name.replace(/\.[^/.]+$/, ""), // Remove extension
+                    operation: 'FILE_CREATE',
+                    evidence: [{ line: index + 1, operation: 'WRITE/OUTPUT' }]
+                });
+            }
+            
+            // Look for read patterns
+            if (trimmed.includes('READ') || trimmed.includes('OPEN INPUT')) {
+                lifecycleFlow.inputPrograms.push({
+                    program: file.name.replace(/\.[^/.]+$/, ""),
+                    operation: 'FILE_READ',
+                    evidence: [{ line: index + 1, operation: 'read' }]
+                });
+            }
+            
+            // Look for update patterns
+            if (trimmed.includes('REWRITE') || trimmed.includes('UPDATE')) {
+                lifecycleFlow.updatePrograms.push({
+                    program: file.name.replace(/\.[^/.]+$/, ""),
+                    operation: 'FILE_UPDATE',
+                    evidence: [{ line: index + 1, operation: 'REWRITE/UPDATE' }]
+                });
+            }
+        });
+    });
+
+    // Remove duplicates
+    lifecycleFlow.creationSources = this.removeDuplicatePrograms(lifecycleFlow.creationSources);
+    lifecycleFlow.inputPrograms = this.removeDuplicatePrograms(lifecycleFlow.inputPrograms);
+    lifecycleFlow.updatePrograms = this.removeDuplicatePrograms(lifecycleFlow.updatePrograms);
+
+    return lifecycleFlow;
+}
+
+// === UTILITY METHODS ===
+removeDuplicatePrograms(programList) {
+    const seen = new Set();
+    return programList.filter(item => {
+        if (seen.has(item.program)) {
+            return false;
+        }
+        seen.add(item.program);
+        return true;
+    });
+}
+
+calculateQualityScore(llmAnalysis, dependencyAnalysis) {
+    let score = 5; // Base score
+    
+    if (llmAnalysis.primaryFields && llmAnalysis.primaryFields.length > 0) score += 1;
+    if (llmAnalysis.recommendations && llmAnalysis.recommendations.length > 3) score += 1;
+    if (dependencyAnalysis.summary.foundCount > dependencyAnalysis.summary.missingCount) score += 1;
+    if (llmAnalysis.qualityScore && llmAnalysis.qualityScore > 6) score += 1;
+    
+    return Math.min(10, Math.max(1, score));
+}
+
 // === DISPLAY ANALYSIS RESULTS ===
 displayAnalysisResults(componentName, results) {
 console.log('Displaying analysis results for:', componentName);
