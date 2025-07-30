@@ -1748,6 +1748,332 @@ if (componentType === 'RECORD_LAYOUT' && !friendlyName.includes('Record')) {
 
 return friendlyName;
 }
+
+// === EXTRACT REAL LIFECYCLE FLOW ===
+async extractRealLifecycleFlow(componentName, componentType, relevantFiles, llmAnalysis) {
+    const lifecycleFlow = {
+        componentName: componentName,
+        componentType: componentType,
+        scope: 'REAL_FILE_ANALYSIS',
+        usagePattern: 'ANALYZED_FROM_FILES',
+        creationSources: [],
+        inputPrograms: [],
+        updatePrograms: [],
+        cicsScreens: [],
+        batchJobs: [],
+        primaryFields: llmAnalysis.primaryFields || []
+    };
+
+    // Extract real lifecycle patterns from file content
+    relevantFiles.forEach(file => {
+        const content = file.content.toUpperCase();
+        const lines = content.split('\n');
+        
+        lines.forEach((line, index) => {
+            const trimmed = line.trim();
+            
+            // Look for creation patterns
+            if (trimmed.includes('OPEN OUTPUT') || trimmed.includes('WRITE')) {
+                lifecycleFlow.creationSources.push({
+                    program: file.name.replace(/\.[^/.]+$/, ""), // Remove extension
+                    operation: 'FILE_CREATE',
+                    evidence: [{ line: index + 1, operation: 'WRITE/OUTPUT' }]
+                });
+            }
+            
+            // Look for read patterns
+            if (trimmed.includes('READ') || trimmed.includes('OPEN INPUT')) {
+                lifecycleFlow.inputPrograms.push({
+                    program: file.name.replace(/\.[^/.]+$/, ""),
+                    operation: 'FILE_READ',
+                    evidence: [{ line: index + 1, operation: 'read' }]
+                });
+            }
+            
+            // Look for update patterns
+            if (trimmed.includes('REWRITE') || trimmed.includes('UPDATE')) {
+                lifecycleFlow.updatePrograms.push({
+                    program: file.name.replace(/\.[^/.]+$/, ""),
+                    operation: 'FILE_UPDATE',
+                    evidence: [{ line: index + 1, operation: 'REWRITE/UPDATE' }]
+                });
+            }
+        });
+    });
+
+    // Remove duplicates
+    lifecycleFlow.creationSources = this.removeDuplicatePrograms(lifecycleFlow.creationSources);
+    lifecycleFlow.inputPrograms = this.removeDuplicatePrograms(lifecycleFlow.inputPrograms);
+    lifecycleFlow.updatePrograms = this.removeDuplicatePrograms(lifecycleFlow.updatePrograms);
+
+    return lifecycleFlow;
+}
+
+// === UTILITY METHODS ===
+removeDuplicatePrograms(programList) {
+    const seen = new Set();
+    return programList.filter(item => {
+        if (seen.has(item.program)) {
+            return false;
+        }
+        seen.add(item.program);
+        return true;
+    });
+}
+
+calculateQualityScore(llmAnalysis, dependencyAnalysis) {
+    let score = 5; // Base score
+    
+    if (llmAnalysis.primaryFields && llmAnalysis.primaryFields.length > 0) score += 1;
+    if (llmAnalysis.recommendations && llmAnalysis.recommendations.length > 3) score += 1;
+    if (dependencyAnalysis && dependencyAnalysis.summary && dependencyAnalysis.summary.foundCount > dependencyAnalysis.summary.missingCount) score += 1;
+    if (llmAnalysis.qualityScore && llmAnalysis.qualityScore > 6) score += 1;
+    
+    return Math.min(10, Math.max(1, score));
+}
+
+// === PARSE UNSTRUCTURED LLM RESPONSE ===
+parseUnstructuredLLMResponse(response, componentName, componentType) {
+    const recommendations = [];
+    const lines = response.split('\n');
+    
+    lines.forEach(line => {
+        if (line.includes('recommend') || line.includes('should') || line.includes('consider')) {
+            recommendations.push(line.trim());
+        }
+    });
+
+    return {
+        componentName: componentName,
+        componentType: componentType,
+        analysisScope: "REAL_FILE_ANALYSIS",
+        purpose: "Analysis based on uploaded files",
+        keyElements: ["File structure", "Code patterns", "Dependencies"],
+        recommendations: recommendations.slice(0, 5), // Limit to 5 recommendations
+        qualityScore: 6
+    };
+}
+
+// === CREATE BASIC ANALYSIS FROM FILE CONTENT ===
+createBasicAnalysis(componentName, componentType, relevantFiles) {
+    const analysis = {
+        componentName: componentName,
+        componentType: componentType,
+        analysisScope: "FILE_CONTENT_ANALYSIS",
+        recommendations: []
+    };
+
+    if (componentType === 'Copybook') {
+        // Extract real fields from copybook
+        const fields = [];
+        relevantFiles.forEach(file => {
+            const lines = file.content.split('\n');
+            lines.forEach((line, index) => {
+                const fieldMatch = line.trim().match(/^\s*(\d+)\s+([A-Z][A-Z0-9\-_]+)/);
+                if (fieldMatch) {
+                    fields.push({
+                        name: fieldMatch[2],
+                        level: parseInt(fieldMatch[1]),
+                        isElementaryField: parseInt(fieldMatch[1]) > 1,
+                        usagePattern: "FOUND_IN_FILE",
+                        businessPurpose: `Field from ${file.name}`
+                    });
+                }
+            });
+        });
+        
+        analysis.primaryFields = fields.filter(f => f.level <= 10); // Reasonable field levels
+        analysis.totalFields = fields.length;
+        analysis.fieldCategories = {
+            inputFields: fields.filter(f => f.name.includes('INPUT')).map(f => f.name),
+            outputFields: fields.filter(f => f.name.includes('OUTPUT')).map(f => f.name),
+            referenceFields: fields.filter(f => f.name.includes('ID') || f.name.includes('KEY')).map(f => f.name),
+            staticFields: [],
+            unusedFields: []
+        };
+        
+        analysis.recommendations = [
+            `Analyzed ${fields.length} fields in ${componentName}`,
+            "Review field usage patterns across programs",
+            "Consider field naming standards validation",
+            "Validate field length requirements"
+        ];
+    } else if (componentType === 'COBOL Program') {
+        // Extract real program structure
+        analysis.programStructure = {
+            divisions: [],
+            paragraphs: [],
+            sections: []
+        };
+        
+        relevantFiles.forEach(file => {
+            const content = file.content.toUpperCase();
+            if (content.includes('IDENTIFICATION DIVISION')) analysis.programStructure.divisions.push('IDENTIFICATION');
+            if (content.includes('ENVIRONMENT DIVISION')) analysis.programStructure.divisions.push('ENVIRONMENT');
+            if (content.includes('DATA DIVISION')) analysis.programStructure.divisions.push('DATA');
+            if (content.includes('PROCEDURE DIVISION')) analysis.programStructure.divisions.push('PROCEDURE');
+        });
+        
+        analysis.recommendations = [
+            `Analyzed COBOL program structure for ${componentName}`,
+            "Review program complexity and modularity",
+            "Consider error handling improvements",
+            "Validate program documentation"
+        ];
+    }
+
+    analysis.qualityScore = Math.min(8, Math.max(4, analysis.recommendations.length + 2));
+    return analysis;
+}
+
+// === ENHANCED FIELD-WISE LIFECYCLE ANALYSIS ===
+async analyzeFieldWiseLifecycle(componentName, relevantFiles) {
+    const fieldLifecycle = {
+        inputFields: [],     // Fields populated from external sources
+        referenceFields: [], // Fields used for lookups/comparisons
+        updatedFields: [],   // Fields modified during processing
+        derivedFields: [],   // Fields calculated from other fields
+        staticFields: [],    // Fields with constant values
+        unusedFields: []     // Fields never referenced
+    };
+    
+    // Extract all fields from copybook
+    const extractedFields = this.extractCopybookFields(componentName, relevantFiles);
+    const usingPrograms = this.findProgramsUsingCopybook(componentName);
+    
+    console.log(`Analyzing ${extractedFields.length} fields across ${usingPrograms.length} programs`);
+    
+    for (const field of extractedFields) {
+        const fieldAnalysis = {
+            name: field.name,
+            level: field.level,
+            picture: field.picture,
+            usagePatterns: [],
+            sourcePrograms: [],
+            targetPrograms: [],
+            operations: []
+        };
+        
+        // Analyze field usage in each program
+        for (const program of usingPrograms) {
+            const usage = this.analyzeFieldUsageInProgram(field.name, program);
+            
+            if (usage.operations.length > 0) {
+                fieldAnalysis.usagePatterns.push(usage);
+                
+                // Categorize based on operations
+                const isInput = usage.isInput || usage.isWritten;
+                const isOutput = usage.isDisplayed || usage.isRead;
+                const isCalculated = usage.isCalculated;
+                const isValidated = usage.isValidated;
+                
+                if (isInput && !isOutput) {
+                    fieldAnalysis.category = 'INPUT';
+                } else if (isOutput && !isInput) {
+                    fieldAnalysis.category = 'OUTPUT';
+                } else if (isCalculated) {
+                    fieldAnalysis.category = 'DERIVED';
+                } else if (isValidated) {
+                    fieldAnalysis.category = 'REFERENCE';
+                } else if (field.value) {
+                    fieldAnalysis.category = 'STATIC';
+                } else if (isInput && isOutput) {
+                    fieldAnalysis.category = 'UPDATED';
+                } else {
+                    fieldAnalysis.category = 'UNUSED';
+                }
+            }
+        }
+        
+        // If no usage found, mark as unused
+        if (fieldAnalysis.usagePatterns.length === 0) {
+            fieldAnalysis.category = 'UNUSED';
+        }
+        
+        // Add to appropriate category
+        switch (fieldAnalysis.category) {
+            case 'INPUT':
+                fieldLifecycle.inputFields.push(fieldAnalysis);
+                break;
+            case 'REFERENCE':
+                fieldLifecycle.referenceFields.push(fieldAnalysis);
+                break;
+            case 'UPDATED':
+                fieldLifecycle.updatedFields.push(fieldAnalysis);
+                break;
+            case 'DERIVED':
+                fieldLifecycle.derivedFields.push(fieldAnalysis);
+                break;
+            case 'STATIC':
+                fieldLifecycle.staticFields.push(fieldAnalysis);
+                break;
+            case 'UNUSED':
+                fieldLifecycle.unusedFields.push(fieldAnalysis);
+                break;
+            default:
+                fieldLifecycle.referenceFields.push(fieldAnalysis);
+        }
+    }
+    
+    return fieldLifecycle;
+}
+
+// === INTELLIGENT CONTENT CHUNKING ===
+intelligentChunkContent(content, componentType) {
+    const maxChars = this.maxTokens * this.averageCharsPerToken * 0.6;
+    
+    if (content.length <= maxChars) {
+        return content;
+    }
+    
+    if (componentType === 'Copybook') {
+        // Focus on field definitions and structures
+        const lines = content.split('\n');
+        const importantLines = [];
+        
+        lines.forEach((line, index) => {
+            const trimmed = line.trim().toUpperCase();
+            
+            // Include 01-level fields and their subordinates
+            if (trimmed.match(/^\s*\d+\s+[A-Z]/)) {
+                importantLines.push(line);
+                
+                // Include next few lines for complete field definition
+                for (let i = 1; i <= 3 && (index + i) < lines.length; i++) {
+                    const nextLine = lines[index + i].trim();
+                    if (nextLine.includes('PIC ') || nextLine.includes('VALUE ') || 
+                        nextLine.includes('OCCURS ') || nextLine.includes('REDEFINES ')) {
+                        importantLines.push(lines[index + i]);
+                    }
+                }
+            }
+        });
+        
+        let result = importantLines.join('\n');
+        return result.substring(0, maxChars);
+        
+    } else if (componentType === 'COBOL Program') {
+        // Focus on working storage and procedure division
+        const workingStorageIndex = content.toUpperCase().indexOf('WORKING-STORAGE');
+        const procedureIndex = content.toUpperCase().indexOf('PROCEDURE DIVISION');
+        
+        let importantContent = '';
+        
+        if (workingStorageIndex > -1) {
+            const wsContent = content.substring(workingStorageIndex, procedureIndex > -1 ? procedureIndex : content.length);
+            importantContent += wsContent.substring(0, maxChars / 2);
+        }
+        
+        if (procedureIndex > -1) {
+            const procContent = content.substring(procedureIndex);
+            importantContent += procContent.substring(0, maxChars / 2);
+        }
+        
+        return importantContent || content.substring(0, maxChars);
+    }
+    
+    return content.substring(0, maxChars);
+}
 // === COMPONENT SUGGESTIONS ===
 updateComponentSuggestions() {
 this.componentSuggestions = [];
@@ -2144,9 +2470,9 @@ formatChatMessage(content) {
 return content
 .replace(/\n/g, '<br>')
 // ✅ FIXED - Proper regex for bold text text
-.replace(/**([^*]+)**/g, '<strong style="color: #1e40af;">$1</strong>')
+.replace(/\*\*([^*]+)\*\*/g, '<strong style="color: #1e40af;">$1</strong>')
 // ✅ FIXED - Proper regex for code blocks code
-.replace(/([^]+)`/g, '<code style="background: rgba(59, 130, 246, 0.1); padding: 2px 4px; border-radius: 3px; color: #1e40af; font-family: monospace; font-size: 13px;">$1</code>')
+.replace(/`([^`]+)`/g, '<code style="background: rgba(59, 130, 246, 0.1); padding: 2px 4px; border-radius: 3px; color: #1e40af; font-family: monospace; font-size: 13px;">$1</code>')
 .replace(/^- /gm, '• ')
 .replace(/^• /gm, '<span style="color: #10b981; font-weight: bold;">•</span> ')
 .replace(/🧠|⚖️|🔗|💡|🎯|📊|🔍|🚀|🌊|⚙️|🖥️|📤|📋|🔄|📖|💼|📁/g, '<span style="font-size: 1.1em;">$&</span>');
@@ -2369,37 +2695,30 @@ async runLLMEnhancedAnalysisWithLifecycle(componentName) {
         
         const dependencyAnalysis = await this.extractRealDependencies(componentName, relevantFiles);
 
-        // Stage 3: Real LLM analysis
-        // Stage 3: Extract enhanced lifecycle flow (KEEP AS STAGE 3)
-this.updateLoadingStatus('🌊 Stage 3: Analyzing enhanced component lifecycle...');
+        // Stage 3: Extract focused lifecycle flow
+this.updateLoadingStatus('🌊 Stage 3: Analyzing component lifecycle...');
 this.updateProgress(50);
 
 const lifecycleFlow = await this.extractFileLifecycleFlow(componentName, relevantFiles);
 
-// Add field-wise analysis for copybooks (ENHANCEMENT)
+// Add field-wise analysis for copybooks
 if (componentType === 'Copybook') {
     this.updateLoadingStatus('🔍 Stage 3b: Analyzing field-wise lifecycle...');
     lifecycleFlow.fieldAnalysis = await this.analyzeFieldWiseLifecycle(componentName, relevantFiles);
 }
 
-// Stage 4: LLM analysis with enhanced context (KEEP AS STAGE 4)
-this.updateLoadingStatus('🤖 Stage 4: Enhanced LLM analysis...');
+// Stage 4: LLM analysis with focused scope
+this.updateLoadingStatus('🤖 Stage 4: Real LLM analysis...');
 this.updateProgress(75);
 
 let llmAnalysis;
 try {
     if (componentType === 'Copybook') {
-        llmAnalysis = await this.analyzeCopybookWithLLMAndLifecycle(
-            componentName, relevantFiles, dependencyAnalysis, lifecycleFlow
-        );
+        llmAnalysis = await this.performRealLLMAnalysis(componentName, componentType, relevantFiles);
     } else if (componentType === 'COBOL Program') {
-        llmAnalysis = await this.analyzeProgramWithLLMAndLifecycle(
-            componentName, relevantFiles, dependencyAnalysis, lifecycleFlow
-        );
+        llmAnalysis = await this.performRealLLMAnalysis(componentName, componentType, relevantFiles);
     } else {
-        llmAnalysis = await this.analyzeGenericComponentWithLLM(
-            componentName, relevantFiles, dependencyAnalysis
-        );
+        llmAnalysis = await this.performRealLLMAnalysis(componentName, componentType, relevantFiles);
     }
 } catch (llmError) {
     console.error('LLM analysis failed:', llmError);
