@@ -3373,62 +3373,139 @@ displayFieldLifecycleSummary(lifecycleFlow) {
     `;
 }
 
+// === DISPLAY ANALYSIS RESULTS ===
+displayAnalysisResults(componentName, results) {
+    // Update all tabs with results
+    this.displayMainAnalysis(componentName, results);
+    
+    // Show appropriate sections based on component type
+    if (results.componentType === 'Copybook') {
+        this.displayFieldMatrix(componentName, results);
+    }
+    
+    this.displayUsagePatterns(componentName, results);
+    this.displayDependencies(componentName, results);
+    this.displayFileLifecycle(componentName, results);
+    
+    // Expand relevant sections automatically
+    this.expandAnalysisSections();
+}
+
+// === EXPAND ANALYSIS SECTIONS ===
+expandAnalysisSections() {
+    // Show analysis results panel
+    const analysisContent = document.getElementById('analysis-content');
+    const analysisToggle = document.getElementById('analysis-toggle');
+    
+    if (analysisContent && analysisContent.classList.contains('collapsed')) {
+        analysisContent.classList.remove('collapsed');
+        if (analysisToggle) {
+            analysisToggle.classList.remove('collapsed');
+            analysisToggle.textContent = '▼';
+        }
+    }
+    
+    // Expand the main analysis section
+    const lifecycleContent = document.getElementById('lifecycle-section-content');
+    const lifecycleToggle = document.getElementById('lifecycle-section-toggle');
+    
+    if (lifecycleContent && lifecycleContent.classList.contains('collapsed')) {
+        lifecycleContent.classList.remove('collapsed');
+        if (lifecycleToggle) {
+            lifecycleToggle.textContent = '▼';
+        }
+    }
+}
+
 // === DISPLAY MAIN ANALYSIS ===
 displayMainAnalysis(componentName, results) {
-const container = document.getElementById('lifecycleContent');
-if (!container) return;
-const friendlyName = this.getFriendlyName(componentName);
-
-let html = `
-    <div style="margin-bottom: 20px;">
-        <h3 style="color: #1e40af; margin-bottom: 8px;">🤖 Analysis: ${friendlyName}</h3>
-        <div style="font-size: 13px; color: #64748b; margin-bottom: 16px;">
-            <strong>Technical Name:</strong> <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">${componentName}</code> • 
-            <strong>Type:</strong> ${results.componentType} • 
-            <strong>Method:</strong> ${results.analysisMethod} • 
-            <strong>Files:</strong> ${results.filesAnalyzed.length} • 
-            <strong>Completed:</strong> ${new Date(results.timestamp).toLocaleString()}
-        </div>
-    </div>
+    const container = document.getElementById('lifecycleContent');
+    if (!container) return;
     
-    <!-- Quality Metrics -->
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px;">
-        <div style="background: #f0fdf4; padding: 12px; border-radius: 8px; text-align: center; border-left: 4px solid #10b981;">
-            <div style="font-size: 1.4rem; font-weight: bold; color: #059669;">${results.qualityScore}/10</div>
-            <div style="font-size: 11px; color: #064e3b;">Analysis Quality</div>
-        </div>
-        <div style="background: #eff6ff; padding: 12px; border-radius: 8px; text-align: center; border-left: 4px solid #3b82f6;">
-            <div style="font-size: 1.4rem; font-weight: bold; color: #1d4ed8;">${results.completeness.score}%</div>
-            <div style="font-size: 11px; color: #1e3a8a;">Completeness</div>
-        </div>
-        <div style="background: #fef3c7; padding: 12px; border-radius: 8px; text-align: center; border-left: 4px solid #f59e0b;">
-            <div style="font-size: 1.4rem; font-weight: bold; color: #d97706;">${results.filesAnalyzed.length}</div>
-            <div style="font-size: 11px; color: #92400e;">Files Analyzed</div>
-        </div>
-        <div style="background: #f3e8ff; padding: 12px; border-radius: 8px; text-align: center; border-left: 4px solid #8b5cf6;">
-            <div style="font-size: 1.2rem; font-weight: bold; color: #7c3aed;">${results.lifecycleFlow ? results.lifecycleFlow.scope : 'N/A'}</div>
-            <div style="font-size: 11px; color: #5b21b6;">Analysis Scope</div>
-        </div>
-    </div>
-`;
+    const friendlyName = this.getFriendlyName(componentName);
 
-// Display dependency analysis
-if (results.dependencyAnalysis) {
-    html += this.displayDependencyAnalysis(results.dependencyAnalysis);
+    let html = `
+        <div style="margin-bottom: 20px;">
+            <h3 style="color: #1e40af; margin-bottom: 8px;">🤖 Analysis: ${friendlyName}</h3>
+            <div style="font-size: 13px; color: #64748b; margin-bottom: 16px;">
+                <strong>Technical Name:</strong> <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">${componentName}</code> • 
+                <strong>Type:</strong> ${results.componentType} • 
+                <strong>Method:</strong> ${results.analysisMethod} • 
+                <strong>Files:</strong> ${results.filesAnalyzed.length} • 
+                <strong>Completed:</strong> ${new Date(results.timestamp).toLocaleString()}
+            </div>
+        </div>
+        
+        <!-- Quality Metrics -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px;">
+            <div style="background: #f0fdf4; padding: 12px; border-radius: 8px; text-align: center; border-left: 4px solid #10b981;">
+                <div style="font-size: 1.4rem; font-weight: bold; color: #059669;">${results.qualityScore}/10</div>
+                <div style="font-size: 11px; color: #064e3b;">Analysis Quality</div>
+            </div>
+            <div style="background: #eff6ff; padding: 12px; border-radius: 8px; text-align: center; border-left: 4px solid #3b82f6;">
+                <div style="font-size: 1.4rem; font-weight: bold; color: #1d4ed8;">${results.completeness.score}%</div>
+                <div style="font-size: 11px; color: #1e3a8a;">Completeness</div>
+            </div>
+            <div style="background: #fef3c7; padding: 12px; border-radius: 8px; text-align: center; border-left: 4px solid #f59e0b;">
+                <div style="font-size: 1.4rem; font-weight: bold; color: #d97706;">${results.filesAnalyzed.length}</div>
+                <div style="font-size: 11px; color: #92400e;">Files Analyzed</div>
+            </div>
+            <div style="background: #f3e8ff; padding: 12px; border-radius: 8px; text-align: center; border-left: 4px solid #8b5cf6;">
+                <div style="font-size: 1.2rem; font-weight: bold; color: #7c3aed;">${results.lifecycleFlow ? results.lifecycleFlow.scope : 'N/A'}</div>
+                <div style="font-size: 11px; color: #5b21b6;">Analysis Scope</div>
+            </div>
+        </div>
+    `;
+
+    // Display dependency analysis
+    if (results.dependencyAnalysis) {
+        html += this.displayDependencyAnalysis(results.dependencyAnalysis);
+    }
+
+    // Display LLM analysis results
+    if (results.llmAnalysis) {
+        html += this.displayLLMResults(results.llmAnalysis, results.componentType);
+    }
+
+    // Display lifecycle flow summary
+    if (results.lifecycleFlow) {
+        html += this.displayLifecycleFlowSummary(results.lifecycleFlow);
+    }
+
+    container.innerHTML = html;
 }
 
-// Display LLM analysis results
-if (results.llmAnalysis) {
-    html += this.displayLLMResults(results.llmAnalysis, results.componentType);
+// === ENABLE ENHANCED CHAT ===
+enableEnhancedChat(componentName, results) {
+    this.enableChat();
+    
+    // Add enhanced context message for copybooks with field analysis
+    if (results.componentType === 'Copybook' && results.lifecycleFlow?.fieldAnalysis) {
+        const fieldStats = results.lifecycleFlow.fieldAnalysis;
+        const friendlyName = this.getFriendlyName(componentName);
+        
+        this.addChatMessage('assistant', 
+            `🎯 **Enhanced Field Analysis Complete for ${friendlyName}!**
+            
+I now have detailed field-level insights:
+📊 **Field Categories:**
+- Input Fields: ${fieldStats.inputFields?.length || 0}
+- Reference Fields: ${fieldStats.referenceFields?.length || 0}  
+- Updated Fields: ${fieldStats.updatedFields?.length || 0}
+- Derived Fields: ${fieldStats.derivedFields?.length || 0}
+- Unused Fields: ${fieldStats.unusedFields?.length || 0}
+
+💡 **Ask me about:**
+"Which fields are never used and can be removed?"
+"Show me all fields that get updated by programs"
+"What are the most important reference fields?"
+"Which fields are only used for calculations?"
+
+Technical Reference: \`${componentName}\``
+        );
+    }
 }
 
-// Display lifecycle flow summary
-if (results.lifecycleFlow) {
-    html += this.displayLifecycleFlowSummary(results.lifecycleFlow);
-}
-
-container.innerHTML = html;
-}
 // === DISPLAY DEPENDENCY ANALYSIS ===
 displayDependencyAnalysis(dependencyAnalysis) {
 const found = dependencyAnalysis.found || {};
