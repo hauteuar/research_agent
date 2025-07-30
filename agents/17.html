@@ -2776,7 +2776,8 @@ async runLLMEnhancedAnalysisWithLifecycle(componentName) {
         this.updateLoadingStatus('🤖 Stage 4: Real LLM analysis...');
         this.updateProgress(75);
 
-        
+        let llmAnalysis;
+
         try {
             if (componentType === 'Copybook') {
                 llmAnalysis = await this.performRealLLMAnalysis(componentName, componentType, relevantFiles);
@@ -2817,27 +2818,6 @@ async runLLMEnhancedAnalysisWithLifecycle(componentName) {
                 };
             }
         }
-// Stage 4: LLM analysis with focused scope
-this.updateLoadingStatus('🤖 Stage 4: Real LLM analysis...');
-this.updateProgress(75);
-
-let llmAnalysis;
-try {
-    if (componentType === 'Copybook') {
-        llmAnalysis = await this.performRealLLMAnalysis(componentName, componentType, relevantFiles);
-    } else if (componentType === 'COBOL Program') {
-        llmAnalysis = await this.performRealLLMAnalysis(componentName, componentType, relevantFiles);
-    } else {
-        llmAnalysis = await this.performRealLLMAnalysis(componentName, componentType, relevantFiles);
-    }
-} catch (llmError) {
-    console.error('LLM analysis failed:', llmError);
-    llmAnalysis = {
-        error: true,
-        message: llmError.message,
-        fallbackData: this.createComponentFallback(componentName, componentType, lifecycleFlow)
-    };
-}
 
 // Stage 5: Finalize results
         this.updateLoadingStatus('📊 Stage 5: Finalizing enhanced analysis...');
@@ -2871,7 +2851,7 @@ try {
     }
 }
 
-// === REAL DEPENDENCY EXTRACTION ===
+
 // === REAL LLM ANALYSIS WITH INTELLIGENT CHUNKING ===
 async extractRealDependencies(componentName, relevantFiles) {
     const found = {
