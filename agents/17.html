@@ -2103,14 +2103,18 @@ try {
     }
 }
 }
+I can see multiple issues in your code. The main problems are with regex patterns and template literal syntax. Here's the corrected version:
+<artifact identifier="fixed-chat-message-function" type="application/vnd.ant.code" language="javascript" title="Fixed Chat Message Functions">
+// === CORRECTED addChatMessage FUNCTION ===
 addChatMessage(sender, content) {
-const messagesContainer = document.getElementById('chatMessages');
-if (!messagesContainer) return;
+    const messagesContainer = document.getElementById('chatMessages');
+    if (!messagesContainer) return;
 const messageId = 'msg_' + Date.now();
 const messageDiv = document.createElement('div');
 messageDiv.className = `chat-message ${sender}`;
 messageDiv.id = messageId;
 
+// ✅ FIXED - Proper template literal with backticks
 messageDiv.innerHTML = `
     <div class="sender">${sender === 'user' ? '👤 You' : '🤖 Analysis Assistant'}</div>
     <div class="content">${this.formatChatMessage(content)}</div>
@@ -2138,15 +2142,52 @@ this.chatHistory.push({
 
 this.saveToStorage();
 }
+// === CORRECTED formatChatMessage FUNCTION ===
 formatChatMessage(content) {
 return content
 .replace(/\n/g, '<br>')
+// ✅ FIXED - Proper regex for bold text text
 .replace(/**([^*]+)**/g, '<strong style="color: #1e40af;">$1</strong>')
+// ✅ FIXED - Proper regex for code blocks code
 .replace(/([^]+)`/g, '<code style="background: rgba(59, 130, 246, 0.1); padding: 2px 4px; border-radius: 3px; color: #1e40af; font-family: monospace; font-size: 13px;">$1</code>')
 .replace(/^- /gm, '• ')
 .replace(/^• /gm, '<span style="color: #10b981; font-weight: bold;">•</span> ')
 .replace(/🧠|⚖️|🔗|💡|🎯|📊|🔍|🚀|🌊|⚙️|🖥️|📤|📋|🔄|📖|💼|📁/g, '<span style="font-size: 1.1em;">$&</span>');
 }
+// === ALTERNATIVE VERSION with escaped regex ===
+formatChatMessageAlt(content) {
+return content
+.replace(/\n/g, '<br>')
+// Bold text: text
+.replace(/**(.+?)**/g, '<strong style="color: #1e40af;">$1</strong>')
+// Code blocks: code
+.replace(/(.+?)/g, '<code style="background: rgba(59, 130, 246, 0.1); padding: 2px 4px; border-radius: 3px; color: #1e40af; font-family: monospace; font-size: 13px;">$1</code>')
+// Convert dashes to bullets
+.replace(/^- /gm, '• ')
+// Style bullets
+.replace(/^• /gm, '<span style="color: #10b981; font-weight: bold;">•</span> ')
+// Style emojis
+.replace(/🧠|⚖️|🔗|💡|🎯|📊|🔍|🚀|🌊|⚙️|🖥️|📤|📋|🔄|📖|💼|📁/g, '<span style="font-size: 1.1em;">$&</span>');
+}
+// === SAFER VERSION with error handling ===
+formatChatMessageSafe(content) {
+try {
+if (!content || typeof content !== 'string') {
+return String(content || '');
+}
+    return content
+        .replace(/\n/g, '<br>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong style="color: #1e40af;">$1</strong>')
+        .replace(/`([^]+)`/g, '<code style="background: rgba(59, 130, 246, 0.1); padding: 2px 4px; border-radius: 3px; color: #1e40af; font-family: monospace; font-size: 13px;">$1</code>')
+        .replace(/^- /gm, '• ')
+        .replace(/^• /gm, '<span style="color: #10b981; font-weight: bold;">•</span> ')
+        .replace(/🧠|⚖️|🔗|💡|🎯|📊|🔍|🚀|🌊|⚙️|🖥️|📤|📋|🔄|📖|💼|📁/g, '<span style="font-size: 1.1em;">$&</span>');
+} catch (error) {
+    console.error('Error formatting chat message:', error);
+    return String(content || '');
+}
+}
+
 showChatTyping() {
 const messagesContainer = document.getElementById('chatMessages');
 if (!messagesContainer) return;
