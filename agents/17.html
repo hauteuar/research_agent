@@ -1750,7 +1750,8 @@ return friendlyName;
 }
 
 // === EXTRACT REAL LIFECYCLE FLOW ===
-async extractRealLifecycleFlow(componentName, componentType, relevantFiles, llmAnalysis) {
+// === EXTRACT REAL LIFECYCLE FLOW ===
+async extractRealLifecycleFlow(componentName, componentType, relevantFiles, llmAnalysis = null) {
     const lifecycleFlow = {
         componentName: componentName,
         componentType: componentType,
@@ -1761,8 +1762,17 @@ async extractRealLifecycleFlow(componentName, componentType, relevantFiles, llmA
         updatePrograms: [],
         cicsScreens: [],
         batchJobs: [],
-        primaryFields: llmAnalysis.primaryFields || []
+        primaryFields: [] // Initialize as empty array
     };
+
+    // Safely extract primary fields from LLM analysis if available
+    if (llmAnalysis && llmAnalysis.primaryFields && Array.isArray(llmAnalysis.primaryFields)) {
+        lifecycleFlow.primaryFields = llmAnalysis.primaryFields;
+    } else if (llmAnalysis && llmAnalysis.totalFields) {
+        // If we have field count but no field array, create placeholder
+        lifecycleFlow.primaryFields = [];
+        lifecycleFlow.totalFields = llmAnalysis.totalFields;
+    }
 
     // Extract real lifecycle patterns from file content
     relevantFiles.forEach(file => {
@@ -1806,8 +1816,22 @@ async extractRealLifecycleFlow(componentName, componentType, relevantFiles, llmA
     lifecycleFlow.inputPrograms = this.removeDuplicatePrograms(lifecycleFlow.inputPrograms);
     lifecycleFlow.updatePrograms = this.removeDuplicatePrograms(lifecycleFlow.updatePrograms);
 
+    // Determine usage pattern based on operations found
+    if (lifecycleFlow.creationSources.length > 0 && lifecycleFlow.updatePrograms.length > 0) {
+        lifecycleFlow.usagePattern = 'FULL_LIFECYCLE';
+    } else if (lifecycleFlow.creationSources.length > 0) {
+        lifecycleFlow.usagePattern = 'CREATION_FOCUSED';
+    } else if (lifecycleFlow.updatePrograms.length > 0) {
+        lifecycleFlow.usagePattern = 'UPDATE_FOCUSED';
+    } else if (lifecycleFlow.inputPrograms.length > 0) {
+        lifecycleFlow.usagePattern = 'READ_ONLY';
+    } else {
+        lifecycleFlow.usagePattern = 'REFERENCE_ONLY';
+    }
+
     return lifecycleFlow;
 }
+
 
 // === UTILITY METHODS ===
 removeDuplicatePrograms(programList) {
@@ -1824,12 +1848,58 @@ removeDuplicatePrograms(programList) {
 calculateQualityScore(llmAnalysis, dependencyAnalysis) {
     let score = 5; // Base score
     
-    if (llmAnalysis.primaryFields && llmAnalysis.primaryFields.length > 0) score += 1;
-    if (llmAnalysis.recommendations && llmAnalysis.recommendations.length > 3) score += 1;
-    if (dependencyAnalysis && dependencyAnalysis.summary && dependencyAnalysis.summary.foundCount > dependencyAnalysis.summary.missingCount) score += 1;
-    if (llmAnalysis.qualityScore && llmAnalysis.qualityScore > 6) score += 1;
-    
-    return Math.min(10, Math.max(1, score));
+    try {
+        // Check LLM analysis quality
+        if (llmAnalysis && !llmAnalysis.error) {
+            if (llmAnalysis.primaryFields && Array.isArray(llmAnalysis.primaryFields) && llmAnalysis.primaryFields.length > 0) {
+                score += 1;
+            }
+            if (llmAnalysis.recommendations && Array.isArray(llmAnalysis.recommendations) && llmAnalysis.recommendations.length > 3) {
+                score += 1;
+            }
+            if (llmAnalysis.qualityScore && typeof llmAnalysis.qualityScore === 'number' && llmAnalysis.qualityScore > 6) {
+                score += 1;
+            }
+        }
+        
+        // Check dependency analysis quality
+        if (dependencyAnalysis && dependencyAnalysis.summary) {
+            const foundCount = dependencyAnalysis.summary.foundCount || 0;
+            const missingCount = dependencyAnalysis.summary.missingCount || 0;
+            
+            if (foundCount > missingCount) {
+                score += 1;
+            }
+            if (foundCount > 0) {
+                score += 1;
+            }
+        }
+        
+        return Math.min(10, Math.max(1, score));
+        
+    } catch (error) {
+        console.warn('Error calculating quality score:', error);
+        return 5; // Default score on error
+    }
+}
+
+// === CREATE COMPONENT FALLBACK ===
+createComponentFallback(componentName, componentType, lifecycleFlow) {
+    return {
+        componentName: componentName,
+        componentType: componentType,
+        analysisScope: "FALLBACK_ANALYSIS",
+        purpose: `Analysis of ${componentType.toLowerCase()} component`,
+        keyElements: ["Basic structure", "Dependencies", "Usage patterns"],
+        recommendations: [
+            `Review ${componentName} for optimization opportunities`,
+            "Consider modernization strategies",
+            "Validate business logic and data flows",
+            "Check for unused or redundant elements"
+        ],
+        qualityScore: 5,
+        fallbackReason: "LLM analysis unavailable, using fallback data"
+    };
 }
 
 // === PARSE UNSTRUCTURED LLM RESPONSE ===
@@ -2695,18 +2765,58 @@ async runLLMEnhancedAnalysisWithLifecycle(componentName) {
         
         const dependencyAnalysis = await this.extractRealDependencies(componentName, relevantFiles);
 
-        // Stage 3: Extract focused lifecycle flow
-this.updateLoadingStatus('🌊 Stage 3: Analyzing component lifecycle...');
-this.updateProgress(50);
+        /// Stage 3: Extract focused lifecycle flow
+        this.updateLoadingStatus('🌊 Stage 3: Analyzing component lifecycle...');
+        this.updateProgress(50);
 
-const lifecycleFlow = await this.extractRealLifecycleFlow(componentName, relevantFiles);
+        // Initialize lifecycle flow first (without LLM analysis)
+        let lifecycleFlow = await this.extractRealLifecycleFlow(componentName, componentType, relevantFiles);
 
-// Add field-wise analysis for copybooks
-if (componentType === 'Copybook') {
-    this.updateLoadingStatus('🔍 Stage 3b: Analyzing field-wise lifecycle...');
-    lifecycleFlow.fieldAnalysis = await this.analyzeFieldWiseLifecycle(componentName, relevantFiles);
-}
+        // Stage 4: LLM analysis with focused scope
+        this.updateLoadingStatus('🤖 Stage 4: Real LLM analysis...');
+        this.updateProgress(75);
 
+        
+        try {
+            if (componentType === 'Copybook') {
+                llmAnalysis = await this.performRealLLMAnalysis(componentName, componentType, relevantFiles);
+            } else if (componentType === 'COBOL Program') {
+                llmAnalysis = await this.performRealLLMAnalysis(componentName, componentType, relevantFiles);
+            } else {
+                llmAnalysis = await this.performRealLLMAnalysis(componentName, componentType, relevantFiles);
+            }
+            
+            // Update lifecycle flow with LLM analysis data
+            if (llmAnalysis && llmAnalysis.primaryFields) {
+                lifecycleFlow.primaryFields = llmAnalysis.primaryFields;
+            }
+            
+        } catch (llmError) {
+            console.error('LLM analysis failed:', llmError);
+            llmAnalysis = {
+                error: true,
+                message: llmError.message,
+                fallbackData: this.createComponentFallback(componentName, componentType, lifecycleFlow)
+            };
+        }
+
+        // Add field-wise analysis for copybooks (after LLM analysis)
+        if (componentType === 'Copybook') {
+            this.updateLoadingStatus('🔍 Stage 4b: Analyzing field-wise lifecycle...');
+            try {
+                lifecycleFlow.fieldAnalysis = await this.analyzeFieldWiseLifecycle(componentName, relevantFiles);
+            } catch (fieldError) {
+                console.warn('Field analysis failed:', fieldError);
+                lifecycleFlow.fieldAnalysis = {
+                    inputFields: [],
+                    referenceFields: [],
+                    updatedFields: [],
+                    derivedFields: [],
+                    staticFields: [],
+                    unusedFields: []
+                };
+            }
+        }
 // Stage 4: LLM analysis with focused scope
 this.updateLoadingStatus('🤖 Stage 4: Real LLM analysis...');
 this.updateProgress(75);
@@ -2729,12 +2839,11 @@ try {
     };
 }
 
-// Stage 5: Finalize results (KEEP AS STAGE 5)
-this.updateLoadingStatus('📊 Stage 5: Finalizing enhanced analysis...');
-this.updateProgress(90);
+// Stage 5: Finalize results
+        this.updateLoadingStatus('📊 Stage 5: Finalizing enhanced analysis...');
+        this.updateProgress(90);
 
-        
-        
+        // Calculate quality score with safe fallbacks
         const qualityScore = this.calculateQualityScore(llmAnalysis, dependencyAnalysis);
         
         const results = {
@@ -2746,12 +2855,16 @@ this.updateProgress(90);
             lifecycleFlow: lifecycleFlow,
             llmAnalysis: llmAnalysis,
             qualityScore: qualityScore,
-            completeness: { score: 85, checkpoints: {}, completed: 5, total: 6 },
-            analysisMethod: 'LLM-Enhanced-Real'
+            completeness: { 
+                score: llmAnalysis && llmAnalysis.error ? 60 : 85, 
+                checkpoints: {}, 
+                completed: llmAnalysis && llmAnalysis.error ? 3 : 5, 
+                total: 6 
+            },
+            analysisMethod: llmAnalysis && llmAnalysis.error ? 'Fallback-Analysis' : 'LLM-Enhanced-Real'
         };
 
         return results;
-
     } catch (error) {
         console.error('Real analysis failed:', error);
         throw new Error(`Analysis failed: ${error.message}`);
