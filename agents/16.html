@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>vLLM File Analysis System</title>
+    <style>
+        :root {
+            --primary-blue: #2563eb;
+            --primary-blue-hover: #1d4ed8;
+            --light-blue: #eff6ff;
+            --border-blue: #bfdbfe;
+            --grey-50: #f9fafb;
+            --grey-100: #f3f4f6;
+            --grey-200: #e5e7eb;
+            --grey-300: #d1d5db;
+            --grey-400: #9ca3af;
+            --grey-500: #6b7280;
+            --grey-600: #4b5563;
+            --grey-700: #374151;
+            --grey-800: #1f2937;
+            --grey-900: #111827;
+            --white: #ffffff;
+            --success-bg: #f0fdf4;
+            --success-border: #bbf7d0;
+            --warning-bg: #fffbeb;
+            --warning-border: #fed7aa;
+            --error-bg: #fef2f2;
+            --error-border: #fecaca;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--white);
+            color: var(--grey-800);
+            overflow-x: hidden;
+        }
+
+        /* Main Layout Container */
+        .main-container {
+            display: grid;
+            grid-template-columns: 300px 1fr 400px;
+            height: 100vh;
+            transition: all 0.3s ease;
+        }
+
+        .main-container.left-collapsed {
+            grid-template-columns: 60px 1fr 400px;
+        }
+
+        .main-container.right-collapsed {
+            grid-template-columns: 300px 1fr 60px;
+        }
+
+        .main-container.both-collapsed {
+            grid-template-columns: 60px 1fr 60px;
+        }
+
+        /* Header */
+        .system-header {
+            grid-column: 1 / -1;
+            background: linear-gradient(135deg, var(--primary-blue) 0%, var(--primary-blue-hover) 100%);
+            color: var(--white);
+            padding: 16px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .system-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .system-status {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            font-size: 0.875rem;
+        }
+
+        /* Panel Base Styles */
+        .left-panel, .right-panel {
+            background: var(--grey-50);
+            display: flex;
+            flex-direction: column;
+            transition: all 0.3s ease;
+            overflow: hidden;
+        }
+
+        .left-panel {
+            border-right: 1px solid var(--grey-200);
+        }
+
+        .right-panel {
+            border-left: 1px solid var(--grey-200);
+        }
+
+        .left-panel.collapsed, .right-panel.collapsed {
+            width: 60px;
+        }
+
+        .panel-header {
+            background: var(--white);
+            border-bottom: 1px solid var(--grey-200);
+            padding: 16px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--grey-800);
+        }
+
+        .collapse-btn {
+            background: var(--primary-blue);
+            color: var(--white);
+            border: none;
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .collapse-btn:hover {
+            background: var(--primary-blue-hover);
+            transform: scale(1.05);
+        }
+
+        .panel-content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .left-panel.collapsed .panel-content,
+        .right-panel.collapsed .panel-content {
+            display: none;
+        }
+
+        /* Middle Panel */
+        .middle-panel {
+            background: var(--white);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container" id="mainContainer">
+        <!-- System Header -->
+        <header class="system-header">
+            <div class="system-title">
+                🔬 vLLM File Analysis System
+            </div>
+            <div class="system-status">
+                <span id="connectionStatus">🔴 Disconnected</span>
+                <span id="fileCount">0 Files</span>
+                <span id="analysisCount">0 Analyzed</span>
+            </div>
+        </header>
+
+        <!-- Left Panel: File Upload & Business Names -->
+        <aside class="left-panel" id="leftPanel">
+            <div class="panel-header">
+                <h2 class="panel-title">File Upload & Mapping</h2>
+                <button class="collapse-btn" onclick="toggleLeftPanel()">
+                    <span id="leftCollapseIcon">←</span>
+                </button>
+            </div>
+            <div class="panel-content">
+                <!-- Content will be added in next part -->
+                <div style="text-align: center; padding: 40px; color: var(--grey-500);">
+                    Left panel content loading...
+                </div>
+            </div>
+        </aside>
+
+        <!-- Middle Panel: Analysis Results -->
+        <main class="middle-panel">
+            <!-- Content will be added in next part -->
+            <div style="text-align: center; padding: 40px; color: var(--grey-500);">
+                Middle panel content loading...
+            </div>
+        </main>
+
+        <!-- Right Panel: Chat -->
+        <aside class="right-panel" id="rightPanel">
+            <div class="panel-header">
+                <h2 class="panel-title">💬 Analysis Chat</h2>
+                <button class="collapse-btn" onclick="toggleRightPanel()">
+                    <span id="rightCollapseIcon">→</span>
+                </button>
+            </div>
+            <div class="panel-content">
+                <!-- Content will be added in next part -->
+                <div style="text-align: center; padding: 40px; color: var(--grey-500);">
+                    Right panel content loading...
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <script>
+        // Basic panel toggle functions
+        function toggleLeftPanel() {
+            const mainContainer = document.getElementById('mainContainer');
+            const leftPanel = document.getElementById('leftPanel');
+            const leftIcon = document.getElementById('leftCollapseIcon');
+            
+            const isCollapsed = leftPanel.classList.contains('collapsed');
+            
+            if (isCollapsed) {
+                leftPanel.classList.remove('collapsed');
+                leftIcon.textContent = '←';
+            } else {
+                leftPanel.classList.add('collapsed');
+                leftIcon.textContent = '→';
+            }
+            
+            updateMainContainerClass();
+        }
+
+        function toggleRightPanel() {
+            const mainContainer = document.getElementById('mainContainer');
+            const rightPanel = document.getElementById('rightPanel');
+            const rightIcon = document.getElementById('rightCollapseIcon');
+            
+            const isCollapsed = rightPanel.classList.contains('collapsed');
+            
+            if (isCollapsed) {
+                rightPanel.classList.remove('collapsed');
+                rightIcon.textContent = '→';
+            } else {
+                rightPanel.classList.add('collapsed');
+                rightIcon.textContent = '←';
+            }
+            
+            updateMainContainerClass();
+        }
+
+        function updateMainContainerClass() {
+            const mainContainer = document.getElementById('mainContainer');
+            const leftCollapsed = document.getElementById('leftPanel').classList.contains('collapsed');
+            const rightCollapsed = document.getElementById('rightPanel').classList.contains('collapsed');
+            
+            mainContainer.className = 'main-container';
+            
+            if (leftCollapsed && rightCollapsed) {
+                mainContainer.classList.add('both-collapsed');
+            } else if (leftCollapsed) {
+                mainContainer.classList.add('left-collapsed');
+            } else if (rightCollapsed) {
+                mainContainer.classList.add('right-collapsed');
+            }
+        }
+
+        console.log('Part 1: Basic structure loaded');
+    </script>
+</body>
+</html>
