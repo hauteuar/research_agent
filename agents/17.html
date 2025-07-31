@@ -2294,22 +2294,49 @@ this.saveToStorage();
 }
 // === COMPONENT HELPER METHODS ===
 findRelevantFiles(componentName) {
-return this.uploadedFiles.filter(file => {
-// Check if file contains the component directly
-if (file.content.toUpperCase().includes(componentName.toUpperCase()) ||
-file.name.toUpperCase().includes(componentName.toUpperCase())) {
-return true;
-}
-    // Check if any component in the file matches
-    if (file.components) {
-        return file.components.some(comp => 
-            comp.name.toUpperCase() === componentName.toUpperCase()
-        );
-    }
+    const componentUpper = componentName.toUpperCase();
     
-    return false;
-});
+    return this.uploadedFiles.filter(file => {
+        // Check filename match (exact or with extension)
+        const fileName = file.name.toUpperCase();
+        const fileNameBase = fileName.replace(/\.[^/.]+$/, ""); // Remove extension
+        
+        if (fileNameBase === componentUpper || fileName.includes(componentUpper)) {
+            console.log(`✅ File ${file.name} matches component ${componentName} by name`);
+            return true;
+        }
+        
+        // Check content match
+        const content = file.content.toUpperCase();
+        if (content.includes(componentUpper)) {
+            // More specific checks
+            const lines = content.split('\n');
+            for (const line of lines) {
+                const trimmed = line.trim();
+                // Check for 01-level definition or COPY statement
+                if (trimmed.match(new RegExp(`^\\s*01\\s+${componentUpper}\\b`)) ||
+                    trimmed.match(new RegExp(`\\bCOPY\\s+${componentUpper}\\b`))) {
+                    console.log(`✅ File ${file.name} contains component ${componentName}`);
+                    return true;
+                }
+            }
+        }
+        
+        // Check if any component in the file matches
+        if (file.components) {
+            const hasMatch = file.components.some(comp => 
+                comp.name.toUpperCase() === componentUpper
+            );
+            if (hasMatch) {
+                console.log(`✅ File ${file.name} has component ${componentName} in components list`);
+                return true;
+            }
+        }
+        
+        return false;
+    });
 }
+
 detectComponentType(componentName, files) {
 // Check if it's a 01-level field (record layout)
 for (const file of files) {
@@ -3218,19 +3245,21 @@ lineReferencesComponent(line, componentName) {
 }
 
 determineReferenceType(line, componentName) {
-    if (line.includes('COPY') && line.includes(componentName)) {
+    const lineTrimmed = line.trim().toUpperCase();
+    
+    if (lineTrimmed.includes('COPY') && lineTrimmed.includes(componentName.toUpperCase())) {
         return 'COPY_INCLUDE';
-    } else if (line.includes('CALL') && line.includes(componentName)) {
+    } else if (lineTrimmed.includes('CALL') && lineTrimmed.includes(componentName.toUpperCase())) {
         return 'PROGRAM_CALL';
-    } else if (line.includes('PERFORM') && line.includes(componentName)) {
+    } else if (lineTrimmed.includes('PERFORM') && lineTrimmed.includes(componentName.toUpperCase())) {
         return 'PERFORM_CALL';
-    } else if (line.includes('MOVE') && line.includes(componentName)) {
+    } else if (lineTrimmed.includes('MOVE') && lineTrimmed.includes(componentName.toUpperCase())) {
         return 'DATA_MOVEMENT';
-    } else if (line.includes('IF') && line.includes(componentName)) {
+    } else if (lineTrimmed.includes('IF') && lineTrimmed.includes(componentName.toUpperCase())) {
         return 'CONDITIONAL_REFERENCE';
-    } else if (line.includes('DISPLAY') && line.includes(componentName)) {
+    } else if (lineTrimmed.includes('DISPLAY') && lineTrimmed.includes(componentName.toUpperCase())) {
         return 'OUTPUT_REFERENCE';
-    } else if (line.match(/^\s*\d+\s+/) && line.includes(componentName)) {
+    } else if (lineTrimmed.match(/^\s*\d+\s+/) && lineTrimmed.includes(componentName.toUpperCase())) {
         return 'FIELD_DEFINITION';
     } else {
         return 'FIELD_REFERENCE';
@@ -3459,14 +3488,14 @@ const dependencyAnalysis = await this.extractComprehensiveDependencies(component
 
 // === REAL LLM ANALYSIS WITH INTELLIGENT CHUNKING ===
 async extractRealDependencies(componentName, relevantFiles) {
-    console.log(`🔍 Enhanced dependency analysis for: ${componentName}`);
+    console.log(`🔍 FIXED Enhanced dependency analysis for: ${componentName}`);
     
     const found = {
         copyStatements: [],
         callStatements: [],
         programIds: [],
         fileReferences: [],
-        usingPrograms: [] // NEW: Programs that use this component
+        usingPrograms: [] // Programs that use this component
     };
     
     const missing = {
@@ -3476,80 +3505,111 @@ async extractRealDependencies(componentName, relevantFiles) {
         fileReferences: []
     };
 
-    // Enhanced search patterns for better detection
-    const componentPatterns = [
-        new RegExp(`\\bCOPY\\s+${componentName}\\b`, 'i'),
-        new RegExp(`\\bINCLUDE\\s+${componentName}\\b`, 'i'),
-        new RegExp(`\\b${componentName}\\b(?!\\s*\\.)`, 'i'), // Component name not followed by period
-        new RegExp(`\\b${componentName}\\.`, 'i'), // Qualified references
-        new RegExp(`\\bOF\\s+${componentName}\\b`, 'i'),
-        new RegExp(`\\bIN\\s+${componentName}\\b`, 'i')
-    ];
-
-    console.log(`📁 Analyzing ${this.uploadedFiles.length} uploaded files...`);
+    // FIXED: More comprehensive search patterns
+    const componentUpper = componentName.toUpperCase();
+    const componentPattern = new RegExp(`\\b${componentUpper}\\b`, 'i');
+    
+    console.log(`📁 Analyzing ${this.uploadedFiles.length} uploaded files for component: ${componentUpper}`);
 
     // Search ALL uploaded files for references to this component
     for (const file of this.uploadedFiles) {
-        const content = file.content.toUpperCase();
+        const content = file.content;
+        const contentUpper = content.toUpperCase();
         const lines = content.split('\n');
-        const componentUpper = componentName.toUpperCase();
         
         let fileUsesComponent = false;
         const references = [];
         
         lines.forEach((line, index) => {
-            const trimmed = line.trim();
+            const lineUpper = line.toUpperCase().trim();
             
-            // Check for various reference patterns
-            const hasReference = componentPatterns.some(pattern => 
-                pattern.test(line) // Use original line case for regex
-            );
+            // FIXED: Check for COPY statements first (most important)
+            const copyMatches = [
+                lineUpper.match(/\bCOPY\s+([A-Z][A-Z0-9\-_]*)/),
+                lineUpper.match(/\bINCLUDE\s+([A-Z][A-Z0-9\-_]*)/),
+            ];
             
-            if (hasReference || trimmed.includes(componentUpper)) {
-                fileUsesComponent = true;
-                references.push({
-                    line: index + 1,
-                    content: line.trim(),
-                    type: this.determineReferenceType(trimmed, componentUpper)
-                });
-                
-                // Extract specific dependency types
-                const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]+)/);
+            for (const copyMatch of copyMatches) {
                 if (copyMatch && copyMatch[1] === componentUpper) {
+                    console.log(`✅ Found COPY ${componentUpper} in ${file.name} at line ${index + 1}`);
+                    fileUsesComponent = true;
+                    references.push({
+                        line: index + 1,
+                        content: line.trim(),
+                        type: 'COPY_INCLUDE'
+                    });
+                    
                     found.copyStatements.push({
                         name: copyMatch[1],
                         file: file.name,
                         line: index + 1
                     });
+                    break; // Found it, no need to check other patterns for this line
                 }
+            }
+            
+            // FIXED: Check for other references (field usage, calls, etc.)
+            if (!fileUsesComponent && componentPattern.test(lineUpper)) {
+                // Additional patterns for field references
+                const referencePatterns = [
+                    `\\b${componentUpper}\\b(?!\\s*\\.)`, // Component name not followed by period
+                    `\\b${componentUpper}\\.`, // Qualified references (COMPONENT.FIELD)
+                    `\\bOF\\s+${componentUpper}\\b`, // COBOL qualification
+                    `\\bIN\\s+${componentUpper}\\b`,   // COBOL qualification
+                ];
                 
-                const callMatch = trimmed.match(/CALL\s+['"]*([A-Z][A-Z0-9\-_]+)['"]*/) || 
-                                trimmed.match(/PERFORM\s+([A-Z][A-Z0-9\-_]+)/);
-                if (callMatch && callMatch[1] === componentUpper) {
-                    found.callStatements.push({
-                        name: callMatch[1],
-                        file: file.name,
-                        line: index + 1
+                const hasReference = referencePatterns.some(pattern => 
+                    new RegExp(pattern, 'i').test(lineUpper)
+                );
+                
+                if (hasReference) {
+                    console.log(`✅ Found reference to ${componentUpper} in ${file.name} at line ${index + 1}`);
+                    fileUsesComponent = true;
+                    references.push({
+                        line: index + 1,
+                        content: line.trim(),
+                        type: this.determineReferenceType(lineUpper, componentUpper)
                     });
                 }
+            }
+            
+            // Check for CALL statements
+            const callMatch = lineUpper.match(/\bCALL\s+['"]*([A-Z][A-Z0-9\-_]+)['"]*/) || 
+                            lineUpper.match(/\bPERFORM\s+([A-Z][A-Z0-9\-_]+)/);
+            if (callMatch && callMatch[1] === componentUpper) {
+                console.log(`✅ Found CALL/PERFORM ${componentUpper} in ${file.name} at line ${index + 1}`);
+                fileUsesComponent = true;
+                references.push({
+                    line: index + 1,
+                    content: line.trim(),
+                    type: 'PROGRAM_CALL'
+                });
+                
+                found.callStatements.push({
+                    name: callMatch[1],
+                    file: file.name,
+                    line: index + 1
+                });
             }
         });
         
         // If this file uses the component, add it to the using programs list
-        if (fileUsesComponent && file.name !== componentName) {
+        if (fileUsesComponent && !file.name.toUpperCase().includes(componentUpper)) {
+            const programName = file.name.replace(/\.[^/.]+$/, ""); // Remove extension
+            
             found.usingPrograms.push({
-                program: file.name.replace(/\.[^/.]+$/, ""), // Remove extension
+                program: programName,
                 file: file.name,
                 type: file.type,
                 references: references,
                 referenceCount: references.length
             });
             
-            console.log(`✅ Found ${references.length} references in ${file.name}`);
+            console.log(`✅ ${file.name} uses ${componentName} with ${references.length} references`);
         }
     }
 
-    // Enhanced analysis for the component itself
+    // FIXED: Enhanced analysis for dependencies OF this component
     for (const file of relevantFiles) {
         const content = file.content.toUpperCase();
         const lines = content.split('\n');
@@ -3557,15 +3617,20 @@ async extractRealDependencies(componentName, relevantFiles) {
         lines.forEach((line, index) => {
             const trimmed = line.trim();
             
-            // Look for dependencies OF this component
-            const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]{2,})/);
-            if (copyMatch && copyMatch[1] !== componentName.toUpperCase()) {
-                // Check if this copybook exists in uploaded files
-                const exists = this.uploadedFiles.some(f => 
-                    f.name.toUpperCase().includes(copyMatch[1]) || 
-                    f.content.toUpperCase().includes(`01 ${copyMatch[1]}`) ||
-                    f.name.replace(/\.[^/.]+$/, "").toUpperCase() === copyMatch[1]
-                );
+            // Look for COPY statements in the component itself
+            const copyMatch = trimmed.match(/\bCOPY\s+([A-Z][A-Z0-9\-_]{2,})/);
+            if (copyMatch && copyMatch[1] !== componentUpper) {
+                // Check if this dependency exists in uploaded files
+                const exists = this.uploadedFiles.some(f => {
+                    const fileName = f.name.toUpperCase();
+                    const fileContent = f.content.toUpperCase();
+                    
+                    // Check multiple ways the dependency might exist
+                    return fileName.includes(copyMatch[1]) || 
+                           fileName.replace(/\.[^/.]+$/, "").toUpperCase() === copyMatch[1] ||
+                           fileContent.includes(`01 ${copyMatch[1]}`) ||
+                           fileContent.includes(`01  ${copyMatch[1]}`);
+                });
                 
                 if (exists) {
                     if (!found.copyStatements.some(c => c.name === copyMatch[1])) {
@@ -3584,10 +3649,20 @@ async extractRealDependencies(componentName, relevantFiles) {
         });
     }
 
-    console.log(`📊 Dependency Analysis Results:`);
-    console.log(`   - Programs using ${componentName}: ${found.usingPrograms.length}`);
+    console.log(`📊 FIXED Dependency Analysis Results for ${componentName}:`);
+    console.log(`   - Programs using this component: ${found.usingPrograms.length}`);
     console.log(`   - Copy statements found: ${found.copyStatements.length}`);
     console.log(`   - Missing dependencies: ${missing.copyStatements.length}`);
+    
+    // Debug output
+    if (found.usingPrograms.length === 0) {
+        console.log(`⚠️ No programs found using ${componentName}. Checking uploaded files...`);
+        this.uploadedFiles.forEach(file => {
+            if (file.content.toUpperCase().includes(`COPY ${componentUpper}`)) {
+                console.log(`🔍 Found COPY ${componentUpper} in ${file.name} (might have been missed)`);
+            }
+        });
+    }
 
     return {
         found: found,
@@ -3602,31 +3677,39 @@ async extractRealDependencies(componentName, relevantFiles) {
     };
 }
 
+
 // === INTELLIGENT CHUNKING FOR LLM ANALYSIS ===
 async performRealLLMAnalysis(componentName, componentType, relevantFiles) {
-    // Get dependency analysis first
+    console.log(`🤖 Starting FIXED LLM analysis for: ${componentName}`);
+    
+    // Get FIXED dependency analysis first
     const dependencyAnalysis = await this.extractRealDependencies(componentName, relevantFiles);
     
-    // Prepare enhanced context with dependency information
-    let fileContext = `COMPONENT ANALYSIS REQUEST
+    // Prepare enhanced context with REAL dependency information
+    let fileContext = `ENHANCED COMPONENT ANALYSIS REQUEST
 Component: ${componentName}
 Type: ${componentType}
 
-DEPENDENCY ANALYSIS:
+REAL DEPENDENCY ANALYSIS RESULTS:
 - Programs using this component: ${dependencyAnalysis.found.usingPrograms?.length || 0}
-- Dependencies found: ${dependencyAnalysis.summary.foundCount}
+- Total dependencies found: ${dependencyAnalysis.summary.foundCount}
 - Missing dependencies: ${dependencyAnalysis.summary.missingCount}
 
-Programs using ${componentName}:
-${(dependencyAnalysis.found.usingPrograms || []).slice(0, 8).map(prog => 
-    `- ${prog.program} (${prog.referenceCount} references)`
-).join('\n')}
+PROGRAMS THAT USE ${componentName}:
+${(dependencyAnalysis.found.usingPrograms || []).map(prog => 
+    `- ${prog.program} (${prog.type}) - ${prog.referenceCount} references`
+).join('\n') || 'No programs found using this component'}
+
+COPY STATEMENTS FOUND:
+${(dependencyAnalysis.found.copyStatements || []).map(copy => 
+    `- ${copy.name} in ${copy.file} at line ${copy.line}`
+).join('\n') || 'No COPY statements found'}
 
 UPLOADED FILE CONTENTS:
 `;
 
     relevantFiles.forEach(file => {
-        fileContext += `\n--- FILE: ${file.name} (${file.type}) ---\n`;
+        fileContext += `\n=== FILE: ${file.name} (${file.type}) ===\n`;
         const relevantContent = this.intelligentChunkContent(file.content, componentType);
         fileContext += relevantContent;
         fileContext += '\n';
@@ -3634,24 +3717,29 @@ UPLOADED FILE CONTENTS:
 
     const analysisPrompt = `${fileContext}
 
-ANALYSIS REQUIREMENTS:
-1. Analyze the component "${componentName}" considering its usage in ${dependencyAnalysis.found.usingPrograms?.length || 0} programs
-2. Extract real field information if it's a copybook (01-level fields)
-3. Consider the dependency context when making recommendations
-4. Provide specific recommendations based on actual usage patterns
+CRITICAL ANALYSIS REQUIREMENTS:
+1. Analyze the component "${componentName}" considering its ACTUAL usage in ${dependencyAnalysis.found.usingPrograms?.length || 0} programs
+2. The dependency analysis shows REAL programs that use this component - include this in your analysis
+3. Extract real field information if it's a copybook (focus on 01-level fields)
+4. Provide recommendations based on the ACTUAL usage patterns shown above
+5. Consider the impact of changes given the number of dependent programs
 
-Respond with a JSON object containing:
+RESPOND WITH JSON:
 {
   "componentName": "${componentName}",
   "componentType": "${componentType}",
-  "analysisScope": "REAL_FILE_ANALYSIS_WITH_DEPENDENCIES",
-  "primaryFields": [...real fields found...],
+  "analysisScope": "REAL_DEPENDENCY_ENHANCED_ANALYSIS",
+  "primaryFields": [...actual fields found in the uploaded files...],
   "programUsage": {
     "totalPrograms": ${dependencyAnalysis.found.usingPrograms?.length || 0},
-    "programNames": [${(dependencyAnalysis.found.usingPrograms || []).slice(0, 5).map(p => `"${p.program}"`).join(', ')}]
+    "programNames": [${(dependencyAnalysis.found.usingPrograms || []).slice(0, 8).map(p => `"${p.program}"`).join(', ')}],
+    "referenceTypes": [...types of references found...]
   },
-  "businessLogic": {...actual logic found...},
-  "recommendations": [...specific recommendations considering usage...],
+  "dependencyImpact": {
+    "riskLevel": "${dependencyAnalysis.found.usingPrograms?.length > 5 ? 'HIGH' : dependencyAnalysis.found.usingPrograms?.length > 2 ? 'MEDIUM' : 'LOW'}",
+    "impactedPrograms": ${dependencyAnalysis.found.usingPrograms?.length || 0}
+  },
+  "recommendations": [...specific recommendations considering the ${dependencyAnalysis.found.usingPrograms?.length || 0} dependent programs...],
   "qualityScore": <1-10 based on actual code quality and usage>
 }`;
 
@@ -3663,6 +3751,7 @@ Respond with a JSON object containing:
             const jsonMatch = response.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
                 const parsed = JSON.parse(jsonMatch[0]);
+                console.log(`✅ LLM analysis successful for ${componentName}`);
                 return parsed;
             }
         } catch (parseError) {
@@ -3674,9 +3763,42 @@ Respond with a JSON object containing:
         
     } catch (error) {
         console.error('LLM analysis failed:', error);
-        // Return basic analysis based on file content and dependencies
+        // Return enhanced basic analysis with dependency context
         return this.createBasicAnalysisWithDependencies(componentName, componentType, relevantFiles, dependencyAnalysis);
     }
+}
+
+debugDependencyDetection(componentName) {
+    console.log(`🔍 DEBUG: Analyzing dependency detection for ${componentName}`);
+    
+    const componentUpper = componentName.toUpperCase();
+    
+    this.uploadedFiles.forEach(file => {
+        console.log(`\n📁 Checking file: ${file.name}`);
+        
+        const lines = file.content.split('\n');
+        lines.forEach((line, index) => {
+            const lineUpper = line.toUpperCase().trim();
+            
+            // Check for COPY statements
+            if (lineUpper.includes('COPY')) {
+                console.log(`  Line ${index + 1}: ${line.trim()}`);
+                
+                const copyMatch = lineUpper.match(/\bCOPY\s+([A-Z][A-Z0-9\-_]*)/);
+                if (copyMatch) {
+                    console.log(`    -> Found COPY: ${copyMatch[1]}`);
+                    if (copyMatch[1] === componentUpper) {
+                        console.log(`    -> ✅ MATCHES ${componentName}!`);
+                    }
+                }
+            }
+            
+            // Check for any reference to the component
+            if (lineUpper.includes(componentUpper)) {
+                console.log(`  Line ${index + 1}: ${line.trim()} (contains ${componentUpper})`);
+            }
+        });
+    });
 }
 
 // Helper method to create basic analysis with dependency context
