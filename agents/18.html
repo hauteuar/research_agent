@@ -3441,6 +3441,611 @@ createBasicFallback() {
         timestamp: new Date().toISOString()
     };
 }
+/* ===================================================================
+MISSING METHODS FIX - parseJSONResponse and Other Missing Functions
+Add these methods to your Enhanced Mainframe Analyzer class
+================================================================== */
+
+// Original parseJSONResponse method that was referenced in the code
+parseJSONResponse(responseText) {
+    console.log('🔍 Parsing JSON response (legacy method)...');
+    
+    // Delegate to the enhanced parsing method
+    const result = this.parseAndValidateLLMResponse(responseText);
+    
+    if (result.success) {
+        return {
+            success: true,
+            data: result.data
+        };
+    } else {
+        return {
+            success: false,
+            error: result.error,
+            fallbackData: result.fallbackData
+        };
+    }
+}
+
+// Additional missing method that might be referenced
+estimateTokenCount(text) {
+    if (!text) return 0;
+    
+    // More accurate token estimation
+    // Remove extra whitespace and normalize
+    const normalizedText = text.replace(/\s+/g, ' ').trim();
+    
+    // Account for different types of content
+    let tokenMultiplier = this.averageCharsPerToken;
+    
+    // Code content typically has more tokens per character
+    if (text.includes('IDENTIFICATION DIVISION') || 
+        text.includes('PROGRAM-ID') || 
+        text.includes('WORKING-STORAGE')) {
+        tokenMultiplier = 2.5; // COBOL code is more token-dense
+    } else if (text.includes('{') && text.includes('}')) {
+        tokenMultiplier = 2.8; // JSON is token-dense
+    }
+    
+    const estimatedTokens = Math.ceil(normalizedText.length / tokenMultiplier);
+    
+    // Add buffer for special tokens
+    return Math.ceil(estimatedTokens * 1.1);
+}
+
+// Method to update token display (if missing)
+updateTokenDisplay(currentTokens) {
+    const tokenInfo = document.getElementById('tokenInfo');
+    const tokenCount = document.getElementById('tokenCount');
+    const tokenFill = document.getElementById('tokenFill');
+    const tokenWarning = document.getElementById('tokenWarning');
+
+    if (!tokenInfo) return;
+
+    tokenInfo.style.display = 'block';
+    tokenCount.textContent = `${currentTokens} / ${this.maxTokens}`;
+    
+    const percentage = (currentTokens / this.maxTokens) * 100;
+    tokenFill.style.width = `${Math.min(percentage, 100)}%`;
+    
+    // Remove existing classes
+    tokenFill.className = 'token-fill';
+    
+    if (percentage <= 50) {
+        tokenFill.classList.add('safe');
+        tokenWarning.innerHTML = '🟢 Optimal token usage - full analysis available<br><small>Intelligent chunking: OFF</small>';
+    } else if (percentage <= 70) {
+        tokenFill.classList.add('warning');
+        tokenWarning.innerHTML = '🟡 Moderate usage - smart chunking active<br><small>Intelligent chunking: ACTIVE</small>';
+    } else {
+        tokenFill.classList.add('danger');
+        tokenWarning.innerHTML = '🔴 High usage - aggressive optimization active<br><small>Intelligent chunking: AGGRESSIVE</small>';
+    }
+}
+
+// Initialize token management (if missing)
+initializeTokenManagement() {
+    this.updateTokenDisplay(0);
+    
+    // Set up token monitoring
+    const componentInput = document.getElementById('componentName');
+    if (componentInput) {
+        componentInput.addEventListener('input', () => {
+            // Estimate tokens for current input
+            const inputText = componentInput.value;
+            const estimatedTokens = this.estimateTokenCount(inputText) + 1000; // Base prompt size
+            this.updateTokenDisplay(estimatedTokens);
+        });
+    }
+    
+    console.log('📊 Token management initialized');
+}
+
+// Sleep utility method (if missing)
+sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Find relevant files method (if missing or needs update)
+findRelevantFiles(componentName) {
+    console.log(`🔍 Finding files relevant to component: ${componentName}`);
+    
+    const relevantFiles = this.uploadedFiles.filter(file => {
+        const fileName = file.name.toUpperCase();
+        const fileContent = file.content.toUpperCase();
+        const componentUpper = componentName.toUpperCase();
+        
+        // Check if filename contains component name
+        if (fileName.includes(componentUpper)) {
+            console.log(`✅ File ${file.name} matches by filename`);
+            return true;
+        }
+        
+        // Check if file content contains component name
+        if (fileContent.includes(componentUpper)) {
+            console.log(`✅ File ${file.name} matches by content reference`);
+            return true;
+        }
+        
+        // Check components within the file
+        if (file.components) {
+            const hasMatchingComponent = file.components.some(comp => 
+                comp.name.toUpperCase() === componentUpper ||
+                comp.name.toUpperCase().includes(componentUpper)
+            );
+            
+            if (hasMatchingComponent) {
+                console.log(`✅ File ${file.name} matches by component definition`);
+                return true;
+            }
+        }
+        
+        // Check for copybook references
+        const copyMatches = fileContent.match(/COPY\s+([A-Z][A-Z0-9\-_]+)/g) || [];
+        const hasCopyReference = copyMatches.some(copyStmt => {
+            const copyName = copyStmt.replace('COPY ', '').trim();
+            return copyName === componentUpper || 
+                   copyName === componentUpper + '.CPY' ||
+                   copyName.replace('.CPY', '') === componentUpper;
+        });
+        
+        if (hasCopyReference) {
+            console.log(`✅ File ${file.name} matches by COPY reference`);
+            return true;
+        }
+        
+        return false;
+    });
+    
+    console.log(`📁 Found ${relevantFiles.length} relevant files for ${componentName}`);
+    return relevantFiles;
+}
+
+// Detect component type method (if missing)
+detectComponentType(componentName, files) {
+    console.log(`🔍 Detecting component type for: ${componentName}`);
+    
+    // Check files for component definitions
+    for (const file of files) {
+        if (file.components) {
+            const component = file.components.find(c => 
+                c.name.toUpperCase() === componentName.toUpperCase()
+            );
+            
+            if (component) {
+                console.log(`✅ Component type detected: ${component.type}`);
+                switch (component.type) {
+                    case 'RECORD_LAYOUT':
+                        return 'Copybook';
+                    case 'PROGRAM':
+                        return 'COBOL Program';
+                    case 'FILE':
+                        return 'File Definition';
+                    default:
+                        return component.type;
+                }
+            }
+        }
+    }
+    
+    // Check by file types
+    const fileTypes = files.map(f => f.type);
+    
+    if (fileTypes.includes('Copybook')) {
+        console.log('✅ Component type detected: Copybook (by file type)');
+        return 'Copybook';
+    }
+    
+    if (fileTypes.includes('COBOL Program')) {
+        console.log('✅ Component type detected: COBOL Program (by file type)');
+        return 'COBOL Program';
+    }
+    
+    if (fileTypes.includes('JCL Job')) {
+        console.log('✅ Component type detected: JCL Job (by file type)');
+        return 'JCL Job';
+    }
+    
+    // Default fallback
+    console.log('⚠️ Component type unknown, using default');
+    return 'Component';
+}
+
+// Enhanced extractDependenciesFromFile method (if the original is missing functionality)
+extractDependenciesFromFile(file) {
+    console.log(`🔍 Extracting dependencies from: ${file.name}`);
+    
+    const dependencies = {
+        copyStatements: [],
+        callStatements: [],
+        execStatements: [],
+        jclDatasets: [],
+        programIds: [],
+        sqlTables: [],
+        fileReferences: []
+    };
+
+    const lines = file.content.split('\n');
+    const fileName = file.name.toUpperCase();
+    
+    lines.forEach((line, lineNum) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // Enhanced COPY statements with better pattern matching
+        const copyPatterns = [
+            /COPY\s+(['"]*[A-Z][A-Z0-9\-_]{1,}['"]*)/,
+            /COPY\s+(['"]*[A-Z][A-Z0-9\-_]{1,}\.CPY['"]*)/,
+            /COPY\s+(['"]*[A-Z][A-Z0-9\-_]{1,}\.COPYBOOK['"]*)/,
+            /INCLUDE\s+(['"]*[A-Z][A-Z0-9\-_]{1,}['"]*)/,
+            /-INC\s+([A-Z][A-Z0-9\-_]{1,})/
+        ];
+        
+        copyPatterns.forEach(pattern => {
+            const copyMatch = trimmed.match(pattern);
+            if (copyMatch) {
+                let copyName = copyMatch[1].replace(/['"]/g, '');
+                const baseName = copyName.replace(/\.(CPY|COPYBOOK)$/i, '');
+                
+                if (!dependencies.copyStatements.includes(baseName)) {
+                    dependencies.copyStatements.push(baseName);
+                }
+            }
+        });
+
+        // Enhanced CALL statements
+        const callPatterns = [
+            /CALL\s+['"]*([A-Z][A-Z0-9\-_]{1,})['"]*/,
+            /LINK\s+['"]*([A-Z][A-Z0-9\-_]{1,})['"]*/,
+            /XCTL\s+['"]*([A-Z][A-Z0-9\-_]{1,})['"]*/,
+            /EXEC\s+CICS\s+LINK\s+PROGRAM\(['"]*([A-Z][A-Z0-9\-_]{1,})['"]*\)/,
+            /EXEC\s+CICS\s+XCTL\s+PROGRAM\(['"]*([A-Z][A-Z0-9\-_]{1,})['"]*\)/
+        ];
+        
+        callPatterns.forEach(pattern => {
+            const callMatch = trimmed.match(pattern);
+            if (callMatch && !dependencies.callStatements.includes(callMatch[1])) {
+                dependencies.callStatements.push(callMatch[1]);
+            }
+        });
+
+        // JCL EXEC statements
+        const execPatterns = [
+            /\/\/\w+\s+EXEC\s+PGM=([A-Z][A-Z0-9\-_]{1,})/,
+            /\/\/\w+\s+EXEC\s+([A-Z][A-Z0-9\-_]{1,})/,
+            /EXEC\s+PGM=([A-Z][A-Z0-9\-_]{1,})/,
+            /EXEC\s+PROC=([A-Z][A-Z0-9\-_]{1,})/
+        ];
+        
+        execPatterns.forEach(pattern => {
+            const execMatch = trimmed.match(pattern);
+            if (execMatch && !dependencies.execStatements.includes(execMatch[1])) {
+                dependencies.execStatements.push(execMatch[1]);
+            }
+        });
+
+        // PROGRAM-ID extraction
+        const programMatch = trimmed.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]{1,})/);
+        if (programMatch && !dependencies.programIds.includes(programMatch[1])) {
+            dependencies.programIds.push(programMatch[1]);
+        }
+
+        // File references
+        const filePatterns = [
+            /FD\s+([A-Z][A-Z0-9\-_]{1,})/,
+            /SELECT\s+([A-Z][A-Z0-9\-_]{1,})\s+ASSIGN/,
+            /OPEN\s+(?:INPUT|OUTPUT|I-O)\s+([A-Z][A-Z0-9\-_]{1,})/,
+            /READ\s+([A-Z][A-Z0-9\-_]{1,})/,
+            /WRITE\s+([A-Z][A-Z0-9\-_]{1,})/,
+            /\/\/([A-Z][A-Z0-9\-_]{1,})\s+DD\s+/
+        ];
+        
+        filePatterns.forEach(pattern => {
+            const fileMatch = trimmed.match(pattern);
+            if (fileMatch && !dependencies.fileReferences.includes(fileMatch[1])) {
+                dependencies.fileReferences.push(fileMatch[1]);
+            }
+        });
+
+        // SQL table references
+        const sqlPatterns = [
+            /FROM\s+([A-Z][A-Z0-9\-_\.]{1,})/,
+            /INSERT\s+INTO\s+([A-Z][A-Z0-9\-_\.]{1,})/,
+            /UPDATE\s+([A-Z][A-Z0-9\-_\.]{1,})/,
+            /DELETE\s+FROM\s+([A-Z][A-Z0-9\-_\.]{1,})/
+        ];
+        
+        sqlPatterns.forEach(pattern => {
+            const sqlMatch = trimmed.match(pattern);
+            if (sqlMatch && !dependencies.sqlTables.includes(sqlMatch[1])) {
+                dependencies.sqlTables.push(sqlMatch[1]);
+            }
+        });
+    });
+
+    const totalDeps = Object.values(dependencies).reduce((sum, arr) => sum + arr.length, 0);
+    console.log(`✅ Extracted ${totalDeps} dependencies from ${fileName}`);
+    
+    return dependencies;
+}
+
+// Enhanced response parsing with multiple fallback strategies
+parseAndValidateLLMResponse(responseText) {
+    console.log('🔍 Parsing LLM response...');
+    
+    try {
+        // Clean the response text
+        let cleanedText = this.cleanLLMResponse(responseText);
+        
+        // Try direct JSON parsing first
+        try {
+            const parsed = JSON.parse(cleanedText);
+            if (this.validateLLMResponseStructure(parsed)) {
+                return { success: true, data: parsed };
+            }
+        } catch (jsonError) {
+            console.warn('Direct JSON parsing failed:', jsonError.message);
+        }
+        
+        // Try extracting JSON from response
+        const extractedJson = this.extractJSONFromResponse(cleanedText);
+        if (extractedJson) {
+            try {
+                const parsed = JSON.parse(extractedJson);
+                if (this.validateLLMResponseStructure(parsed)) {
+                    return { success: true, data: parsed };
+                }
+            } catch (extractError) {
+                console.warn('Extracted JSON parsing failed:', extractError.message);
+            }
+        }
+        
+        // Try parsing as partial JSON
+        const partialResult = this.parsePartialJSON(cleanedText);
+        if (partialResult.success) {
+            return partialResult;
+        }
+        
+        // Create fallback from text content
+        const fallbackData = this.createFallbackFromText(responseText);
+        
+        return {
+            success: false,
+            error: 'Could not parse as valid JSON',
+            fallbackData: fallbackData
+        };
+        
+    } catch (error) {
+        console.error('Response parsing error:', error);
+        return {
+            success: false,
+            error: error.message,
+            fallbackData: this.createBasicFallback()
+        };
+    }
+}
+
+// Clean LLM response text for parsing
+cleanLLMResponse(text) {
+    return text
+        .replace(/```json\s*/gi, '') // Remove markdown code blocks
+        .replace(/```\s*$/gi, '')
+        .replace(/^[^{]*/, '') // Remove text before first {
+        .replace(/[^}]*$/, '}') // Ensure ends with }
+        .trim();
+}
+
+// Extract JSON from mixed content response
+extractJSONFromResponse(text) {
+    // Look for JSON object patterns
+    const jsonMatches = text.match(/\{[\s\S]*\}/);
+    if (jsonMatches) {
+        return jsonMatches[0];
+    }
+    
+    // Look for content between specific markers
+    const markerPatterns = [
+        /```json\s*([\s\S]*?)\s*```/gi,
+        /\{[\s\S]*?\}/g,
+        /"componentName"[\s\S]*?\}/g
+    ];
+    
+    for (const pattern of markerPatterns) {
+        const match = text.match(pattern);
+        if (match && match[0]) {
+            return match[0];
+        }
+    }
+    
+    return null;
+}
+
+// Validate LLM response structure
+validateLLMResponseStructure(data) {
+    const requiredFields = [
+        'componentName',
+        'friendlyName', 
+        'componentType',
+        'businessPurpose'
+    ];
+    
+    const hasRequiredFields = requiredFields.every(field => 
+        data.hasOwnProperty(field) && data[field]
+    );
+    
+    if (!hasRequiredFields) {
+        console.warn('Missing required fields in LLM response');
+        return false;
+    }
+    
+    return true;
+}
+
+// Parse partial or malformed JSON
+parsePartialJSON(text) {
+    try {
+        // Try to fix common JSON issues
+        let fixedText = text
+            .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
+            .replace(/([{,]\s*)(\w+):/g, '$1"$2":') // Quote unquoted keys
+            .replace(/:\s*([^",\[\{][^,\}\]]*)/g, ':"$1"') // Quote unquoted string values
+            .replace(/"\s*\n\s*"/g, '", "'); // Fix line breaks in JSON
+        
+        const parsed = JSON.parse(fixedText);
+        
+        // Add missing required fields
+        const enhanced = this.enhancePartialResponse(parsed);
+        
+        return { success: true, data: enhanced };
+    } catch (error) {
+        console.warn('Partial JSON parsing failed:', error.message);
+        return { success: false, error: error.message };
+    }
+}
+
+// Enhance partial response with missing fields
+enhancePartialResponse(partial) {
+    const defaults = {
+        componentName: this.currentAnalyzedComponent || 'Unknown',
+        friendlyName: partial.friendlyName || this.currentAnalyzedComponent || 'Unknown Component',
+        componentType: partial.componentType || 'Unknown',
+        analysisScope: 'PARTIAL',
+        businessPurpose: partial.businessPurpose || 'Business purpose analysis incomplete',
+        technicalSummary: partial.technicalSummary || 'Technical analysis in progress',
+        qualityScore: partial.qualityScore || 6,
+        recommendations: partial.recommendations || ['Analysis incomplete - please retry'],
+        fieldAnalysis: partial.fieldAnalysis || {
+            totalFields: 0,
+            keyFields: [],
+            fieldCategories: { input: [], output: [], calculated: [], control: [] }
+        },
+        businessRules: partial.businessRules || [],
+        dependencies: partial.dependencies || {
+            required: [],
+            optional: [],
+            missing: [],
+            riskAssessment: 'MEDIUM'
+        },
+        lifecyclePhases: partial.lifecyclePhases || {
+            creation: [],
+            processing: [],
+            output: [],
+            archival: []
+        }
+    };
+    
+    return { ...defaults, ...partial };
+}
+
+// Create fallback data from text content
+createFallbackFromText(text) {
+    const componentName = this.currentAnalyzedComponent || 'Unknown';
+    const friendlyName = document.getElementById('friendlyName')?.value || componentName;
+    
+    // Try to extract useful information from text
+    const extractedInfo = this.extractInfoFromText(text);
+    
+    return {
+        componentName: componentName,
+        friendlyName: friendlyName,
+        componentType: extractedInfo.type || 'Unknown',
+        analysisScope: 'TEXT_EXTRACTION',
+        businessPurpose: extractedInfo.purpose || 'Could not determine business purpose from response',
+        technicalSummary: extractedInfo.summary || 'Technical analysis incomplete',
+        qualityScore: 5,
+        recommendations: extractedInfo.recommendations || [
+            'LLM response parsing failed',
+            'Consider re-analyzing with different parameters',
+            'Review file content and dependencies manually'
+        ],
+        fieldAnalysis: {
+            totalFields: extractedInfo.fieldCount || 0,
+            keyFields: extractedInfo.fields || [],
+            fieldCategories: { input: [], output: [], calculated: [], control: [] }
+        },
+        businessRules: [],
+        dependencies: {
+            required: [],
+            optional: [],
+            missing: [],
+            riskAssessment: 'HIGH'
+        },
+        lifecyclePhases: {
+            creation: [],
+            processing: [],
+            output: [],
+            archival: []
+        },
+        parseError: 'Response could not be parsed as JSON',
+        rawText: text.substring(0, 500)
+    };
+}
+
+// Extract information from unstructured text
+extractInfoFromText(text) {
+    const info = {};
+    
+    // Extract component type
+    const typePatterns = [
+        /(?:component|program|copybook|file)[\s:]+(\w+)/gi,
+        /type[\s:]+(\w+)/gi
+    ];
+    
+    for (const pattern of typePatterns) {
+        const match = text.match(pattern);
+        if (match && match[1]) {
+            info.type = match[1];
+            break;
+        }
+    }
+    
+    // Extract purpose/description
+    const purposePatterns = [
+        /purpose[\s:]+([^.]+)/gi,
+        /description[\s:]+([^.]+)/gi,
+        /business[\s:]+([^.]+)/gi
+    ];
+    
+    for (const pattern of purposePatterns) {
+        const match = text.match(pattern);
+        if (match && match[1]) {
+            info.purpose = match[1].trim();
+            break;
+        }
+    }
+    
+    // Extract field names
+    const fieldMatches = text.match(/(?:01|field)[\s]+([A-Z][A-Z0-9\-_]+)/gi);
+    if (fieldMatches) {
+        info.fields = fieldMatches.map(match => 
+            match.replace(/^(?:01|field)[\s]+/i, '').trim()
+        ).slice(0, 10); // Limit to first 10
+        info.fieldCount = info.fields.length;
+    }
+    
+    // Extract recommendations
+    const recMatches = text.match(/recommend[^.]+\./gi);
+    if (recMatches) {
+        info.recommendations = recMatches.slice(0, 5); // Limit to 5
+    }
+    
+    return info;
+}
+
+// Method to generate friendly name (if missing)
+generateFriendlyName(componentName) {
+    if (!componentName) return 'Unknown Component';
+    
+    return componentName
+        .toLowerCase()
+        .replace(/-/g, ' ')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, l => l.toUpperCase())
+        .replace(/\bRecord\b/g, 'Record')
+        .replace(/\bCopy\b/g, 'Copy')
+        .replace(/\bProc\b/g, 'Process')
+        .replace(/\bPgm\b/g, 'Program')
+        .replace(/\bFile\b/g, 'File');
+}
 // Analyze which dependencies are found vs missing
 analyzeDependencyStatus(allDependencies) {
     const analysis = {
