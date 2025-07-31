@@ -2723,77 +2723,984 @@ try {
         // This is a simplified placeholder for the core analysis functionality
         // In a real implementation, you would include all the analysis methods from the original code
         async runLLMEnhancedAnalysisWithLifecycle(componentName, friendlyName) {
-            this.updateLoadingStatus('🔍 Stage 1: Analyzing component scope...');
-            this.updateProgress(10);
-            
-            const relevantFiles = this.findRelevantFiles(componentName);
-            const componentType = this.detectComponentType(componentName, relevantFiles);
-            
-            this.updateLoadingStatus('🔗 Stage 2: Analyzing dependencies...');
-            this.updateProgress(25);
-            
-            // Simplified dependency analysis
-            const dependencyAnalysis = {
-                found: { copyStatements: [], callStatements: [], fileReferences: [] },
-                missing: { copyStatements: [], callStatements: [], fileReferences: [] },
-                summary: { foundCount: 0, missingCount: 0 }
-            };
+    console.log(`=== Starting Full LLM Analysis for ${componentName} ===`);
+    
+    this.updateLoadingStatus('🔍 Stage 1: Extracting dependencies...');
+    this.updateProgress(10);
+    
+    const relevantFiles = this.findRelevantFiles(componentName);
+    const componentType = this.detectComponentType(componentName, relevantFiles);
+    
+    // STEP 1: Extract comprehensive dependencies
+    const allDependencies = this.extractComprehensiveDependencies(relevantFiles, componentName);
+    console.log('Extracted dependencies:', allDependencies);
+    
+    this.updateLoadingStatus('🔗 Stage 2: Analyzing dependency relationships...');
+    this.updateProgress(25);
+    
+    // STEP 2: Analyze found vs missing dependencies
+    const dependencyAnalysis = this.analyzeDependencyStatus(allDependencies);
+    console.log('Dependency analysis:', dependencyAnalysis);
+    
+    this.updateLoadingStatus('🌊 Stage 3: Building lifecycle context...');
+    this.updateProgress(40);
+    
+    // STEP 3: Build comprehensive context for LLM
+    const analysisContext = this.buildLLMAnalysisContext(
+        componentName, 
+        friendlyName, 
+        relevantFiles, 
+        allDependencies, 
+        dependencyAnalysis
+    );
+    
+    this.updateLoadingStatus('🤖 Stage 4: Calling LLM for component analysis...');
+    this.updateProgress(60);
+    
+    // STEP 4: Call LLM with intelligent chunking
+    const llmAnalysis = await this.callLLMForComponentAnalysis(analysisContext);
+    
+    this.updateLoadingStatus('🌊 Stage 5: Analyzing lifecycle flow...');
+    this.updateProgress(80);
+    
+    // STEP 5: Generate lifecycle flow
+    const lifecycleFlow = this.generateLifecycleFlow(componentName, friendlyName, relevantFiles, llmAnalysis);
+    
+    this.updateLoadingStatus('📊 Stage 6: Finalizing analysis...');
+    this.updateProgress(95);
+    
+    const results = {
+        componentName: componentName,
+        friendlyName: friendlyName,
+        timestamp: new Date().toISOString(),
+        filesAnalyzed: relevantFiles.map(f => f.name),
+        componentType: componentType,
+        dependencyAnalysis: dependencyAnalysis,
+        lifecycleFlow: lifecycleFlow,
+        llmAnalysis: llmAnalysis,
+        qualityScore: this.calculateQualityScore(llmAnalysis, dependencyAnalysis, relevantFiles),
+        completeness: this.calculateCompleteness(llmAnalysis, dependencyAnalysis),
+        analysisMethod: 'LLM-Enhanced-Full-Integration'
+    };
 
-            this.updateLoadingStatus('🌊 Stage 3: Analyzing component lifecycle...');
-            this.updateProgress(50);
-            
-            // Simplified lifecycle flow
-            const lifecycleFlow = {
-                componentName: componentName,
-                friendlyName: friendlyName,
-                usagePattern: 'ANALYZED',
-                creationSources: [],
-                inputPrograms: [],
-                updatePrograms: [],
-                cicsScreens: [],
-                batchJobs: []
-            };
+    this.updateProgress(100);
+    console.log('=== LLM Analysis Complete ===', results);
+    return results;
+}
 
-            this.updateLoadingStatus('🤖 Stage 4: LLM analysis...');
-            this.updateProgress(75);
-            
-            // Simplified LLM analysis results
-            const llmAnalysis = {
-                componentName: componentName,
-                friendlyName: friendlyName,
-                componentType: componentType,
-                analysisScope: 'ENHANCED_UI_ANALYSIS',
-                recommendations: [
-                    `Analysis completed for ${friendlyName}`,
-                    'Review the component structure and dependencies',
-                    'Consider optimization opportunities',
-                    'Use the chat interface for detailed questions'
-                ],
-                qualityScore: 8
-            };
+/* ===================================================================
+ENHANCED MAINFRAME ANALYZER - LIFECYCLE AND QUALITY ASSESSMENT
+Part 4: Lifecycle Flow Generation and Quality Scoring
+================================================================== */
 
-            this.updateLoadingStatus('📊 Stage 5: Finalizing analysis...');
-            this.updateProgress(90);
-            
-            await this.sleep(1000); // Simulate processing time
-            
-            const results = {
-                componentName: componentName,
-                friendlyName: friendlyName,
-                timestamp: new Date().toISOString(),
-                filesAnalyzed: relevantFiles.map(f => f.name),
-                componentType: componentType,
-                dependencyAnalysis: dependencyAnalysis,
-                lifecycleFlow: lifecycleFlow,
-                llmAnalysis: llmAnalysis,
-                qualityScore: 8,
-                completeness: { score: 85, checkpoints: {}, completed: 5, total: 6 },
-                analysisMethod: 'LLM-Enhanced-Redesigned-UI'
-            };
+// Generate comprehensive lifecycle flow from analysis
+generateLifecycleFlow(componentName, friendlyName, relevantFiles, llmAnalysis) {
+    console.log('🌊 Generating lifecycle flow for:', componentName);
+    
+    const lifecycleFlow = {
+        componentName: componentName,
+        friendlyName: friendlyName,
+        timestamp: new Date().toISOString(),
+        usagePattern: this.determineUsagePattern(relevantFiles, llmAnalysis),
+        creationSources: this.identifyCreationSources(relevantFiles),
+        inputPrograms: this.identifyInputPrograms(relevantFiles),
+        updatePrograms: this.identifyUpdatePrograms(relevantFiles),
+        cicsScreens: this.identifyCicsScreens(relevantFiles),
+        batchJobs: this.identifyBatchJobs(relevantFiles),
+        dataFlow: this.analyzeDataFlow(relevantFiles, componentName),
+        businessFlow: this.extractBusinessFlow(llmAnalysis),
+        riskAssessment: this.assessLifecycleRisks(relevantFiles, llmAnalysis)
+    };
+    
+    console.log('✅ Lifecycle flow generated:', lifecycleFlow);
+    return lifecycleFlow;
+}
 
-            this.updateProgress(100);
-            return results;
+// Determine the primary usage pattern of the component
+determineUsagePattern(files, llmAnalysis) {
+    const patterns = {
+        'BATCH_PROCESSING': 0,
+        'ONLINE_TRANSACTION': 0,
+        'DATA_STORAGE': 0,
+        'INTERFACE_PROCESSING': 0,
+        'REPORTING': 0,
+        'HYBRID': 0
+    };
+    
+    files.forEach(file => {
+        const content = file.content.toUpperCase();
+        
+        // Check for batch indicators
+        if (content.includes('//JOB') || content.includes('//EXEC') || content.includes('SORT')) {
+            patterns.BATCH_PROCESSING += 3;
         }
+        
+        // Check for CICS indicators
+        if (content.includes('EXEC CICS') || content.includes('SEND MAP') || content.includes('RECEIVE MAP')) {
+            patterns.ONLINE_TRANSACTION += 3;
+        }
+        
+        // Check for data storage indicators
+        if (content.includes('01 ') || content.includes('COPY ') || file.type === 'Copybook') {
+            patterns.DATA_STORAGE += 2;
+        }
+        
+        // Check for interface indicators
+        if (content.includes('CALL ') || content.includes('INVOKE') || content.includes('WS-')) {
+            patterns.INTERFACE_PROCESSING += 2;
+        }
+        
+        // Check for reporting indicators
+        if (content.includes('DISPLAY') || content.includes('WRITE') || content.includes('REPORT')) {
+            patterns.REPORTING += 1;
+        }
+    });
+    
+    // Determine primary pattern
+    const maxScore = Math.max(...Object.values(patterns));
+    if (maxScore === 0) return 'UNKNOWN';
+    
+    const primaryPattern = Object.keys(patterns).find(key => patterns[key] === maxScore);
+    
+    // Check for hybrid patterns
+    const significantPatterns = Object.keys(patterns).filter(key => patterns[key] >= maxScore * 0.7);
+    if (significantPatterns.length > 1) {
+        return 'HYBRID';
+    }
+    
+    return primaryPattern;
+}
+
+// Identify programs/processes that create the component
+identifyCreationSources(files) {
+    const creationSources = [];
+    
+    files.forEach(file => {
+        const lines = file.content.split('\n');
+        lines.forEach((line, index) => {
+            const upperLine = line.trim().toUpperCase();
+            
+            // Check for creation patterns
+            const creationPatterns = [
+                /OPEN\s+OUTPUT\s+([A-Z][A-Z0-9\-_]+)/,
+                /WRITE\s+([A-Z][A-Z0-9\-_]+)/,
+                /CREATE\s+([A-Z][A-Z0-9\-_]+)/,
+                /\/\/([A-Z][A-Z0-9\-_]+)\s+DD\s+DISP=NEW/,
+                /FD\s+([A-Z][A-Z0-9\-_]+).*OUTPUT/
+            ];
+            
+            creationPatterns.forEach(pattern => {
+                const match = upperLine.match(pattern);
+                if (match) {
+                    creationSources.push({
+                        program: this.extractProgramName(file),
+                        file: file.name,
+                        lineNumber: index + 1,
+                        operation: 'CREATE',
+                        target: match[1],
+                        confidence: this.calculateConfidence(line, 'creation')
+                    });
+                }
+            });
+        });
+    });
+    
+    return this.deduplicateAndRank(creationSources);
+}
+
+// Identify programs that read/input the component
+identifyInputPrograms(files) {
+    const inputPrograms = [];
+    
+    files.forEach(file => {
+        const lines = file.content.split('\n');
+        lines.forEach((line, index) => {
+            const upperLine = line.trim().toUpperCase();
+            
+            // Check for input patterns
+            const inputPatterns = [
+                /OPEN\s+INPUT\s+([A-Z][A-Z0-9\-_]+)/,
+                /READ\s+([A-Z][A-Z0-9\-_]+)/,
+                /SELECT\s+([A-Z][A-Z0-9\-_]+)\s+ASSIGN/,
+                /EXEC\s+CICS\s+READ/,
+                /\/\/([A-Z][A-Z0-9\-_]+)\s+DD\s+DISP=SHR/
+            ];
+            
+            inputPatterns.forEach(pattern => {
+                const match = upperLine.match(pattern);
+                if (match) {
+                    inputPrograms.push({
+                        program: this.extractProgramName(file),
+                        file: file.name,
+                        lineNumber: index + 1,
+                        operation: 'READ',
+                        target: match[1],
+                        confidence: this.calculateConfidence(line, 'input')
+                    });
+                }
+            });
+        });
+    });
+    
+    return this.deduplicateAndRank(inputPrograms);
+}
+
+// Identify programs that update/modify the component
+identifyUpdatePrograms(files) {
+    const updatePrograms = [];
+    
+    files.forEach(file => {
+        const lines = file.content.split('\n');
+        lines.forEach((line, index) => {
+            const upperLine = line.trim().toUpperCase();
+            
+            // Check for update patterns
+            const updatePatterns = [
+                /OPEN\s+I-O\s+([A-Z][A-Z0-9\-_]+)/,
+                /REWRITE\s+([A-Z][A-Z0-9\-_]+)/,
+                /UPDATE\s+([A-Z][A-Z0-9\-_]+)/,
+                /EXEC\s+CICS\s+REWRITE/,
+                /EXEC\s+CICS\s+WRITE/,
+                /MOVE\s+.*TO\s+([A-Z][A-Z0-9\-_]+)/
+            ];
+            
+            updatePatterns.forEach(pattern => {
+                const match = upperLine.match(pattern);
+                if (match) {
+                    updatePrograms.push({
+                        program: this.extractProgramName(file),
+                        file: file.name,
+                        lineNumber: index + 1,
+                        operation: 'UPDATE',
+                        target: match[1],
+                        confidence: this.calculateConfidence(line, 'update')
+                    });
+                }
+            });
+        });
+    });
+    
+    return this.deduplicateAndRank(updatePrograms);
+}
+
+// Identify CICS screens and transactions
+identifyCicsScreens(files) {
+    const cicsScreens = [];
+    
+    files.forEach(file => {
+        const lines = file.content.split('\n');
+        lines.forEach((line, index) => {
+            const upperLine = line.trim().toUpperCase();
+            
+            // Check for CICS patterns
+            const cicsPatterns = [
+                /EXEC\s+CICS\s+SEND\s+MAP\s*\(\s*['"]*([A-Z][A-Z0-9\-_]+)/,
+                /EXEC\s+CICS\s+RECEIVE\s+MAP\s*\(\s*['"]*([A-Z][A-Z0-9\-_]+)/,
+                /EXEC\s+CICS\s+START\s+TRANSID\s*\(\s*['"]*([A-Z][A-Z0-9\-_]+)/,
+                /DFHCOMMAREA/
+            ];
+            
+            cicsPatterns.forEach(pattern => {
+                const match = upperLine.match(pattern);
+                if (match) {
+                    cicsScreens.push({
+                        program: this.extractProgramName(file),
+                        file: file.name,
+                        lineNumber: index + 1,
+                        operation: 'CICS_INTERACTION',
+                        screen: match[1] || 'UNKNOWN',
+                        confidence: this.calculateConfidence(line, 'cics')
+                    });
+                }
+            });
+        });
+    });
+    
+    return this.deduplicateAndRank(cicsScreens);
+}
+
+// Identify batch jobs and procedures
+identifyBatchJobs(files) {
+    const batchJobs = [];
+    
+    files.forEach(file => {
+        if (file.type === 'JCL Job' || file.content.includes('//JOB ')) {
+            const lines = file.content.split('\n');
+            lines.forEach((line, index) => {
+                const upperLine = line.trim().toUpperCase();
+                
+                // Check for batch patterns
+                const batchPatterns = [
+                    /\/\/JOB\s+([A-Z][A-Z0-9\-_]+)/,
+                    /\/\/([A-Z][A-Z0-9\-_]+)\s+EXEC\s+PGM=([A-Z][A-Z0-9\-_]+)/,
+                    /\/\/([A-Z][A-Z0-9\-_]+)\s+EXEC\s+([A-Z][A-Z0-9\-_]+)/
+                ];
+                
+                batchPatterns.forEach(pattern => {
+                    const match = upperLine.match(pattern);
+                    if (match) {
+                        batchJobs.push({
+                            job: match[1],
+                            program: match[2] || match[1],
+                            file: file.name,
+                            lineNumber: index + 1,
+                            operation: 'BATCH_EXECUTION',
+                            confidence: this.calculateConfidence(line, 'batch')
+                        });
+                    }
+                });
+            });
+        }
+    });
+    
+    return this.deduplicateAndRank(batchJobs);
+}
+
+// Analyze data flow patterns
+analyzeDataFlow(files, componentName) {
+    const dataFlow = {
+        inputs: [],
+        outputs: [],
+        transformations: [],
+        validations: []
+    };
+    
+    files.forEach(file => {
+        const content = file.content.toUpperCase();
+        
+        // Identify input sources
+        const inputMatches = content.match(/READ\s+([A-Z][A-Z0-9\-_]+)/g) || [];
+        inputMatches.forEach(match => {
+            const source = match.replace('READ ', '').trim();
+            if (!dataFlow.inputs.includes(source)) {
+                dataFlow.inputs.push(source);
+            }
+        });
+        
+        // Identify output destinations
+        const outputMatches = content.match(/WRITE\s+([A-Z][A-Z0-9\-_]+)/g) || [];
+        outputMatches.forEach(match => {
+            const dest = match.replace('WRITE ', '').trim();
+            if (!dataFlow.outputs.includes(dest)) {
+                dataFlow.outputs.push(dest);
+            }
+        });
+        
+        // Identify transformations
+        const computeMatches = content.match(/COMPUTE\s+([A-Z][A-Z0-9\-_]+)/g) || [];
+        computeMatches.forEach(match => {
+            const field = match.replace('COMPUTE ', '').trim();
+            if (!dataFlow.transformations.includes(field)) {
+                dataFlow.transformations.push(field);
+            }
+        });
+        
+        // Identify validations
+        const ifMatches = content.match(/IF\s+([A-Z][A-Z0-9\-_]+)/g) || [];
+        ifMatches.forEach(match => {
+            const field = match.replace('IF ', '').trim();
+            if (!dataFlow.validations.includes(field)) {
+                dataFlow.validations.push(field);
+            }
+        });
+    });
+    
+    return dataFlow;
+}
+
+// Extract business flow from LLM analysis
+extractBusinessFlow(llmAnalysis) {
+    if (!llmAnalysis || llmAnalysis.error) {
+        return {
+            businessSteps: [],
+            decisionPoints: [],
+            businessRules: []
+        };
+    }
+    
+    return {
+        businessSteps: llmAnalysis.lifecyclePhases || {},
+        decisionPoints: (llmAnalysis.businessRules || [])
+            .filter(rule => rule.type === 'CONTROL')
+            .map(rule => rule.description),
+        businessRules: llmAnalysis.businessRules || []
+    };
+}
+
+// Assess lifecycle risks
+assessLifecycleRisks(files, llmAnalysis) {
+    const risks = [];
+    
+    // Check for missing dependencies
+    const totalFiles = files.length;
+    if (totalFiles < 2) {
+        risks.push({
+            type: 'INCOMPLETE_ANALYSIS',
+            severity: 'HIGH',
+            description: 'Limited files available for comprehensive analysis',
+            impact: 'May miss critical dependencies and relationships'
+        });
+    }
+    
+    // Check for LLM analysis issues
+    if (llmAnalysis.error || llmAnalysis.fallbackGenerated) {
+        risks.push({
+            type: 'LLM_ANALYSIS_INCOMPLETE',
+            severity: 'MEDIUM',
+            description: 'LLM analysis failed or incomplete',
+            impact: 'Business logic and advanced patterns may not be identified'
+        });
+    }
+    
+    // Check for missing dependencies
+    if (llmAnalysis.dependencies && llmAnalysis.dependencies.missing.length > 0) {
+        risks.push({
+            type: 'MISSING_DEPENDENCIES',
+            severity: 'HIGH',
+            description: `${llmAnalysis.dependencies.missing.length} dependencies not found`,
+            impact: 'Component may not function correctly without missing dependencies'
+        });
+    }
+    
+    // Check for outdated patterns
+    files.forEach(file => {
+        const content = file.content.toUpperCase();
+        if (content.includes('GOTO') || content.includes('ALTER')) {
+            risks.push({
+                type: 'LEGACY_PATTERNS',
+                severity: 'MEDIUM',
+                description: 'Legacy programming patterns detected',
+                impact: 'May be difficult to maintain and modernize'
+            });
+        }
+    });
+    
+    return risks;
+}
+
+// Helper methods for lifecycle generation
+extractProgramName(file) {
+    // Try to extract program name from content
+    const content = file.content.toUpperCase();
+    const programMatch = content.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]+)/);
+    if (programMatch) {
+        return programMatch[1];
+    }
+    
+    // Fallback to filename
+    return file.name.replace(/\.(cbl|cob|cpy|jcl|txt)$/i, '').toUpperCase();
+}
+
+calculateConfidence(line, operationType) {
+    let confidence = 0.5; // Base confidence
+    
+    // Adjust confidence based on context
+    const upperLine = line.toUpperCase();
+    
+    if (operationType === 'creation') {
+        if (upperLine.includes('OPEN OUTPUT')) confidence = 0.9;
+        else if (upperLine.includes('WRITE')) confidence = 0.8;
+        else if (upperLine.includes('CREATE')) confidence = 0.9;
+    } else if (operationType === 'input') {
+        if (upperLine.includes('OPEN INPUT')) confidence = 0.9;
+        else if (upperLine.includes('READ')) confidence = 0.8;
+    } else if (operationType === 'update') {
+        if (upperLine.includes('OPEN I-O')) confidence = 0.9;
+        else if (upperLine.includes('REWRITE')) confidence = 0.8;
+    } else if (operationType === 'cics') {
+        if (upperLine.includes('EXEC CICS')) confidence = 0.9;
+    } else if (operationType === 'batch') {
+        if (upperLine.includes('//JOB')) confidence = 0.9;
+        else if (upperLine.includes('//EXEC')) confidence = 0.8;
+    }
+    
+    return confidence;
+}
+
+deduplicateAndRank(items) {
+    // Remove duplicates based on program and target
+    const unique = items.filter((item, index, self) => 
+        index === self.findIndex(t => 
+            t.program === item.program && 
+            t.target === item.target &&
+            t.operation === item.operation
+        )
+    );
+    
+    // Sort by confidence (highest first)
+    return unique.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+}
+
+// Calculate overall quality score for the analysis
+calculateQualityScore(llmAnalysis, dependencyAnalysis, relevantFiles) {
+    let score = 5; // Base score
+    
+    // LLM Analysis Quality (40% weight)
+    if (!llmAnalysis.error && !llmAnalysis.fallbackGenerated) {
+        score += 2; // +2 for successful LLM analysis
+        
+        if (llmAnalysis.businessPurpose && llmAnalysis.businessPurpose.length > 50) {
+            score += 0.5; // +0.5 for detailed business purpose
+        }
+        
+        if (llmAnalysis.recommendations && llmAnalysis.recommendations.length >= 3) {
+            score += 0.5; // +0.5 for comprehensive recommendations
+        }
+        
+        if (llmAnalysis.fieldAnalysis && llmAnalysis.fieldAnalysis.totalFields > 0) {
+            score += 0.5; // +0.5 for field analysis
+        }
+    } else {
+        score -= 1; // -1 for failed LLM analysis
+    }
+    
+    // Dependency Analysis Quality (30% weight)
+    const totalDeps = dependencyAnalysis.summary.foundCount + dependencyAnalysis.summary.missingCount;
+    if (totalDeps > 0) {
+        const foundRatio = dependencyAnalysis.summary.foundCount / totalDeps;
+        score += foundRatio * 2; // +0 to +2 based on found dependency ratio
+    }
+    
+    // File Coverage Quality (20% weight)
+    if (relevantFiles.length >= 3) {
+        score += 1; // +1 for good file coverage
+    } else if (relevantFiles.length >= 2) {
+        score += 0.5; // +0.5 for adequate file coverage
+    }
+    
+    // Completeness Quality (10% weight)
+    if (llmAnalysis.businessRules && llmAnalysis.businessRules.length > 0) {
+        score += 0.5; // +0.5 for business rules identification
+    }
+    
+    if (llmAnalysis.lifecyclePhases && Object.keys(llmAnalysis.lifecyclePhases).length > 0) {
+        score += 0.5; // +0.5 for lifecycle phases
+    }
+    
+    // Ensure score is between 1 and 10
+    return Math.max(1, Math.min(10, Math.round(score * 10) / 10));
+}
+
+// Calculate completeness metrics
+calculateCompleteness(llmAnalysis, dependencyAnalysis) {
+    const checkpoints = {
+        llmAnalysisComplete: !llmAnalysis.error && !llmAnalysis.fallbackGenerated,
+        businessPurposeIdentified: !!(llmAnalysis.businessPurpose && llmAnalysis.businessPurpose.length > 20),
+        fieldAnalysisComplete: !!(llmAnalysis.fieldAnalysis && llmAnalysis.fieldAnalysis.totalFields > 0),
+        businessRulesIdentified: !!(llmAnalysis.businessRules && llmAnalysis.businessRules.length > 0),
+        dependenciesAnalyzed: !!(dependencyAnalysis.summary.foundCount > 0 || dependencyAnalysis.summary.missingCount > 0),
+        recommendationsProvided: !!(llmAnalysis.recommendations && llmAnalysis.recommendations.length > 0)
+    };
+    
+    const completed = Object.values(checkpoints).filter(Boolean).length;
+    const total = Object.keys(checkpoints).length;
+    const score = Math.round((completed / total) * 100);
+    
+    return {
+        score: score,
+        checkpoints: checkpoints,
+        completed: completed,
+        total: total
+    };
+}
+
+// Enhanced dependency found check with better matching
+isDependencyFound(dependency, type, uploadedFiles) {
+    const depUpper = dependency.toUpperCase();
+    
+    // For copybooks, create multiple search variants
+    if (type === 'copyStatements') {
+        const searchVariants = [
+            depUpper,                           // COPYBOOK-NAME
+            depUpper + '.CPY',                  // COPYBOOK-NAME.CPY
+            depUpper + '.COPYBOOK',             // COPYBOOK-NAME.COPYBOOK
+            depUpper.replace('.CPY', ''),       // Remove .CPY if present
+            depUpper.replace('.COPYBOOK', '')   // Remove .COPYBOOK if present
+        ];
+        
+        return uploadedFiles.some(file => {
+            // Check filename variants
+            const fileNameUpper = file.name.toUpperCase();
+            const fileBaseName = fileNameUpper.replace(/\.(CPY|COPYBOOK|TXT)$/i, '');
+            
+            const filenameMatches = searchVariants.some(variant => {
+                return fileNameUpper === variant || 
+                       fileNameUpper === variant + '.CPY' || 
+                       fileNameUpper === variant + '.COPYBOOK' ||
+                       fileBaseName === variant.replace(/\.(CPY|COPYBOOK)$/i, '');
+            });
+            
+            if (filenameMatches) {
+                console.log(`✅ Found copybook dependency: ${dependency} -> ${file.name}`);
+                return true;
+            }
+            
+            // Check components within files
+            if (file.components) {
+                const componentMatch = file.components.some(comp => 
+                    searchVariants.some(variant => comp.name.toUpperCase() === variant)
+                );
+                if (componentMatch) {
+                    console.log(`✅ Found copybook component: ${dependency} in ${file.name}`);
+                    return true;
+                }
+            }
+            
+            return false;
+        });
+    }
+
+    // For programs
+    if (type === 'callStatements' || type === 'programIds' || type === 'execStatements') {
+        return uploadedFiles.some(file => {
+            // Check filename
+            const fileBaseName = file.name.replace(/\.(CBL|COB|TXT)$/i, '').toUpperCase();
+            if (fileBaseName === depUpper) {
+                console.log(`✅ Found program dependency: ${dependency} -> ${file.name}`);
+                return true;
+            }
+            
+            // Check PROGRAM-ID in components
+            if (file.components) {
+                const programMatch = file.components.some(comp => 
+                    comp.type === 'PROGRAM' && comp.name.toUpperCase() === depUpper
+                );
+                if (programMatch) {
+                    console.log(`✅ Found program component: ${dependency} in ${file.name}`);
+                    return true;
+                }
+            }
+            
+            return false;
+        });
+    }
+
+    // For file references
+    if (type === 'fileReferences') {
+        return uploadedFiles.some(file => {
+            const fileBaseName = file.name.replace(/\.[^/.]+$/, "").toUpperCase();
+            if (fileBaseName === depUpper || file.name.toUpperCase().includes(depUpper)) {
+                console.log(`✅ Found file dependency: ${dependency} -> ${file.name}`);
+                return true;
+            }
+            
+            if (file.components) {
+                const fileMatch = file.components.some(comp => 
+                    comp.type === 'FILE' && comp.name.toUpperCase() === depUpper
+                );
+                if (fileMatch) {
+                    console.log(`✅ Found file component: ${dependency} in ${file.name}`);
+                    return true;
+                }
+            }
+            
+            return false;
+        });
+    }
+
+    return false;
+}
+
+// Create basic fallback for complete failure scenarios
+createBasicFallback() {
+    return {
+        componentName: 'Unknown',
+        friendlyName: 'Unknown Component',
+        componentType: 'Unknown',
+        analysisScope: 'FAILED',
+        businessPurpose: 'Analysis failed - unable to determine business purpose',
+        technicalSummary: 'Technical analysis failed',
+        qualityScore: 1,
+        recommendations: [
+            'Check LLM server configuration',
+            'Verify file content and format',
+            'Consider manual analysis',
+            'Review token limits and chunking settings'
+        ],
+        fieldAnalysis: {
+            totalFields: 0,
+            keyFields: [],
+            fieldCategories: { input: [], output: [], calculated: [], control: [] }
+        },
+        businessRules: [],
+        dependencies: {
+            required: [],
+            optional: [],
+            missing: [],
+            riskAssessment: 'UNKNOWN'
+        },
+        lifecyclePhases: {
+            creation: [],
+            processing: [],
+            output: [],
+            archival: []
+        },
+        modernizationOpportunities: [],
+        riskFactors: ['Complete analysis failure'],
+        error: true,
+        timestamp: new Date().toISOString()
+    };
+}
+// Analyze which dependencies are found vs missing
+analyzeDependencyStatus(allDependencies) {
+    const analysis = {
+        found: {},
+        missing: {},
+        summary: { foundCount: 0, missingCount: 0 },
+        details: {}
+    };
+
+    const dependencyTypes = ['copyStatements', 'callStatements', 'execStatements', 'fileReferences'];
+    
+    dependencyTypes.forEach(depType => {
+        const dependencies = allDependencies[depType] || [];
+        analysis.found[depType] = [];
+        analysis.missing[depType] = [];
+        analysis.details[depType] = [];
+
+        dependencies.forEach(dependency => {
+            const isFound = this.isDependencyFound(dependency, depType, this.uploadedFiles);
+            
+            const depInfo = {
+                name: dependency,
+                found: isFound,
+                type: depType,
+                searchVariants: this.generateSearchVariants(dependency, depType)
+            };
+
+            if (isFound) {
+                analysis.found[depType].push(dependency);
+                analysis.summary.foundCount++;
+            } else {
+                analysis.missing[depType].push(dependency);
+                analysis.summary.missingCount++;
+            }
+            
+            analysis.details[depType].push(depInfo);
+        });
+    });
+
+    console.log('Dependency analysis complete:', analysis);
+    return analysis;
+}
+// Generate search variants for dependency matching
+generateSearchVariants(dependency, type) {
+    const variants = [dependency.toUpperCase()];
+    
+    if (type === 'copyStatements') {
+        const base = dependency.toUpperCase().replace(/\.(CPY|COPYBOOK)$/i, '');
+        variants.push(
+            base,
+            base + '.CPY',
+            base + '.COPYBOOK',
+            dependency.toUpperCase() + '.CPY',
+            dependency.toUpperCase() + '.COPYBOOK'
+        );
+    }
+    
+    return [...new Set(variants)];
+}
+
+// Build comprehensive context for LLM analysis
+buildLLMAnalysisContext(componentName, friendlyName, relevantFiles, dependencies, dependencyAnalysis) {
+    const fileContents = relevantFiles.map(file => ({
+        name: file.name,
+        type: file.type,
+        content: file.content.substring(0, 2000), // Limit content for token management
+        lines: file.content.split('\n').length
+    }));
+
+    const context = {
+        component: {
+            name: componentName,
+            friendlyName: friendlyName,
+            type: this.detectComponentType(componentName, relevantFiles)
+        },
+        files: fileContents,
+        dependencies: dependencies,
+        dependencyStatus: {
+            found: dependencyAnalysis.found,
+            missing: dependencyAnalysis.missing,
+            summary: dependencyAnalysis.summary
+        },
+        analysisRequest: {
+            timestamp: new Date().toISOString(),
+            maxTokens: this.maxTokens,
+            analysisScope: 'COMPREHENSIVE'
+        }
+    };
+
+    return context;
+}
+
+async callLLMForComponentAnalysis(context) {
+    const prompt = this.buildComponentAnalysisPrompt(context);
+    console.log('Built analysis prompt, estimated tokens:', this.estimateTokenCount(prompt));
+    
+    try {
+        const response = await this.callLLMAPI(prompt);
+        
+        if (response.error) {
+            console.warn('LLM call failed, using fallback:', response.message);
+            return this.createComponentFallback(
+                context.component.name,
+                context.component.friendlyName,
+                context
+            );
+        }
+        
+        return response;
+    } catch (error) {
+        console.error('LLM analysis failed:', error);
+        return this.createComponentFallback(
+            context.component.name,
+            context.component.friendlyName,
+            context
+        );
+    }
+}
+
+// Build the detailed prompt for LLM component analysis
+buildComponentAnalysisPrompt(context) {
+    const { component, files, dependencies, dependencyStatus } = context;
+    
+    const prompt = `MAINFRAME COMPONENT ANALYSIS REQUEST
+
+CRITICAL: Respond with valid JSON format only. No markdown, no explanations outside JSON.
+
+COMPONENT DETAILS:
+- Name: ${component.name}
+- Friendly Name: ${component.friendlyName}
+- Type: ${component.type}
+- Files Analyzed: ${files.length}
+
+DEPENDENCIES SUMMARY:
+- Found: ${dependencyStatus.summary.foundCount}
+- Missing: ${dependencyStatus.summary.missingCount}
+- Copy Statements: ${(dependencies.copyStatements || []).join(', ')}
+- Call Statements: ${(dependencies.callStatements || []).join(', ')}
+- File References: ${(dependencies.fileReferences || []).join(', ')}
+
+MISSING DEPENDENCIES:
+${Object.entries(dependencyStatus.missing).map(([type, deps]) => 
+    `${type}: ${deps.join(', ')}`
+).join('\n')}
+
+FILE CONTENTS:
+${files.map(file => `
+=== ${file.name} (${file.type}) ===
+${file.content}
+`).join('\n')}
+
+REQUIRED JSON RESPONSE FORMAT:
+{
+  "componentName": "${component.name}",
+  "friendlyName": "${component.friendlyName}",
+  "componentType": "${component.type}",
+  "analysisScope": "COMPREHENSIVE",
+  "businessPurpose": "string - what this component does in business terms",
+  "technicalSummary": "string - technical overview of the component",
+  "fieldAnalysis": {
+    "totalFields": number,
+    "keyFields": ["field1", "field2"],
+    "calculatedFields": ["field1", "field2"],
+    "fieldCategories": {
+      "input": ["fields that are input"],
+      "output": ["fields that are output"],
+      "calculated": ["fields that are calculated"],
+      "control": ["fields used for control/validation"]
+    }
+  },
+  "businessRules": [
+    {
+      "type": "VALIDATION|CALCULATION|CONTROL",
+      "description": "string",
+      "fields": ["affected fields"],
+      "complexity": "LOW|MEDIUM|HIGH"
+    }
+  ],
+  "dependencies": {
+    "required": ["critical dependencies"],
+    "optional": ["optional dependencies"],
+    "missing": ["missing dependencies that impact functionality"],
+    "riskAssessment": "LOW|MEDIUM|HIGH"
+  },
+  "lifecyclePhases": {
+    "creation": ["programs/processes that create this data"],
+    "processing": ["programs that read/update this data"],
+    "output": ["programs that output/report this data"],
+    "archival": ["programs that archive/purge this data"]
+  },
+  "qualityScore": number between 1-10,
+  "recommendations": [
+    "string - specific actionable recommendations"
+  ],
+  "modernizationOpportunities": [
+    "string - opportunities for modernization"
+  ],
+  "riskFactors": [
+    "string - potential risks or issues identified"
+  ]
+}
+
+INSTRUCTIONS:
+1. Analyze the component thoroughly based on the provided file contents
+2. Focus on business value and technical accuracy
+3. Identify patterns in field usage and data flow
+4. Assess the impact of missing dependencies
+5. Provide actionable recommendations
+6. Respond with valid JSON only - no additional text`;
+
+    return prompt;
+}
+
+// Extract comprehensive dependencies from all relevant files
+extractComprehensiveDependencies(relevantFiles, componentName) {
+    console.log(`Extracting dependencies for component: ${componentName}`);
+    
+    const allDependencies = {
+        copyStatements: new Set(),
+        callStatements: new Set(),
+        execStatements: new Set(),
+        jclDatasets: new Set(),
+        programIds: new Set(),
+        sqlTables: new Set(),
+        fileReferences: new Set(),
+        sourceFiles: []
+    };
+
+    relevantFiles.forEach(file => {
+        console.log(`Processing file: ${file.name}`);
+        const fileDeps = this.extractDependenciesFromFile(file);
+        
+        // Merge dependencies
+        Object.keys(fileDeps).forEach(depType => {
+            if (Array.isArray(fileDeps[depType])) {
+                fileDeps[depType].forEach(dep => {
+                    if (allDependencies[depType]) {
+                        allDependencies[depType].add(dep);
+                    }
+                });
+            }
+        });
+        
+        allDependencies.sourceFiles.push({
+            name: file.name,
+            type: file.type,
+            dependencies: fileDeps
+        });
+    });
+
+    // Convert Sets back to Arrays for easier processing
+    Object.keys(allDependencies).forEach(key => {
+        if (allDependencies[key] instanceof Set) {
+            allDependencies[key] = Array.from(allDependencies[key]);
+        }
+    });
+
+    console.log('Comprehensive dependencies extracted:', allDependencies);
+    return allDependencies;
+}
 
         findRelevantFiles(componentName) {
             return this.uploadedFiles.filter(file => {
@@ -3792,42 +4699,484 @@ try {
     }
 }
 
+/* ===================================================================
+ENHANCED MAINFRAME ANALYZER - INTELLIGENT CHUNKING AND CHAT
+Part 3: Advanced Token Management and Enhanced Chat with LLM
+================================================================== */
+
+// Enhanced intelligent chunking with priority-based content selection
 async applyIntelligentChunking(prompt) {
-    console.log('Applying intelligent chunking to reduce token usage...');
+    console.log('🔄 Applying intelligent chunking to optimize token usage...');
     
-    // Split prompt into sections
-    const sections = prompt.split('\n\n');
-    let corePrompt = '';
-    let contextData = '';
-    let instructions = '';
+    // Parse prompt into sections
+    const sections = this.parsePromptSections(prompt);
+    console.log('📋 Parsed sections:', Object.keys(sections));
     
-    // Separate core instructions from context data
-    sections.forEach(section => {
-        if (section.includes('CRITICAL:') || section.includes('REQUIRED JSON') || section.includes('INSTRUCTIONS:')) {
-            instructions += section + '\n\n';
-        } else if (section.includes('CONTENT:') || section.includes('ANALYSIS RESULTS:') || section.includes('LIFECYCLE FLOW:')) {
-            contextData += section + '\n\n';
-        } else {
-            corePrompt += section + '\n\n';
+    // Calculate token budgets
+    const tokenBudget = this.calculateTokenBudgets();
+    console.log('💰 Token budget:', tokenBudget);
+    
+    // Build optimized prompt
+    const optimizedPrompt = this.buildOptimizedPrompt(sections, tokenBudget);
+    
+    const finalTokenCount = this.estimateTokenCount(optimizedPrompt);
+    console.log(`✅ Chunking complete: ${finalTokenCount} tokens (target: ${this.maxTokens * 0.7})`);
+    
+    return optimizedPrompt;
+}
+
+// Parse prompt into manageable sections
+parsePromptSections(prompt) {
+    const sections = {
+        instructions: '',
+        component: '',
+        dependencies: '',
+        fileContents: '',
+        jsonFormat: ''
+    };
+    
+    const lines = prompt.split('\n');
+    let currentSection = 'instructions';
+    
+    lines.forEach(line => {
+        if (line.includes('COMPONENT DETAILS:')) {
+            currentSection = 'component';
+        } else if (line.includes('DEPENDENCIES SUMMARY:')) {
+            currentSection = 'dependencies';
+        } else if (line.includes('FILE CONTENTS:')) {
+            currentSection = 'fileContents';
+        } else if (line.includes('REQUIRED JSON RESPONSE')) {
+            currentSection = 'jsonFormat';
         }
+        
+        sections[currentSection] += line + '\n';
     });
     
-    // Chunk the context data intelligently
-    const maxContextTokens = this.maxTokens * 0.5; // Reserve 50% for context
-    const contextTokenCount = this.estimateTokenCount(contextData);
+    return sections;
+}
+
+// Calculate token budgets for different sections
+calculateTokenBudgets() {
+    const maxTokens = this.maxTokens * 0.7; // 70% for input, 30% for response
     
-    if (contextTokenCount > maxContextTokens) {
-        console.log(`Context too large (${contextTokenCount} tokens), applying smart chunking...`);
-        contextData = this.chunkContextData(contextData, maxContextTokens);
+    return {
+        total: maxTokens,
+        instructions: Math.floor(maxTokens * 0.2), // 20% for instructions
+        component: Math.floor(maxTokens * 0.1),    // 10% for component details
+        dependencies: Math.floor(maxTokens * 0.15), // 15% for dependencies
+        fileContents: Math.floor(maxTokens * 0.45), // 45% for file contents
+        jsonFormat: Math.floor(maxTokens * 0.1)     // 10% for JSON format
+    };
+}
+
+// Build optimized prompt within token limits
+buildOptimizedPrompt(sections, budget) {
+    let optimizedPrompt = '';
+    
+    // Always include full instructions and JSON format
+    optimizedPrompt += this.limitSectionTokens(sections.instructions, budget.instructions);
+    optimizedPrompt += this.limitSectionTokens(sections.component, budget.component);
+    optimizedPrompt += this.limitSectionTokens(sections.dependencies, budget.dependencies);
+    
+    // Smart chunking for file contents
+    const chunkedFileContents = this.chunkFileContents(sections.fileContents, budget.fileContents);
+    optimizedPrompt += chunkedFileContents;
+    
+    optimizedPrompt += this.limitSectionTokens(sections.jsonFormat, budget.jsonFormat);
+    
+    return optimizedPrompt;
+}
+
+// Limit section to token budget
+limitSectionTokens(content, maxTokens) {
+    const currentTokens = this.estimateTokenCount(content);
+    
+    if (currentTokens <= maxTokens) {
+        return content;
     }
     
-    const finalPrompt = instructions + corePrompt + contextData;
-    const finalTokenCount = this.estimateTokenCount(finalPrompt);
+    // Truncate content to fit token budget
+    const targetChars = Math.floor(maxTokens * this.averageCharsPerToken * 0.9);
+    const truncated = content.substring(0, targetChars);
     
-    console.log(`Chunking complete: ${finalTokenCount} tokens (reduced from ${this.estimateTokenCount(prompt)})`);
-    this.updateTokenDisplay(finalTokenCount);
+    return truncated + '\n[Content truncated for token optimization]\n';
+}
+
+// Advanced file content chunking with priority preservation
+chunkFileContents(fileContents, maxTokens) {
+    console.log('📁 Chunking file contents...');
     
-    return finalPrompt;
+    const lines = fileContents.split('\n');
+    let chunkedContent = 'FILE CONTENTS:\n';
+    let currentTokens = this.estimateTokenCount(chunkedContent);
+    
+    // Priority patterns for important lines
+    const priorityPatterns = [
+        { pattern: /01\s+[A-Z][A-Z0-9\-_]+/, priority: 10, label: 'COBOL 01-level' },
+        { pattern: /PROGRAM-ID\.?\s+[A-Z][A-Z0-9\-_]+/, priority: 9, label: 'Program ID' },
+        { pattern: /COPY\s+[A-Z][A-Z0-9\-_]+/, priority: 8, label: 'Copy statement' },
+        { pattern: /CALL\s+['"]*[A-Z][A-Z0-9\-_]+/, priority: 7, label: 'Call statement' },
+        { pattern: /FD\s+[A-Z][A-Z0-9\-_]+/, priority: 6, label: 'File definition' },
+        { pattern: /EXEC\s+CICS/, priority: 5, label: 'CICS command' },
+        { pattern: /WORKING-STORAGE|LINKAGE/, priority: 4, label: 'Storage section' },
+        { pattern: /PROCEDURE\s+DIVISION/, priority: 3, label: 'Procedure division' }
+    ];
+    
+    // Categorize lines by priority
+    const categorizedLines = lines.map(line => {
+        const trimmed = line.trim().toUpperCase();
+        let priority = 0;
+        let label = 'Regular code';
+        
+        for (const pattern of priorityPatterns) {
+            if (pattern.pattern.test(trimmed)) {
+                priority = pattern.priority;
+                label = pattern.label;
+                break;
+            }
+        }
+        
+        return {
+            original: line,
+            trimmed: trimmed,
+            priority: priority,
+            label: label,
+            tokens: this.estimateTokenCount(line)
+        };
+    });
+    
+    // Sort by priority (high to low)
+    const sortedLines = categorizedLines.sort((a, b) => b.priority - a.priority);
+    
+    // Add high-priority lines first
+    const addedLines = new Set();
+    
+    for (const lineInfo of sortedLines) {
+        if (currentTokens + lineInfo.tokens < maxTokens * 0.9) {
+            if (!addedLines.has(lineInfo.original)) {
+                chunkedContent += lineInfo.original + '\n';
+                currentTokens += lineInfo.tokens;
+                addedLines.add(lineInfo.original);
+                
+                if (lineInfo.priority > 0) {
+                    console.log(`Added priority line (${lineInfo.label}): ${lineInfo.original.substring(0, 50)}...`);
+                }
+            }
+        } else {
+            break;
+        }
+    }
+    
+    // Add summary of excluded content
+    const excludedCount = lines.length - addedLines.size;
+    if (excludedCount > 0) {
+        chunkedContent += `\n[${excludedCount} lines excluded for token optimization - lower priority code]\n`;
+    }
+    
+    console.log(`📊 File content chunking: ${addedLines.size}/${lines.length} lines kept, ${this.estimateTokenCount(chunkedContent)} tokens`);
+    
+    return chunkedContent;
+}
+
+// Enhanced chat functionality with proper LLM integration
+async processEnhancedChatQuery(question) {
+    console.log('💬 Processing chat query:', question);
+    
+    const analysisData = this.analysisResults[this.currentAnalyzedComponent];
+    const friendlyName = document.getElementById('friendlyName')?.value || this.currentAnalyzedComponent;
+    
+    if (!analysisData) {
+        return "Please analyze a component first before asking questions about it.";
+    }
+    
+    // Build chat context
+    const chatContext = this.buildChatContext(question, analysisData, friendlyName);
+    
+    // Apply chunking for chat
+    const optimizedContext = await this.applyChatChunking(chatContext);
+    
+    try {
+        console.log('🤖 Calling LLM for chat response...');
+        const response = await this.callLLMAPI(optimizedContext);
+        
+        if (response.error) {
+            return this.generateFallbackChatResponse(question, analysisData, friendlyName);
+        }
+        
+        // Extract chat response
+        return this.extractChatResponse(response, question, friendlyName);
+        
+    } catch (error) {
+        console.error('Chat LLM call failed:', error);
+        return this.generateFallbackChatResponse(question, analysisData, friendlyName);
+    }
+}
+
+// Build comprehensive chat context
+buildChatContext(question, analysisData, friendlyName) {
+    const context = `MAINFRAME ANALYSIS CHAT ASSISTANT
+
+CONTEXT:
+You are a helpful assistant analyzing mainframe components. Provide detailed, accurate responses based on the analysis data.
+
+COMPONENT: ${analysisData.componentName} (${friendlyName})
+TYPE: ${analysisData.componentType}
+ANALYSIS METHOD: ${analysisData.analysisMethod}
+
+ANALYSIS RESULTS:
+${JSON.stringify(analysisData.llmAnalysis, null, 2)}
+
+DEPENDENCY STATUS:
+Found Dependencies: ${analysisData.dependencyAnalysis?.summary?.foundCount || 0}
+Missing Dependencies: ${analysisData.dependencyAnalysis?.summary?.missingCount || 0}
+Details: ${JSON.stringify(analysisData.dependencyAnalysis?.found, null, 2)}
+
+LIFECYCLE FLOW:
+${JSON.stringify(analysisData.lifecycleFlow, null, 2)}
+
+CHAT HISTORY:
+${this.getChatHistoryForContext()}
+
+USER QUESTION: "${question}"
+
+INSTRUCTIONS:
+1. Provide a helpful, detailed response based on the analysis data
+2. Use the friendly name "${friendlyName}" when referring to the component
+3. Include specific examples and data from the analysis
+4. Format response with markdown for better readability
+5. If the question cannot be answered from the data, explain what's available
+6. Keep responses focused and actionable
+
+RESPONSE:`;
+
+    return context;
+}
+
+// Apply chunking specifically for chat context
+async applyChatChunking(context) {
+    const maxChatTokens = this.maxTokens * 0.6; // Reserve more for response in chat
+    const currentTokens = this.estimateTokenCount(context);
+    
+    if (currentTokens <= maxChatTokens) {
+        return context;
+    }
+    
+    console.log('🔄 Applying chat chunking...');
+    
+    // Split context into sections
+    const sections = context.split('\n\n');
+    let optimizedContext = '';
+    let tokenCount = 0;
+    
+    // Prioritize sections for chat
+    const priorityOrder = [
+        'INSTRUCTIONS:',
+        'USER QUESTION:',
+        'COMPONENT:',
+        'ANALYSIS RESULTS:',
+        'DEPENDENCY STATUS:',
+        'LIFECYCLE FLOW:',
+        'CHAT HISTORY:'
+    ];
+    
+    // Add sections in priority order
+    for (const priority of priorityOrder) {
+        const section = sections.find(s => s.includes(priority));
+        if (section) {
+            const sectionTokens = this.estimateTokenCount(section);
+            if (tokenCount + sectionTokens < maxChatTokens) {
+                optimizedContext += section + '\n\n';
+                tokenCount += sectionTokens;
+            }
+        }
+    }
+    
+    console.log(`📊 Chat chunking: ${tokenCount} tokens (limit: ${maxChatTokens})`);
+    return optimizedContext;
+}
+
+// Get relevant chat history for context
+getChatHistoryForContext() {
+    const recentMessages = this.chatHistory.slice(-4); // Last 4 messages
+    return recentMessages.map(msg => 
+        `${msg.sender}: ${msg.content.substring(0, 200)}${msg.content.length > 200 ? '...' : ''}`
+    ).join('\n');
+}
+
+// Extract response from LLM chat call
+extractChatResponse(llmResponse, question, friendlyName) {
+    let responseText = '';
+    
+    // Handle different response formats
+    if (typeof llmResponse === 'string') {
+        responseText = llmResponse;
+    } else if (llmResponse.text) {
+        responseText = llmResponse.text;
+    } else if (llmResponse.response) {
+        responseText = llmResponse.response;
+    } else if (llmResponse.rawResponse) {
+        responseText = llmResponse.rawResponse;
+    } else {
+        // Try to extract meaningful content from structured response
+        if (llmResponse.businessPurpose) {
+            responseText = `Based on the analysis of ${friendlyName}:\n\n${llmResponse.businessPurpose}`;
+        } else if (llmResponse.recommendations) {
+            responseText = `Here are the key recommendations for ${friendlyName}:\n\n` +
+                         llmResponse.recommendations.map((rec, i) => `${i + 1}. ${rec}`).join('\n');
+        } else {
+            return this.generateFallbackChatResponse(question, null, friendlyName);
+        }
+    }
+    
+    // Clean and format the response
+    return this.formatChatResponse(responseText, friendlyName);
+}
+
+// Format chat response for display
+formatChatResponse(text, friendlyName) {
+    return text
+        .replace(/RESPONSE:\s*/i, '') // Remove RESPONSE: prefix
+        .replace(/\n{3,}/g, '\n\n') // Limit consecutive newlines
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') // Bold formatting
+        .replace(/`([^`]+)`/g, '<code>$1</code>') // Code formatting
+        .replace(/\n- /g, '\n• ') // Bullet points
+        .trim();
+}
+
+// Generate fallback response when LLM fails
+generateFallbackChatResponse(question, analysisData, friendlyName) {
+    const lowerQuestion = question.toLowerCase();
+    
+    if (lowerQuestion.includes('field') || lowerQuestion.includes('data')) {
+        return `Based on the analysis of **${friendlyName}**, I can provide information about the fields and data structures. The component contains various data elements that are used throughout the system. For detailed field-level analysis, please check the Field Matrix tab.`;
+    }
+    
+    if (lowerQuestion.includes('dependency') || lowerQuestion.includes('call') || lowerQuestion.includes('copy')) {
+        return `For **${friendlyName}** dependencies: The analysis identified both found and missing dependencies. Check the Dependencies tab for a complete breakdown of copybooks, called programs, and file references.`;
+    }
+    
+    if (lowerQuestion.includes('lifecycle') || lowerQuestion.includes('flow') || lowerQuestion.includes('process')) {
+        return `The lifecycle flow for **${friendlyName}** shows how the component moves through different processing stages. You can view the complete flow diagram in the File Lifecycle tab.`;
+    }
+    
+    if (lowerQuestion.includes('business') || lowerQuestion.includes('purpose') || lowerQuestion.includes('function')) {
+        if (analysisData?.llmAnalysis?.businessPurpose) {
+            return `**Business Purpose of ${friendlyName}:**\n\n${analysisData.llmAnalysis.businessPurpose}`;
+        }
+        return `**${friendlyName}** serves a specific business function within the mainframe system. The analysis provides insights into its role and purpose based on the code structure and dependencies.`;
+    }
+    
+    if (lowerQuestion.includes('recommend') || lowerQuestion.includes('improve') || lowerQuestion.includes('optimize')) {
+        if (analysisData?.llmAnalysis?.recommendations) {
+            return `**Recommendations for ${friendlyName}:**\n\n` +
+                   analysisData.llmAnalysis.recommendations.map((rec, i) => `${i + 1}. ${rec}`).join('\n');
+        }
+        return `For **${friendlyName}** optimization: Consider reviewing the dependency analysis for missing components, examine the field usage patterns, and evaluate modernization opportunities based on the current structure.`;
+    }
+    
+    // Generic fallback
+    return `I can help you understand **${friendlyName}** based on the analysis results. The component has been analyzed for dependencies, field structures, and lifecycle patterns. Please check the different tabs (Analysis Results, Field Matrix, Dependencies, File Lifecycle) for detailed information, or ask more specific questions about fields, dependencies, business logic, or recommendations.`;
+}
+
+// Create comprehensive fallback data for failed LLM calls
+createComponentFallback(componentName, friendlyName, context) {
+    console.log('🔄 Creating fallback data for:', componentName);
+    
+    const fallbackData = {
+        componentName: componentName,
+        friendlyName: friendlyName || componentName,
+        componentType: this.detectComponentTypeFromContext(context),
+        analysisScope: 'FALLBACK',
+        businessPurpose: `Analysis of ${friendlyName || componentName} - Component serves as part of the mainframe system architecture`,
+        technicalSummary: 'Technical analysis incomplete due to LLM processing limitations',
+        qualityScore: 6,
+        recommendations: [
+            'Consider re-analyzing with optimized token usage',
+            'Review dependency status manually',
+            'Check file contents for missing components',
+            'Verify LLM server configuration and connectivity'
+        ],
+        fieldAnalysis: {
+            totalFields: this.estimateFieldCount(context),
+            keyFields: this.extractKeyFields(context),
+            fieldCategories: {
+                input: [],
+                output: [],
+                calculated: [],
+                control: []
+            }
+        },
+        businessRules: [],
+        dependencies: {
+            required: context?.dependencies?.copyStatements || [],
+            optional: context?.dependencies?.callStatements || [],
+            missing: [],
+            riskAssessment: 'MEDIUM'
+        },
+        lifecyclePhases: {
+            creation: [],
+            processing: [],
+            output: [],
+            archival: []
+        },
+        modernizationOpportunities: [
+            'LLM analysis incomplete - manual review recommended'
+        ],
+        riskFactors: [
+            'Analysis incomplete due to processing limitations',
+            'Manual validation recommended'
+        ],
+        fallbackGenerated: true,
+        timestamp: new Date().toISOString()
+    };
+    
+    console.log('✅ Fallback data created:', fallbackData);
+    return fallbackData;
+}
+
+// Helper methods for fallback data creation
+detectComponentTypeFromContext(context) {
+    if (!context) return 'Unknown';
+    
+    if (context.component?.type) return context.component.type;
+    
+    const files = context.files || [];
+    for (const file of files) {
+        if (file.type === 'Copybook') return 'Copybook';
+        if (file.type === 'COBOL Program') return 'COBOL Program';
+        if (file.type === 'JCL Job') return 'JCL Job';
+    }
+    
+    return 'Component';
+}
+
+estimateFieldCount(context) {
+    if (!context?.files) return 0;
+    
+    let fieldCount = 0;
+    context.files.forEach(file => {
+        const matches = file.content?.match(/01\s+[A-Z][A-Z0-9\-_]+/gi) || [];
+        fieldCount += matches.length;
+    });
+    
+    return fieldCount;
+}
+
+extractKeyFields(context) {
+    if (!context?.files) return [];
+    
+    const fields = [];
+    context.files.forEach(file => {
+        const matches = file.content?.match(/01\s+([A-Z][A-Z0-9\-_]+)/gi) || [];
+        matches.forEach(match => {
+            const field = match.replace(/01\s+/i, '').trim();
+            if (fields.length < 10 && !fields.includes(field)) {
+                fields.push(field);
+            }
+        });
+    });
+    
+    return fields;
 }
 
 chunkContextData(contextData, maxTokens) {
@@ -3872,6 +5221,101 @@ chunkContextData(contextData, maxTokens) {
     });
     
     return chunkedData + '\n[Content truncated for token optimization]';
+}
+
+// Create fallback data from text content
+createFallbackFromText(text) {
+    const componentName = this.currentAnalyzedComponent || 'Unknown';
+    const friendlyName = document.getElementById('friendlyName')?.value || componentName;
+    
+    // Try to extract useful information from text
+    const extractedInfo = this.extractInfoFromText(text);
+    
+    return {
+        componentName: componentName,
+        friendlyName: friendlyName,
+        componentType: extractedInfo.type || 'Unknown',
+        analysisScope: 'TEXT_EXTRACTION',
+        businessPurpose: extractedInfo.purpose || 'Could not determine business purpose from response',
+        technicalSummary: extractedInfo.summary || 'Technical analysis incomplete',
+        qualityScore: 5,
+        recommendations: extractedInfo.recommendations || [
+            'LLM response parsing failed',
+            'Consider re-analyzing with different parameters',
+            'Review file content and dependencies manually'
+        ],
+        fieldAnalysis: {
+            totalFields: extractedInfo.fieldCount || 0,
+            keyFields: extractedInfo.fields || [],
+            fieldCategories: { input: [], output: [], calculated: [], control: [] }
+        },
+        businessRules: [],
+        dependencies: {
+            required: [],
+            optional: [],
+            missing: [],
+            riskAssessment: 'HIGH'
+        },
+        lifecyclePhases: {
+            creation: [],
+            processing: [],
+            output: [],
+            archival: []
+        },
+        parseError: 'Response could not be parsed as JSON',
+        rawText: text.substring(0, 500)
+    };
+}
+
+// Extract information from unstructured text
+extractInfoFromText(text) {
+    const info = {};
+    
+    // Extract component type
+    const typePatterns = [
+        /(?:component|program|copybook|file)[\s:]+(\w+)/gi,
+        /type[\s:]+(\w+)/gi
+    ];
+    
+    for (const pattern of typePatterns) {
+        const match = text.match(pattern);
+        if (match && match[1]) {
+            info.type = match[1];
+            break;
+        }
+    }
+    
+    // Extract purpose/description
+    const purposePatterns = [
+        /purpose[\s:]+([^.]+)/gi,
+        /description[\s:]+([^.]+)/gi,
+        /business[\s:]+([^.]+)/gi
+    ];
+    
+    for (const pattern of purposePatterns) {
+        const match = text.match(pattern);
+        if (match && match[1]) {
+            info.purpose = match[1].trim();
+            break;
+        }
+    }
+    
+    // Extract field names
+    const fieldMatches = text.match(/(?:01|field)[\s]+([A-Z][A-Z0-9\-_]+)/gi);
+    if (fieldMatches) {
+        info.fields = fieldMatches.map(match => 
+            match.replace(/^(?:01|field)[\s]+/i, '').trim()
+        ).slice(0, 10); // Limit to first 10
+        info.fieldCount = info.fields.length;
+    }
+    
+    // Extract recommendations
+    const recMatches = text.match(/recommend[^.]+\./gi);
+    if (recMatches) {
+        info.recommendations = recMatches.slice(0, 5); // Limit to 5
+    }
+    
+    return info;
 }
 
 
