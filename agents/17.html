@@ -2763,8 +2763,8 @@ async runLLMEnhancedAnalysisWithLifecycle(componentName) {
         // Stage 2: Extract real dependencies
         this.updateLoadingStatus('🔗 Stage 2: Extracting dependencies...');
         
-        const dependencyAnalysis = await this.extractRealDependencies(componentName, relevantFiles);
-
+        //const dependencyAnalysis = await this.extractRealDependencies(componentName, relevantFiles);
+        const dependencyAnalysis = await this.extractComprehensiveDependencies(componentName, relevantFiles);
         /// Stage 3: Extract focused lifecycle flow
         this.updateLoadingStatus('🌊 Stage 3: Analyzing component lifecycle...');
         this.updateProgress(50);
@@ -2851,6 +2851,487 @@ async runLLMEnhancedAnalysisWithLifecycle(componentName) {
     }
 }
 
+// Enhanced Dependency Analysis Methods for EnhancedMainframeAnalyzer class
+
+// Add these methods to the EnhancedMainframeAnalyzer class to improve dependency analysis
+
+// === COMPREHENSIVE DEPENDENCY ANALYSIS ===
+async extractComprehensiveDependencies(componentName, relevantFiles) {
+    console.log(`Starting comprehensive dependency analysis for: ${componentName}`);
+    
+    const dependencyMap = {
+        directDependencies: {
+            usedBy: [], // Programs that directly use this component
+            uses: [],   // Components this component uses
+            includesFrom: [], // Copybooks included by this component
+            includedBy: []    // Programs/copybooks that include this component
+        },
+        indirectDependencies: {
+            transitiveUsers: [], // Programs affected through chain of dependencies
+            sharedComponents: [], // Other components sharing same dependencies
+            impactScope: 0      // Total number of components potentially impacted
+        },
+        fieldLevelDependencies: {
+            fieldsUsedBy: new Map(), // Which programs use which fields
+            fieldModifiers: new Map(), // Which programs modify which fields
+            unusedFields: []           // Fields not referenced anywhere
+        },
+        programInteractions: {
+            callChain: [],      // Programs that call each other
+            dataFlow: [],       // How data flows between programs
+            batchSequence: []   // Order of execution in batch jobs
+        }
+    };
+
+    try {
+        // Stage 1: Find direct dependencies
+        console.log("Stage 1: Analyzing direct dependencies...");
+        await this.findDirectDependencies(componentName, relevantFiles, dependencyMap);
+
+        // Stage 2: Find indirect/transitive dependencies
+        console.log("Stage 2: Analyzing indirect dependencies...");
+        await this.findIndirectDependencies(componentName, dependencyMap);
+
+        // Stage 3: Field-level dependency analysis (for copybooks)
+        if (this.detectComponentType(componentName, relevantFiles) === 'Copybook') {
+            console.log("Stage 3: Analyzing field-level dependencies...");
+            await this.analyzeFieldLevelDependencies(componentName, dependencyMap);
+        }
+
+        // Stage 4: Program interaction analysis
+        console.log("Stage 4: Analyzing program interactions...");
+        await this.analyzeProgramInteractions(componentName, dependencyMap);
+
+        // Stage 5: Calculate impact scope
+        console.log("Stage 5: Calculating impact scope...");
+        this.calculateImpactScope(dependencyMap);
+
+        return this.formatDependencyResults(dependencyMap);
+        
+    } catch (error) {
+        console.error('Comprehensive dependency analysis failed:', error);
+        // Fallback to basic analysis
+        return await this.extractRealDependencies(componentName, relevantFiles);
+    }
+}
+
+// === FIND DIRECT DEPENDENCIES ===
+async findDirectDependencies(componentName, relevantFiles, dependencyMap) {
+    const componentType = this.detectComponentType(componentName, relevantFiles);
+    
+    // Analyze all uploaded files for references to this component
+    for (const file of this.uploadedFiles) {
+        const content = file.content.toUpperCase();
+        const lines = content.split('\n');
+        
+        lines.forEach((line, index) => {
+            const trimmed = line.trim();
+            
+            // Check if this file uses the component
+            if (this.lineReferencesComponent(trimmed, componentName)) {
+                const dependency = {
+                    fileName: file.name,
+                    fileType: file.type,
+                    lineNumber: index + 1,
+                    referenceType: this.determineReferenceType(trimmed, componentName),
+                    context: trimmed,
+                    isDirectUse: true
+                };
+                
+                dependencyMap.directDependencies.usedBy.push(dependency);
+            }
+            
+            // If analyzing the component itself, find what it uses
+            if (relevantFiles.includes(file)) {
+                const usedComponents = this.extractUsedComponents(trimmed);
+                usedComponents.forEach(used => {
+                    if (used !== componentName) { // Don't include self-references
+                        dependencyMap.directDependencies.uses.push({
+                            componentName: used,
+                            fileName: file.name,
+                            lineNumber: index + 1,
+                            referenceType: this.determineReferenceType(trimmed, used),
+                            context: trimmed
+                        });
+                    }
+                });
+            }
+        });
+    }
+    
+    // Remove duplicates
+    dependencyMap.directDependencies.usedBy = this.removeDuplicateDependencies(
+        dependencyMap.directDependencies.usedBy
+    );
+    dependencyMap.directDependencies.uses = this.removeDuplicateDependencies(
+        dependencyMap.directDependencies.uses
+    );
+}
+
+// === FIND INDIRECT DEPENDENCIES ===
+async findIndirectDependencies(componentName, dependencyMap) {
+    const visited = new Set([componentName]);
+    const transitiveUsers = new Set();
+    
+    // Find transitive dependencies using BFS
+    const queue = [...dependencyMap.directDependencies.usedBy.map(dep => dep.fileName)];
+    
+    while (queue.length > 0) {
+        const currentFile = queue.shift();
+        if (visited.has(currentFile)) continue;
+        
+        visited.add(currentFile);
+        
+        // Find programs that use the current program
+        const indirectUsers = this.findProgramsUsingProgram(currentFile);
+        indirectUsers.forEach(user => {
+            if (!visited.has(user.fileName)) {
+                transitiveUsers.add(user);
+                queue.push(user.fileName);
+            }
+        });
+    }
+    
+    dependencyMap.indirectDependencies.transitiveUsers = Array.from(transitiveUsers);
+    
+    // Find shared components (components used by the same programs)
+    const sharedComponents = this.findSharedComponents(componentName, dependencyMap);
+    dependencyMap.indirectDependencies.sharedComponents = sharedComponents;
+}
+
+// === FIELD-LEVEL DEPENDENCY ANALYSIS ===
+async analyzeFieldLevelDependencies(componentName, dependencyMap) {
+    // Extract all fields from the copybook
+    const relevantFiles = this.findRelevantFiles(componentName);
+    const fields = this.extractCopybookFields(componentName, relevantFiles);
+    
+    // For each field, find which programs use it
+    for (const field of fields) {
+        const fieldUsers = [];
+        const fieldModifiers = [];
+        
+        // Search all programs for field usage
+        for (const file of this.uploadedFiles) {
+            if (file.type === 'COBOL Program' || file.type === 'JCL Job') {
+                const fieldUsage = this.analyzeFieldUsageInProgram(field.name, {
+                    name: file.name,
+                    content: file.content,
+                    type: file.type
+                });
+                
+                if (fieldUsage.operations.length > 0) {
+                    fieldUsers.push({
+                        program: file.name,
+                        operations: fieldUsage.operations,
+                        isModifier: fieldUsage.isWritten || fieldUsage.isCalculated
+                    });
+                    
+                    if (fieldUsage.isWritten || fieldUsage.isCalculated) {
+                        fieldModifiers.push({
+                            program: file.name,
+                            operations: fieldUsage.operations.filter(op => 
+                                op.type === 'WRITE' || op.type === 'COMPUTE'
+                            )
+                        });
+                    }
+                }
+            }
+        }
+        
+        if (fieldUsers.length > 0) {
+            dependencyMap.fieldLevelDependencies.fieldsUsedBy.set(field.name, fieldUsers);
+        } else {
+            dependencyMap.fieldLevelDependencies.unusedFields.push(field.name);
+        }
+        
+        if (fieldModifiers.length > 0) {
+            dependencyMap.fieldLevelDependencies.fieldModifiers.set(field.name, fieldModifiers);
+        }
+    }
+}
+
+// === PROGRAM INTERACTION ANALYSIS ===
+async analyzeProgramInteractions(componentName, dependencyMap) {
+    const callChain = [];
+    const dataFlow = [];
+    
+    dependencyMap.directDependencies.usedBy.forEach(dependency => {
+        // Analyze program calls from programs that use this component
+        const file = this.uploadedFiles.find(f => f.name === dependency.fileName);
+        if (file) {
+            const calls = this.extractProgramCalls(file.content);
+            calls.forEach(call => {
+                callChain.push({
+                    caller: dependency.fileName,
+                    called: call.program,
+                    lineNumber: call.line,
+                    isConditional: call.isConditional
+                });
+            });
+            
+            // Analyze data flow patterns
+            const dataFlows = this.extractDataFlowPatterns(file.content, componentName);
+            dataFlow.push(...dataFlows);
+        }
+    });
+    
+    dependencyMap.programInteractions.callChain = callChain;
+    dependencyMap.programInteractions.dataFlow = dataFlow;
+}
+
+// === HELPER METHODS ===
+lineReferencesComponent(line, componentName) {
+    const patterns = [
+        new RegExp(`\\bCOPY\\s+${componentName}\\b`, 'i'),
+        new RegExp(`\\bINCLUDE\\s+${componentName}\\b`, 'i'),
+        new RegExp(`\\b${componentName}\\b`), // General reference
+        new RegExp(`\\b${componentName}\\.`, 'i'), // Qualified reference
+        new RegExp(`\\bOF\\s+${componentName}\\b`, 'i'), // COBOL qualification
+        new RegExp(`\\bIN\\s+${componentName}\\b`, 'i')   // COBOL qualification
+    ];
+    
+    return patterns.some(pattern => pattern.test(line));
+}
+
+determineReferenceType(line, componentName) {
+    const lineTrimmed = line.trim().toUpperCase();
+    
+    if (lineTrimmed.includes('COPY') && lineTrimmed.includes(componentName.toUpperCase())) {
+        return 'COPY_INCLUDE';
+    } else if (lineTrimmed.includes('CALL') && lineTrimmed.includes(componentName.toUpperCase())) {
+        return 'PROGRAM_CALL';
+    } else if (lineTrimmed.includes('PERFORM') && lineTrimmed.includes(componentName.toUpperCase())) {
+        return 'PERFORM_CALL';
+    } else if (lineTrimmed.includes('MOVE') && lineTrimmed.includes(componentName.toUpperCase())) {
+        return 'DATA_MOVEMENT';
+    } else if (lineTrimmed.includes('IF') && lineTrimmed.includes(componentName.toUpperCase())) {
+        return 'CONDITIONAL_REFERENCE';
+    } else if (lineTrimmed.includes('DISPLAY') && lineTrimmed.includes(componentName.toUpperCase())) {
+        return 'OUTPUT_REFERENCE';
+    } else {
+        return 'FIELD_REFERENCE';
+    }
+}
+
+extractUsedComponents(line) {
+    const components = [];
+    const patterns = [
+        /COPY\s+([A-Z][A-Z0-9\-_]+)/g,
+        /CALL\s+['"]*([A-Z][A-Z0-9\-_]+)['"]*\s/g,
+        /PERFORM\s+([A-Z][A-Z0-9\-_]+)/g,
+        /FD\s+([A-Z][A-Z0-9\-_]+)/g
+    ];
+    
+    patterns.forEach(pattern => {
+        let match;
+        while ((match = pattern.exec(line)) !== null) {
+            components.push(match[1]);
+        }
+    });
+    
+    return components;
+}
+
+findProgramsUsingProgram(programName) {
+    const users = [];
+    const programNameBase = programName.replace(/\.[^/.]+$/, ""); // Remove extension
+    
+    for (const file of this.uploadedFiles) {
+        const content = file.content.toUpperCase();
+        const lines = content.split('\n');
+        
+        lines.forEach((line, index) => {
+            const trimmed = line.trim();
+            if (trimmed.includes(`CALL`) && trimmed.includes(programNameBase.toUpperCase())) {
+                users.push({
+                    fileName: file.name,
+                    lineNumber: index + 1,
+                    referenceType: 'PROGRAM_CALL',
+                    context: trimmed
+                });
+            }
+        });
+    }
+    
+    return users;
+}
+
+findSharedComponents(componentName, dependencyMap) {
+    const sharedComponents = [];
+    const componentUsers = new Set(dependencyMap.directDependencies.usedBy.map(d => d.fileName));
+    
+    // Find other components used by the same programs
+    for (const file of this.uploadedFiles) {
+        if (componentUsers.has(file.name)) {
+            const usedComponents = this.extractAllComponentReferences(file.content);
+            usedComponents.forEach(comp => {
+                if (comp !== componentName && !sharedComponents.some(s => s.componentName === comp)) {
+                    sharedComponents.push({
+                        componentName: comp,
+                        sharedWith: [file.name],
+                        relationshipType: 'CO_USED'
+                    });
+                }
+            });
+        }
+    }
+    
+    return sharedComponents;
+}
+
+extractAllComponentReferences(content) {
+    const components = new Set();
+    const lines = content.split('\n');
+    
+    lines.forEach(line => {
+        const usedComponents = this.extractUsedComponents(line.trim().toUpperCase());
+        usedComponents.forEach(comp => components.add(comp));
+    });
+    
+    return Array.from(components);
+}
+
+extractProgramCalls(content) {
+    const calls = [];
+    const lines = content.split('\n');
+    
+    lines.forEach((line, index) => {
+        const trimmed = line.trim().toUpperCase();
+        const callMatch = trimmed.match(/CALL\s+['"]*([A-Z][A-Z0-9\-_]+)['"]*/) ||
+                         trimmed.match(/PERFORM\s+([A-Z][A-Z0-9\-_]+)/);
+        
+        if (callMatch) {
+            calls.push({
+                program: callMatch[1],
+                line: index + 1,
+                isConditional: trimmed.includes('IF ') || trimmed.includes('WHEN ')
+            });
+        }
+    });
+    
+    return calls;
+}
+
+extractDataFlowPatterns(content, componentName) {
+    const dataFlows = [];
+    const lines = content.split('\n');
+    
+    lines.forEach((line, index) => {
+        const trimmed = line.trim().toUpperCase();
+        if (trimmed.includes(componentName.toUpperCase())) {
+            if (trimmed.includes('MOVE') && trimmed.includes('TO')) {
+                const moveMatch = trimmed.match(/MOVE\s+(.+?)\s+TO\s+(.+)/);
+                if (moveMatch) {
+                    dataFlows.push({
+                        type: 'DATA_MOVEMENT',
+                        from: moveMatch[1].trim(),
+                        to: moveMatch[2].trim(),
+                        line: index + 1,
+                        involvesComponent: true
+                    });
+                }
+            }
+        }
+    });
+    
+    return dataFlows;
+}
+
+removeDuplicateDependencies(dependencies) {
+    const seen = new Set();
+    return dependencies.filter(dep => {
+        const key = `${dep.fileName}-${dep.lineNumber}-${dep.referenceType}`;
+        if (seen.has(key)) {
+            return false;
+        }
+        seen.add(key);
+        return true;
+    });
+}
+
+calculateImpactScope(dependencyMap) {
+    const allImpactedFiles = new Set();
+    
+    // Add direct dependencies
+    dependencyMap.directDependencies.usedBy.forEach(dep => {
+        allImpactedFiles.add(dep.fileName);
+    });
+    
+    // Add indirect dependencies
+    dependencyMap.indirectDependencies.transitiveUsers.forEach(dep => {
+        allImpactedFiles.add(dep.fileName);
+    });
+    
+    // Add programs in call chain
+    dependencyMap.programInteractions.callChain.forEach(call => {
+        allImpactedFiles.add(call.caller);
+        allImpactedFiles.add(call.called);
+    });
+    
+    dependencyMap.indirectDependencies.impactScope = allImpactedFiles.size;
+}
+
+formatDependencyResults(dependencyMap) {
+    return {
+        found: {
+            directUsers: dependencyMap.directDependencies.usedBy,
+            usedComponents: dependencyMap.directDependencies.uses,
+            transitiveUsers: dependencyMap.indirectDependencies.transitiveUsers,
+            sharedComponents: dependencyMap.indirectDependencies.sharedComponents
+        },
+        fieldLevelAnalysis: {
+            fieldsUsedBy: Object.fromEntries(dependencyMap.fieldLevelDependencies.fieldsUsedBy),
+            fieldModifiers: Object.fromEntries(dependencyMap.fieldLevelDependencies.fieldModifiers),
+            unusedFields: dependencyMap.fieldLevelDependencies.unusedFields
+        },
+        programInteractions: dependencyMap.programInteractions,
+        impactAnalysis: {
+            totalImpactedFiles: dependencyMap.indirectDependencies.impactScope,
+            directImpact: dependencyMap.directDependencies.usedBy.length,
+            indirectImpact: dependencyMap.indirectDependencies.transitiveUsers.length,
+            riskLevel: this.calculateRiskLevel(dependencyMap)
+        },
+        summary: {
+            foundCount: dependencyMap.directDependencies.usedBy.length + 
+                       dependencyMap.directDependencies.uses.length,
+            missingCount: 0, // Would need additional logic to determine missing dependencies
+            completeness: this.calculateCompletenessScore(dependencyMap)
+        }
+    };
+}
+
+calculateRiskLevel(dependencyMap) {
+    const totalImpact = dependencyMap.indirectDependencies.impactScope;
+    const directImpact = dependencyMap.directDependencies.usedBy.length;
+    
+    if (totalImpact > 20 || directImpact > 10) {
+        return 'HIGH';
+    } else if (totalImpact > 10 || directImpact > 5) {
+        return 'MEDIUM';
+    } else if (totalImpact > 5 || directImpact > 2) {
+        return 'LOW';
+    } else {
+        return 'MINIMAL';
+    }
+}
+
+calculateCompletenessScore(dependencyMap) {
+    let score = 60; // Base score
+    
+    // Add points for comprehensive analysis
+    if (dependencyMap.directDependencies.usedBy.length > 0) score += 10;
+    if (dependencyMap.indirectDependencies.transitiveUsers.length > 0) score += 10;
+    if (dependencyMap.fieldLevelDependencies.fieldsUsedBy.size > 0) score += 10;
+    if (dependencyMap.programInteractions.callChain.length > 0) score += 10;
+    
+    return Math.min(100, score);
+}
+
+// === UPDATE THE MAIN ANALYSIS METHOD ===
+// Replace the existing extractRealDependencies call in runLLMEnhancedAnalysisWithLifecycle with:
+/*
+const dependencyAnalysis = await this.extractComprehensiveDependencies(componentName, relevantFiles);
+*/
 
 // === REAL LLM ANALYSIS WITH INTELLIGENT CHUNKING ===
 async extractRealDependencies(componentName, relevantFiles) {
