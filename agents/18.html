@@ -2721,52 +2721,56 @@ try {
         }
 
         // This is a simplified placeholder for the core analysis functionality
-        // In a real implementation, you would include all the analysis methods from the original code
         async runLLMEnhancedAnalysisWithLifecycle(componentName, friendlyName) {
-    console.log(`=== Starting Full LLM Analysis for ${componentName} ===`);
+    console.log(`=== Starting Enhanced Analysis for Component: ${componentName} ===`);
     
-    this.updateLoadingStatus('🔍 Stage 1: Extracting dependencies...');
+    this.updateLoadingStatus('🔍 Stage 1: Identifying component and extracting fields...');
     this.updateProgress(10);
     
-    const relevantFiles = this.findRelevantFiles(componentName);
-    const componentType = this.detectComponentType(componentName, relevantFiles);
+    // Enhanced component identification
+    const componentInfo = this.identifyComponentDetails(componentName);
+    console.log('Component identification result:', componentInfo);
     
-    // STEP 1: Extract comprehensive dependencies
-    const allDependencies = this.extractComprehensiveDependencies(relevantFiles, componentName);
-    console.log('Extracted dependencies:', allDependencies);
+    const relevantFiles = this.findRelevantFiles(componentName, componentInfo);
+    console.log(`Found ${relevantFiles.length} relevant files:`, relevantFiles.map(f => f.name));
     
-    this.updateLoadingStatus('🔗 Stage 2: Analyzing dependency relationships...');
+    this.updateLoadingStatus('📋 Stage 2: Analyzing copybook fields and structure...');
     this.updateProgress(25);
     
-    // STEP 2: Analyze found vs missing dependencies
-    const dependencyAnalysis = this.analyzeDependencyStatus(allDependencies);
-    console.log('Dependency analysis:', dependencyAnalysis);
+    // Enhanced field analysis for copybooks
+    const fieldAnalysis = this.analyzeComponentFields(componentName, relevantFiles, componentInfo);
+    console.log('Field analysis result:', fieldAnalysis);
     
-    this.updateLoadingStatus('🌊 Stage 3: Building lifecycle context...');
+    this.updateLoadingStatus('🔗 Stage 3: Extracting and analyzing dependencies...');
     this.updateProgress(40);
     
-    // STEP 3: Build comprehensive context for LLM
-    const analysisContext = this.buildLLMAnalysisContext(
+    // Enhanced dependency analysis
+    const allDependencies = this.extractComprehensiveDependencies(relevantFiles, componentName);
+    const dependencyAnalysis = this.analyzeDependencyStatusEnhanced(allDependencies, componentName);
+    console.log('Enhanced dependency analysis:', dependencyAnalysis);
+    
+    this.updateLoadingStatus('🤖 Stage 4: LLM analysis with field context...');
+    this.updateProgress(60);
+    
+    // Build enhanced context with field information
+    const analysisContext = this.buildEnhancedAnalysisContext(
         componentName, 
         friendlyName, 
         relevantFiles, 
+        fieldAnalysis,
         allDependencies, 
-        dependencyAnalysis
+        dependencyAnalysis,
+        componentInfo
     );
     
-    this.updateLoadingStatus('🤖 Stage 4: Calling LLM for component analysis...');
-    this.updateProgress(60);
-    
-    // STEP 4: Call LLM with intelligent chunking
     const llmAnalysis = await this.callLLMForComponentAnalysis(analysisContext);
     
-    this.updateLoadingStatus('🌊 Stage 5: Analyzing lifecycle flow...');
+    this.updateLoadingStatus('🌊 Stage 5: Building lifecycle with field tracking...');
     this.updateProgress(80);
     
-    // STEP 5: Generate lifecycle flow
     const lifecycleFlow = this.generateLifecycleFlow(componentName, friendlyName, relevantFiles, llmAnalysis);
     
-    this.updateLoadingStatus('📊 Stage 6: Finalizing analysis...');
+    this.updateLoadingStatus('📊 Stage 6: Finalizing enhanced analysis...');
     this.updateProgress(95);
     
     const results = {
@@ -2774,18 +2778,1087 @@ try {
         friendlyName: friendlyName,
         timestamp: new Date().toISOString(),
         filesAnalyzed: relevantFiles.map(f => f.name),
-        componentType: componentType,
+        componentType: componentInfo.type,
+        componentInfo: componentInfo,
+        fieldAnalysis: fieldAnalysis,
         dependencyAnalysis: dependencyAnalysis,
         lifecycleFlow: lifecycleFlow,
         llmAnalysis: llmAnalysis,
         qualityScore: this.calculateQualityScore(llmAnalysis, dependencyAnalysis, relevantFiles),
         completeness: this.calculateCompleteness(llmAnalysis, dependencyAnalysis),
-        analysisMethod: 'LLM-Enhanced-Full-Integration'
+        analysisMethod: 'LLM-Enhanced-Field-Analysis'
     };
 
     this.updateProgress(100);
-    console.log('=== LLM Analysis Complete ===', results);
+    console.log('=== Enhanced Analysis Complete ===', results);
     return results;
+}
+
+analyzeComponentFields(componentName, relevantFiles, componentInfo) {
+    console.log(`📋 Analyzing fields for component: ${componentName}`);
+    
+    const fieldAnalysis = {
+        componentName: componentName,
+        componentType: componentInfo.type,
+        totalFields: 0,
+        fields: [],
+        fieldsByLevel: {},
+        fieldCategories: {
+            input: [],
+            output: [],
+            calculated: [],
+            control: [],
+            static: [],
+            unused: []
+        },
+        fieldUsage: {},
+        businessLogic: [],
+        fieldHierarchy: [],
+        statistics: {
+            level01Count: 0,
+            level05Count: 0,
+            level10Count: 0,
+            level15Count: 0,
+            otherLevels: 0,
+            picXCount: 0,
+            picSCount: 0,
+            pic9Count: 0,
+            redefinesCount: 0,
+            occursCount: 0
+        }
+    };
+    
+    // Extract fields from the main component file (copybook)
+    if (componentInfo.sourceFile) {
+        const fields = this.extractFieldsFromCopybook(componentInfo.sourceFile);
+        fieldAnalysis.fields = fields;
+        fieldAnalysis.totalFields = fields.length;
+        
+        // Organize fields by level
+        fields.forEach(field => {
+            const level = field.level || '01';
+            if (!fieldAnalysis.fieldsByLevel[level]) {
+                fieldAnalysis.fieldsByLevel[level] = [];
+            }
+            fieldAnalysis.fieldsByLevel[level].push(field);
+            
+            // Update statistics
+            this.updateFieldStatistics(field, fieldAnalysis.statistics);
+        });
+        
+        // Build field hierarchy
+        fieldAnalysis.fieldHierarchy = this.buildFieldHierarchy(fields);
+    }
+    
+    // Analyze field usage in other files
+    const otherFiles = relevantFiles.filter(f => f.id !== componentInfo.sourceFile?.id);
+    otherFiles.forEach(file => {
+        const usage = this.analyzeFieldUsageInFile(file, fieldAnalysis.fields, componentName);
+        
+        // Merge usage information
+        Object.keys(usage).forEach(fieldName => {
+            if (!fieldAnalysis.fieldUsage[fieldName]) {
+                fieldAnalysis.fieldUsage[fieldName] = {
+                    readOperations: [],
+                    writeOperations: [],
+                    calculations: [],
+                    validations: [],
+                    files: []
+                };
+            }
+            
+            const fieldUsage = fieldAnalysis.fieldUsage[fieldName];
+            fieldUsage.readOperations.push(...usage[fieldName].readOperations);
+            fieldUsage.writeOperations.push(...usage[fieldName].writeOperations);
+            fieldUsage.calculations.push(...usage[fieldName].calculations);
+            fieldUsage.validations.push(...usage[fieldName].validations);
+            fieldUsage.files.push(file.name);
+        });
+    });
+    
+    // Categorize fields based on usage
+    this.categorizeFields(fieldAnalysis);
+    
+    // Extract business logic
+    fieldAnalysis.businessLogic = this.extractBusinessLogicFromFields(fieldAnalysis, otherFiles);
+    
+    console.log(`✅ Field analysis complete: ${fieldAnalysis.totalFields} fields analyzed`);
+    return fieldAnalysis;
+}
+
+
+/* ===================================================================
+FIELD USAGE ANALYSIS AND ENHANCED DEPENDENCY DISPLAY
+Part 2: Analyze how fields are used and display detailed dependencies
+================================================================== */
+
+// Analyze field usage in program files
+analyzeFieldUsageInFile(file, fields, componentName) {
+    console.log(`🔍 Analyzing field usage in: ${file.name}`);
+    
+    const usage = {};
+    const lines = file.content.split('\n');
+    const fieldNames = fields.map(f => f.name.toUpperCase());
+    
+    lines.forEach((line, index) => {
+        const upperLine = line.trim().toUpperCase();
+        
+        fieldNames.forEach(fieldName => {
+            if (!upperLine.includes(fieldName)) return;
+            
+            if (!usage[fieldName]) {
+                usage[fieldName] = {
+                    readOperations: [],
+                    writeOperations: [],
+                    calculations: [],
+                    validations: [],
+                    comparisons: []
+                };
+            }
+            
+            const lineInfo = {
+                lineNumber: index + 1,
+                content: line.trim(),
+                file: file.name,
+                operation: 'REFERENCE'
+            };
+            
+            // Detect read operations
+            if (this.isReadOperation(upperLine, fieldName)) {
+                lineInfo.operation = 'READ';
+                usage[fieldName].readOperations.push(lineInfo);
+            }
+            
+            // Detect write operations
+            if (this.isWriteOperation(upperLine, fieldName)) {
+                lineInfo.operation = 'WRITE';
+                usage[fieldName].writeOperations.push(lineInfo);
+            }
+            
+            // Detect calculations
+            if (this.isCalculationOperation(upperLine, fieldName)) {
+                lineInfo.operation = 'CALCULATE';
+                usage[fieldName].calculations.push(lineInfo);
+            }
+            
+            // Detect validations
+            if (this.isValidationOperation(upperLine, fieldName)) {
+                lineInfo.operation = 'VALIDATE';
+                usage[fieldName].validations.push(lineInfo);
+            }
+            
+            // Detect comparisons
+            if (this.isComparisonOperation(upperLine, fieldName)) {
+                lineInfo.operation = 'COMPARE';
+                usage[fieldName].comparisons.push(lineInfo);
+            }
+        });
+    });
+    
+    const usedFields = Object.keys(usage).length;
+    console.log(`  ✅ Found usage for ${usedFields} fields in ${file.name}`);
+    
+    return usage;
+}
+
+// Check if line contains read operation
+isReadOperation(line, fieldName) {
+    const readPatterns = [
+        new RegExp(`DISPLAY\\s+${fieldName}`, 'i'),
+        new RegExp(`MOVE\\s+${fieldName}\\s+TO`, 'i'),
+        new RegExp(`IF\\s+${fieldName}`, 'i'),
+        new RegExp(`EVALUATE\\s+${fieldName}`, 'i'),
+        new RegExp(`WRITE\\s+.*${fieldName}`, 'i')
+    ];
+    
+    return readPatterns.some(pattern => pattern.test(line));
+}
+
+// Check if line contains write operation
+isWriteOperation(line, fieldName) {
+    const writePatterns = [
+        new RegExp(`MOVE\\s+.*\\s+TO\\s+${fieldName}`, 'i'),
+        new RegExp(`COMPUTE\\s+${fieldName}`, 'i'),
+        new RegExp(`ADD\\s+.*\\s+TO\\s+${fieldName}`, 'i'),
+        new RegExp(`SUBTRACT\\s+.*\\s+FROM\\s+${fieldName}`, 'i'),
+        new RegExp(`MULTIPLY\\s+.*\\s+BY\\s+${fieldName}`, 'i'),
+        new RegExp(`DIVIDE\\s+.*\\s+INTO\\s+${fieldName}`, 'i'),
+        new RegExp(`ACCEPT\\s+${fieldName}`, 'i'),
+        new RegExp(`READ\\s+.*\\s+INTO\\s+${fieldName}`, 'i')
+    ];
+    
+    return writePatterns.some(pattern => pattern.test(line));
+}
+
+// Check if line contains calculation
+isCalculationOperation(line, fieldName) {
+    const calcPatterns = [
+        new RegExp(`COMPUTE\\s+${fieldName}`, 'i'),
+        new RegExp(`ADD\\s+.*${fieldName}`, 'i'),
+        new RegExp(`SUBTRACT\\s+.*${fieldName}`, 'i'),
+        new RegExp(`MULTIPLY\\s+.*${fieldName}`, 'i'),
+        new RegExp(`DIVIDE\\s+.*${fieldName}`, 'i')
+    ];
+    
+    return calcPatterns.some(pattern => pattern.test(line));
+}
+
+// Check if line contains validation
+isValidationOperation(line, fieldName) {
+    const validationPatterns = [
+        new RegExp(`IF\\s+${fieldName}\\s+(=|>|<|NOT)`, 'i'),
+        new RegExp(`IF\\s+${fieldName}\\s+IS\\s+(NUMERIC|ALPHABETIC)`, 'i'),
+        new RegExp(`EVALUATE\\s+${fieldName}`, 'i'),
+        new RegExp(`WHEN\\s+${fieldName}`, 'i')
+    ];
+    
+    return validationPatterns.some(pattern => pattern.test(line));
+}
+
+// Check if line contains comparison
+isComparisonOperation(line, fieldName) {
+    const comparisonPatterns = [
+        new RegExp(`${fieldName}\\s*=`, 'i'),
+        new RegExp(`${fieldName}\\s*>`, 'i'),
+        new RegExp(`${fieldName}\\s*<`, 'i'),
+        new RegExp(`${fieldName}\\s*(NOT\\s+)?EQUAL`, 'i'),
+        new RegExp(`${fieldName}\\s*GREATER`, 'i'),
+        new RegExp(`${fieldName}\\s*LESS`, 'i')
+    ];
+    
+    return comparisonPatterns.some(pattern => pattern.test(line));
+}
+
+// Categorize fields based on usage patterns
+categorizeFields(fieldAnalysis) {
+    console.log('📊 Categorizing fields based on usage...');
+    
+    fieldAnalysis.fields.forEach(field => {
+        const fieldName = field.name;
+        const usage = fieldAnalysis.fieldUsage[fieldName];
+        
+        if (!usage) {
+            // No usage found - likely unused
+            fieldAnalysis.fieldCategories.unused.push(fieldName);
+            return;
+        }
+        
+        const hasReads = usage.readOperations.length > 0;
+        const hasWrites = usage.writeOperations.length > 0;
+        const hasCalculations = usage.calculations.length > 0;
+        const hasValidations = usage.validations.length > 0;
+        
+        // Categorize based on usage patterns
+        if (hasCalculations) {
+            fieldAnalysis.fieldCategories.calculated.push(fieldName);
+        } else if (hasWrites && !hasReads) {
+            fieldAnalysis.fieldCategories.output.push(fieldName);
+        } else if (hasReads && !hasWrites) {
+            fieldAnalysis.fieldCategories.input.push(fieldName);
+        } else if (hasValidations) {
+            fieldAnalysis.fieldCategories.control.push(fieldName);
+        } else if (field.hasValue && !hasWrites) {
+            fieldAnalysis.fieldCategories.static.push(fieldName);
+        }
+    });
+    
+    console.log('📊 Field categorization complete:', {
+        input: fieldAnalysis.fieldCategories.input.length,
+        output: fieldAnalysis.fieldCategories.output.length,
+        calculated: fieldAnalysis.fieldCategories.calculated.length,
+        control: fieldAnalysis.fieldCategories.control.length,
+        static: fieldAnalysis.fieldCategories.static.length,
+        unused: fieldAnalysis.fieldCategories.unused.length
+    });
+}
+
+// Extract business logic from field operations
+extractBusinessLogicFromFields(fieldAnalysis, files) {
+    console.log('🧠 Extracting business logic from field operations...');
+    
+    const businessLogic = [];
+    
+    files.forEach(file => {
+        const lines = file.content.split('\n');
+        
+        lines.forEach((line, index) => {
+            const upperLine = line.trim().toUpperCase();
+            
+            // Look for business logic patterns
+            if (this.isBusinessLogicLine(upperLine)) {
+                const logic = {
+                    type: this.classifyBusinessLogic(upperLine),
+                    description: line.trim(),
+                    file: file.name,
+                    lineNumber: index + 1,
+                    affectedFields: this.extractFieldsFromLine(upperLine, fieldAnalysis.fields),
+                    complexity: this.assessLogicComplexity(upperLine)
+                };
+                
+                businessLogic.push(logic);
+            }
+        });
+    });
+    
+    console.log(`🧠 Extracted ${businessLogic.length} business logic rules`);
+    return businessLogic;
+}
+
+// Check if line contains business logic
+isBusinessLogicLine(line) {
+    const businessPatterns = [
+        /IF\s+.*THEN/i,
+        /COMPUTE\s+/i,
+        /EVALUATE\s+/i,
+        /WHEN\s+/i,
+        /PERFORM\s+.*UNTIL/i,
+        /CALL\s+/i,
+        /ADD\s+.*TO/i,
+        /SUBTRACT\s+.*FROM/i,
+        /MULTIPLY\s+.*BY/i,
+        /DIVIDE\s+.*INTO/i
+    ];
+    
+    return businessPatterns.some(pattern => pattern.test(line));
+}
+
+// Classify business logic type
+classifyBusinessLogic(line) {
+    if (line.includes('IF') || line.includes('EVALUATE') || line.includes('WHEN')) {
+        return 'VALIDATION';
+    } else if (line.includes('COMPUTE') || line.includes('ADD') || line.includes('SUBTRACT') || 
+               line.includes('MULTIPLY') || line.includes('DIVIDE')) {
+        return 'CALCULATION';
+    } else if (line.includes('CALL') || line.includes('PERFORM')) {
+        return 'CONTROL';
+    } else {
+        return 'OTHER';
+    }
+}
+
+// Extract fields mentioned in a line
+extractFieldsFromLine(line, allFields) {
+    const fieldNames = allFields.map(f => f.name.toUpperCase());
+    const mentionedFields = [];
+    
+    fieldNames.forEach(fieldName => {
+        if (line.includes(fieldName)) {
+            mentionedFields.push(fieldName);
+        }
+    });
+    
+    return mentionedFields;
+}
+
+// Assess complexity of business logic
+assessLogicComplexity(line) {
+    let complexity = 'LOW';
+    
+    // Count complexity indicators
+    const complexityIndicators = [
+        /AND/g, /OR/g, /NOT/g,
+        /\(/g, /\)/g,
+        /COMPUTE/g, /EVALUATE/g,
+        /PERFORM/g, /CALL/g
+    ];
+    
+    let indicatorCount = 0;
+    complexityIndicators.forEach(pattern => {
+        const matches = line.match(pattern);
+        if (matches) indicatorCount += matches.length;
+    });
+    
+    if (indicatorCount >= 5) complexity = 'HIGH';
+    else if (indicatorCount >= 2) complexity = 'MEDIUM';
+    
+    return complexity;
+}
+
+// Enhanced dependency analysis with detailed found/missing display
+analyzeDependencyStatusEnhanced(allDependencies, componentName) {
+    console.log('🔗 Enhanced dependency analysis...');
+    
+    const analysis = {
+        found: {},
+        missing: {},
+        summary: { foundCount: 0, missingCount: 0 },
+        details: {},
+        searchLog: []
+    };
+
+    const dependencyTypes = ['copyStatements', 'callStatements', 'execStatements', 'fileReferences'];
+    
+    dependencyTypes.forEach(depType => {
+        const dependencies = allDependencies[depType] || [];
+        analysis.found[depType] = [];
+        analysis.missing[depType] = [];
+        analysis.details[depType] = [];
+
+        console.log(`\n🔍 Analyzing ${depType}: ${dependencies.length} dependencies`);
+
+        dependencies.forEach(dependency => {
+            const searchResult = this.searchForDependencyEnhanced(dependency, depType, componentName);
+            
+            const depInfo = {
+                name: dependency,
+                found: searchResult.found,
+                type: depType,
+                searchVariants: searchResult.searchVariants,
+                matchDetails: searchResult.matchDetails,
+                confidence: searchResult.confidence,
+                foundIn: searchResult.foundIn
+            };
+
+            if (searchResult.found) {
+                analysis.found[depType].push({
+                    name: dependency,
+                    foundIn: searchResult.foundIn,
+                    matchType: searchResult.matchDetails.matchType,
+                    confidence: searchResult.confidence
+                });
+                analysis.summary.foundCount++;
+                console.log(`  ✅ ${dependency} -> Found in ${searchResult.foundIn}`);
+            } else {
+                analysis.missing[depType].push({
+                    name: dependency,
+                    searchVariants: searchResult.searchVariants,
+                    reason: searchResult.reason || 'Not found in uploaded files'
+                });
+                analysis.summary.missingCount++;
+                console.log(`  ❌ ${dependency} -> Missing (searched: ${searchResult.searchVariants.join(', ')})`);
+            }
+            
+            analysis.details[depType].push(depInfo);
+            analysis.searchLog.push(searchResult.log);
+        });
+    });
+
+    console.log(`\n📊 Dependency Analysis Summary:`);
+    console.log(`  ✅ Found: ${analysis.summary.foundCount}`);
+    console.log(`  ❌ Missing: ${analysis.summary.missingCount}`);
+    
+    return analysis;
+}
+
+// Enhanced dependency search with detailed logging
+searchForDependencyEnhanced(dependency, type, componentName) {
+    const searchResult = {
+        dependency: dependency,
+        type: type,
+        found: false,
+        foundIn: null,
+        matchDetails: {},
+        searchVariants: [],
+        confidence: 0,
+        reason: '',
+        log: `Searching for ${type}: ${dependency}`
+    };
+
+    const depUpper = dependency.toUpperCase();
+    
+    // Generate search variants based on dependency type
+    if (type === 'copyStatements') {
+        searchResult.searchVariants = [
+            depUpper,
+            depUpper + '.CPY',
+            depUpper + '.COPYBOOK',
+            depUpper.replace('.CPY', ''),
+            depUpper.replace('.COPYBOOK', ''),
+            depUpper.replace(/^COPY\s+/, '')
+        ];
+    } else if (type === 'callStatements' || type === 'programIds' || type === 'execStatements') {
+        searchResult.searchVariants = [
+            depUpper,
+            depUpper + '.CBL',
+            depUpper + '.COB',
+            depUpper.replace(/^(CALL|EXEC|PGM=)\s+/, '')
+        ];
+    } else if (type === 'fileReferences') {
+        searchResult.searchVariants = [
+            depUpper,
+            depUpper + '.DAT',
+            depUpper + '.TXT',
+            depUpper.replace(/^(FD|SELECT)\s+/, '')
+        ];
+    } else {
+        searchResult.searchVariants = [depUpper];
+    }
+
+    // Remove duplicates and clean variants
+    searchResult.searchVariants = [...new Set(searchResult.searchVariants.filter(v => v && v.length > 0))];
+
+    // Search through uploaded files
+    for (const file of this.uploadedFiles) {
+        const fileNameUpper = file.name.toUpperCase();
+        const fileBaseName = fileNameUpper.replace(/\.(CPY|COPYBOOK|CBL|COB|JCL|TXT|DAT)$/i, '');
+        const fileContent = file.content.toUpperCase();
+
+        // Check filename matches
+        for (const variant of searchResult.searchVariants) {
+            if (fileNameUpper === variant || 
+                fileBaseName === variant ||
+                fileNameUpper.includes(variant)) {
+                
+                searchResult.found = true;
+                searchResult.foundIn = file.name;
+                searchResult.matchDetails = {
+                    matchType: 'FILENAME',
+                    variant: variant,
+                    exactMatch: fileNameUpper === variant
+                };
+                searchResult.confidence = fileNameUpper === variant ? 1.0 : 0.8;
+                searchResult.log += ` -> Found by filename match: ${variant} in ${file.name}`;
+                return searchResult;
+            }
+        }
+
+        // Check content matches for copybooks
+        if (type === 'copyStatements') {
+            for (const variant of searchResult.searchVariants) {
+                if (fileContent.includes(`01 ${variant}`) ||
+                    fileContent.includes(`01  ${variant}`) ||
+                    fileContent.includes(`   ${variant}`) ||
+                    (file.components && file.components.some(comp => comp.name.toUpperCase() === variant))) {
+                    
+                    searchResult.found = true;
+                    searchResult.foundIn = file.name;
+                    searchResult.matchDetails = {
+                        matchType: 'CONTENT_DEFINITION',
+                        variant: variant,
+                        pattern: `01 ${variant} definition`
+                    };
+                    searchResult.confidence = 0.9;
+                    searchResult.log += ` -> Found by content definition: ${variant} in ${file.name}`;
+                    return searchResult;
+                }
+            }
+        }
+
+        // Check content matches for programs
+        if (type === 'callStatements' || type === 'programIds') {
+            for (const variant of searchResult.searchVariants) {
+                if (fileContent.includes(`PROGRAM-ID. ${variant}`) ||
+                    fileContent.includes(`PROGRAM-ID ${variant}`) ||
+                    (file.components && file.components.some(comp => 
+                        comp.type === 'PROGRAM' && comp.name.toUpperCase() === variant))) {
+                    
+                    searchResult.found = true;
+                    searchResult.foundIn = file.name;
+                    searchResult.matchDetails = {
+                        matchType: 'PROGRAM_ID',
+                        variant: variant,
+                        pattern: `PROGRAM-ID ${variant}`
+                    };
+                    searchResult.confidence = 0.95;
+                    searchResult.log += ` -> Found by PROGRAM-ID: ${variant} in ${file.name}`;
+                    return searchResult;
+                }
+            }
+        }
+
+        // Check file references
+        if (type === 'fileReferences') {
+            for (const variant of searchResult.searchVariants) {
+                if (fileContent.includes(`FD ${variant}`) ||
+                    fileContent.includes(`SELECT ${variant}`) ||
+                    (file.components && file.components.some(comp => 
+                        comp.type === 'FILE' && comp.name.toUpperCase() === variant))) {
+                    
+                    searchResult.found = true;
+                    searchResult.foundIn = file.name;
+                    searchResult.matchDetails = {
+                        matchType: 'FILE_DEFINITION',
+                        variant: variant,
+                        pattern: `FD/SELECT ${variant}`
+                    };
+                    searchResult.confidence = 0.85;
+                    searchResult.log += ` -> Found by file definition: ${variant} in ${file.name}`;
+                    return searchResult;
+                }
+            }
+        }
+    }
+
+    // Not found
+    searchResult.reason = `Not found in any uploaded files. Searched variants: ${searchResult.searchVariants.join(', ')}`;
+    searchResult.log += ` -> NOT FOUND (searched ${searchResult.searchVariants.length} variants)`;
+    
+    return searchResult;
+}
+
+// Enhanced field matrix display
+displayFieldMatrix(componentName, results, friendlyName) {
+    const container = document.getElementById('fieldMatrixContent');
+    if (!container) return;
+
+    const fieldAnalysis = results.fieldAnalysis;
+    if (!fieldAnalysis || fieldAnalysis.totalFields === 0) {
+        container.innerHTML = `
+            <div class="analysis-header">
+                <h3 class="analysis-title">📋 Field Matrix: ${friendlyName}</h3>
+                <p class="analysis-meta">No field analysis available for ${friendlyName}.</p>
+            </div>
+            <div class="result-card text-center">
+                <p>No fields found for analysis. This might be because:</p>
+                <ul style="text-align: left; margin: 16px 0; color: #6b7280;">
+                    <li>• Component is not a copybook</li>
+                    <li>• No field definitions found in uploaded files</li>
+                    <li>• File format not recognized as containing field definitions</li>
+                </ul>
+            </div>
+        `;
+        return;
+    }
+
+    let html = `
+        <div class="analysis-header">
+            <h3 class="analysis-title">📋 Field Matrix: ${friendlyName}</h3>
+            <p class="analysis-meta">
+                Comprehensive field analysis for ${friendlyName} - ${fieldAnalysis.totalFields} fields analyzed
+            </p>
+        </div>
+
+        <!-- Field Statistics -->
+        <div class="metrics-grid" style="margin-bottom: 24px;">
+            <div class="metric-card">
+                <div class="metric-value">${fieldAnalysis.totalFields}</div>
+                <div class="metric-label">Total Fields</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">${fieldAnalysis.fieldCategories.input.length}</div>
+                <div class="metric-label">Input Fields</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">${fieldAnalysis.fieldCategories.calculated.length}</div>
+                <div class="metric-label">Calculated Fields</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">${fieldAnalysis.fieldCategories.unused.length}</div>
+                <div class="metric-label">Unused Fields</div>
+            </div>
+        </div>
+
+        <!-- Field Categories -->
+        <div class="result-card">
+            <h4>📊 Field Categorization</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 16px;">
+                ${this.renderFieldCategory('Input Fields', fieldAnalysis.fieldCategories.input, '#10b981', '📥')}
+                ${this.renderFieldCategory('Output Fields', fieldAnalysis.fieldCategories.output, '#3b82f6', '📤')}
+                ${this.renderFieldCategory('Calculated Fields', fieldAnalysis.fieldCategories.calculated, '#f59e0b', '🧮')}
+                ${this.renderFieldCategory('Control Fields', fieldAnalysis.fieldCategories.control, '#8b5cf6', '🎛️')}
+                ${this.renderFieldCategory('Static Fields', fieldAnalysis.fieldCategories.static, '#6b7280', '📌')}
+                ${this.renderFieldCategory('Unused Fields', fieldAnalysis.fieldCategories.unused, '#ef4444', '❌')}
+            </div>
+        </div>
+
+        <!-- Detailed Field List -->
+        <div class="result-card">
+            <h4>📋 Detailed Field Analysis</h4>
+            <div style="max-height: 400px; overflow-y: auto; margin-top: 16px;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                    <thead style="background: #f8fafc; position: sticky; top: 0;">
+                        <tr>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Level</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Field Name</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Picture</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Type</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Length</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Usage</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Category</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${fieldAnalysis.fields.map(field => this.renderFieldRow(field, fieldAnalysis.fieldCategories)).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Business Logic -->
+        ${fieldAnalysis.businessLogic.length > 0 ? `
+            <div class="result-card">
+                <h4>🧠 Business Logic Identified</h4>
+                <div style="max-height: 300px; overflow-y: auto; margin-top: 16px;">
+                    ${fieldAnalysis.businessLogic.map(logic => `
+                        <div style="background: #f8fafc; padding: 12px; margin-bottom: 8px; border-radius: 6px; border-left: 4px solid ${this.getLogicColor(logic.type)};">
+                            <div style="font-weight: 600; color: #1f2937; margin-bottom: 4px;">
+                                ${logic.type} - ${logic.complexity} Complexity
+                            </div>
+                            <div style="font-family: monospace; font-size: 11px; background: white; padding: 8px; border-radius: 4px; margin-bottom: 8px;">
+                                ${logic.description}
+                            </div>
+                            <div style="font-size: 10px; color: #6b7280;">
+                                File: ${logic.file} | Line: ${logic.lineNumber} | Fields: ${logic.affectedFields.join(', ') || 'None'}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        ` : ''}
+
+        <!-- Field Statistics Details -->
+        <div class="result-card">
+            <h4>📈 Field Statistics</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-top: 16px;">
+                <div style="background: #f8fafc; padding: 12px; border-radius: 6px;">
+                    <h6 style="color: #1e40af; margin-bottom: 8px;">By Level</h6>
+                    <div style="font-size: 12px;">
+                        Level 01: ${fieldAnalysis.statistics.level01Count}<br>
+                        Level 05: ${fieldAnalysis.statistics.level05Count}<br>
+                        Level 10: ${fieldAnalysis.statistics.level10Count}<br>
+                        Level 15: ${fieldAnalysis.statistics.level15Count}<br>
+                        Other: ${fieldAnalysis.statistics.otherLevels}
+                    </div>
+                </div>
+                <div style="background: #f8fafc; padding: 12px; border-radius: 6px;">
+                    <h6 style="color: #1e40af; margin-bottom: 8px;">By Data Type</h6>
+                    <div style="font-size: 12px;">
+                        Alphanumeric (X): ${fieldAnalysis.statistics.picXCount}<br>
+                        Numeric (9): ${fieldAnalysis.statistics.pic9Count}<br>
+                        Signed (S): ${fieldAnalysis.statistics.picSCount}<br>
+                        Redefines: ${fieldAnalysis.statistics.redefinesCount}<br>
+                        Occurs: ${fieldAnalysis.statistics.occursCount}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    container.innerHTML = html;
+}
+
+// Render field category section
+renderFieldCategory(title, fields, color, icon) {
+    if (fields.length === 0) {
+        return `
+            <div style="background: #f9fafb; padding: 16px; border-radius: 8px; border: 1px solid #e5e7eb;">
+                <h6 style="color: ${color}; margin-bottom: 8px;">${icon} ${title}</h6>
+                <div style="font-size: 12px; color: #9ca3af;">No fields in this category</div>
+            </div>
+        `;
+    }
+
+    return `
+        <div style="background: #f9fafb; padding: 16px; border-radius: 8px; border: 1px solid #e5e7eb;">
+            <h6 style="color: ${color}; margin-bottom: 8px;">${icon} ${title} (${fields.length})</h6>
+            <div style="max-height: 120px; overflow-y: auto;">
+                ${fields.map(field => `
+                    <div style="font-size: 11px; padding: 4px 8px; margin: 2px 0; background: white; border-radius: 4px; border-left: 3px solid ${color};">
+                        ${field}
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+// Render field table row
+renderFieldRow(field, categories) {
+    const category = this.getFieldCategory(field.name, categories);
+    const categoryColor = this.getCategoryColor(category);
+    
+    return `
+        <tr style="border-bottom: 1px solid #f3f4f6;">
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">${field.level}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 600;">${field.name}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-family: monospace;">${field.picture || '-'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">${field.dataType}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">${field.length || '-'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">${field.usage || 'DISPLAY'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">
+                <span style="background: ${categoryColor}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">
+                    ${category}
+                </span>
+            </td>
+        </tr>
+    `;
+}
+
+// Get field category
+getFieldCategory(fieldName, categories) {
+    for (const [categoryName, fields] of Object.entries(categories)) {
+        if (fields.includes(fieldName)) {
+            return categoryName.toUpperCase();
+        }
+    }
+    return 'UNKNOWN';
+}
+
+// Get category color
+getCategoryColor(category) {
+    const colors = {
+        'INPUT': '#10b981',
+        'OUTPUT': '#3b82f6',
+        'CALCULATED': '#f59e0b',
+        'CONTROL': '#8b5cf6',
+        'STATIC': '#6b7280',
+        'UNUSED': '#ef4444',
+        'UNKNOWN': '#9ca3af'
+    };
+    return colors[category] || colors.UNKNOWN;
+}
+
+// Get logic color
+getLogicColor(type) {
+    const colors = {
+        'VALIDATION': '#8b5cf6',
+        'CALCULATION': '#f59e0b',
+        'CONTROL': '#3b82f6',
+        'OTHER': '#6b7280'
+    };
+    return colors[type] || colors.OTHER;
+}
+
+// Extract fields from copybook with detailed parsing
+extractFieldsFromCopybook(file) {
+    console.log(`📋 Extracting fields from copybook: ${file.name}`);
+    
+    const fields = [];
+    const lines = file.content.split('\n');
+    
+    lines.forEach((line, index) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('*')) return; // Skip comments and empty lines
+        
+        // Enhanced field pattern matching
+        const fieldPatterns = [
+            /^\s*(\d+)\s+([A-Z][A-Z0-9\-_]*)\s+(.*)/,  // Level + Name + Rest
+            /^\s*(\d+)\s+([A-Z][A-Z0-9\-_]*)\s*\./     // Level + Name + Period
+        ];
+        
+        for (const pattern of fieldPatterns) {
+            const match = trimmed.match(pattern);
+            if (match) {
+                const level = match[1];
+                const name = match[2];
+                const definition = match[3] || '';
+                
+                const field = {
+                    level: level,
+                    name: name,
+                    definition: definition.trim(),
+                    lineNumber: index + 1,
+                    originalLine: line,
+                    picture: this.extractPictureClause(definition),
+                    value: this.extractValueClause(definition),
+                    occurs: this.extractOccursClause(definition),
+                    redefines: this.extractRedefinesClause(definition),
+                    usage: this.extractUsageClause(definition),
+                    dataType: this.determineDataType(definition),
+                    length: this.calculateFieldLength(definition),
+                    isGroup: level === '01' || (!definition.includes('PIC') && !definition.includes('VALUE')),
+                    isNumeric: this.isNumericField(definition),
+                    isAlphanumeric: this.isAlphanumericField(definition),
+                    isSigned: this.isSignedField(definition),
+                    hasValue: definition.includes('VALUE'),
+                    isRedefines: definition.includes('REDEFINES'),
+                    isOccurs: definition.includes('OCCURS')
+                };
+                
+                fields.push(field);
+                console.log(`  ✅ Found field: ${level} ${name} ${field.picture || ''}`);
+                break;
+            }
+        }
+    });
+    
+    console.log(`📋 Extracted ${fields.length} fields from ${file.name}`);
+    return fields;
+}
+
+// Extract picture clause
+extractPictureClause(definition) {
+    const picMatch = definition.match(/PIC(?:TURE)?\s+([^\s.]+)/i);
+    return picMatch ? picMatch[1] : null;
+}
+
+// Extract value clause
+extractValueClause(definition) {
+    const valueMatch = definition.match(/VALUE\s+(['"][^'"]*['"]|\S+)/i);
+    return valueMatch ? valueMatch[1] : null;
+}
+
+// Extract occurs clause
+extractOccursClause(definition) {
+    const occursMatch = definition.match(/OCCURS\s+(\d+)/i);
+    return occursMatch ? parseInt(occursMatch[1]) : null;
+}
+
+// Extract redefines clause
+extractRedefinesClause(definition) {
+    const redefinesMatch = definition.match(/REDEFINES\s+([A-Z][A-Z0-9\-_]*)/i);
+    return redefinesMatch ? redefinesMatch[1] : null;
+}
+
+// Extract usage clause
+extractUsageClause(definition) {
+    const usageMatch = definition.match(/USAGE\s+(COMP|COMP-3|DISPLAY|BINARY|PACKED-DECIMAL)/i);
+    return usageMatch ? usageMatch[1] : 'DISPLAY';
+}
+
+// Determine data type
+determineDataType(definition) {
+    if (definition.includes('PIC')) {
+        const pic = this.extractPictureClause(definition);
+        if (pic) {
+            if (pic.includes('9')) return 'NUMERIC';
+            if (pic.includes('X')) return 'ALPHANUMERIC';
+            if (pic.includes('S')) return 'SIGNED_NUMERIC';
+        }
+    }
+    if (definition.includes('COMP')) return 'COMPUTATIONAL';
+    return 'GROUP';
+}
+
+// Calculate field length
+calculateFieldLength(definition) {
+    const pic = this.extractPictureClause(definition);
+    if (!pic) return 0;
+    
+    let length = 0;
+    const lengthMatch = pic.match(/[X9S]+|\((\d+)\)/g);
+    if (lengthMatch) {
+        lengthMatch.forEach(match => {
+            if (match.startsWith('(')) {
+                length += parseInt(match.slice(1, -1));
+            } else {
+                length += match.length;
+            }
+        });
+    }
+    
+    return length;
+}
+
+// Check if field is numeric
+isNumericField(definition) {
+    const pic = this.extractPictureClause(definition);
+    return pic && (pic.includes('9') || pic.includes('S'));
+}
+
+// Check if field is alphanumeric
+isAlphanumericField(definition) {
+    const pic = this.extractPictureClause(definition);
+    return pic && pic.includes('X');
+}
+
+// Check if field is signed
+isSignedField(definition) {
+    const pic = this.extractPictureClause(definition);
+    return pic && pic.includes('S');
+}
+
+// Update field statistics
+updateFieldStatistics(field, stats) {
+    // Count by level
+    switch (field.level) {
+        case '01': stats.level01Count++; break;
+        case '05': stats.level05Count++; break;
+        case '10': stats.level10Count++; break;
+        case '15': stats.level15Count++; break;
+        default: stats.otherLevels++; break;
+    }
+    
+    // Count by picture type
+    if (field.picture) {
+        if (field.picture.includes('X')) stats.picXCount++;
+        if (field.picture.includes('9')) stats.pic9Count++;
+        if (field.picture.includes('S')) stats.picSCount++;
+    }
+    
+    // Count special clauses
+    if (field.isRedefines) stats.redefinesCount++;
+    if (field.isOccurs) stats.occursCount++;
+}
+
+// Build field hierarchy
+buildFieldHierarchy(fields) {
+    const hierarchy = [];
+    const stack = [];
+    
+    fields.forEach(field => {
+        const level = parseInt(field.level);
+        
+        // Pop stack until we find a parent level
+        while (stack.length > 0 && stack[stack.length - 1].level >= level) {
+            stack.pop();
+        }
+        
+        // Add parent reference
+        if (stack.length > 0) {
+            field.parent = stack[stack.length - 1].name;
+            if (!stack[stack.length - 1].children) {
+                stack[stack.length - 1].children = [];
+            }
+            stack[stack.length - 1].children.push(field.name);
+        } else {
+            hierarchy.push(field);
+        }
+        
+        // Add to stack
+        stack.push({ name: field.name, level: level });
+    });
+    
+    return hierarchy;
+}
+
+// Enhanced component identification
+identifyComponentDetails(componentName) {
+    console.log(`🔍 Identifying component details for: ${componentName}`);
+    
+    const componentUpper = componentName.toUpperCase();
+    let componentInfo = {
+        name: componentName,
+        normalizedName: componentUpper,
+        searchVariants: [componentUpper],
+        type: 'Unknown',
+        isMainComponent: false,
+        sourceFile: null
+    };
+    
+    // Generate search variants for the component
+    const variants = [
+        componentUpper,
+        componentUpper + '.CPY',
+        componentUpper + '.COPYBOOK',
+        componentUpper.replace('.CPY', ''),
+        componentUpper.replace('.COPYBOOK', '')
+    ];
+    componentInfo.searchVariants = [...new Set(variants)];
+    
+    // Check uploaded files to identify component type
+    for (const file of this.uploadedFiles) {
+        const fileName = file.name.toUpperCase();
+        const fileBaseName = fileName.replace(/\.(CPY|COPYBOOK|CBL|COB|JCL|TXT)$/i, '');
+        
+        // Check if this file contains our component
+        const isMatch = componentInfo.searchVariants.some(variant => 
+            fileName === variant || 
+            fileBaseName === variant ||
+            fileName.includes(variant) ||
+            file.content.toUpperCase().includes(`01 ${variant}`) ||
+            file.content.toUpperCase().includes(`COPY ${variant}`)
+        );
+        
+        if (isMatch) {
+            componentInfo.sourceFile = file;
+            componentInfo.isMainComponent = true;
+            
+            // Determine type based on file and content
+            if (file.type === 'Copybook' || fileName.includes('.CPY') || fileName.includes('.COPYBOOK')) {
+                componentInfo.type = 'Copybook';
+            } else if (file.type === 'COBOL Program' || fileName.includes('.CBL') || fileName.includes('.COB')) {
+                componentInfo.type = 'COBOL Program';
+            } else if (file.type === 'JCL Job' || fileName.includes('.JCL')) {
+                componentInfo.type = 'JCL Job';
+            }
+            
+            console.log(`✅ Component identified: ${componentInfo.type} in ${file.name}`);
+            break;
+        }
+    }
+    
+    return componentInfo;
 }
 
 /* ===================================================================
@@ -3546,55 +4619,54 @@ sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Find relevant files method (if missing or needs update)
-findRelevantFiles(componentName) {
+// Enhanced file finding with better component matching
+findRelevantFiles(componentName, componentInfo) {
     console.log(`🔍 Finding files relevant to component: ${componentName}`);
     
-    const relevantFiles = this.uploadedFiles.filter(file => {
-        const fileName = file.name.toUpperCase();
+    const relevantFiles = [];
+    const addedFiles = new Set();
+    
+    // Always include the main component file if found
+    if (componentInfo.sourceFile && !addedFiles.has(componentInfo.sourceFile.id)) {
+        relevantFiles.push(componentInfo.sourceFile);
+        addedFiles.add(componentInfo.sourceFile.id);
+        console.log(`✅ Added main component file: ${componentInfo.sourceFile.name}`);
+    }
+    
+    // Find files that reference this component
+    this.uploadedFiles.forEach(file => {
+        if (addedFiles.has(file.id)) return;
+        
         const fileContent = file.content.toUpperCase();
-        const componentUpper = componentName.toUpperCase();
         
-        // Check if filename contains component name
-        if (fileName.includes(componentUpper)) {
-            console.log(`✅ File ${file.name} matches by filename`);
-            return true;
-        }
-        
-        // Check if file content contains component name
-        if (fileContent.includes(componentUpper)) {
-            console.log(`✅ File ${file.name} matches by content reference`);
-            return true;
-        }
-        
-        // Check components within the file
-        if (file.components) {
-            const hasMatchingComponent = file.components.some(comp => 
-                comp.name.toUpperCase() === componentUpper ||
-                comp.name.toUpperCase().includes(componentUpper)
-            );
-            
-            if (hasMatchingComponent) {
-                console.log(`✅ File ${file.name} matches by component definition`);
-                return true;
-            }
-        }
-        
-        // Check for copybook references
-        const copyMatches = fileContent.match(/COPY\s+([A-Z][A-Z0-9\-_]+)/g) || [];
-        const hasCopyReference = copyMatches.some(copyStmt => {
-            const copyName = copyStmt.replace('COPY ', '').trim();
-            return copyName === componentUpper || 
-                   copyName === componentUpper + '.CPY' ||
-                   copyName.replace('.CPY', '') === componentUpper;
+        // Check for COPY statements referencing our component
+        const hasReference = componentInfo.searchVariants.some(variant => {
+            return fileContent.includes(`COPY ${variant}`) ||
+                   fileContent.includes(`COPY ${variant}.CPY`) ||
+                   fileContent.includes(`COPY ${variant}.COPYBOOK`) ||
+                   fileContent.includes(`INCLUDE ${variant}`) ||
+                   fileContent.includes(`-INC ${variant}`);
         });
         
-        if (hasCopyReference) {
-            console.log(`✅ File ${file.name} matches by COPY reference`);
-            return true;
+        if (hasReference) {
+            relevantFiles.push(file);
+            addedFiles.add(file.id);
+            console.log(`✅ Added referencing file: ${file.name}`);
         }
         
-        return false;
+        // For copybooks, also include programs that might use fields
+        if (componentInfo.type === 'Copybook') {
+            const hasFieldReference = componentInfo.searchVariants.some(variant => {
+                return fileContent.includes(variant) && 
+                       (fileContent.includes('MOVE') || fileContent.includes('COMPUTE') || fileContent.includes('IF'));
+            });
+            
+            if (hasFieldReference && !addedFiles.has(file.id)) {
+                relevantFiles.push(file);
+                addedFiles.add(file.id);
+                console.log(`✅ Added field-referencing file: ${file.name}`);
+            }
+        }
     });
     
     console.log(`📁 Found ${relevantFiles.length} relevant files for ${componentName}`);
@@ -4165,99 +5237,6 @@ async callLLMForComponentAnalysis(context) {
     }
 }
 
-// Build the detailed prompt for LLM component analysis
-buildComponentAnalysisPrompt(context) {
-    const { component, files, dependencies, dependencyStatus } = context;
-    
-    const prompt = `MAINFRAME COMPONENT ANALYSIS REQUEST
-
-CRITICAL: Respond with valid JSON format only. No markdown, no explanations outside JSON.
-
-COMPONENT DETAILS:
-- Name: ${component.name}
-- Friendly Name: ${component.friendlyName}
-- Type: ${component.type}
-- Files Analyzed: ${files.length}
-
-DEPENDENCIES SUMMARY:
-- Found: ${dependencyStatus.summary.foundCount}
-- Missing: ${dependencyStatus.summary.missingCount}
-- Copy Statements: ${(dependencies.copyStatements || []).join(', ')}
-- Call Statements: ${(dependencies.callStatements || []).join(', ')}
-- File References: ${(dependencies.fileReferences || []).join(', ')}
-
-MISSING DEPENDENCIES:
-${Object.entries(dependencyStatus.missing).map(([type, deps]) => 
-    `${type}: ${deps.join(', ')}`
-).join('\n')}
-
-FILE CONTENTS:
-${files.map(file => `
-=== ${file.name} (${file.type}) ===
-${file.content}
-`).join('\n')}
-
-REQUIRED JSON RESPONSE FORMAT:
-{
-  "componentName": "${component.name}",
-  "friendlyName": "${component.friendlyName}",
-  "componentType": "${component.type}",
-  "analysisScope": "COMPREHENSIVE",
-  "businessPurpose": "string - what this component does in business terms",
-  "technicalSummary": "string - technical overview of the component",
-  "fieldAnalysis": {
-    "totalFields": number,
-    "keyFields": ["field1", "field2"],
-    "calculatedFields": ["field1", "field2"],
-    "fieldCategories": {
-      "input": ["fields that are input"],
-      "output": ["fields that are output"],
-      "calculated": ["fields that are calculated"],
-      "control": ["fields used for control/validation"]
-    }
-  },
-  "businessRules": [
-    {
-      "type": "VALIDATION|CALCULATION|CONTROL",
-      "description": "string",
-      "fields": ["affected fields"],
-      "complexity": "LOW|MEDIUM|HIGH"
-    }
-  ],
-  "dependencies": {
-    "required": ["critical dependencies"],
-    "optional": ["optional dependencies"],
-    "missing": ["missing dependencies that impact functionality"],
-    "riskAssessment": "LOW|MEDIUM|HIGH"
-  },
-  "lifecyclePhases": {
-    "creation": ["programs/processes that create this data"],
-    "processing": ["programs that read/update this data"],
-    "output": ["programs that output/report this data"],
-    "archival": ["programs that archive/purge this data"]
-  },
-  "qualityScore": number between 1-10,
-  "recommendations": [
-    "string - specific actionable recommendations"
-  ],
-  "modernizationOpportunities": [
-    "string - opportunities for modernization"
-  ],
-  "riskFactors": [
-    "string - potential risks or issues identified"
-  ]
-}
-
-INSTRUCTIONS:
-1. Analyze the component thoroughly based on the provided file contents
-2. Focus on business value and technical accuracy
-3. Identify patterns in field usage and data flow
-4. Assess the impact of missing dependencies
-5. Provide actionable recommendations
-6. Respond with valid JSON only - no additional text`;
-
-    return prompt;
-}
 
 // Extract comprehensive dependencies from all relevant files
 extractComprehensiveDependencies(relevantFiles, componentName) {
@@ -4307,22 +5286,7 @@ extractComprehensiveDependencies(relevantFiles, componentName) {
     return allDependencies;
 }
 
-        findRelevantFiles(componentName) {
-            return this.uploadedFiles.filter(file => {
-                if (file.content.toUpperCase().includes(componentName.toUpperCase()) ||
-                    file.name.toUpperCase().includes(componentName.toUpperCase())) {
-                    return true;
-                }
-                
-                if (file.components) {
-                    return file.components.some(comp => 
-                        comp.name.toUpperCase() === componentName.toUpperCase()
-                    );
-                }
-                
-                return false;
-            });
-        }
+       
 
         detectComponentType(componentName, files) {
             for (const file of files) {
@@ -4595,29 +5559,462 @@ extractComprehensiveDependencies(relevantFiles, componentName) {
             container.innerHTML = html;
         }
 
-        displayDependencies(componentName, results, friendlyName) {
-            const container = document.getElementById('dependenciesContent');
-            if (!container) return;
-            
-            let html = `
-                <div class="analysis-header">
-                    <h3 class="analysis-title">🔗 Dependencies: ${friendlyName}</h3>
-                    <p class="analysis-meta">Found vs missing dependencies for ${friendlyName}.</p>
+        /* ===================================================================
+ENHANCED DEPENDENCY DISPLAY METHODS
+Detailed display of found and missing dependencies with search information
+================================================================== */
+
+// Enhanced dependency display with detailed found/missing breakdown
+displayDependencies(componentName, results, friendlyName) {
+    const container = document.getElementById('dependenciesContent');
+    if (!container) return;
+
+    const dependencyAnalysis = results.dependencyAnalysis;
+    if (!dependencyAnalysis) {
+        container.innerHTML = `
+            <div class="analysis-header">
+                <h3 class="analysis-title">🔗 Dependencies: ${friendlyName}</h3>
+                <p class="analysis-meta">No dependency analysis available for ${friendlyName}.</p>
+            </div>
+            <div class="result-card text-center">
+                <p>No dependency analysis performed.</p>
+            </div>
+        `;
+        return;
+    }
+
+    let html = `
+        <div class="analysis-header">
+            <h3 class="analysis-title">🔗 Dependencies: ${friendlyName}</h3>
+            <p class="analysis-meta">
+                Comprehensive dependency analysis for ${friendlyName} - 
+                ${dependencyAnalysis.summary.foundCount} found, ${dependencyAnalysis.summary.missingCount} missing
+            </p>
+        </div>
+
+        <!-- Dependency Summary -->
+        <div class="metrics-grid" style="margin-bottom: 24px;">
+            <div class="metric-card" style="background: #ecfdf5;">
+                <div class="metric-value" style="color: #059669;">${dependencyAnalysis.summary.foundCount}</div>
+                <div class="metric-label">✅ Dependencies Found</div>
+            </div>
+            <div class="metric-card" style="background: #fef2f2;">
+                <div class="metric-value" style="color: #dc2626;">${dependencyAnalysis.summary.missingCount}</div>
+                <div class="metric-label">❌ Dependencies Missing</div>
+            </div>
+            <div class="metric-card" style="background: #fffbeb;">
+                <div class="metric-value" style="color: #d97706;">${Math.round((dependencyAnalysis.summary.foundCount / (dependencyAnalysis.summary.foundCount + dependencyAnalysis.summary.missingCount)) * 100) || 0}%</div>
+                <div class="metric-label">📊 Coverage Ratio</div>
+            </div>
+            <div class="metric-card" style="background: #f0f9ff;">
+                <div class="metric-value" style="color: #0284c7;">${Object.keys(dependencyAnalysis.found).length}</div>
+                <div class="metric-label">📁 Dependency Types</div>
+            </div>
+        </div>
+
+        <!-- Found Dependencies -->
+        ${this.renderFoundDependencies(dependencyAnalysis.found)}
+
+        <!-- Missing Dependencies -->
+        ${this.renderMissingDependencies(dependencyAnalysis.missing)}
+
+        <!-- Dependency Details -->
+        ${this.renderDependencyDetails(dependencyAnalysis.details)}
+    `;
+    
+    container.innerHTML = html;
+}
+
+// Render found dependencies section
+renderFoundDependencies(foundDeps) {
+    const totalFound = Object.values(foundDeps).reduce((sum, deps) => sum + deps.length, 0);
+    
+    if (totalFound === 0) {
+        return `
+            <div class="result-card">
+                <h4>✅ Found Dependencies</h4>
+                <div style="text-align: center; padding: 20px; color: #6b7280;">
+                    No dependencies were found in the uploaded files.
+                </div>
+            </div>
+        `;
+    }
+
+    let html = `
+        <div class="result-card">
+            <h4>✅ Found Dependencies (${totalFound})</h4>
+            <div style="margin-top: 16px;">
+    `;
+
+    Object.entries(foundDeps).forEach(([depType, dependencies]) => {
+        if (dependencies.length > 0) {
+            html += `
+                <div style="margin-bottom: 20px;">
+                    <h5 style="color: #059669; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                        ${this.getDependencyIcon(depType)} ${this.getDependencyLabel(depType)} (${dependencies.length})
+                    </h5>
+                    <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px;">
+                        ${dependencies.map(dep => `
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; margin: 4px 0; background: white; border-radius: 6px; border-left: 4px solid #10b981;">
+                                <div>
+                                    <div style="font-weight: 600; color: #065f46;">${dep.name}</div>
+                                    <div style="font-size: 11px; color: #166534;">
+                                        Found in: <strong>${dep.foundIn}</strong> | 
+                                        Match: ${dep.matchType} | 
+                                        Confidence: ${Math.round(dep.confidence * 100)}%
+                                    </div>
+                                </div>
+                                <div style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: 600;">
+                                    FOUND
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
                 </div>
             `;
-            
-            if (results.dependencyAnalysis) {
-                html += this.displayDependencyAnalysis(results.dependencyAnalysis);
-            } else {
-                html += `
-                    <div class="result-card text-center">
-                        <p style="opacity: 0.8;">Dependency analysis for ${friendlyName} will appear here after component analysis.</p>
-                    </div>
-                `;
-            }
-            
-            container.innerHTML = html;
         }
+    });
+
+    html += `</div></div>`;
+    return html;
+}
+
+// Render missing dependencies section
+renderMissingDependencies(missingDeps) {
+    const totalMissing = Object.values(missingDeps).reduce((sum, deps) => sum + deps.length, 0);
+    
+    if (totalMissing === 0) {
+        return `
+            <div class="result-card">
+                <h4>✅ All Dependencies Found</h4>
+                <div style="text-align: center; padding: 20px; background: #ecfdf5; border-radius: 8px; border: 1px solid #a7f3d0;">
+                    <div style="color: #065f46; font-weight: 600; margin-bottom: 8px;">🎉 Excellent!</div>
+                    <div style="color: #166534;">All required dependencies are available in the uploaded files.</div>
+                </div>
+            </div>
+        `;
+    }
+
+    let html = `
+        <div class="result-card">
+            <h4>❌ Missing Dependencies (${totalMissing})</h4>
+            <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px; margin: 16px 0;">
+                <div style="color: #991b1b; font-weight: 600; margin-bottom: 8px;">⚠️ Impact Assessment</div>
+                <div style="color: #7f1d1d; font-size: 13px;">
+                    Missing dependencies may cause compilation errors or runtime issues. 
+                    Consider uploading the missing files or verifying the dependency names.
+                </div>
+            </div>
+            <div style="margin-top: 16px;">
+    `;
+
+    Object.entries(missingDeps).forEach(([depType, dependencies]) => {
+        if (dependencies.length > 0) {
+            html += `
+                <div style="margin-bottom: 20px;">
+                    <h5 style="color: #dc2626; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                        ${this.getDependencyIcon(depType)} ${this.getDependencyLabel(depType)} (${dependencies.length})
+                    </h5>
+                    <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px;">
+                        ${dependencies.map(dep => `
+                            <div style="padding: 8px 12px; margin: 4px 0; background: white; border-radius: 6px; border-left: 4px solid #ef4444;">
+                                <div style="display: flex; justify-content: between; align-items: center;">
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: 600; color: #991b1b; margin-bottom: 4px;">${dep.name}</div>
+                                        <div style="font-size: 11px; color: #7f1d1d; margin-bottom: 8px;">
+                                            ${dep.reason || 'Not found in uploaded files'}
+                                        </div>
+                                        <div style="font-size: 10px; color: #6b7280;">
+                                            <strong>Searched variants:</strong> ${dep.searchVariants ? dep.searchVariants.join(', ') : 'N/A'}
+                                        </div>
+                                    </div>
+                                    <div style="background: #ef4444; color: white; padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: 600;">
+                                        MISSING
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                        
+                        <!-- Suggestions for missing dependencies -->
+                        <div style="background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px; padding: 8px; margin-top: 8px;">
+                            <div style="font-size: 11px; color: #92400e; font-weight: 600; margin-bottom: 4px;">💡 Suggestions:</div>
+                            <div style="font-size: 10px; color: #a16207;">
+                                ${this.getMissingSuggestions(depType)}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    });
+
+    html += `</div></div>`;
+    return html;
+}
+
+// Render detailed dependency analysis
+renderDependencyDetails(details) {
+    if (!details || Object.keys(details).length === 0) {
+        return '';
+    }
+
+    let html = `
+        <div class="result-card">
+            <h4>🔍 Dependency Search Details</h4>
+            <div style="margin-top: 16px;">
+                <div style="background: #f8fafc; border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+                    <div style="font-size: 12px; color: #374151; line-height: 1.5;">
+                        This section shows detailed search information for each dependency, including 
+                        search variants tried and confidence levels for matches found.
+                    </div>
+                </div>
+    `;
+
+    Object.entries(details).forEach(([depType, dependencies]) => {
+        if (dependencies.length > 0) {
+            html += `
+                <div style="margin-bottom: 20px;">
+                    <h5 style="color: #1e40af; margin-bottom: 12px; cursor: pointer;" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+                        🔽 ${this.getDependencyLabel(depType)} - Search Details (${dependencies.length})
+                    </h5>
+                    <div style="background: #f8fafc; border-radius: 8px; padding: 12px; display: none;">
+                        ${dependencies.map(dep => `
+                            <div style="border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; margin-bottom: 8px; background: white;">
+                                <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 8px;">
+                                    <div style="font-weight: 600; color: #1f2937;">${dep.name}</div>
+                                    <div style="font-size: 10px; padding: 2px 6px; border-radius: 3px; ${dep.found ? 'background: #10b981; color: white;' : 'background: #ef4444; color: white;'}">
+                                        ${dep.found ? 'FOUND' : 'MISSING'}
+                                    </div>
+                                </div>
+                                
+                                ${dep.found ? `
+                                    <div style="background: #ecfdf5; padding: 8px; border-radius: 4px; margin-bottom: 8px;">
+                                        <div style="font-size: 11px; color: #065f46; margin-bottom: 4px;">
+                                            <strong>✅ Found in:</strong> ${dep.foundIn}
+                                        </div>
+                                        <div style="font-size: 11px; color: #065f46; margin-bottom: 4px;">
+                                            <strong>Match Type:</strong> ${dep.matchDetails?.matchType || 'Unknown'}
+                                        </div>
+                                        <div style="font-size: 11px; color: #065f46;">
+                                            <strong>Confidence:</strong> ${Math.round((dep.confidence || 0) * 100)}%
+                                        </div>
+                                    </div>
+                                ` : `
+                                    <div style="background: #fef2f2; padding: 8px; border-radius: 4px; margin-bottom: 8px;">
+                                        <div style="font-size: 11px; color: #991b1b;">
+                                            <strong>❌ Not found in any uploaded files</strong>
+                                        </div>
+                                    </div>
+                                `}
+                                
+                                <div style="background: #f1f5f9; padding: 8px; border-radius: 4px;">
+                                    <div style="font-size: 10px; color: #475569; margin-bottom: 4px;">
+                                        <strong>Search Variants Tried:</strong>
+                                    </div>
+                                    <div style="font-size: 10px; color: #64748b; font-family: monospace;">
+                                        ${dep.searchVariants?.join(', ') || 'None'}
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+    });
+
+    html += `</div></div>`;
+    return html;
+}
+
+// Get dependency type icon
+getDependencyIcon(depType) {
+    const icons = {
+        'copyStatements': '📋',
+        'callStatements': '📞',
+        'execStatements': '⚙️',
+        'fileReferences': '📁',
+        'programIds': '💼',
+        'sqlTables': '🗃️',
+        'jclDatasets': '💾'
+    };
+    return icons[depType] || '📦';
+}
+
+// Get dependency type label
+getDependencyLabel(depType) {
+    const labels = {
+        'copyStatements': 'Copybooks',
+        'callStatements': 'Called Programs',
+        'execStatements': 'Executed Programs',
+        'fileReferences': 'File References',
+        'programIds': 'Program IDs',
+        'sqlTables': 'SQL Tables',
+        'jclDatasets': 'JCL Datasets'
+    };
+    return labels[depType] || depType;
+}
+
+// Get suggestions for missing dependencies
+getMissingSuggestions(depType) {
+    const suggestions = {
+        'copyStatements': '• Upload .cpy or .copybook files • Check if copybook names match exactly • Verify COPY statements in source',
+        'callStatements': '• Upload called program source files • Check program names in CALL statements • Verify program exists in system',
+        'execStatements': '• Upload JCL procedures • Check program names in EXEC statements • Verify executable programs',
+        'fileReferences': '• Upload file definitions • Check FD and SELECT statements • Verify file names and DD statements'
+    };
+    return suggestions[depType] || '• Upload missing dependency files • Verify naming conventions • Check references in source code';
+}
+
+// Enhanced component analysis context building
+buildEnhancedAnalysisContext(componentName, friendlyName, relevantFiles, fieldAnalysis, dependencies, dependencyAnalysis, componentInfo) {
+    const context = {
+        component: {
+            name: componentName,
+            friendlyName: friendlyName,
+            type: componentInfo.type,
+            isMainComponent: componentInfo.isMainComponent,
+            sourceFile: componentInfo.sourceFile?.name
+        },
+        files: relevantFiles.map(file => ({
+            name: file.name,
+            type: file.type,
+            content: file.content.substring(0, 1500), // Limit for token management
+            lines: file.content.split('\n').length
+        })),
+        fieldAnalysis: {
+            totalFields: fieldAnalysis.totalFields,
+            fieldCategories: fieldAnalysis.fieldCategories,
+            statistics: fieldAnalysis.statistics,
+            businessLogicCount: fieldAnalysis.businessLogic.length
+        },
+        dependencies: dependencies,
+        dependencyStatus: {
+            found: dependencyAnalysis.found,
+            missing: dependencyAnalysis.missing,
+            summary: dependencyAnalysis.summary
+        },
+        analysisRequest: {
+            timestamp: new Date().toISOString(),
+            maxTokens: this.maxTokens,
+            analysisScope: 'COMPREHENSIVE_WITH_FIELDS'
+        }
+    };
+
+    return context;
+}
+
+// Enhanced prompt building with field context
+buildComponentAnalysisPrompt(context) {
+    const { component, files, fieldAnalysis, dependencies, dependencyStatus } = context;
+    
+    const prompt = `MAINFRAME COMPONENT ANALYSIS REQUEST
+
+CRITICAL: Respond with valid JSON format only. No markdown, no explanations outside JSON.
+
+COMPONENT DETAILS:
+- Name: ${component.name}
+- Friendly Name: ${component.friendlyName}
+- Type: ${component.type}
+- Source File: ${component.sourceFile || 'Unknown'}
+- Files Analyzed: ${files.length}
+
+FIELD ANALYSIS SUMMARY:
+- Total Fields: ${fieldAnalysis.totalFields}
+- Input Fields: ${fieldAnalysis.fieldCategories.input.length}
+- Output Fields: ${fieldAnalysis.fieldCategories.output.length}
+- Calculated Fields: ${fieldAnalysis.fieldCategories.calculated.length}
+- Static Fields: ${fieldAnalysis.fieldCategories.static.length}
+- Unused Fields: ${fieldAnalysis.fieldCategories.unused.length}
+- Business Logic Rules: ${fieldAnalysis.businessLogicCount}
+
+DEPENDENCIES SUMMARY:
+- Found: ${dependencyStatus.summary.foundCount}
+- Missing: ${dependencyStatus.summary.missingCount}
+- Copy Statements: ${(dependencies.copyStatements || []).join(', ')}
+- Call Statements: ${(dependencies.callStatements || []).join(', ')}
+- File References: ${(dependencies.fileReferences || []).join(', ')}
+
+MISSING DEPENDENCIES IMPACT:
+${Object.entries(dependencyStatus.missing).map(([type, deps]) => 
+    `${type}: ${deps.map(d => d.name).join(', ')}`
+).join('\n')}
+
+FIELD CATEGORIZATION:
+- Input Fields: ${fieldAnalysis.fieldCategories.input.join(', ')}
+- Calculated Fields: ${fieldAnalysis.fieldCategories.calculated.join(', ')}
+- Unused Fields: ${fieldAnalysis.fieldCategories.unused.join(', ')}
+
+FILE CONTENTS:
+${files.map(file => `
+=== ${file.name} (${file.type}) ===
+${file.content}
+`).join('\n')}
+
+REQUIRED JSON RESPONSE FORMAT:
+{
+  "componentName": "${component.name}",
+  "friendlyName": "${component.friendlyName}",
+  "componentType": "${component.type}",
+  "analysisScope": "COMPREHENSIVE_WITH_FIELDS",
+  "businessPurpose": "string - what this component does in business terms",
+  "technicalSummary": "string - technical overview including field usage",
+  "fieldAnalysis": {
+    "totalFields": ${fieldAnalysis.totalFields},
+    "keyFields": ["most important fields identified"],
+    "calculatedFields": ["fields that are computed/derived"],
+    "fieldCategories": {
+      "input": ["fields used as input"],
+      "output": ["fields used as output"],
+      "calculated": ["fields that are calculated"],
+      "control": ["fields used for control/validation"]
+    },
+    "fieldUsagePatterns": "string - description of how fields are used",
+    "dataFlowSummary": "string - how data flows through the fields"
+  },
+  "businessRules": [
+    {
+      "type": "VALIDATION|CALCULATION|CONTROL",
+      "description": "string",
+      "fields": ["affected fields"],
+      "complexity": "LOW|MEDIUM|HIGH"
+    }
+  ],
+  "dependencies": {
+    "required": ["critical dependencies for functionality"],
+    "optional": ["optional dependencies"],
+    "missing": ["missing dependencies that impact functionality"],
+    "riskAssessment": "LOW|MEDIUM|HIGH - based on missing dependencies"
+  },
+  "lifecyclePhases": {
+    "creation": ["programs/processes that create this data"],
+    "processing": ["programs that read/update this data"],
+    "output": ["programs that output/report this data"],
+    "archival": ["programs that archive/purge this data"]
+  },
+  "qualityScore": number between 1-10,
+  "recommendations": [
+    "string - specific actionable recommendations for improvement"
+  ],
+  "modernizationOpportunities": [
+    "string - opportunities for modernization based on field usage"
+  ],
+  "riskFactors": [
+    "string - risks identified from missing dependencies and unused fields"
+  ]
+}
+
+INSTRUCTIONS:
+1. Analyze the component thoroughly based on field analysis and dependencies
+2. Focus on how fields are used in business processes
+3. Assess the impact of missing dependencies on functionality
+4. Identify unused fields and potential cleanup opportunities
+5. Provide specific recommendations based on field usage patterns
+6. Consider the business value of each field category
+7. Respond with valid JSON only - no additional text`;
+
+    return prompt;
+}
 
         displayFileLifecycle(componentName, results, friendlyName) {
             const container = document.getElementById('fileflowContent');
