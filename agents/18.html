@@ -1901,6 +1901,136 @@ initializePanelToggles() {
                 return 'Text File';
             }
         }
+        extractDependenciesFromFile(file) {
+    const dependencies = {
+        copyStatements: [],
+        callStatements: [],
+        execStatements: [],
+        jclDatasets: [],
+        programIds: [],
+        sqlTables: [],
+        fileReferences: []
+    };
+
+    const lines = file.content.split('\n');
+    const fileName = file.name.toUpperCase();
+    
+    lines.forEach((line, lineNum) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // Enhanced COPY statements - handles both .cpy and without extension
+        const copyPatterns = [
+            /COPY\s+(['"]*[A-Z][A-Z0-9\-_]{1,}['"]*)/,           // COPY COPYBOOK-NAME
+            /COPY\s+(['"]*[A-Z][A-Z0-9\-_]{1,}\.CPY['"]*)/,      // COPY COPYBOOK-NAME.CPY  
+            /COPY\s+(['"]*[A-Z][A-Z0-9\-_]{1,}\.COPYBOOK['"]*)/,  // COPY COPYBOOK-NAME.COPYBOOK
+            /INCLUDE\s+(['"]*[A-Z][A-Z0-9\-_]{1,}['"]*)/,        // INCLUDE COPYBOOK-NAME
+            /-INC\s+([A-Z][A-Z0-9\-_]{1,})/                      // -INC COPYBOOK-NAME (JCL style)
+        ];
+        
+        copyPatterns.forEach(pattern => {
+            const copyMatch = trimmed.match(pattern);
+            if (copyMatch) {
+                let copyName = copyMatch[1].replace(/['"]/g, '');
+                
+                // Normalize copybook names - remove extensions for comparison
+                const baseName = copyName.replace(/\.(CPY|COPYBOOK)$/i, '');
+                
+                // Store both with and without extension for flexible matching
+                if (!dependencies.copyStatements.includes(baseName)) {
+                    dependencies.copyStatements.push(baseName);
+                }
+                if (copyName !== baseName && !dependencies.copyStatements.includes(copyName)) {
+                    dependencies.copyStatements.push(copyName);
+                }
+                
+                console.log(`Found COPY statement: ${copyName} (normalized: ${baseName}) at line ${lineNum + 1}`);
+            }
+        });
+
+        // Enhanced CALL statements
+        const callPatterns = [
+            /CALL\s+['"]*([A-Z][A-Z0-9\-_]{1,})['"]*/,           // CALL 'PROGRAM-NAME'
+            /LINK\s+['"]*([A-Z][A-Z0-9\-_]{1,})['"]*/,           // LINK PROGRAM-NAME
+            /XCTL\s+['"]*([A-Z][A-Z0-9\-_]{1,})['"]*/,           // XCTL PROGRAM-NAME
+            /EXEC\s+CICS\s+LINK\s+PROGRAM\(['"]*([A-Z][A-Z0-9\-_]{1,})['"]*\)/, // EXEC CICS LINK
+            /EXEC\s+CICS\s+XCTL\s+PROGRAM\(['"]*([A-Z][A-Z0-9\-_]{1,})['"]*\)/, // EXEC CICS XCTL
+        ];
+        
+        callPatterns.forEach(pattern => {
+            const callMatch = trimmed.match(pattern);
+            if (callMatch && !dependencies.callStatements.includes(callMatch[1])) {
+                dependencies.callStatements.push(callMatch[1]);
+                console.log(`Found CALL statement: ${callMatch[1]} at line ${lineNum + 1}`);
+            }
+        });
+
+        // Enhanced JCL EXEC statements
+        const execPatterns = [
+            /\/\/\w+\s+EXEC\s+PGM=([A-Z][A-Z0-9\-_]{1,})/,      // //STEP EXEC PGM=PROGRAM
+            /\/\/\w+\s+EXEC\s+([A-Z][A-Z0-9\-_]{1,})/,          // //STEP EXEC PROGRAM
+            /EXEC\s+PGM=([A-Z][A-Z0-9\-_]{1,})/,                // EXEC PGM=PROGRAM
+            /EXEC\s+PROC=([A-Z][A-Z0-9\-_]{1,})/                // EXEC PROC=PROCEDURE
+        ];
+        
+        execPatterns.forEach(pattern => {
+            const execMatch = trimmed.match(pattern);
+            if (execMatch && !dependencies.execStatements.includes(execMatch[1])) {
+                dependencies.execStatements.push(execMatch[1]);
+                console.log(`Found EXEC statement: ${execMatch[1]} at line ${lineNum + 1}`);
+            }
+        });
+
+        // PROGRAM-ID extraction
+        const programMatch = trimmed.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]{1,})/);
+        if (programMatch && !dependencies.programIds.includes(programMatch[1])) {
+            dependencies.programIds.push(programMatch[1]);
+            console.log(`Found PROGRAM-ID: ${programMatch[1]} at line ${lineNum + 1}`);
+        }
+
+        // Enhanced file references
+        const filePatterns = [
+            /FD\s+([A-Z][A-Z0-9\-_]{1,})/,                      // FD FILE-NAME
+            /SELECT\s+([A-Z][A-Z0-9\-_]{1,})\s+ASSIGN/,         // SELECT FILE-NAME ASSIGN
+            /OPEN\s+(?:INPUT|OUTPUT|I-O)\s+([A-Z][A-Z0-9\-_]{1,})/, // OPEN INPUT FILE-NAME
+            /READ\s+([A-Z][A-Z0-9\-_]{1,})/,                    // READ FILE-NAME
+            /WRITE\s+([A-Z][A-Z0-9\-_]{1,})/,                   // WRITE FILE-NAME
+            /\/\/([A-Z][A-Z0-9\-_]{1,})\s+DD\s+/                // //FILENAME DD
+        ];
+        
+        filePatterns.forEach(pattern => {
+            const fileMatch = trimmed.match(pattern);
+            if (fileMatch && !dependencies.fileReferences.includes(fileMatch[1])) {
+                dependencies.fileReferences.push(fileMatch[1]);
+                console.log(`Found file reference: ${fileMatch[1]} at line ${lineNum + 1}`);
+            }
+        });
+
+        // SQL table references (if applicable)
+        const sqlPatterns = [
+            /FROM\s+([A-Z][A-Z0-9\-_\.]{1,})/,                  // FROM TABLE-NAME
+            /INSERT\s+INTO\s+([A-Z][A-Z0-9\-_\.]{1,})/,         // INSERT INTO TABLE-NAME
+            /UPDATE\s+([A-Z][A-Z0-9\-_\.]{1,})/,                // UPDATE TABLE-NAME
+            /DELETE\s+FROM\s+([A-Z][A-Z0-9\-_\.]{1,})/          // DELETE FROM TABLE-NAME
+        ];
+        
+        sqlPatterns.forEach(pattern => {
+            const sqlMatch = trimmed.match(pattern);
+            if (sqlMatch && !dependencies.sqlTables.includes(sqlMatch[1])) {
+                dependencies.sqlTables.push(sqlMatch[1]);
+                console.log(`Found SQL table: ${sqlMatch[1]} at line ${lineNum + 1}`);
+            }
+        });
+    });
+
+    console.log(`Dependency extraction complete for ${fileName}:`, {
+        copyStatements: dependencies.copyStatements.length,
+        callStatements: dependencies.callStatements.length,
+        execStatements: dependencies.execStatements.length,
+        fileReferences: dependencies.fileReferences.length
+    });
+
+    return dependencies;
+}
 
         extractComponentsFromFile(content, fileType) {
             const components = [];
@@ -2303,6 +2433,128 @@ async sendChatMessage() {
               input.focus();
           }
       }
+      isDependencyFound(dependency, type, uploadedFiles) {
+    const depUpper = dependency.toUpperCase();
+    
+    // For copybooks, create multiple search variants
+    if (type === 'copyStatements') {
+        const searchVariants = [
+            depUpper,                           // COPYBOOK-NAME
+            depUpper + '.CPY',                  // COPYBOOK-NAME.CPY
+            depUpper + '.COPYBOOK',             // COPYBOOK-NAME.COPYBOOK
+            depUpper.replace('.CPY', ''),       // Remove .CPY if present
+            depUpper.replace('.COPYBOOK', '')   // Remove .COPYBOOK if present
+        ];
+        
+        return uploadedFiles.some(file => {
+            // Check filename variants
+            const fileNameUpper = file.name.toUpperCase();
+            const fileBaseName = fileNameUpper.replace(/\.(CPY|COPYBOOK|TXT)$/i, '');
+            
+            const filenameMatches = searchVariants.some(variant => {
+                return fileNameUpper === variant || 
+                       fileNameUpper === variant + '.CPY' || 
+                       fileNameUpper === variant + '.COPYBOOK' ||
+                       fileBaseName === variant.replace(/\.(CPY|COPYBOOK)$/i, '');
+            });
+            
+            if (filenameMatches) {
+                console.log(`✅ Found copybook dependency: ${dependency} -> ${file.name}`);
+                return true;
+            }
+            
+            // Check components within files
+            if (file.components) {
+                const componentMatch = file.components.some(comp => 
+                    searchVariants.some(variant => comp.name.toUpperCase() === variant)
+                );
+                if (componentMatch) {
+                    console.log(`✅ Found copybook component: ${dependency} in ${file.name}`);
+                    return true;
+                }
+            }
+            
+            return false;
+        });
+    }
+
+    // For programs
+    if (type === 'callStatements' || type === 'programIds' || type === 'execStatements') {
+        return uploadedFiles.some(file => {
+            // Check filename
+            const fileBaseName = file.name.replace(/\.(CBL|COB|TXT)$/i, '').toUpperCase();
+            if (fileBaseName === depUpper) {
+                console.log(`✅ Found program dependency: ${dependency} -> ${file.name}`);
+                return true;
+            }
+            
+            // Check PROGRAM-ID in components
+            if (file.components) {
+                const programMatch = file.components.some(comp => 
+                    comp.type === 'PROGRAM' && comp.name.toUpperCase() === depUpper
+                );
+                if (programMatch) {
+                    console.log(`✅ Found program component: ${dependency} in ${file.name}`);
+                    return true;
+                }
+            }
+            
+            return false;
+        });
+    }
+
+    // For file references
+    if (type === 'fileReferences') {
+        return uploadedFiles.some(file => {
+            const fileBaseName = file.name.replace(/\.[^/.]+$/, "").toUpperCase();
+            if (fileBaseName === depUpper || file.name.toUpperCase().includes(depUpper)) {
+                console.log(`✅ Found file dependency: ${dependency} -> ${file.name}`);
+                return true;
+            }
+            
+            if (file.components) {
+                const fileMatch = file.components.some(comp => 
+                    comp.type === 'FILE' && comp.name.toUpperCase() === depUpper
+                );
+                if (fileMatch) {
+                    console.log(`✅ Found file component: ${dependency} in ${file.name}`);
+                    return true;
+                }
+            }
+            
+            return false;
+        });
+    }
+
+    return false;
+}
+
+updateTokenDisplay(currentTokens) {
+    const tokenInfo = document.getElementById('tokenInfo');
+    const tokenCount = document.getElementById('tokenCount');
+    const tokenFill = document.getElementById('tokenFill');
+    const tokenWarning = document.getElementById('tokenWarning');
+
+    if (!tokenInfo) return;
+
+    tokenInfo.style.display = 'block';
+    tokenCount.textContent = `${currentTokens} / ${this.maxTokens}`;
+    
+    const percentage = (currentTokens / this.maxTokens) * 100;
+    tokenFill.style.width = `${Math.min(percentage, 100)}%`;
+    
+    tokenFill.className = 'token-fill';
+    if (percentage <= 50) {
+        tokenFill.classList.add('safe');
+        tokenWarning.innerHTML = '🟢 Optimal token usage - full analysis available<br><small>Intelligent chunking: OFF</small>';
+    } else if (percentage <= 70) {
+        tokenFill.classList.add('warning');
+        tokenWarning.innerHTML = '🟡 Moderate usage - smart chunking active<br><small>Intelligent chunking: ACTIVE</small>';
+    } else {
+        tokenFill.classList.add('danger');
+        tokenWarning.innerHTML = '🔴 High usage - aggressive optimization active<br><small>Intelligent chunking: AGGRESSIVE</small>';
+    }
+}
 
       async processEnhancedChatQuery(question) {
           const analysisData = this.analysisResults[this.currentAnalyzedComponent];
@@ -3433,14 +3685,196 @@ try {
         }
 
         // Simplified LLM API call - in real implementation, include full LLM integration
-        async callLLMAPI(prompt) {
-            // This is a placeholder - in real implementation, include the full LLM integration
-            return new Promise((resolve) => {
-                setTimeout(() => {
-                    resolve(`This is a simulated LLM response for the enhanced UI. In the full implementation, this would contain the actual LLM analysis based on the prompt: "${prompt.substring(0, 100)}..."`);
-                }, 1000);
-            });
+        async callLLMAPI(prompt, retries = 0) {
+    let resultText = '';
+    
+    try {
+        console.log(`Making LLM API call attempt ${retries + 1}...`);
+        
+        // Intelligent token estimation and chunking
+        const estimatedTokens = this.estimateTokenCount(prompt);
+        console.log(`Estimated tokens: ${estimatedTokens}, Max allowed: ${this.maxTokens}`);
+        
+        let processedPrompt = prompt;
+        
+        // If prompt exceeds token limit, apply intelligent chunking
+        if (estimatedTokens > this.maxTokens * 0.8) {
+            console.log('Applying intelligent chunking...');
+            processedPrompt = await this.applyIntelligentChunking(prompt);
         }
+        
+        const response = await fetch(`${this.vllmEndpoint}/generate`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                prompt: processedPrompt,
+                max_tokens: Math.min(this.maxTokens * 0.8, 4000),
+                temperature: 0.1,
+                top_p: 0.9,
+                stop: [],
+                stream: false,
+                frequency_penalty: 0.1,
+                presence_penalty: 0.0
+            }),
+            signal: AbortSignal.timeout(90000) // 90 second timeout
+        });
+
+        if (!response.ok) {
+            throw new Error(`LLM API request failed: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        console.log('LLM API Response received, keys:', Object.keys(data));
+        
+        // Extract text from various response formats
+        if (data.text) {
+            resultText = data.text.trim();
+        } else if (data.choices && data.choices.length > 0) {
+            if (data.choices[0].text) {
+                resultText = data.choices[0].text.trim();
+            } else if (data.choices[0].message && data.choices[0].message.content) {
+                resultText = data.choices[0].message.content.trim();
+            }
+        } else if (data.generated_text) {
+            resultText = data.generated_text.trim();
+        } else if (data.response) {
+            resultText = data.response.trim();
+        } else if (typeof data === 'string') {
+            resultText = data.trim();
+        }
+
+        if (!resultText) {
+            throw new Error('No valid text content in LLM response');
+        }
+
+        console.log(`LLM response length: ${resultText.length} chars`);
+        
+        // Update token display
+        this.updateTokenDisplay(this.estimateTokenCount(processedPrompt + resultText));
+
+        // Parse the response
+        const parseResult = this.parseJSONResponse(resultText);
+        
+        if (parseResult.success) {
+            console.log('LLM JSON parsing successful');
+            return parseResult.data;
+        } else {
+            console.warn('LLM JSON parsing failed, using fallback');
+            if (parseResult.fallbackData) {
+                parseResult.fallbackData.rawResponse = resultText.substring(0, 1000);
+                parseResult.fallbackData.parseError = parseResult.error;
+                return parseResult.fallbackData;
+            } else {
+                throw new Error(`JSON parsing failed: ${parseResult.error}`);
+            }
+        }
+
+    } catch (error) {
+        console.error(`LLM API call attempt ${retries + 1} failed:`, error);
+        
+        if (retries < 2) {
+            console.log(`Retrying LLM API call (${retries + 1}/2)...`);
+            await this.sleep(2000 * (retries + 1));
+            return this.callLLMAPI(prompt, retries + 1);
+        }
+        
+        return {
+            error: true,
+            message: error.message,
+            fallbackData: this.createComponentFallback(
+                this.currentAnalyzedComponent || 'Unknown',
+                'Unknown',
+                null
+            )
+        };
+    }
+}
+
+async applyIntelligentChunking(prompt) {
+    console.log('Applying intelligent chunking to reduce token usage...');
+    
+    // Split prompt into sections
+    const sections = prompt.split('\n\n');
+    let corePrompt = '';
+    let contextData = '';
+    let instructions = '';
+    
+    // Separate core instructions from context data
+    sections.forEach(section => {
+        if (section.includes('CRITICAL:') || section.includes('REQUIRED JSON') || section.includes('INSTRUCTIONS:')) {
+            instructions += section + '\n\n';
+        } else if (section.includes('CONTENT:') || section.includes('ANALYSIS RESULTS:') || section.includes('LIFECYCLE FLOW:')) {
+            contextData += section + '\n\n';
+        } else {
+            corePrompt += section + '\n\n';
+        }
+    });
+    
+    // Chunk the context data intelligently
+    const maxContextTokens = this.maxTokens * 0.5; // Reserve 50% for context
+    const contextTokenCount = this.estimateTokenCount(contextData);
+    
+    if (contextTokenCount > maxContextTokens) {
+        console.log(`Context too large (${contextTokenCount} tokens), applying smart chunking...`);
+        contextData = this.chunkContextData(contextData, maxContextTokens);
+    }
+    
+    const finalPrompt = instructions + corePrompt + contextData;
+    const finalTokenCount = this.estimateTokenCount(finalPrompt);
+    
+    console.log(`Chunking complete: ${finalTokenCount} tokens (reduced from ${this.estimateTokenCount(prompt)})`);
+    this.updateTokenDisplay(finalTokenCount);
+    
+    return finalPrompt;
+}
+
+chunkContextData(contextData, maxTokens) {
+    const lines = contextData.split('\n');
+    let chunkedData = '';
+    let currentTokens = 0;
+    
+    // Prioritize important lines
+    const priorityPatterns = [
+        /01\s+[A-Z][A-Z0-9\-_]+/,  // COBOL 01-level fields
+        /COPY\s+[A-Z][A-Z0-9\-_]+/, // Copy statements
+        /CALL\s+[A-Z][A-Z0-9\-_]+/, // Call statements
+        /PROGRAM-ID/,                // Program IDs
+        /FD\s+[A-Z]/,               // File definitions
+        /EXEC\s+CICS/               // CICS commands
+    ];
+    
+    // First pass: Add high-priority lines
+    lines.forEach(line => {
+        if (currentTokens < maxTokens * 0.8) {
+            const lineTokens = this.estimateTokenCount(line);
+            const isHighPriority = priorityPatterns.some(pattern => pattern.test(line));
+            
+            if (isHighPriority && (currentTokens + lineTokens < maxTokens)) {
+                chunkedData += line + '\n';
+                currentTokens += lineTokens;
+            }
+        }
+    });
+    
+    // Second pass: Add remaining lines if space allows
+    lines.forEach(line => {
+        if (currentTokens < maxTokens * 0.9) {
+            const lineTokens = this.estimateTokenCount(line);
+            const alreadyIncluded = chunkedData.includes(line);
+            
+            if (!alreadyIncluded && (currentTokens + lineTokens < maxTokens)) {
+                chunkedData += line + '\n';
+                currentTokens += lineTokens;
+            }
+        }
+    });
+    
+    return chunkedData + '\n[Content truncated for token optimization]';
+}
+
+
     }
 
     // ===================================================================
