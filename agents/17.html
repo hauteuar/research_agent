@@ -2448,57 +2448,181 @@ try {
 }
 }
 async processEnhancedChatQuery(question) {
-const analysisData = this.analysisResults[this.currentAnalyzedComponent];
-const friendlyName = this.getFriendlyName(this.currentAnalyzedComponent);
-let context = `MAINFRAME COMPONENT ANALYSIS CHAT
+    const analysisData = this.analysisResults[this.currentAnalyzedComponent];
+    const friendlyName = this.getFriendlyName(this.currentAnalyzedComponent);
+    
+    // Create SMART, focused context based on question
+    let context = this.buildSmartChatContext(question, analysisData, friendlyName);
+    
+    try {
+        const response = await this.callLLMAPI(context);
+        
+        if (typeof response === 'string') {
+            return response;
+        } else if (response.text) {
+            return response.text;
+        } else if (response.content) {
+            return response.content;
+        } else if (response.error) {
+            return this.generateFallbackResponse(question, analysisData);
+        }
+        
+        return 'I can provide information based on the component analysis. What specific aspect would you like to know more about?';
+        
+    } catch (error) {
+        console.error('Chat LLM call failed:', error);
+        return this.generateFallbackResponse(question, analysisData);
+    }
+}
+
+// NEW: Smart context builder that limits token usage
+buildSmartChatContext(question, analysisData, friendlyName) {
+    const questionLower = question.toLowerCase();
+    
+    // Start with essential context
+    let context = `MAINFRAME COMPONENT ANALYSIS CHAT
 COMPONENT: ${this.currentAnalyzedComponent}
 DISPLAY NAME: ${friendlyName}
-COMPONENT TYPE: ${analysisData.componentType}
-ANALYSIS METHOD: ${analysisData.analysisMethod}
-FILES ANALYZED: ${analysisData.filesAnalyzed.join(', ')}
-ANALYSIS RESULTS:
-${JSON.stringify(analysisData.llmAnalysis, null, 2)}
-LIFECYCLE FLOW:
-${JSON.stringify(analysisData.lifecycleFlow, null, 2)}
-DEPENDENCY ANALYSIS:
-${JSON.stringify(analysisData.dependencyAnalysis, null, 2)}
+TYPE: ${analysisData.componentType}
+QUALITY: ${analysisData.qualityScore}/10
+
 USER QUESTION: "${question}"
-Provide a detailed, helpful response based on the analysis data above. Use specific examples and data from the analysis. Format your response with clear sections and bullet points where appropriate.`;
-try {
-    const response = await this.callLLMAPI(context);
-    
-    if (typeof response === 'string') {
-        return response;
-    } else if (response.text) {
-        return response.text;
-    } else if (response.content) {
-        return response.content;
-    } else if (response.error) {
-        return `Based on the available analysis data: ${response.fallbackData?.recommendations?.join('. ') || 'Please check the analysis results for more details.'}`;
+
+`;
+
+    // Add specific context based on question focus
+    if (questionLower.includes('field') || questionLower.includes('update')) {
+        context += this.buildFieldContext(analysisData);
+    } else if (questionLower.includes('program') || questionLower.includes('depend')) {
+        context += this.buildProgramContext(analysisData);
+    } else if (questionLower.includes('lifecycle') || questionLower.includes('flow')) {
+        context += this.buildLifecycleContext(analysisData);
+    } else {
+        // General context - keep it brief
+        context += this.buildGeneralContext(analysisData);
     }
     
-    return 'I can provide information based on the component analysis. What specific aspect would you like to know more about?';
-} catch (error) {
-    console.error('Chat LLM call failed:', error);
+    context += `\nProvide a helpful, specific response based on the analysis data above. Use bullet points and be concise.`;
     
-    // Provide intelligent fallback based on question content
+    // Ensure we stay within token limits
+    const estimatedTokens = this.estimateTokenCount(context);
+    if (estimatedTokens > 2000) { // Conservative limit for chat
+        context = this.truncateContext(context, 2000);
+    }
+    
+    return context;
+}
+
+buildFieldContext(analysisData) {
+    let context = `FIELD ANALYSIS:\n`;
+    
+    if (analysisData.llmAnalysis?.primaryFields) {
+        const fields = analysisData.llmAnalysis.primaryFields.slice(0, 10); // Limit fields
+        context += `Fields (${fields.length} shown):\n`;
+        fields.forEach(field => {
+            context += `- ${field.name}: ${field.businessPurpose || 'Business field'}\n`;
+        });
+    }
+    
+    if (analysisData.lifecycleFlow?.fieldAnalysis) {
+        const fa = analysisData.lifecycleFlow.fieldAnalysis;
+        context += `Field Usage:\n`;
+        context += `- Input Fields: ${fa.inputFields?.length || 0}\n`;
+        context += `- Updated Fields: ${fa.updatedFields?.length || 0}\n`;
+        context += `- Unused Fields: ${fa.unusedFields?.length || 0}\n`;
+    }
+    
+    return context;
+}
+
+buildProgramContext(analysisData) {
+    let context = `PROGRAM DEPENDENCIES:\n`;
+    
+    if (analysisData.dependencyAnalysis?.found?.usingPrograms) {
+        const programs = analysisData.dependencyAnalysis.found.usingPrograms;
+        context += `Programs using this component (${programs.length}):\n`;
+        programs.slice(0, 8).forEach(prog => { // Limit to 8 programs
+            context += `- ${prog.program} (${prog.referenceCount} references)\n`;
+        });
+    }
+    
+    if (analysisData.lifecycleFlow) {
+        const lf = analysisData.lifecycleFlow;
+        context += `Lifecycle:\n`;
+        context += `- Creation: ${lf.creationSources?.length || 0} programs\n`;
+        context += `- Reading: ${lf.inputPrograms?.length || 0} programs\n`;
+        context += `- Updating: ${lf.updatePrograms?.length || 0} programs\n`;
+    }
+    
+    return context;
+}
+
+buildLifecycleContext(analysisData) {
+    let context = `LIFECYCLE FLOW:\n`;
+    
+    if (analysisData.lifecycleFlow) {
+        const lf = analysisData.lifecycleFlow;
+        context += `Pattern: ${lf.usagePattern || 'Unknown'}\n`;
+        context += `Scope: ${lf.scope || 'Standard'}\n`;
+        
+        if (lf.creationSources?.length > 0) {
+            context += `Creation Sources:\n`;
+            lf.creationSources.slice(0, 5).forEach(source => {
+                context += `- ${source.program}: ${source.operation}\n`;
+            });
+        }
+    }
+    
+    return context;
+}
+
+buildGeneralContext(analysisData) {
+    let context = `SUMMARY:\n`;
+    context += `Analysis Method: ${analysisData.analysisMethod}\n`;
+    context += `Files Analyzed: ${analysisData.filesAnalyzed?.length || 0}\n`;
+    
+    if (analysisData.llmAnalysis?.recommendations) {
+        context += `Key Recommendations:\n`;
+        analysisData.llmAnalysis.recommendations.slice(0, 3).forEach(rec => {
+            context += `- ${rec}\n`;
+        });
+    }
+    
+    return context;
+}
+
+truncateContext(context, maxTokens) {
+    const maxChars = maxTokens * this.averageCharsPerToken;
+    if (context.length <= maxChars) {
+        return context;
+    }
+    
+    // Truncate and add note
+    const truncated = context.substring(0, maxChars - 100);
+    return truncated + '\n\n[Context truncated for token limit]';
+}
+
+generateFallbackResponse(question, analysisData) {
     const questionLower = question.toLowerCase();
     
     if (questionLower.includes('field')) {
         const fieldCount = analysisData.llmAnalysis?.totalFields || 0;
         return `Based on the analysis, this component has ${fieldCount} fields. The analysis shows field categorization and usage patterns. Check the Field Matrix tab for detailed field-level information.`;
     } else if (questionLower.includes('program')) {
-        const programCount = analysisData.lifecycleFlow?.inputPrograms?.length || 0;
-        return `The analysis found ${programCount} programs that interact with this component. Check the Dependencies tab for program relationships and the Lifecycle tab for detailed program usage patterns.`;
+        const usingCount = analysisData.dependencyAnalysis?.found?.usingPrograms?.length || 0;
+        return `The analysis found ${usingCount} programs that use this component. Check the Dependencies tab for program relationships and the Lifecycle tab for detailed program usage patterns.`;
     } else if (questionLower.includes('depend')) {
         const foundDeps = analysisData.dependencyAnalysis?.summary?.foundCount || 0;
         const missingDeps = analysisData.dependencyAnalysis?.summary?.missingCount || 0;
         return `Dependency analysis shows ${foundDeps} dependencies found and ${missingDeps} missing. Check the Dependencies tab for the complete dependency mapping.`;
+    } else if (questionLower.includes('update')) {
+        const updateCount = analysisData.lifecycleFlow?.updatePrograms?.length || 0;
+        return `Found ${updateCount} programs that update this component. For field-level update analysis, check the Field Matrix tab.`;
     } else {
-        return `I'm having trouble accessing the LLM server right now. You can find detailed information about ${friendlyName} in the analysis tabs above, or try asking a more specific question about fields, programs, or dependencies.`;
+        return `I'm having trouble accessing the LLM server right now. You can find detailed information about ${this.getFriendlyName(this.currentAnalyzedComponent)} in the analysis tabs above, or try asking a more specific question about fields, programs, or dependencies.`;
     }
 }
-}
+
 addChatMessage(sender, content) {
     const messagesContainer = document.getElementById('chatMessages');
     if (!messagesContainer) return;
@@ -3094,20 +3218,20 @@ lineReferencesComponent(line, componentName) {
 }
 
 determineReferenceType(line, componentName) {
-    const lineTrimmed = line.trim().toUpperCase();
-    
-    if (lineTrimmed.includes('COPY') && lineTrimmed.includes(componentName.toUpperCase())) {
+    if (line.includes('COPY') && line.includes(componentName)) {
         return 'COPY_INCLUDE';
-    } else if (lineTrimmed.includes('CALL') && lineTrimmed.includes(componentName.toUpperCase())) {
+    } else if (line.includes('CALL') && line.includes(componentName)) {
         return 'PROGRAM_CALL';
-    } else if (lineTrimmed.includes('PERFORM') && lineTrimmed.includes(componentName.toUpperCase())) {
+    } else if (line.includes('PERFORM') && line.includes(componentName)) {
         return 'PERFORM_CALL';
-    } else if (lineTrimmed.includes('MOVE') && lineTrimmed.includes(componentName.toUpperCase())) {
+    } else if (line.includes('MOVE') && line.includes(componentName)) {
         return 'DATA_MOVEMENT';
-    } else if (lineTrimmed.includes('IF') && lineTrimmed.includes(componentName.toUpperCase())) {
+    } else if (line.includes('IF') && line.includes(componentName)) {
         return 'CONDITIONAL_REFERENCE';
-    } else if (lineTrimmed.includes('DISPLAY') && lineTrimmed.includes(componentName.toUpperCase())) {
+    } else if (line.includes('DISPLAY') && line.includes(componentName)) {
         return 'OUTPUT_REFERENCE';
+    } else if (line.match(/^\s*\d+\s+/) && line.includes(componentName)) {
+        return 'FIELD_DEFINITION';
     } else {
         return 'FIELD_REFERENCE';
     }
@@ -3335,12 +3459,16 @@ const dependencyAnalysis = await this.extractComprehensiveDependencies(component
 
 // === REAL LLM ANALYSIS WITH INTELLIGENT CHUNKING ===
 async extractRealDependencies(componentName, relevantFiles) {
+    console.log(`🔍 Enhanced dependency analysis for: ${componentName}`);
+    
     const found = {
         copyStatements: [],
         callStatements: [],
         programIds: [],
-        fileReferences: []
+        fileReferences: [],
+        usingPrograms: [] // NEW: Programs that use this component
     };
+    
     const missing = {
         copyStatements: [],
         callStatements: [],
@@ -3348,69 +3476,157 @@ async extractRealDependencies(componentName, relevantFiles) {
         fileReferences: []
     };
 
-    // Extract dependencies from actual file content
+    // Enhanced search patterns for better detection
+    const componentPatterns = [
+        new RegExp(`\\bCOPY\\s+${componentName}\\b`, 'i'),
+        new RegExp(`\\bINCLUDE\\s+${componentName}\\b`, 'i'),
+        new RegExp(`\\b${componentName}\\b(?!\\s*\\.)`, 'i'), // Component name not followed by period
+        new RegExp(`\\b${componentName}\\.`, 'i'), // Qualified references
+        new RegExp(`\\bOF\\s+${componentName}\\b`, 'i'),
+        new RegExp(`\\bIN\\s+${componentName}\\b`, 'i')
+    ];
+
+    console.log(`📁 Analyzing ${this.uploadedFiles.length} uploaded files...`);
+
+    // Search ALL uploaded files for references to this component
+    for (const file of this.uploadedFiles) {
+        const content = file.content.toUpperCase();
+        const lines = content.split('\n');
+        const componentUpper = componentName.toUpperCase();
+        
+        let fileUsesComponent = false;
+        const references = [];
+        
+        lines.forEach((line, index) => {
+            const trimmed = line.trim();
+            
+            // Check for various reference patterns
+            const hasReference = componentPatterns.some(pattern => 
+                pattern.test(line) // Use original line case for regex
+            );
+            
+            if (hasReference || trimmed.includes(componentUpper)) {
+                fileUsesComponent = true;
+                references.push({
+                    line: index + 1,
+                    content: line.trim(),
+                    type: this.determineReferenceType(trimmed, componentUpper)
+                });
+                
+                // Extract specific dependency types
+                const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]+)/);
+                if (copyMatch && copyMatch[1] === componentUpper) {
+                    found.copyStatements.push({
+                        name: copyMatch[1],
+                        file: file.name,
+                        line: index + 1
+                    });
+                }
+                
+                const callMatch = trimmed.match(/CALL\s+['"]*([A-Z][A-Z0-9\-_]+)['"]*/) || 
+                                trimmed.match(/PERFORM\s+([A-Z][A-Z0-9\-_]+)/);
+                if (callMatch && callMatch[1] === componentUpper) {
+                    found.callStatements.push({
+                        name: callMatch[1],
+                        file: file.name,
+                        line: index + 1
+                    });
+                }
+            }
+        });
+        
+        // If this file uses the component, add it to the using programs list
+        if (fileUsesComponent && file.name !== componentName) {
+            found.usingPrograms.push({
+                program: file.name.replace(/\.[^/.]+$/, ""), // Remove extension
+                file: file.name,
+                type: file.type,
+                references: references,
+                referenceCount: references.length
+            });
+            
+            console.log(`✅ Found ${references.length} references in ${file.name}`);
+        }
+    }
+
+    // Enhanced analysis for the component itself
     for (const file of relevantFiles) {
         const content = file.content.toUpperCase();
         const lines = content.split('\n');
         
-        lines.forEach(line => {
+        lines.forEach((line, index) => {
             const trimmed = line.trim();
             
-            // Extract COPY statements
-            const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]+)/);
-            if (copyMatch && !found.copyStatements.includes(copyMatch[1])) {
-                // Check if copybook exists in uploaded files
+            // Look for dependencies OF this component
+            const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]{2,})/);
+            if (copyMatch && copyMatch[1] !== componentName.toUpperCase()) {
+                // Check if this copybook exists in uploaded files
                 const exists = this.uploadedFiles.some(f => 
                     f.name.toUpperCase().includes(copyMatch[1]) || 
-                    f.content.toUpperCase().includes(copyMatch[1])
+                    f.content.toUpperCase().includes(`01 ${copyMatch[1]}`) ||
+                    f.name.replace(/\.[^/.]+$/, "").toUpperCase() === copyMatch[1]
                 );
                 
                 if (exists) {
-                    found.copyStatements.push(copyMatch[1]);
+                    if (!found.copyStatements.some(c => c.name === copyMatch[1])) {
+                        found.copyStatements.push({
+                            name: copyMatch[1],
+                            file: file.name,
+                            line: index + 1
+                        });
+                    }
                 } else {
-                    missing.copyStatements.push(copyMatch[1]);
+                    if (!missing.copyStatements.includes(copyMatch[1])) {
+                        missing.copyStatements.push(copyMatch[1]);
+                    }
                 }
-            }
-            
-            // Extract CALL statements
-            const callMatch = trimmed.match(/CALL\s+['"]*([A-Z][A-Z0-9\-_]+)['"]*/) || 
-                            trimmed.match(/PERFORM\s+([A-Z][A-Z0-9\-_]+)/);
-            if (callMatch && !found.callStatements.includes(callMatch[1])) {
-                found.callStatements.push(callMatch[1]);
-            }
-            
-            // Extract file references
-            const fileMatch = trimmed.match(/FD\s+([A-Z][A-Z0-9\-_]+)/) ||
-                            trimmed.match(/SELECT\s+([A-Z][A-Z0-9\-_]+)/);
-            if (fileMatch && !found.fileReferences.includes(fileMatch[1])) {
-                found.fileReferences.push(fileMatch[1]);
             }
         });
     }
+
+    console.log(`📊 Dependency Analysis Results:`);
+    console.log(`   - Programs using ${componentName}: ${found.usingPrograms.length}`);
+    console.log(`   - Copy statements found: ${found.copyStatements.length}`);
+    console.log(`   - Missing dependencies: ${missing.copyStatements.length}`);
 
     return {
         found: found,
         missing: missing,
         summary: {
-            foundCount: found.copyStatements.length + found.callStatements.length + found.fileReferences.length,
-            missingCount: missing.copyStatements.length + missing.callStatements.length + missing.fileReferences.length
+            foundCount: found.copyStatements.length + found.callStatements.length + 
+                       found.fileReferences.length + found.usingPrograms.length,
+            missingCount: missing.copyStatements.length + missing.callStatements.length + 
+                         missing.fileReferences.length,
+            usingProgramsCount: found.usingPrograms.length
         }
     };
 }
 
 // === INTELLIGENT CHUNKING FOR LLM ANALYSIS ===
 async performRealLLMAnalysis(componentName, componentType, relevantFiles) {
-    // Prepare context from actual files with intelligent chunking
+    // Get dependency analysis first
+    const dependencyAnalysis = await this.extractRealDependencies(componentName, relevantFiles);
+    
+    // Prepare enhanced context with dependency information
     let fileContext = `COMPONENT ANALYSIS REQUEST
 Component: ${componentName}
 Type: ${componentType}
+
+DEPENDENCY ANALYSIS:
+- Programs using this component: ${dependencyAnalysis.found.usingPrograms?.length || 0}
+- Dependencies found: ${dependencyAnalysis.summary.foundCount}
+- Missing dependencies: ${dependencyAnalysis.summary.missingCount}
+
+Programs using ${componentName}:
+${(dependencyAnalysis.found.usingPrograms || []).slice(0, 8).map(prog => 
+    `- ${prog.program} (${prog.referenceCount} references)`
+).join('\n')}
 
 UPLOADED FILE CONTENTS:
 `;
 
     relevantFiles.forEach(file => {
         fileContext += `\n--- FILE: ${file.name} (${file.type}) ---\n`;
-        // Use intelligent chunking to get relevant parts
         const relevantContent = this.intelligentChunkContent(file.content, componentType);
         fileContext += relevantContent;
         fileContext += '\n';
@@ -3419,23 +3635,24 @@ UPLOADED FILE CONTENTS:
     const analysisPrompt = `${fileContext}
 
 ANALYSIS REQUIREMENTS:
-1. Analyze the actual component "${componentName}" found in the uploaded files
+1. Analyze the component "${componentName}" considering its usage in ${dependencyAnalysis.found.usingPrograms?.length || 0} programs
 2. Extract real field information if it's a copybook (01-level fields)
-3. Identify actual program structure if it's a COBOL program
-4. Find real business logic, validations, and calculations
-5. Provide specific recommendations based on the actual code
-
-IMPORTANT: Only analyze what exists in the uploaded files. Do not create fictional data.
+3. Consider the dependency context when making recommendations
+4. Provide specific recommendations based on actual usage patterns
 
 Respond with a JSON object containing:
 {
   "componentName": "${componentName}",
   "componentType": "${componentType}",
-  "analysisScope": "REAL_FILE_ANALYSIS",
+  "analysisScope": "REAL_FILE_ANALYSIS_WITH_DEPENDENCIES",
   "primaryFields": [...real fields found...],
+  "programUsage": {
+    "totalPrograms": ${dependencyAnalysis.found.usingPrograms?.length || 0},
+    "programNames": [${(dependencyAnalysis.found.usingPrograms || []).slice(0, 5).map(p => `"${p.program}"`).join(', ')}]
+  },
   "businessLogic": {...actual logic found...},
-  "recommendations": [...specific to this component...],
-  "qualityScore": <1-10 based on actual code quality>
+  "recommendations": [...specific recommendations considering usage...],
+  "qualityScore": <1-10 based on actual code quality and usage>
 }`;
 
     try {
@@ -3457,9 +3674,33 @@ Respond with a JSON object containing:
         
     } catch (error) {
         console.error('LLM analysis failed:', error);
-        // Return basic analysis based on file content
-        return this.createBasicAnalysis(componentName, componentType, relevantFiles);
+        // Return basic analysis based on file content and dependencies
+        return this.createBasicAnalysisWithDependencies(componentName, componentType, relevantFiles, dependencyAnalysis);
     }
+}
+
+// Helper method to create basic analysis with dependency context
+createBasicAnalysisWithDependencies(componentName, componentType, relevantFiles, dependencyAnalysis) {
+    const analysis = this.createBasicAnalysis(componentName, componentType, relevantFiles);
+    
+    // Enhance with dependency information
+    analysis.programUsage = {
+        totalPrograms: dependencyAnalysis.found.usingPrograms?.length || 0,
+        programNames: (dependencyAnalysis.found.usingPrograms || []).slice(0, 10).map(p => p.program)
+    };
+    
+    // Add dependency-aware recommendations
+    if (dependencyAnalysis.found.usingPrograms?.length > 0) {
+        analysis.recommendations.unshift(
+            `This component is used by ${dependencyAnalysis.found.usingPrograms.length} programs - changes require careful impact analysis`
+        );
+        
+        if (dependencyAnalysis.found.usingPrograms.length > 10) {
+            analysis.recommendations.push('High usage component - consider creating comprehensive test cases before modifications');
+        }
+    }
+    
+    return analysis;
 }
 
 // === INTELLIGENT CONTENT CHUNKING ===
@@ -3969,47 +4210,75 @@ Technical Reference: \`${componentName}\``
 
 // === DISPLAY DEPENDENCY ANALYSIS ===
 displayDependencyAnalysis(dependencyAnalysis) {
-const found = dependencyAnalysis.found || {};
-const missing = dependencyAnalysis.missing || {};
-const summary = dependencyAnalysis.summary || { foundCount: 0, missingCount: 0 };
-return `
-    <div style="background: #eff6ff; padding: 16px; border-radius: 8px; border-left: 4px solid #3b82f6; margin-bottom: 20px;">
-        <h4 style="color: #1e40af; margin-bottom: 12px;">🔗 Dependency Analysis</h4>
-        
-        <!-- Summary -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
-            <div style="text-align: center; background: #f0fdf4; padding: 10px; border-radius: 6px; border: 1px solid #bbf7d0;">
-                <div style="font-size: 1.3rem; font-weight: bold; color: #059669;">${summary.foundCount}</div>
-                <div style="font-size: 11px; color: #064e3b;">✅ Dependencies Found</div>
+    const found = dependencyAnalysis.found || {};
+    const missing = dependencyAnalysis.missing || {};
+    const summary = dependencyAnalysis.summary || { foundCount: 0, missingCount: 0 };
+    
+    return `
+        <div style="background: #eff6ff; padding: 16px; border-radius: 8px; border-left: 4px solid #3b82f6; margin-bottom: 20px;">
+            <h4 style="color: #1e40af; margin-bottom: 12px;">🔗 Enhanced Dependency Analysis</h4>
+            
+            <!-- Summary with Programs Using Component -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 16px;">
+                <div style="text-align: center; background: #f0fdf4; padding: 10px; border-radius: 6px; border: 1px solid #bbf7d0;">
+                    <div style="font-size: 1.3rem; font-weight: bold; color: #059669;">${summary.foundCount}</div>
+                    <div style="font-size: 11px; color: #064e3b;">✅ Total Found</div>
+                </div>
+                <div style="text-align: center; background: #fef2f2; padding: 10px; border-radius: 6px; border: 1px solid #fecaca;">
+                    <div style="font-size: 1.3rem; font-weight: bold; color: #dc2626;">${summary.missingCount}</div>
+                    <div style="font-size: 11px; color: #991b1b;">❌ Missing</div>
+                </div>
+                ${summary.usingProgramsCount ? `
+                    <div style="text-align: center; background: #f3e8ff; padding: 10px; border-radius: 6px; border: 1px solid #d8b4fe;">
+                        <div style="font-size: 1.3rem; font-weight: bold; color: #7c3aed;">${summary.usingProgramsCount}</div>
+                        <div style="font-size: 11px; color: #5b21b6;">🖥️ Using Programs</div>
+                    </div>
+                ` : ''}
             </div>
-            <div style="text-align: center; background: #fef2f2; padding: 10px; border-radius: 6px; border: 1px solid #fecaca;">
-                <div style="font-size: 1.3rem; font-weight: bold; color: #dc2626;">${summary.missingCount}</div>
-                <div style="font-size: 11px; color: #991b1b;">❌ Dependencies Missing</div>
-            </div>
-        </div>
 
-        <!-- Detailed Dependencies -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-            <div style="background: #f0fdf4; padding: 12px; border-radius: 6px; border: 1px solid #bbf7d0;">
-                <div style="font-weight: 600; color: #059669; font-size: 12px; margin-bottom: 8px;">✅ Available Dependencies</div>
-                <div style="font-size: 11px;">
-                    <div><strong>Copybooks:</strong> ${(found.copyStatements || []).join(', ') || 'None'}</div>
-                    <div><strong>Programs:</strong> ${(found.callStatements || []).join(', ') || 'None'}</div>
-                    <div><strong>Files:</strong> ${(found.fileReferences || []).join(', ') || 'None'}</div>
+            <!-- Programs Using This Component -->
+            ${found.usingPrograms && found.usingPrograms.length > 0 ? `
+                <div style="background: #f3e8ff; padding: 12px; border-radius: 6px; border: 1px solid #d8b4fe; margin-bottom: 12px;">
+                    <div style="font-weight: 600; color: #7c3aed; font-size: 12px; margin-bottom: 8px;">🖥️ Programs Using This Component</div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 6px;">
+                        ${found.usingPrograms.slice(0, 6).map(prog => `
+                            <div style="background: rgba(255,255,255,0.6); padding: 6px; border-radius: 4px; font-size: 10px;">
+                                <div style="font-weight: 600; color: #1e40af;">${prog.program}</div>
+                                <div style="color: #6b7280;">${prog.type} • ${prog.referenceCount} refs</div>
+                            </div>
+                        `).join('')}
+                        ${found.usingPrograms.length > 6 ? `
+                            <div style="background: rgba(107, 114, 128, 0.1); padding: 6px; border-radius: 4px; font-size: 10px; text-align: center; color: #6b7280;">
+                                +${found.usingPrograms.length - 6} more programs
+                            </div>
+                        ` : ''}
+                    </div>
                 </div>
-            </div>
-            <div style="background: #fef2f2; padding: 12px; border-radius: 6px; border: 1px solid #fecaca;">
-                <div style="font-weight: 600; color: #dc2626; font-size: 12px; margin-bottom: 8px;">❌ Missing Dependencies</div>
-                <div style="font-size: 11px;">
-                    <div><strong>Copybooks:</strong> ${(missing.copyStatements || []).join(', ') || 'None'}</div>
-                    <div><strong>Programs:</strong> ${(missing.callStatements || []).join(', ') || 'None'}</div>
-                    <div><strong>Files:</strong> ${(missing.fileReferences || []).join(', ') || 'None'}</div>
+            ` : ''}
+
+            <!-- Traditional Dependencies -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div style="background: #f0fdf4; padding: 12px; border-radius: 6px; border: 1px solid #bbf7d0;">
+                    <div style="font-weight: 600; color: #059669; font-size: 12px; margin-bottom: 8px;">✅ Available Dependencies</div>
+                    <div style="font-size: 11px;">
+                        <div><strong>Copybooks:</strong> ${(found.copyStatements || []).map(c => c.name).join(', ') || 'None'}</div>
+                        <div><strong>Programs:</strong> ${(found.callStatements || []).map(c => c.name).join(', ') || 'None'}</div>
+                        <div><strong>Files:</strong> ${(found.fileReferences || []).map(f => f.name).join(', ') || 'None'}</div>
+                    </div>
+                </div>
+                <div style="background: #fef2f2; padding: 12px; border-radius: 6px; border: 1px solid #fecaca;">
+                    <div style="font-weight: 600; color: #dc2626; font-size: 12px; margin-bottom: 8px;">❌ Missing Dependencies</div>
+                    <div style="font-size: 11px;">
+                        <div><strong>Copybooks:</strong> ${(missing.copyStatements || []).join(', ') || 'None'}</div>
+                        <div><strong>Programs:</strong> ${(missing.callStatements || []).join(', ') || 'None'}</div>
+                        <div><strong>Files:</strong> ${(missing.fileReferences || []).join(', ') || 'None'}</div>
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
-`;
+    `;
 }
+
 
 // Continue the EnhancedMainframeAnalyzer class - Display Methods & Export Functionality
 // === DISPLAY LLM RESULTS ===
