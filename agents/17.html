@@ -1998,95 +1998,109 @@ createBasicAnalysis(componentName, componentType, relevantFiles) {
 
 // === ENHANCED FIELD-WISE LIFECYCLE ANALYSIS ===
 async analyzeFieldWiseLifecycle(componentName, relevantFiles) {
+    console.log(`🔍 REAL field-wise lifecycle analysis for: ${componentName}`);
+    
     const fieldLifecycle = {
-        inputFields: [],     // Fields populated from external sources
-        referenceFields: [], // Fields used for lookups/comparisons
-        updatedFields: [],   // Fields modified during processing
-        derivedFields: [],   // Fields calculated from other fields
-        staticFields: [],    // Fields with constant values
-        unusedFields: []     // Fields never referenced
+        inputFields: [],
+        referenceFields: [],
+        updatedFields: [],
+        derivedFields: [],
+        staticFields: [],
+        unusedFields: []
     };
     
-    // Extract all fields from copybook
+    // Get ACTUAL fields from the copybook
     const extractedFields = this.extractCopybookFields(componentName, relevantFiles);
-    const usingPrograms = this.findProgramsUsingCopybook(componentName);
+    console.log(`📋 Analyzing ${extractedFields.length} actual fields`);
     
-    console.log(`Analyzing ${extractedFields.length} fields across ${usingPrograms.length} programs`);
+    // Get programs that use this copybook
+    const usingPrograms = [];
+    for (const file of this.uploadedFiles) {
+        if (file.type === 'COBOL Program' && file.content.toUpperCase().includes(`COPY ${componentName.toUpperCase()}`)) {
+            usingPrograms.push({
+                name: file.name.replace(/\.[^/.]+$/, ""),
+                content: file.content,
+                type: file.type
+            });
+        }
+    }
     
+    console.log(`🖥️ Found ${usingPrograms.length} programs using ${componentName}`);
+    
+    // Analyze each field's usage
     for (const field of extractedFields) {
         const fieldAnalysis = {
             name: field.name,
             level: field.level,
             picture: field.picture,
             usagePatterns: [],
-            sourcePrograms: [],
-            targetPrograms: [],
-            operations: []
+            category: 'UNUSED'
         };
         
-        // Analyze field usage in each program
+        let totalUsages = 0;
+        let isInput = false;
+        let isOutput = false;
+        let isCalculated = false;
+        let isValidated = false;
+        let hasValue = false;
+        
+        // Check if field has a VALUE clause (static)
+        if (field.value && field.value.trim() !== '') {
+            hasValue = true;
+        }
+        
+        // Analyze usage in each program
         for (const program of usingPrograms) {
             const usage = this.analyzeFieldUsageInProgram(field.name, program);
-            
             if (usage.operations.length > 0) {
+                totalUsages += usage.operations.length;
                 fieldAnalysis.usagePatterns.push(usage);
                 
-                // Categorize based on operations
-                const isInput = usage.isInput || usage.isWritten;
-                const isOutput = usage.isDisplayed || usage.isRead;
-                const isCalculated = usage.isCalculated;
-                const isValidated = usage.isValidated;
-                
-                if (isInput && !isOutput) {
-                    fieldAnalysis.category = 'INPUT';
-                } else if (isOutput && !isInput) {
-                    fieldAnalysis.category = 'OUTPUT';
-                } else if (isCalculated) {
-                    fieldAnalysis.category = 'DERIVED';
-                } else if (isValidated) {
-                    fieldAnalysis.category = 'REFERENCE';
-                } else if (field.value) {
-                    fieldAnalysis.category = 'STATIC';
-                } else if (isInput && isOutput) {
-                    fieldAnalysis.category = 'UPDATED';
-                } else {
-                    fieldAnalysis.category = 'UNUSED';
-                }
+                if (usage.isWritten || usage.isInput) isInput = true;
+                if (usage.isRead || usage.isDisplayed) isOutput = true;
+                if (usage.isCalculated) isCalculated = true;
+                if (usage.isValidated) isValidated = true;
             }
         }
         
-        // If no usage found, mark as unused
-        if (fieldAnalysis.usagePatterns.length === 0) {
+        // Categorize field based on usage patterns
+        if (totalUsages === 0) {
             fieldAnalysis.category = 'UNUSED';
+            fieldLifecycle.unusedFields.push(fieldAnalysis);
+        } else if (hasValue) {
+            fieldAnalysis.category = 'STATIC';
+            fieldLifecycle.staticFields.push(fieldAnalysis);
+        } else if (isCalculated) {
+            fieldAnalysis.category = 'DERIVED';
+            fieldLifecycle.derivedFields.push(fieldAnalysis);
+        } else if (isInput && isOutput) {
+            fieldAnalysis.category = 'UPDATED';
+            fieldLifecycle.updatedFields.push(fieldAnalysis);
+        } else if (isInput && !isOutput) {
+            fieldAnalysis.category = 'INPUT';
+            fieldLifecycle.inputFields.push(fieldAnalysis);
+        } else if (isValidated || (!isInput && isOutput)) {
+            fieldAnalysis.category = 'REFERENCE';
+            fieldLifecycle.referenceFields.push(fieldAnalysis);
+        } else {
+            fieldAnalysis.category = 'REFERENCE';
+            fieldLifecycle.referenceFields.push(fieldAnalysis);
         }
         
-        // Add to appropriate category
-        switch (fieldAnalysis.category) {
-            case 'INPUT':
-                fieldLifecycle.inputFields.push(fieldAnalysis);
-                break;
-            case 'REFERENCE':
-                fieldLifecycle.referenceFields.push(fieldAnalysis);
-                break;
-            case 'UPDATED':
-                fieldLifecycle.updatedFields.push(fieldAnalysis);
-                break;
-            case 'DERIVED':
-                fieldLifecycle.derivedFields.push(fieldAnalysis);
-                break;
-            case 'STATIC':
-                fieldLifecycle.staticFields.push(fieldAnalysis);
-                break;
-            case 'UNUSED':
-                fieldLifecycle.unusedFields.push(fieldAnalysis);
-                break;
-            default:
-                fieldLifecycle.referenceFields.push(fieldAnalysis);
-        }
+        console.log(`📊 Field ${field.name}: ${fieldAnalysis.category} (${totalUsages} usages)`);
     }
+    
+    console.log(`📈 Field categorization complete:`);
+    console.log(`   - Input: ${fieldLifecycle.inputFields.length}`);
+    console.log(`   - Reference: ${fieldLifecycle.referenceFields.length}`);
+    console.log(`   - Updated: ${fieldLifecycle.updatedFields.length}`);
+    console.log(`   - Derived: ${fieldLifecycle.derivedFields.length}`);
+    console.log(`   - Static: ${fieldLifecycle.staticFields.length}`);
+    console.log(`   - Unused: ${fieldLifecycle.unusedFields.length}`);
     
     return fieldLifecycle;
 }
+
 
 // === INTELLIGENT CONTENT CHUNKING ===
 intelligentChunkContent(content, componentType) {
@@ -3488,14 +3502,14 @@ const dependencyAnalysis = await this.extractComprehensiveDependencies(component
 
 // === REAL LLM ANALYSIS WITH INTELLIGENT CHUNKING ===
 async extractRealDependencies(componentName, relevantFiles) {
-    console.log(`🔍 FIXED Enhanced dependency analysis for: ${componentName}`);
+    console.log(`🔍 COMPREHENSIVE dependency analysis for: ${componentName}`);
     
     const found = {
         copyStatements: [],
         callStatements: [],
         programIds: [],
         fileReferences: [],
-        usingPrograms: [] // Programs that use this component
+        usingPrograms: []
     };
     
     const missing = {
@@ -3505,83 +3519,80 @@ async extractRealDependencies(componentName, relevantFiles) {
         fileReferences: []
     };
 
-    // FIXED: More comprehensive search patterns
     const componentUpper = componentName.toUpperCase();
-    const componentPattern = new RegExp(`\\b${componentUpper}\\b`, 'i');
+    console.log(`🎯 Searching for component: ${componentUpper}`);
     
-    console.log(`📁 Analyzing ${this.uploadedFiles.length} uploaded files for component: ${componentUpper}`);
-
-    // Search ALL uploaded files for references to this component
+    // COMPREHENSIVE search through ALL files
     for (const file of this.uploadedFiles) {
         const content = file.content;
-        const contentUpper = content.toUpperCase();
         const lines = content.split('\n');
-        
-        let fileUsesComponent = false;
         const references = [];
+        let fileUsesComponent = false;
+        
+        console.log(`📁 Analyzing file: ${file.name} (${file.type})`);
         
         lines.forEach((line, index) => {
-            const lineUpper = line.toUpperCase().trim();
+            const originalLine = line.trim();
+            const lineUpper = originalLine.toUpperCase();
             
-            // FIXED: Check for COPY statements first (most important)
-            const copyMatches = [
-                lineUpper.match(/\bCOPY\s+([A-Z][A-Z0-9\-_]*)/),
-                lineUpper.match(/\bINCLUDE\s+([A-Z][A-Z0-9\-_]*)/),
+            // PRIORITY 1: COPY statements (most important)
+            const copyPatterns = [
+                /\bCOPY\s+([A-Z][A-Z0-9\-_]+)/g,
+                /\bINCLUDE\s+([A-Z][A-Z0-9\-_]+)/g,
+                /\bCOPY\s+([A-Z][A-Z0-9\-_]+)\s*\./g
             ];
             
-            for (const copyMatch of copyMatches) {
-                if (copyMatch && copyMatch[1] === componentUpper) {
-                    console.log(`✅ Found COPY ${componentUpper} in ${file.name} at line ${index + 1}`);
-                    fileUsesComponent = true;
-                    references.push({
-                        line: index + 1,
-                        content: line.trim(),
-                        type: 'COPY_INCLUDE'
-                    });
-                    
-                    found.copyStatements.push({
-                        name: copyMatch[1],
-                        file: file.name,
-                        line: index + 1
-                    });
-                    break; // Found it, no need to check other patterns for this line
+            for (const pattern of copyPatterns) {
+                let match;
+                while ((match = pattern.exec(lineUpper)) !== null) {
+                    if (match[1] === componentUpper) {
+                        console.log(`✅ FOUND COPY ${componentUpper} in ${file.name} at line ${index + 1}: ${originalLine}`);
+                        fileUsesComponent = true;
+                        references.push({
+                            line: index + 1,
+                            content: originalLine,
+                            type: 'COPY_INCLUDE'
+                        });
+                        
+                        found.copyStatements.push({
+                            name: match[1],
+                            file: file.name,
+                            line: index + 1
+                        });
+                    }
                 }
             }
             
-            // FIXED: Check for other references (field usage, calls, etc.)
-            if (!fileUsesComponent && componentPattern.test(lineUpper)) {
-                // Additional patterns for field references
-                const referencePatterns = [
-                    `\\b${componentUpper}\\b(?!\\s*\\.)`, // Component name not followed by period
-                    `\\b${componentUpper}\\.`, // Qualified references (COMPONENT.FIELD)
-                    `\\bOF\\s+${componentUpper}\\b`, // COBOL qualification
-                    `\\bIN\\s+${componentUpper}\\b`,   // COBOL qualification
-                ];
-                
-                const hasReference = referencePatterns.some(pattern => 
-                    new RegExp(pattern, 'i').test(lineUpper)
-                );
-                
-                if (hasReference) {
-                    console.log(`✅ Found reference to ${componentUpper} in ${file.name} at line ${index + 1}`);
-                    fileUsesComponent = true;
-                    references.push({
-                        line: index + 1,
-                        content: line.trim(),
-                        type: this.determineReferenceType(lineUpper, componentUpper)
-                    });
+            // PRIORITY 2: Field references (qualified names)
+            const fieldPatterns = [
+                new RegExp(`\\b([A-Z][A-Z0-9\\-_]*\\s+OF\\s+${componentUpper})\\b`, 'g'),
+                new RegExp(`\\b([A-Z][A-Z0-9\\-_]*\\s+IN\\s+${componentUpper})\\b`, 'g'),
+                new RegExp(`\\b(${componentUpper}\\.[A-Z][A-Z0-9\\-_]*)\\b`, 'g'),
+            ];
+            
+            for (const pattern of fieldPatterns) {
+                let match;
+                while ((match = pattern.exec(lineUpper)) !== null) {
+                    console.log(`✅ FOUND field reference ${match[1]} in ${file.name} at line ${index + 1}`);
+                    if (!fileUsesComponent) {
+                        fileUsesComponent = true;
+                        references.push({
+                            line: index + 1,
+                            content: originalLine,
+                            type: 'FIELD_REFERENCE'
+                        });
+                    }
                 }
             }
             
-            // Check for CALL statements
-            const callMatch = lineUpper.match(/\bCALL\s+['"]*([A-Z][A-Z0-9\-_]+)['"]*/) || 
-                            lineUpper.match(/\bPERFORM\s+([A-Z][A-Z0-9\-_]+)/);
+            // PRIORITY 3: Program calls
+            const callMatch = lineUpper.match(/\b(?:CALL|PERFORM)\s+['"]*([A-Z][A-Z0-9\-_]+)['"]*/) ;
             if (callMatch && callMatch[1] === componentUpper) {
-                console.log(`✅ Found CALL/PERFORM ${componentUpper} in ${file.name} at line ${index + 1}`);
+                console.log(`✅ FOUND CALL/PERFORM ${componentUpper} in ${file.name} at line ${index + 1}`);
                 fileUsesComponent = true;
                 references.push({
                     line: index + 1,
-                    content: line.trim(),
+                    content: originalLine,
                     type: 'PROGRAM_CALL'
                 });
                 
@@ -3593,9 +3604,9 @@ async extractRealDependencies(componentName, relevantFiles) {
             }
         });
         
-        // If this file uses the component, add it to the using programs list
+        // Add to using programs if found any references
         if (fileUsesComponent && !file.name.toUpperCase().includes(componentUpper)) {
-            const programName = file.name.replace(/\.[^/.]+$/, ""); // Remove extension
+            const programName = file.name.replace(/\.[^/.]+$/, "");
             
             found.usingPrograms.push({
                 program: programName,
@@ -3605,167 +3616,266 @@ async extractRealDependencies(componentName, relevantFiles) {
                 referenceCount: references.length
             });
             
-            console.log(`✅ ${file.name} uses ${componentName} with ${references.length} references`);
+            console.log(`✅ CONFIRMED: ${file.name} uses ${componentName} (${references.length} references)`);
         }
     }
 
-    // FIXED: Enhanced analysis for dependencies OF this component
-    for (const file of relevantFiles) {
-        const content = file.content.toUpperCase();
-        const lines = content.split('\n');
-        
-        lines.forEach((line, index) => {
-            const trimmed = line.trim();
-            
-            // Look for COPY statements in the component itself
-            const copyMatch = trimmed.match(/\bCOPY\s+([A-Z][A-Z0-9\-_]{2,})/);
-            if (copyMatch && copyMatch[1] !== componentUpper) {
-                // Check if this dependency exists in uploaded files
-                const exists = this.uploadedFiles.some(f => {
-                    const fileName = f.name.toUpperCase();
-                    const fileContent = f.content.toUpperCase();
-                    
-                    // Check multiple ways the dependency might exist
-                    return fileName.includes(copyMatch[1]) || 
-                           fileName.replace(/\.[^/.]+$/, "").toUpperCase() === copyMatch[1] ||
-                           fileContent.includes(`01 ${copyMatch[1]}`) ||
-                           fileContent.includes(`01  ${copyMatch[1]}`);
-                });
-                
-                if (exists) {
-                    if (!found.copyStatements.some(c => c.name === copyMatch[1])) {
-                        found.copyStatements.push({
-                            name: copyMatch[1],
-                            file: file.name,
-                            line: index + 1
-                        });
-                    }
-                } else {
-                    if (!missing.copyStatements.includes(copyMatch[1])) {
-                        missing.copyStatements.push(copyMatch[1]);
-                    }
-                }
-            }
-        });
-    }
-
-    console.log(`📊 FIXED Dependency Analysis Results for ${componentName}:`);
-    console.log(`   - Programs using this component: ${found.usingPrograms.length}`);
-    console.log(`   - Copy statements found: ${found.copyStatements.length}`);
-    console.log(`   - Missing dependencies: ${missing.copyStatements.length}`);
-    
-    // Debug output
-    if (found.usingPrograms.length === 0) {
-        console.log(`⚠️ No programs found using ${componentName}. Checking uploaded files...`);
-        this.uploadedFiles.forEach(file => {
-            if (file.content.toUpperCase().includes(`COPY ${componentUpper}`)) {
-                console.log(`🔍 Found COPY ${componentUpper} in ${file.name} (might have been missed)`);
-            }
-        });
-    }
+    console.log(`📊 FINAL RESULTS for ${componentName}:`);
+    console.log(`   - Programs using component: ${found.usingPrograms.length}`);
+    console.log(`   - COPY statements: ${found.copyStatements.length}`);
+    console.log(`   - CALL statements: ${found.callStatements.length}`);
 
     return {
         found: found,
         missing: missing,
         summary: {
-            foundCount: found.copyStatements.length + found.callStatements.length + 
-                       found.fileReferences.length + found.usingPrograms.length,
-            missingCount: missing.copyStatements.length + missing.callStatements.length + 
-                         missing.fileReferences.length,
+            foundCount: found.copyStatements.length + found.callStatements.length + found.usingPrograms.length,
+            missingCount: missing.copyStatements.length,
             usingProgramsCount: found.usingPrograms.length
         }
     };
 }
 
 
+
 // === INTELLIGENT CHUNKING FOR LLM ANALYSIS ===
 async performRealLLMAnalysis(componentName, componentType, relevantFiles) {
-    console.log(`🤖 Starting FIXED LLM analysis for: ${componentName}`);
+    console.log(`🤖 ENHANCED LLM analysis for: ${componentName}`);
     
-    // Get FIXED dependency analysis first
+    // Get REAL dependency analysis
     const dependencyAnalysis = await this.extractRealDependencies(componentName, relevantFiles);
     
-    // Prepare enhanced context with REAL dependency information
-    let fileContext = `ENHANCED COMPONENT ANALYSIS REQUEST
+    // Get REAL field data for copybooks
+    let realFields = [];
+    if (componentType === 'Copybook') {
+        realFields = this.extractCopybookFields(componentName, relevantFiles);
+        console.log(`📋 Extracted ${realFields.length} real fields for LLM analysis`);
+    }
+    
+    // Create focused context with REAL data
+    let fileContext = `REAL MAINFRAME COMPONENT ANALYSIS
 Component: ${componentName}
 Type: ${componentType}
 
-REAL DEPENDENCY ANALYSIS RESULTS:
+ACTUAL DEPENDENCY ANALYSIS:
 - Programs using this component: ${dependencyAnalysis.found.usingPrograms?.length || 0}
-- Total dependencies found: ${dependencyAnalysis.summary.foundCount}
-- Missing dependencies: ${dependencyAnalysis.summary.missingCount}
+- ACTUAL programs found: ${(dependencyAnalysis.found.usingPrograms || []).map(p => p.program).join(', ')}
+- Copy statements: ${dependencyAnalysis.found.copyStatements?.length || 0}
 
-PROGRAMS THAT USE ${componentName}:
-${(dependencyAnalysis.found.usingPrograms || []).map(prog => 
-    `- ${prog.program} (${prog.type}) - ${prog.referenceCount} references`
-).join('\n') || 'No programs found using this component'}
-
-COPY STATEMENTS FOUND:
-${(dependencyAnalysis.found.copyStatements || []).map(copy => 
-    `- ${copy.name} in ${copy.file} at line ${copy.line}`
-).join('\n') || 'No COPY statements found'}
-
-UPLOADED FILE CONTENTS:
 `;
 
+    // Add REAL field information for copybooks
+    if (componentType === 'Copybook' && realFields.length > 0) {
+        fileContext += `ACTUAL FIELDS IN COPYBOOK (${realFields.length} fields):
+${realFields.slice(0, 20).map(field => 
+    `- ${field.name} (Level ${field.level}) ${field.picture ? 'PIC ' + field.picture : ''} ${field.value ? 'VALUE ' + field.value : ''}`
+).join('\n')}
+${realFields.length > 20 ? `... and ${realFields.length - 20} more fields` : ''}
+
+`;
+    }
+
+    fileContext += `FILE CONTENTS:
+`;
+
+    // Add relevant file content
     relevantFiles.forEach(file => {
-        fileContext += `\n=== FILE: ${file.name} (${file.type}) ===\n`;
-        const relevantContent = this.intelligentChunkContent(file.content, componentType);
-        fileContext += relevantContent;
-        fileContext += '\n';
+        fileContext += `\n=== ${file.name} ===\n`;
+        fileContext += this.intelligentChunkContent(file.content, componentType);
     });
 
     const analysisPrompt = `${fileContext}
 
-CRITICAL ANALYSIS REQUIREMENTS:
-1. Analyze the component "${componentName}" considering its ACTUAL usage in ${dependencyAnalysis.found.usingPrograms?.length || 0} programs
-2. The dependency analysis shows REAL programs that use this component - include this in your analysis
-3. Extract real field information if it's a copybook (focus on 01-level fields)
-4. Provide recommendations based on the ACTUAL usage patterns shown above
-5. Consider the impact of changes given the number of dependent programs
+CRITICAL: Analyze ONLY the real data provided above.
 
-RESPOND WITH JSON:
+REQUIREMENTS:
+1. For copybooks: Use the ACTUAL ${realFields.length} fields listed above - these are the real field names and levels
+2. For programs: Consider the ${dependencyAnalysis.found.usingPrograms?.length || 0} actual programs that use this component
+3. Provide specific field names from the actual fields listed above
+4. Give realistic recommendations based on actual usage
+
+JSON RESPONSE:
 {
   "componentName": "${componentName}",
   "componentType": "${componentType}",
-  "analysisScope": "REAL_DEPENDENCY_ENHANCED_ANALYSIS",
-  "primaryFields": [...actual fields found in the uploaded files...],
+  "analysisScope": "REAL_DATA_ANALYSIS",
+  "totalFields": ${realFields.length},
+  "primaryFields": [
+    ${realFields.slice(0, 10).map(field => `{
+      "name": "${field.name}",
+      "level": ${field.level},
+      "picture": "${field.picture || ''}",
+      "businessPurpose": "Field from ${componentName} copybook"
+    }`).join(',\n    ')}
+  ],
   "programUsage": {
     "totalPrograms": ${dependencyAnalysis.found.usingPrograms?.length || 0},
-    "programNames": [${(dependencyAnalysis.found.usingPrograms || []).slice(0, 8).map(p => `"${p.program}"`).join(', ')}],
-    "referenceTypes": [...types of references found...]
+    "programNames": [${(dependencyAnalysis.found.usingPrograms || []).slice(0, 8).map(p => `"${p.program}"`).join(', ')}]
   },
-  "dependencyImpact": {
-    "riskLevel": "${dependencyAnalysis.found.usingPrograms?.length > 5 ? 'HIGH' : dependencyAnalysis.found.usingPrograms?.length > 2 ? 'MEDIUM' : 'LOW'}",
-    "impactedPrograms": ${dependencyAnalysis.found.usingPrograms?.length || 0}
-  },
-  "recommendations": [...specific recommendations considering the ${dependencyAnalysis.found.usingPrograms?.length || 0} dependent programs...],
-  "qualityScore": <1-10 based on actual code quality and usage>
+  "recommendations": [
+    "This component is used by ${dependencyAnalysis.found.usingPrograms?.length || 0} programs",
+    "Contains ${realFields.length} actual fields requiring analysis",
+    "Review field usage patterns across dependent programs"
+  ],
+  "qualityScore": ${Math.min(10, Math.max(5, 6 + (dependencyAnalysis.found.usingPrograms?.length || 0)))}
 }`;
 
     try {
         const response = await this.callLLMAPI(analysisPrompt);
         
-        // Try to parse JSON response
         try {
             const jsonMatch = response.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
                 const parsed = JSON.parse(jsonMatch[0]);
-                console.log(`✅ LLM analysis successful for ${componentName}`);
+                console.log(`✅ LLM analysis successful - ${parsed.totalFields} fields, ${parsed.programUsage.totalPrograms} programs`);
                 return parsed;
             }
         } catch (parseError) {
-            console.warn('Failed to parse LLM JSON response, using fallback');
+            console.warn('LLM JSON parse failed, using fallback');
         }
         
-        // Fallback: create structured response from LLM text
-        return this.parseUnstructuredLLMResponse(response, componentName, componentType);
+        // Enhanced fallback with real data
+        return {
+            componentName: componentName,
+            componentType: componentType,
+            analysisScope: "REAL_DATA_FALLBACK",
+            totalFields: realFields.length,
+            primaryFields: realFields.slice(0, 15).map(field => ({
+                name: field.name,
+                level: field.level,
+                picture: field.picture || '',
+                businessPurpose: `Field from ${componentName} copybook`
+            })),
+            programUsage: {
+                totalPrograms: dependencyAnalysis.found.usingPrograms?.length || 0,
+                programNames: (dependencyAnalysis.found.usingPrograms || []).slice(0, 10).map(p => p.program)
+            },
+            recommendations: [
+                `Component has ${realFields.length} actual fields`,
+                `Used by ${dependencyAnalysis.found.usingPrograms?.length || 0} programs`,
+                "Field-level impact analysis recommended",
+                "Review dependent program logic before changes"
+            ],
+            qualityScore: Math.min(10, Math.max(5, 6 + (dependencyAnalysis.found.usingPrograms?.length || 0)))
+        };
         
     } catch (error) {
         console.error('LLM analysis failed:', error);
-        // Return enhanced basic analysis with dependency context
         return this.createBasicAnalysisWithDependencies(componentName, componentType, relevantFiles, dependencyAnalysis);
     }
+}
+
+createComponentFlowDiagram(componentName, dependencyAnalysis, lifecycleFlow) {
+    const usingPrograms = dependencyAnalysis.found?.usingPrograms || [];
+    const friendlyName = this.getFriendlyName(componentName);
+    
+    return `
+        <div style="background: #ffffff; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; margin: 16px 0;">
+            <h4 style="color: #1e40af; margin-bottom: 16px; text-align: center;">🌊 Component Flow Diagram</h4>
+            
+            <!-- Component at Center -->
+            <div style="text-align: center; margin-bottom: 24px;">
+                <div style="
+                    display: inline-block;
+                    background: linear-gradient(135deg, #FFD700, #FFA500);
+                    color: #000;
+                    padding: 16px 24px;
+                    border-radius: 20px;
+                    font-weight: bold;
+                    font-size: 18px;
+                    box-shadow: 0 4px 12px rgba(255, 215, 0, 0.3);
+                    border: 3px solid #FF8C00;
+                ">
+                    📋 ${friendlyName}
+                    <div style="font-size: 12px; margin-top: 4px; opacity: 0.8;">
+                        (${componentName})
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Programs Flow -->
+            ${usingPrograms.length > 0 ? `
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-top: 20px;">
+                    ${usingPrograms.slice(0, 8).map((prog, index) => `
+                        <div style="position: relative;">
+                            <!-- Arrow pointing to component -->
+                            <div style="
+                                position: absolute;
+                                top: 50%;
+                                right: -8px;
+                                width: 0;
+                                height: 0;
+                                border-left: 8px solid #3b82f6;
+                                border-top: 6px solid transparent;
+                                border-bottom: 6px solid transparent;
+                                transform: translateY(-50%);
+                            "></div>
+                            
+                            <!-- Program Box -->
+                            <div style="
+                                background: linear-gradient(135deg, #eff6ff, #dbeafe);
+                                border: 2px solid #3b82f6;
+                                border-radius: 8px;
+                                padding: 12px;
+                                text-align: center;
+                            ">
+                                <div style="font-weight: bold; color: #1e40af; font-size: 14px;">
+                                    💼 ${prog.program}
+                                </div>
+                                <div style="font-size: 11px; color: #64748b; margin-top: 4px;">
+                                    ${prog.type}
+                                </div>
+                                <div style="font-size: 10px; color: #059669; margin-top: 2px;">
+                                    ${prog.referenceCount} references
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                    
+                    ${usingPrograms.length > 8 ? `
+                        <div style="
+                            background: #f8fafc;
+                            border: 2px dashed #94a3b8;
+                            border-radius: 8px;
+                            padding: 12px;
+                            text-align: center;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                        ">
+                            <div style="color: #64748b; font-weight: 600;">
+                                +${usingPrograms.length - 8} more programs
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+                
+                <!-- Flow Summary -->
+                <div style="background: #f0fdf4; padding: 12px; border-radius: 8px; margin-top: 20px; border: 1px solid #bbf7d0;">
+                    <h5 style="color: #059669; margin-bottom: 8px; text-align: center;">📊 Flow Summary</h5>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; text-align: center;">
+                        <div>
+                            <div style="font-size: 1.2rem; font-weight: bold; color: #1e40af;">${usingPrograms.length}</div>
+                            <div style="font-size: 11px; color: #64748b;">Programs Using</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 1.2rem; font-weight: bold; color: #059669;">${usingPrograms.reduce((sum, p) => sum + p.referenceCount, 0)}</div>
+                            <div style="font-size: 11px; color: #64748b;">Total References</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 1.2rem; font-weight: bold; color: #d97706;">${lifecycleFlow?.primaryFields?.length || 0}</div>
+                            <div style="font-size: 11px; color: #64748b;">Fields</div>
+                        </div>
+                    </div>
+                </div>
+            ` : `
+                <div style="text-align: center; padding: 20px; color: #64748b;">
+                    <div style="font-size: 2rem; margin-bottom: 8px;">🔍</div>
+                    <div>No programs currently use this component</div>
+                </div>
+            `}
+        </div>
+    `;
 }
 
 debugDependencyDetection(componentName) {
@@ -3888,39 +3998,59 @@ intelligentChunkContent(content, componentType) {
 // === EXTRACT COPYBOOK FIELDS ===
 extractCopybookFields(componentName, relevantFiles) {
     const fields = [];
+    console.log(`🔍 Extracting fields from copybook: ${componentName}`);
     
     for (const file of relevantFiles) {
+        console.log(`📁 Processing file: ${file.name}`);
         const lines = file.content.split('\n');
         
         lines.forEach((line, index) => {
-            const trimmed = line.trim().toUpperCase();
-            // Match COBOL field definitions (level number + field name)
-            const fieldMatch = trimmed.match(/^\s*(\d+)\s+([A-Z][A-Z0-9\-_]+)(?:\s+PIC\s+([X9\(\)V]+))?(?:\s+VALUE\s+(.+))?/);
+            const originalLine = line.trim();
+            const trimmed = originalLine.toUpperCase();
             
-            if (fieldMatch) {
-                const level = parseInt(fieldMatch[1]);
-                const name = fieldMatch[2];
-                const picture = fieldMatch[3] || '';
-                const value = fieldMatch[4] || '';
+            // FIXED: Better COBOL field detection patterns
+            const fieldPatterns = [
+                // Standard: 05 FIELD-NAME PIC X(10)
+                /^\s*(\d+)\s+([A-Z][A-Z0-9\-_]+)(?:\s+PIC\s+([X9\(\)V\-S\+]+))?(?:\s+VALUE\s+(.+?))?\.?\s*$/,
+                // With REDEFINES: 05 FIELD-NAME REDEFINES OTHER-FIELD
+                /^\s*(\d+)\s+([A-Z][A-Z0-9\-_]+)\s+REDEFINES\s+([A-Z][A-Z0-9\-_]+)(?:\s+PIC\s+([X9\(\)V\-S\+]+))?\.?\s*$/,
+                // With OCCURS: 05 FIELD-NAME OCCURS 10 TIMES
+                /^\s*(\d+)\s+([A-Z][A-Z0-9\-_]+)\s+OCCURS\s+(\d+)\s+TIMES(?:\s+PIC\s+([X9\(\)V\-S\+]+))?\.?\s*$/,
+            ];
+            
+            for (const pattern of fieldPatterns) {
+                const fieldMatch = trimmed.match(pattern);
                 
-                // Only include reasonable field levels (01-88)
-                if (level >= 1 && level <= 88) {
-                    fields.push({
-                        name: name,
-                        level: level,
-                        picture: picture,
-                        value: value,
-                        lineNumber: index + 1,
-                        file: file.name,
-                        isElementaryField: level > 1 && !picture.includes('OCCURS')
-                    });
+                if (fieldMatch) {
+                    const level = parseInt(fieldMatch[1]);
+                    const name = fieldMatch[2];
+                    
+                    // Only include reasonable field levels and exclude FILLER
+                    if (level >= 1 && level <= 88 && name !== 'FILLER') {
+                        const field = {
+                            name: name,
+                            level: level,
+                            picture: fieldMatch[3] || fieldMatch[4] || '',
+                            value: fieldMatch[4] || fieldMatch[5] || '',
+                            lineNumber: index + 1,
+                            file: file.name,
+                            originalLine: originalLine,
+                            isElementaryField: level > 1 && (fieldMatch[3] || fieldMatch[4])
+                        };
+                        
+                        fields.push(field);
+                        console.log(`✅ Found field: ${name} (Level ${level}) at line ${index + 1}`);
+                        break; // Found match, don't check other patterns
+                    }
                 }
             }
         });
     }
     
+    console.log(`📊 Total fields extracted: ${fields.length}`);
     return fields;
 }
+
 
 // === FIND PROGRAMS USING COPYBOOK ===
 findProgramsUsingCopybook(componentName) {
@@ -4252,13 +4382,15 @@ displayMainAnalysis(componentName, results) {
         <div style="margin-bottom: 20px;">
             <h3 style="color: #1e40af; margin-bottom: 8px;">🤖 Analysis: ${friendlyName}</h3>
             <div style="font-size: 13px; color: #64748b; margin-bottom: 16px;">
-                <strong>Technical Name:</strong> <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">${componentName}</code> • 
-                <strong>Type:</strong> ${results.componentType} • 
-                <strong>Method:</strong> ${results.analysisMethod} • 
-                <strong>Files:</strong> ${results.filesAnalyzed.length} • 
-                <strong>Completed:</strong> ${new Date(results.timestamp).toLocaleString()}
+                <strong>Technical Name:</strong> <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">${componentName}</code> •
+                <strong>Type:</strong> ${results.componentType} •
+                <strong>Fields:</strong> ${results.llmAnalysis?.totalFields || 0} •
+                <strong>Programs:</strong> ${results.dependencyAnalysis?.summary?.usingProgramsCount || 0}
             </div>
         </div>
+        
+        <!-- FLOW DIAGRAM -->
+        ${this.createComponentFlowDiagram(componentName, results.dependencyAnalysis, results.lifecycleFlow)}
         
         <!-- Quality Metrics -->
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px;">
@@ -4267,31 +4399,27 @@ displayMainAnalysis(componentName, results) {
                 <div style="font-size: 11px; color: #064e3b;">Analysis Quality</div>
             </div>
             <div style="background: #eff6ff; padding: 12px; border-radius: 8px; text-align: center; border-left: 4px solid #3b82f6;">
-                <div style="font-size: 1.4rem; font-weight: bold; color: #1d4ed8;">${results.completeness.score}%</div>
-                <div style="font-size: 11px; color: #1e3a8a;">Completeness</div>
+                <div style="font-size: 1.4rem; font-weight: bold; color: #1d4ed8;">${results.llmAnalysis?.totalFields || 0}</div>
+                <div style="font-size: 11px; color: #1e3a8a;">Total Fields</div>
             </div>
             <div style="background: #fef3c7; padding: 12px; border-radius: 8px; text-align: center; border-left: 4px solid #f59e0b;">
-                <div style="font-size: 1.4rem; font-weight: bold; color: #d97706;">${results.filesAnalyzed.length}</div>
-                <div style="font-size: 11px; color: #92400e;">Files Analyzed</div>
+                <div style="font-size: 1.4rem; font-weight: bold; color: #d97706;">${results.dependencyAnalysis?.summary?.usingProgramsCount || 0}</div>
+                <div style="font-size: 11px; color: #92400e;">Using Programs</div>
             </div>
             <div style="background: #f3e8ff; padding: 12px; border-radius: 8px; text-align: center; border-left: 4px solid #8b5cf6;">
-                <div style="font-size: 1.2rem; font-weight: bold; color: #7c3aed;">${results.lifecycleFlow ? results.lifecycleFlow.scope : 'N/A'}</div>
-                <div style="font-size: 11px; color: #5b21b6;">Analysis Scope</div>
+                <div style="font-size: 1.2rem; font-weight: bold; color: #7c3aed;">${results.filesAnalyzed.length}</div>
+                <div style="font-size: 11px; color: #5b21b6;">Files Analyzed</div>
             </div>
         </div>
     `;
 
-    // Display dependency analysis
+    // Display rest of analysis
     if (results.dependencyAnalysis) {
         html += this.displayDependencyAnalysis(results.dependencyAnalysis);
     }
-
-    // Display LLM analysis results
     if (results.llmAnalysis) {
         html += this.displayLLMResults(results.llmAnalysis, results.componentType);
     }
-
-    // Display lifecycle flow summary
     if (results.lifecycleFlow) {
         html += this.displayLifecycleFlowSummary(results.lifecycleFlow);
     }
