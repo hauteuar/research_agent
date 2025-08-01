@@ -1679,10 +1679,7 @@ initializePanelToggles() {
             this.showSuccess('🚀 Enhanced Mainframe Analyzer Ready with New UI!');
         }
 
-        estimateTokenCount(text) {
-            if (!text) return 0;
-            return Math.ceil(text.length / this.averageCharsPerToken);
-        }
+        
 
         updateTokenDisplay(currentTokens) {
             const tokenInfo = document.getElementById('tokenInfo');
@@ -3477,7 +3474,9 @@ displayFieldMatrix(componentName, results, friendlyName) {
     console.log('LLM field analysis:', llmFieldAnalysis);
 
     // Merge field analysis data
-    const mergedFieldData = this.mergeFieldAnalysisData(fieldAnalysis, llmFieldAnalysis);
+    const componentSpecificFields = this.filterFieldsForComponent(componentName, fieldAnalysis);
+    const mergedFieldData = this.mergeFieldAnalysisData(componentSpecificFields, llmFieldAnalysis);
+    //const mergedFieldData = this.mergeFieldAnalysisData(fieldAnalysis, llmFieldAnalysis);
     
     if (!mergedFieldData || mergedFieldData.totalFields === 0) {
         container.innerHTML = `
@@ -4148,6 +4147,66 @@ getLogicColor(type) {
     return colors[type] || colors.OTHER;
 }
 
+filterFieldsForComponent(componentName, fieldAnalysis) {
+    console.log(`🔍 Filtering fields for component: ${componentName}`);
+    
+    if (!fieldAnalysis || !fieldAnalysis.fields) {
+        console.log('⚠️ No field analysis data to filter');
+        return fieldAnalysis;
+    }
+    
+    // Find the source file for this component
+    const componentInfo = this.identifyComponentDetails(componentName);
+    const sourceFileName = componentInfo?.sourceFile?.name;
+    
+    if (!sourceFileName) {
+        console.log('⚠️ No source file identified for component, showing all fields');
+        return fieldAnalysis;
+    }
+    
+    console.log(`📁 Source file identified: ${sourceFileName}`);
+    
+    // Filter fields to only those from the component's source file
+    const componentFields = fieldAnalysis.fields.filter(field => {
+        // Check if field belongs to the component's source file
+        return field.sourceFile === sourceFileName || 
+               field.file === sourceFileName ||
+               (field.originalLine && field.originalLine.includes(componentName));
+    });
+    
+    // Also filter field categories
+    const filteredCategories = {};
+    Object.keys(fieldAnalysis.fieldCategories || {}).forEach(category => {
+        filteredCategories[category] = (fieldAnalysis.fieldCategories[category] || [])
+            .filter(fieldName => 
+                componentFields.some(field => field.name === fieldName)
+            );
+    });
+    
+    // Filter field usage to only component-specific fields
+    const filteredFieldUsage = {};
+    Object.keys(fieldAnalysis.fieldUsage || {}).forEach(fieldName => {
+        if (componentFields.some(field => field.name === fieldName)) {
+            filteredFieldUsage[fieldName] = fieldAnalysis.fieldUsage[fieldName];
+        }
+    });
+    
+    const filtered = {
+        ...fieldAnalysis,
+        fields: componentFields,
+        totalFields: componentFields.length,
+        fieldCategories: filteredCategories,
+        fieldUsage: filteredFieldUsage,
+        filteredForComponent: componentName,
+        originalTotalFields: fieldAnalysis.totalFields
+    };
+    
+    console.log(`✅ Field filtering complete: ${componentFields.length}/${fieldAnalysis.totalFields} fields for ${componentName}`);
+    
+    return filtered;
+}
+
+
 // Extract fields from copybook with detailed parsing
 extractFieldsFromCopybook(file) {
     console.log(`📋 Extracting fields from copybook: ${file.name}`);
@@ -4157,12 +4216,12 @@ extractFieldsFromCopybook(file) {
     
     lines.forEach((line, index) => {
         const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('*')) return; // Skip comments and empty lines
+        if (!trimmed || trimmed.startsWith('*')) return;
         
         // Enhanced field pattern matching
         const fieldPatterns = [
-            /^\s*(\d+)\s+([A-Z][A-Z0-9\-_]*)\s+(.*)/,  // Level + Name + Rest
-            /^\s*(\d+)\s+([A-Z][A-Z0-9\-_]*)\s*\./     // Level + Name + Period
+            /^\s*(\d+)\s+([A-Z][A-Z0-9\-_]*)\s+(.*)/,
+            /^\s*(\d+)\s+([A-Z][A-Z0-9\-_]*)\s*\./
         ];
         
         for (const pattern of fieldPatterns) {
@@ -4178,6 +4237,8 @@ extractFieldsFromCopybook(file) {
                     definition: definition.trim(),
                     lineNumber: index + 1,
                     originalLine: line,
+                    sourceFile: file.name,        // CRITICAL: Track source file
+                    sourceFileId: file.id,        // CRITICAL: Track source file ID
                     picture: this.extractPictureClause(definition),
                     value: this.extractValueClause(definition),
                     occurs: this.extractOccursClause(definition),
@@ -4195,7 +4256,7 @@ extractFieldsFromCopybook(file) {
                 };
                 
                 fields.push(field);
-                console.log(`  ✅ Found field: ${level} ${name} ${field.picture || ''}`);
+                console.log(`  ✅ Found field: ${level} ${name} ${field.picture || ''} (from ${file.name})`);
                 break;
             }
         }
@@ -4204,6 +4265,7 @@ extractFieldsFromCopybook(file) {
     console.log(`📋 Extracted ${fields.length} fields from ${file.name}`);
     return fields;
 }
+
 
 // Extract picture clause
 extractPictureClause(definition) {
@@ -5048,71 +5110,6 @@ isDependencyFound(dependency, type, uploadedFiles) {
     return false;
 }
 
-// Create basic fallback for complete failure scenarios
-createBasicFallback() {
-    return {
-        componentName: 'Unknown',
-        friendlyName: 'Unknown Component',
-        componentType: 'Unknown',
-        analysisScope: 'FAILED',
-        businessPurpose: 'Analysis failed - unable to determine business purpose',
-        technicalSummary: 'Technical analysis failed',
-        qualityScore: 1,
-        recommendations: [
-            'Check LLM server configuration',
-            'Verify file content and format',
-            'Consider manual analysis',
-            'Review token limits and chunking settings'
-        ],
-        fieldAnalysis: {
-            totalFields: 0,
-            keyFields: [],
-            fieldCategories: { input: [], output: [], calculated: [], control: [] }
-        },
-        businessRules: [],
-        dependencies: {
-            required: [],
-            optional: [],
-            missing: [],
-            riskAssessment: 'UNKNOWN'
-        },
-        lifecyclePhases: {
-            creation: [],
-            processing: [],
-            output: [],
-            archival: []
-        },
-        modernizationOpportunities: [],
-        riskFactors: ['Complete analysis failure'],
-        error: true,
-        timestamp: new Date().toISOString()
-    };
-}
-/* ===================================================================
-MISSING METHODS FIX - parseJSONResponse and Other Missing Functions
-Add these methods to your Enhanced Mainframe Analyzer class
-================================================================== */
-
-// Original parseJSONResponse method that was referenced in the code
-parseJSONResponse(responseText) {
-    console.log('🔍 Parsing JSON response (legacy method)...');
-    
-    // Delegate to the enhanced parsing method
-    const result = this.parseAndValidateLLMResponse(responseText);
-    
-    if (result.success) {
-        return {
-            success: true,
-            data: result.data
-        };
-    } else {
-        return {
-            success: false,
-            error: result.error,
-            fallbackData: result.fallbackData
-        };
-    }
-}
 
 // Additional missing method that might be referenced
 estimateTokenCount(text) {
@@ -5188,10 +5185,6 @@ initializeTokenManagement() {
     console.log('📊 Token management initialized');
 }
 
-// Sleep utility method (if missing)
-sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
 
 // Enhanced file finding with better component matching
 // Fixed findRelevantFilesEnhanced with safe property access
@@ -5473,7 +5466,7 @@ parseAndValidateLLMResponse(responseText) {
         return {
             success: false,
             error: error.message,
-            fallbackData: this.createBasicFallback()
+            fallbackData: this.createComponentFallback(responseText)
         };
     }
 }
@@ -6039,30 +6032,155 @@ extractComprehensiveDependencies(relevantFiles, componentName) {
         }
 
         displayFieldMatrix(componentName, results, friendlyName) {
-            const container = document.getElementById('fieldMatrixContent');
-            if (!container) return;
+    const container = document.getElementById('fieldMatrixContent');
+    if (!container) return;
+
+    console.log('📋 Displaying field matrix for SPECIFIC component:', componentName);
+
+    // Get field analysis and FILTER for the specific component
+    let fieldAnalysis = results.fieldAnalysis;
+    let llmFieldAnalysis = results.llmAnalysis?.fieldAnalysis;
+    
+    // CRITICAL FIX: Filter fields for the specific component
+    const componentSpecificFields = this.filterFieldsForComponent(componentName, fieldAnalysis);
+    const mergedFieldData = this.mergeFieldAnalysisData(componentSpecificFields, llmFieldAnalysis);
+    
+    if (!mergedFieldData || mergedFieldData.totalFields === 0) {
+        container.innerHTML = `
+            <div class="analysis-header">
+                <h3 class="analysis-title">📋 Field Matrix: ${friendlyName}</h3>
+                <p class="analysis-meta">No fields found specifically for component ${componentName}</p>
+            </div>
             
-            let html = `
-                <div class="analysis-header">
-                    <h3 class="analysis-title">📋 Field Matrix: ${friendlyName}</h3>
-                    <p class="analysis-meta">Field-level analysis with lifecycle context for ${friendlyName}.</p>
+            <div class="result-card">
+                <h4>🔍 Component-Specific Field Search</h4>
+                <div style="background: #fef3c7; padding: 16px; border-radius: 8px; border: 1px solid #fcd34d;">
+                    <div style="color: #92400e; font-weight: 600; margin-bottom: 8px;">
+                        ⚠️ No fields found for component "${componentName}"
+                    </div>
+                    <div style="color: #a16207; font-size: 12px;">
+                        This could mean:<br>
+                        • Component is not a copybook or record layout<br>
+                        • Fields are defined in a different file<br>
+                        • Component name doesn't match file contents<br>
+                        • Manual field extraction needed
+                    </div>
                 </div>
-                
-                <div class="result-card text-center">
-                    <h4>🔬 Enhanced Field Analysis</h4>
-                    <p>Field matrix analysis for ${friendlyName} will be displayed here with:</p>
-                    <ul style="text-align: left; margin: 16px 0; color: #6b7280;">
-                        <li>• Field-level lifecycle tracking</li>
-                        <li>• Usage pattern categorization</li>
-                        <li>• Business purpose mapping</li>
-                        <li>• Cross-program field flow</li>
-                    </ul>
-                    <p style="font-size: 12px; color: #9ca3af;">Detailed field matrix will appear after enhanced analysis.</p>
+                ${componentSpecificFields?.originalTotalFields ? `
+                    <div style="margin-top: 12px; padding: 12px; background: #f0f9ff; border-radius: 6px; border: 1px solid #bae6fd;">
+                        <div style="color: #1e40af; font-size: 12px;">
+                            📊 Note: ${componentSpecificFields.originalTotalFields} total fields found across all files, 
+                            but none specifically matched component "${componentName}"
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+        return;
+    }
+
+    let html = `
+        <div class="analysis-header">
+            <h3 class="analysis-title">📋 Field Matrix: ${friendlyName}</h3>
+            <p class="analysis-meta">
+                Component-specific field analysis for ${friendlyName} - 
+                ${mergedFieldData.totalFields} fields 
+                ${mergedFieldData.originalTotalFields && mergedFieldData.originalTotalFields !== mergedFieldData.totalFields ? 
+                    `(filtered from ${mergedFieldData.originalTotalFields} total)` : ''}
+            </p>
+        </div>
+
+        <!-- Component-Specific Field Statistics -->
+        <div class="metrics-grid" style="margin-bottom: 24px;">
+            <div class="metric-card">
+                <div class="metric-value">${mergedFieldData.totalFields}</div>
+                <div class="metric-label">Component Fields</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">${mergedFieldData.fieldCategories.input.length}</div>
+                <div class="metric-label">Input Fields</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">${mergedFieldData.fieldCategories.calculated.length}</div>
+                <div class="metric-label">Calculated Fields</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">${mergedFieldData.fieldCategories.unused.length}</div>
+                <div class="metric-label">Unused Fields</div>
+            </div>
+        </div>
+
+        <!-- Component Filtering Notice -->
+        ${mergedFieldData.filteredForComponent ? `
+            <div class="result-card">
+                <h4>🎯 Component Filtering Applied</h4>
+                <div style="background: #eff6ff; padding: 12px; border-radius: 6px; border: 1px solid #bfdbfe;">
+                    <div style="color: #1e40af; font-size: 13px;">
+                        ✅ Showing fields specifically for component: <strong>${mergedFieldData.filteredForComponent}</strong><br>
+                        📁 Source file: <strong>${componentSpecificFields?.fields?.[0]?.sourceFile || 'Multiple'}</strong>
+                        ${mergedFieldData.originalTotalFields !== mergedFieldData.totalFields ? `<br>
+                        📊 Filtered: ${mergedFieldData.totalFields} of ${mergedFieldData.originalTotalFields} total fields` : ''}
+                    </div>
                 </div>
-            `;
+            </div>
+        ` : ''}
+
+        <!-- Rest of the field matrix display... -->
+        ${this.renderFieldCategories(mergedFieldData)}
+        ${this.renderKeyFields(mergedFieldData, friendlyName)}
+        ${this.renderDetailedFieldList(mergedFieldData)}
+        ${this.renderBusinessLogic(mergedFieldData)}
+        ${this.renderFieldStatistics(mergedFieldData)}
+    `;
+    
+    container.innerHTML = html;
+}
+
+// Render comprehensive dependency dashboard
+renderDependencyDashboard(dependencyAnalysis) {
+    const { found, missing, summary } = dependencyAnalysis;
+    const totalDeps = summary.foundCount + summary.missingCount;
+    const coveragePercent = totalDeps > 0 ? Math.round((summary.foundCount / totalDeps) * 100) : 0;
+    
+    return `
+        <div class="result-card">
+            <h4>📊 Dependency Dashboard</h4>
             
-            container.innerHTML = html;
-        }
+            <!-- Coverage Metrics -->
+            <div class="metrics-grid" style="margin-bottom: 20px;">
+                <div class="metric-card" style="background: ${coveragePercent >= 80 ? '#ecfdf5' : coveragePercent >= 60 ? '#fffbeb' : '#fef2f2'};">
+                    <div class="metric-value" style="color: ${coveragePercent >= 80 ? '#059669' : coveragePercent >= 60 ? '#d97706' : '#dc2626'};">${coveragePercent}%</div>
+                    <div class="metric-label">Coverage Rate</div>
+                </div>
+                <div class="metric-card" style="background: #ecfdf5;">
+                    <div class="metric-value" style="color: #059669;">${summary.foundCount}</div>
+                    <div class="metric-label">✅ Found</div>
+                </div>
+                <div class="metric-card" style="background: #fef2f2;">
+                    <div class="metric-value" style="color: #dc2626;">${summary.missingCount}</div>
+                    <div class="metric-label">❌ Missing</div>
+                </div>
+                <div class="metric-card" style="background: #f0f9ff;">
+                    <div class="metric-value" style="color: #0284c7;">${Object.keys(found).length}</div>
+                    <div class="metric-label">📁 Dep Types</div>
+                </div>
+            </div>
+
+            <!-- Risk Assessment -->
+            <div style="background: ${summary.missingCount === 0 ? '#ecfdf5' : summary.missingCount < 3 ? '#fffbeb' : '#fef2f2'}; 
+                        padding: 16px; border-radius: 8px; border: 1px solid ${summary.missingCount === 0 ? '#a7f3d0' : summary.missingCount < 3 ? '#fcd34d' : '#fca5a5'};">
+                <div style="font-weight: 600; color: ${summary.missingCount === 0 ? '#065f46' : summary.missingCount < 3 ? '#92400e' : '#991b1b'}; margin-bottom: 8px;">
+                    ${summary.missingCount === 0 ? '🟢 LOW RISK' : summary.missingCount < 3 ? '🟡 MEDIUM RISK' : '🔴 HIGH RISK'} - Dependency Status
+                </div>
+                <div style="color: ${summary.missingCount === 0 ? '#166534' : summary.missingCount < 3 ? '#a16207' : '#7f1d1d'}; font-size: 13px;">
+                    ${summary.missingCount === 0 ? 'All dependencies are available. Component can be safely analyzed and compiled.' :
+                      summary.missingCount < 3 ? `${summary.missingCount} dependencies missing. May cause compilation issues.` :
+                      `${summary.missingCount} dependencies missing. High risk of compilation failure.`}
+                </div>
+            </div>
+        </div>
+    `;
+}
 
         displayUsagePatterns(componentName, results, friendlyName) {
             const container = document.getElementById('usageContent');
@@ -6112,65 +6230,69 @@ ENHANCED DEPENDENCY DISPLAY METHODS
 Detailed display of found and missing dependencies with search information
 ================================================================== */
 
-// Enhanced dependency display with detailed found/missing breakdown
+// Enhanced dependency display with complete mapping
 displayDependencies(componentName, results, friendlyName) {
     const container = document.getElementById('dependenciesContent');
     if (!container) return;
 
     const dependencyAnalysis = results.dependencyAnalysis;
     if (!dependencyAnalysis) {
-        container.innerHTML = `
-            <div class="analysis-header">
-                <h3 class="analysis-title">🔗 Dependencies: ${friendlyName}</h3>
-                <p class="analysis-meta">No dependency analysis available for ${friendlyName}.</p>
-            </div>
-            <div class="result-card text-center">
-                <p>No dependency analysis performed.</p>
-            </div>
-        `;
+        container.innerHTML = this.renderNoDependencyAnalysis(friendlyName);
         return;
     }
 
     let html = `
         <div class="analysis-header">
-            <h3 class="analysis-title">🔗 Dependencies: ${friendlyName}</h3>
+            <h3 class="analysis-title">🔗 Complete Dependency Analysis: ${friendlyName}</h3>
             <p class="analysis-meta">
-                Comprehensive dependency analysis for ${friendlyName} - 
+                Comprehensive dependency mapping for ${friendlyName} - 
                 ${dependencyAnalysis.summary.foundCount} found, ${dependencyAnalysis.summary.missingCount} missing
             </p>
         </div>
 
-        <!-- Dependency Summary -->
-        <div class="metrics-grid" style="margin-bottom: 24px;">
-            <div class="metric-card" style="background: #ecfdf5;">
-                <div class="metric-value" style="color: #059669;">${dependencyAnalysis.summary.foundCount}</div>
-                <div class="metric-label">✅ Dependencies Found</div>
-            </div>
-            <div class="metric-card" style="background: #fef2f2;">
-                <div class="metric-value" style="color: #dc2626;">${dependencyAnalysis.summary.missingCount}</div>
-                <div class="metric-label">❌ Dependencies Missing</div>
-            </div>
-            <div class="metric-card" style="background: #fffbeb;">
-                <div class="metric-value" style="color: #d97706;">${Math.round((dependencyAnalysis.summary.foundCount / (dependencyAnalysis.summary.foundCount + dependencyAnalysis.summary.missingCount)) * 100) || 0}%</div>
-                <div class="metric-label">📊 Coverage Ratio</div>
-            </div>
-            <div class="metric-card" style="background: #f0f9ff;">
-                <div class="metric-value" style="color: #0284c7;">${Object.keys(dependencyAnalysis.found).length}</div>
-                <div class="metric-label">📁 Dependency Types</div>
-            </div>
-        </div>
+        <!-- Dependency Overview Dashboard -->
+        ${this.renderDependencyDashboard(dependencyAnalysis)}
 
-        <!-- Found Dependencies -->
-        ${this.renderFoundDependencies(dependencyAnalysis.found)}
+        <!-- Complete Dependency Tree -->
+        ${this.renderCompleteDependencyTree(componentName, dependencyAnalysis, results)}
 
-        <!-- Missing Dependencies -->
-        ${this.renderMissingDependencies(dependencyAnalysis.missing)}
+        <!-- Cross-Reference Map -->
+        ${this.renderCrossReferenceMap(componentName, dependencyAnalysis, results)}
 
-        <!-- Dependency Details -->
-        ${this.renderDependencyDetails(dependencyAnalysis.details)}
+        <!-- Impact Analysis -->
+        ${this.renderDependencyImpactAnalysis(componentName, dependencyAnalysis)}
+
+        <!-- Detailed Dependency Breakdown -->
+        ${this.renderDetailedDependencyBreakdown(dependencyAnalysis)}
     `;
     
     container.innerHTML = html;
+}
+
+// Render complete dependency tree
+renderCompleteDependencyTree(componentName, dependencyAnalysis, results) {
+    return `
+        <div class="result-card">
+            <h4>🌳 Complete Dependency Tree</h4>
+            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                
+                <!-- Root Component -->
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <div style="background: #3b82f6; color: white; padding: 12px 20px; border-radius: 8px; display: inline-block; font-weight: 600;">
+                        🎯 ${componentName}
+                    </div>
+                </div>
+
+                <!-- Dependency Branches -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+                    ${this.renderDependencyBranch('Copybooks', dependencyAnalysis.found.copyStatements, dependencyAnalysis.missing.copyStatements, '📋')}
+                    ${this.renderDependencyBranch('Called Programs', dependencyAnalysis.found.callStatements, dependencyAnalysis.missing.callStatements, '📞')}
+                    ${this.renderDependencyBranch('Executed Programs', dependencyAnalysis.found.execStatements, dependencyAnalysis.missing.execStatements, '⚙️')}
+                    ${this.renderDependencyBranch('File References', dependencyAnalysis.found.fileReferences, dependencyAnalysis.missing.fileReferences, '📁')}
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 // Render found dependencies section
@@ -6633,7 +6755,7 @@ parseAndValidateLLMResponse(responseText) {
         return {
             success: false,
             error: error.message,
-            fallbackData: this.createBasicFallback()
+            fallbackData: this.createComponentFallback(componentName, friendlyName, responseText)
         };
     }
 }
@@ -7059,7 +7181,7 @@ parseAndValidateLLMResponse(responseText) {
         return {
             success: false,
             error: error.message,
-            fallbackData: this.createBasicFallback()
+            fallbackData: this.createComponentFallback(componentName, friendlyName, responseText)
         };
     }
 }
@@ -8364,7 +8486,7 @@ displayFieldMatrix(componentName, results, friendlyName) {
         this.updateTokenDisplay(this.estimateTokenCount(processedPrompt + resultText));
 
         // Parse the response
-        const parseResult = this.parseJSONResponse(resultText);
+        const parseResult = this.parseAndValidateLLMResponse(resultText);
         
         if (parseResult.success) {
             console.log('LLM JSON parsing successful');
@@ -9019,6 +9141,588 @@ extractInfoFromText(text) {
     
     return info;
 }
+// Render individual dependency branch
+renderDependencyBranch(title, foundDeps, missingDeps, icon) {
+    const totalCount = (foundDeps?.length || 0) + (missingDeps?.length || 0);
+    
+    if (totalCount === 0) {
+        return `
+            <div style="background: #f9fafb; padding: 16px; border-radius: 8px; border: 1px solid #e5e7eb;">
+                <h5 style="color: #6b7280; margin-bottom: 12px;">${icon} ${title}</h5>
+                <div style="color: #9ca3af; font-size: 12px; text-align: center;">No dependencies</div>
+            </div>
+        `;
+    }
+    
+    return `
+        <div style="background: white; padding: 16px; border-radius: 8px; border: 1px solid #d1d5db;">
+            <h5 style="color: #1f2937; margin-bottom: 12px;">${icon} ${title} (${totalCount})</h5>
+            
+            <!-- Found Dependencies -->
+            ${(foundDeps?.length || 0) > 0 ? `
+                <div style="margin-bottom: 12px;">
+                    <div style="font-size: 11px; color: #059669; font-weight: 600; margin-bottom: 6px;">✅ FOUND (${foundDeps.length})</div>
+                    ${foundDeps.map(dep => `
+                        <div style="background: #ecfdf5; padding: 8px 12px; margin: 4px 0; border-radius: 4px; border-left: 3px solid #10b981;">
+                            <div style="font-weight: 600; color: #065f46; font-size: 12px;">${dep.name}</div>
+                            <div style="color: #166534; font-size: 10px;">📁 ${dep.foundIn} | ${dep.matchType} | ${Math.round(dep.confidence * 100)}%</div>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : ''}
+            
+            <!-- Missing Dependencies -->
+            ${(missingDeps?.length || 0) > 0 ? `
+                <div>
+                    <div style="font-size: 11px; color: #dc2626; font-weight: 600; margin-bottom: 6px;">❌ MISSING (${missingDeps.length})</div>
+                    ${missingDeps.map(dep => `
+                        <div style="background: #fef2f2; padding: 8px 12px; margin: 4px 0; border-radius: 4px; border-left: 3px solid #ef4444;">
+                            <div style="font-weight: 600; color: #991b1b; font-size: 12px;">${dep.name}</div>
+                            <div style="color: #7f1d1d; font-size: 10px;">🔍 Searched: ${(dep.searchVariants || []).slice(0, 2).join(', ')}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+// Render cross-reference map
+renderCrossReferenceMap(componentName, dependencyAnalysis, results) {
+    return `
+        <div class="result-card">
+            <h4>🔗 Cross-Reference Map</h4>
+            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                <div style="color: #374151; margin-bottom: 16px; font-size: 13px;">
+                    This map shows how ${componentName} relates to other components in the system.
+                </div>
+                
+                <!-- Inbound References (What uses this component) -->
+                <div style="margin-bottom: 20px;">
+                    <h5 style="color: #1e40af; margin-bottom: 8px;">📥 Inbound References</h5>
+                    <div style="background: #eff6ff; padding: 12px; border-radius: 6px; border: 1px solid #bfdbfe;">
+                        <div style="color: #1e40af; font-size: 12px;">
+                            Programs and components that reference ${componentName}
+                        </div>
+                        ${this.renderInboundReferences(componentName, results)}
+                    </div>
+                </div>
+                
+                <!-- Outbound References (What this component uses) -->
+                <div>
+                    <h5 style="color: #7c3aed; margin-bottom: 8px;">📤 Outbound References</h5>
+                    <div style="background: #faf5ff; padding: 12px; border-radius: 6px; border: 1px solid #d8b4fe;">
+                        <div style="color: #7c3aed; font-size: 12px;">
+                            Dependencies that ${componentName} requires
+                        </div>
+                        ${this.renderOutboundReferences(dependencyAnalysis)}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Helper methods for cross-references
+renderInboundReferences(componentName, results) {
+    // This would analyze which other components reference this one
+    const filesAnalyzed = results.filesAnalyzed || [];
+    let references = [];
+    
+    // Search through all uploaded files for references to this component
+    this.uploadedFiles.forEach(file => {
+        const content = file.content.toUpperCase();
+        const componentUpper = componentName.toUpperCase();
+        
+        // Check for COPY statements referencing this component
+        if (content.includes(`COPY ${componentUpper}`) || 
+            content.includes(`COPY ${componentUpper}.CPY`) ||
+            content.includes(`INCLUDE ${componentUpper}`)) {
+            references.push({
+                file: file.name,
+                type: 'COPY',
+                reference: `COPY ${componentName}`
+            });
+        }
+        
+        // Check for field references (if this is a copybook)
+        if (content.includes(componentUpper) && file.name !== componentName) {
+            references.push({
+                file: file.name,
+                type: 'FIELD_REF',
+                reference: componentName
+            });
+        }
+    });
+    
+    if (references.length === 0) {
+        return `
+            <div style="color: #6b7280; font-size: 11px; margin-top: 8px;">
+                No inbound references found in uploaded files
+            </div>
+        `;
+    }
+    
+    return `
+        <div style="margin-top: 8px;">
+            ${references.map(ref => `
+                <div style="background: white; padding: 8px; margin: 4px 0; border-radius: 4px; border-left: 3px solid #3b82f6;">
+                    <div style="font-weight: 600; color: #1e40af; font-size: 11px;">📁 ${ref.file}</div>
+                    <div style="color: #1d4ed8; font-size: 10px;">${ref.type}: ${ref.reference}</div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+renderOutboundReferences(dependencyAnalysis) {
+    const allDeps = [];
+    
+    // Collect all dependencies
+    Object.keys(dependencyAnalysis.found || {}).forEach(depType => {
+        (dependencyAnalysis.found[depType] || []).forEach(dep => {
+            allDeps.push({
+                name: dep.name,
+                type: depType,
+                status: 'FOUND',
+                foundIn: dep.foundIn
+            });
+        });
+    });
+    
+    Object.keys(dependencyAnalysis.missing || {}).forEach(depType => {
+        (dependencyAnalysis.missing[depType] || []).forEach(dep => {
+            allDeps.push({
+                name: dep.name,
+                type: depType,
+                status: 'MISSING'
+            });
+        });
+    });
+    
+    if (allDeps.length === 0) {
+        return `
+            <div style="color: #6b7280; font-size: 11px; margin-top: 8px;">
+                No outbound dependencies identified
+            </div>
+        `;
+    }
+    
+    return `
+        <div style="margin-top: 8px; max-height: 200px; overflow-y: auto;">
+            ${allDeps.map(dep => `
+                <div style="background: white; padding: 8px; margin: 4px 0; border-radius: 4px; border-left: 3px solid ${dep.status === 'FOUND' ? '#10b981' : '#ef4444'};">
+                    <div style="font-weight: 600; color: #7c3aed; font-size: 11px;">
+                        ${this.getDependencyIcon(dep.type)} ${dep.name}
+                    </div>
+                    <div style="color: #6b21a8; font-size: 10px;">
+                        ${dep.status === 'FOUND' ? `✅ Found in: ${dep.foundIn}` : '❌ Missing'}
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+// Render dependency impact analysis
+renderDependencyImpactAnalysis(componentName, dependencyAnalysis) {
+    const { summary } = dependencyAnalysis;
+    const totalDeps = summary.foundCount + summary.missingCount;
+    
+    let riskLevel = 'LOW';
+    let riskColor = '#059669';
+    let riskBg = '#ecfdf5';
+    let riskBorder = '#a7f3d0';
+    
+    if (summary.missingCount >= totalDeps * 0.5) {
+        riskLevel = 'HIGH';
+        riskColor = '#dc2626';
+        riskBg = '#fef2f2';
+        riskBorder = '#fca5a5';
+    } else if (summary.missingCount >= totalDeps * 0.2) {
+        riskLevel = 'MEDIUM';
+        riskColor = '#d97706';
+        riskBg = '#fffbeb';
+        riskBorder = '#fcd34d';
+    }
+    
+    return `
+        <div class="result-card">
+            <h4>💥 Dependency Impact Analysis</h4>
+            
+            <!-- Risk Assessment -->
+            <div style="background: ${riskBg}; padding: 16px; border-radius: 8px; border: 1px solid ${riskBorder}; margin-bottom: 16px;">
+                <div style="font-weight: 600; color: ${riskColor}; margin-bottom: 8px;">
+                    🎯 RISK LEVEL: ${riskLevel}
+                </div>
+                <div style="color: ${riskColor}; font-size: 13px; line-height: 1.5;">
+                    ${this.generateRiskAssessment(riskLevel, summary, componentName)}
+                </div>
+            </div>
+            
+            <!-- Impact Categories -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
+                
+                <!-- Compilation Impact -->
+                <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                    <h5 style="color: #1e40af; margin-bottom: 12px;">🔨 Compilation Impact</h5>
+                    <div style="font-size: 12px; color: #374151; line-height: 1.5;">
+                        ${summary.missingCount === 0 ? 
+                            '✅ All dependencies available<br>🟢 Clean compilation expected' :
+                            `⚠️ ${summary.missingCount} missing dependencies<br>🔴 Compilation errors likely`
+                        }
+                    </div>
+                </div>
+                
+                <!-- Runtime Impact -->
+                <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                    <h5 style="color: #7c3aed; margin-bottom: 12px;">⚡ Runtime Impact</h5>
+                    <div style="font-size: 12px; color: #374151; line-height: 1.5;">
+                        ${summary.missingCount === 0 ? 
+                            '✅ All runtime dependencies met<br>🟢 Stable execution expected' :
+                            `⚠️ Missing ${summary.missingCount} components<br>🔴 Runtime failures possible`
+                        }
+                    </div>
+                </div>
+                
+                <!-- Maintenance Impact -->
+                <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                    <h5 style="color: #059669; margin-bottom: 12px;">🔧 Maintenance Impact</h5>
+                    <div style="font-size: 12px; color: #374151; line-height: 1.5;">
+                        Coverage: ${Math.round((summary.foundCount / (totalDeps || 1)) * 100)}%<br>
+                        ${summary.foundCount >= totalDeps * 0.8 ? 
+                            '🟢 Good maintainability' : 
+                            '🔴 High maintenance risk'
+                        }
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Recommendations -->
+            <div style="background: #fef3c7; padding: 16px; border-radius: 8px; border: 1px solid #fcd34d; margin-top: 16px;">
+                <h5 style="color: #92400e; margin-bottom: 12px;">💡 Recommendations</h5>
+                <div style="color: #a16207; font-size: 12px;">
+                    ${this.generateDependencyRecommendations(summary, componentName)}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Generate risk assessment text
+generateRiskAssessment(riskLevel, summary, componentName) {
+    switch (riskLevel) {
+        case 'HIGH':
+            return `Component ${componentName} has ${summary.missingCount} missing dependencies out of ${summary.foundCount + summary.missingCount} total. This poses a HIGH RISK for compilation and runtime stability. Immediate attention required to locate missing components.`;
+        case 'MEDIUM':
+            return `Component ${componentName} has some missing dependencies (${summary.missingCount}). While ${summary.foundCount} dependencies are available, the missing ones may cause issues during compilation or execution. Review and remediation recommended.`;
+        case 'LOW':
+            return `Component ${componentName} has excellent dependency coverage with ${summary.foundCount} dependencies found and ${summary.missingCount} missing. Low risk for compilation and runtime issues.`;
+        default:
+            return `Dependency analysis complete for ${componentName}.`;
+    }
+}
+
+// Generate dependency recommendations
+generateDependencyRecommendations(summary, componentName) {
+    const recommendations = [];
+    
+    if (summary.missingCount === 0) {
+        recommendations.push('✅ All dependencies satisfied - proceed with confidence');
+        recommendations.push('📊 Consider documenting the dependency tree for future reference');
+    } else {
+        recommendations.push(`🔍 Locate and upload ${summary.missingCount} missing dependencies`);
+        recommendations.push('📋 Check copybook libraries and program directories');
+        
+        if (summary.missingCount >= 3) {
+            recommendations.push('⚠️ High number of missing deps - verify component name and search paths');
+        }
+        
+        recommendations.push('🧪 Test compilation after resolving missing dependencies');
+    }
+    
+    if (summary.foundCount > 0) {
+        recommendations.push(`✅ ${summary.foundCount} dependencies successfully located`);
+    }
+    
+    return recommendations.join('<br>• ');
+}
+
+// Render detailed dependency breakdown with search information
+renderDetailedDependencyBreakdown(dependencyAnalysis) {
+    return `
+        <div class="result-card">
+            <h4>🔍 Detailed Dependency Breakdown</h4>
+            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                
+                <!-- Toggle for Advanced Details -->
+                <div style="margin-bottom: 16px;">
+                    <button onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'; this.textContent = this.nextElementSibling.style.display === 'none' ? '🔽 Show Advanced Details' : '🔼 Hide Advanced Details';" 
+                            style="background: #3b82f6; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 12px;">
+                        🔽 Show Advanced Details
+                    </button>
+                    <div style="display: none; margin-top: 16px;">
+                        ${this.renderAdvancedDependencyDetails(dependencyAnalysis)}
+                    </div>
+                </div>
+                
+                <!-- Summary by Type -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+                    ${Object.keys(dependencyAnalysis.found || {}).map(depType => this.renderDependencyTypeSummary(depType, dependencyAnalysis.found[depType], dependencyAnalysis.missing[depType])).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Render advanced dependency details
+renderAdvancedDependencyDetails(dependencyAnalysis) {
+    if (!dependencyAnalysis.details) {
+        return '<div style="color: #6b7280;">Advanced search details not available</div>';
+    }
+    
+    let html = '<div style="background: white; padding: 16px; border-radius: 8px; border: 1px solid #d1d5db;">';
+    
+    Object.entries(dependencyAnalysis.details).forEach(([depType, dependencies]) => {
+        if (dependencies.length > 0) {
+            html += `
+                <div style="margin-bottom: 20px;">
+                    <h6 style="color: #1f2937; margin-bottom: 12px; font-weight: 600;">
+                        ${this.getDependencyIcon(depType)} ${this.getDependencyLabel(depType)} - Search Details
+                    </h6>
+                    <div style="background: #f9fafb; padding: 12px; border-radius: 6px;">
+                        ${dependencies.map(dep => `
+                            <div style="border: 1px solid #e5e7eb; border-radius: 4px; padding: 10px; margin-bottom: 8px; background: white;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                    <strong style="color: #1f2937;">${dep.name}</strong>
+                                    <span style="font-size: 10px; padding: 2px 6px; border-radius: 3px; ${dep.found ? 'background: #10b981; color: white;' : 'background: #ef4444; color: white;'}">
+                                        ${dep.found ? 'FOUND' : 'MISSING'}
+                                    </span>
+                                </div>
+                                
+                                ${dep.found ? `
+                                    <div style="background: #ecfdf5; padding: 6px; border-radius: 3px; margin-bottom: 6px;">
+                                        <div style="font-size: 10px; color: #065f46;">
+                                            📁 <strong>Found in:</strong> ${dep.foundIn || 'Unknown'}<br>
+                                            🔍 <strong>Match Type:</strong> ${dep.matchDetails?.matchType || 'Unknown'}<br>
+                                            📊 <strong>Confidence:</strong> ${Math.round((dep.confidence || 0) * 100)}%
+                                        </div>
+                                    </div>
+                                ` : `
+                                    <div style="background: #fef2f2; padding: 6px; border-radius: 3px; margin-bottom: 6px;">
+                                        <div style="font-size: 10px; color: #991b1b;">
+                                            ❌ <strong>Not found in any uploaded files</strong>
+                                        </div>
+                                    </div>
+                                `}
+                                
+                                <div style="background: #f1f5f9; padding: 6px; border-radius: 3px;">
+                                    <div style="font-size: 9px; color: #475569;">
+                                        <strong>🔍 Search Variants:</strong><br>
+                                        <code style="font-size: 9px; color: #64748b;">${(dep.searchVariants || []).join(', ') || 'None'}</code>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+    });
+    
+    html += '</div>';
+    return html;
+}
+
+// Render dependency type summary
+renderDependencyTypeSummary(depType, foundDeps, missingDeps) {
+    const foundCount = foundDeps?.length || 0;
+    const missingCount = missingDeps?.length || 0;
+    const totalCount = foundCount + missingCount;
+    
+    if (totalCount === 0) return '';
+    
+    const successRate = Math.round((foundCount / totalCount) * 100);
+    
+    return `
+        <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #d1d5db;">
+            <div style="font-weight: 600; color: #1f2937; margin-bottom: 8px; font-size: 12px;">
+                ${this.getDependencyIcon(depType)} ${this.getDependencyLabel(depType)}
+            </div>
+            <div style="font-size: 11px; color: #6b7280; margin-bottom: 8px;">
+                Total: ${totalCount} | Found: ${foundCount} | Missing: ${missingCount}
+            </div>
+            <div style="background: #f3f4f6; height: 4px; border-radius: 2px; overflow: hidden;">
+                <div style="background: ${successRate >= 80 ? '#10b981' : successRate >= 50 ? '#f59e0b' : '#ef4444'}; height: 100%; width: ${successRate}%; transition: width 0.3s ease;"></div>
+            </div>
+            <div style="font-size: 10px; color: #374151; margin-top: 4px; text-align: center;">
+                ${successRate}% Coverage
+            </div>
+        </div>
+    `;
+}
+
+// Helper method to render "no dependency analysis" state
+renderNoDependencyAnalysis(friendlyName) {
+    return `
+        <div class="analysis-header">
+            <h3 class="analysis-title">🔗 Dependencies: ${friendlyName}</h3>
+            <p class="analysis-meta">No dependency analysis available for ${friendlyName}.</p>
+        </div>
+        <div class="result-card text-center">
+            <h4>⚠️ No Dependency Analysis</h4>
+            <p style="color: #6b7280; margin: 16px 0;">
+                Dependency analysis was not performed or failed for this component.
+            </p>
+            <div style="background: #fef3c7; padding: 16px; border-radius: 8px; border: 1px solid #fcd34d; margin: 16px 0;">
+                <div style="color: #92400e; font-size: 13px;">
+                    <strong>Possible reasons:</strong><br>
+                    • Component analysis incomplete<br>
+                    • No dependencies found in source files<br>
+                    • Analysis method doesn't support this component type<br>
+                    • LLM processing failed during dependency extraction
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// ===================================================================
+// FIX 3: HELPER METHODS FOR FIELD MATRIX RENDERING
+// ===================================================================
+
+// Render field categories with component-specific data
+renderFieldCategories(mergedFieldData) {
+    return `
+        <div class="result-card">
+            <h4>📊 Field Categorization</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 16px;">
+                ${this.renderFieldCategory('Input Fields', mergedFieldData.fieldCategories.input, '#10b981', '📥')}
+                ${this.renderFieldCategory('Output Fields', mergedFieldData.fieldCategories.output, '#3b82f6', '📤')}
+                ${this.renderFieldCategory('Calculated Fields', mergedFieldData.fieldCategories.calculated, '#f59e0b', '🧮')}
+                ${this.renderFieldCategory('Control Fields', mergedFieldData.fieldCategories.control, '#8b5cf6', '🎛️')}
+                ${this.renderFieldCategory('Static Fields', mergedFieldData.fieldCategories.static, '#6b7280', '📌')}
+                ${this.renderFieldCategory('Unused Fields', mergedFieldData.fieldCategories.unused, '#ef4444', '❌')}
+            </div>
+        </div>
+    `;
+}
+
+// Render key fields section
+renderKeyFields(mergedFieldData, friendlyName) {
+    if (!mergedFieldData.keyFields || mergedFieldData.keyFields.length === 0) {
+        return '';
+    }
+    
+    return `
+        <div class="result-card">
+            <h4>🔑 Key Fields Analysis</h4>
+            <div style="background: #f0f9ff; padding: 16px; border-radius: 8px; border: 1px solid #bae6fd;">
+                ${mergedFieldData.keyFields.map(field => `
+                    <div style="background: white; padding: 12px; margin: 8px 0; border-radius: 6px; border-left: 4px solid #3b82f6;">
+                        <div style="font-weight: 600; color: #1e40af; margin-bottom: 4px;">${field}</div>
+                        <div style="font-size: 12px; color: #1e40af;">
+                            Primary field used in ${friendlyName} processing
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+// Render detailed field list
+renderDetailedFieldList(mergedFieldData) {
+    if (!mergedFieldData.fields || mergedFieldData.fields.length === 0) {
+        return '';
+    }
+    
+    return `
+        <div class="result-card">
+            <h4>📋 Detailed Field Analysis</h4>
+            <div style="max-height: 400px; overflow-y: auto; margin-top: 16px;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                    <thead style="background: #f8fafc; position: sticky; top: 0;">
+                        <tr>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Level</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Field Name</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Picture</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Type</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Length</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Usage</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Source</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Category</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${mergedFieldData.fields.map(field => this.renderFieldRowEnhanced(field, mergedFieldData.fieldCategories)).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
+// Enhanced field row rendering with source file information
+renderFieldRowEnhanced(field, categories) {
+    const category = this.getFieldCategory(field.name, categories);
+    const categoryColor = this.getCategoryColor(category);
+    
+    return `
+        <tr style="border-bottom: 1px solid #f3f4f6;">
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">${field.level}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 600;">${field.name}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-family: monospace;">${field.picture || '-'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">${field.dataType}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">${field.length || '-'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">${field.usage || 'DISPLAY'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-size: 10px;">${field.sourceFile || 'Unknown'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">
+                <span style="background: ${categoryColor}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">
+                    ${category}
+                </span>
+            </td>
+        </tr>
+    `;
+}
+
+// ===================================================================
+// FIX 4: DEAD CODE REMOVAL - METHODS TO DELETE/CONSOLIDATE
+// ===================================================================
+
+/* 
+DEAD CODE TO REMOVE:
+
+1. Delete these duplicate methods:
+   - parseJSONResponse() - line ~2640 (use parseAndValidateLLMResponse instead)
+   - createBasicFallback() - line ~2850 (use createComponentFallback instead) 
+   - sleep() method appears multiple times - keep only one
+   - estimateTokenCount() - multiple definitions, consolidate
+
+2. Remove these unused variables:
+   - this.componentSuggestions can be derived from uploadedFiles
+   - Multiple similar token calculation variables
+
+3. Consolidate these similar methods:
+   - extractFieldsFromCopybook() and extractFieldsFromFile() 
+   - Multiple fallback creation methods
+   - Similar dependency extraction patterns
+
+4. Remove unused event handlers and validation methods
+
+DUPLICATE CODE CONSOLIDATION:
+- Field extraction logic (3 similar methods)
+- Token management (scattered across methods)  
+- Dependency analysis (3 overlapping methods)
+- LLM response parsing (4 similar methods)
+- Fallback data creation (4 similar methods)
+
+ARCHITECTURAL IMPROVEMENTS NEEDED:
+- Extract separate classes for major functionality
+- Separate UI concerns from business logic
+- Consolidate error handling patterns
+- Reduce method complexity (many >100 lines)
+*/
 
 
     }
