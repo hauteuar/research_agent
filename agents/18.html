@@ -2794,12 +2794,13 @@ try {
     return results;
 }
 
+// Fixed analyzeComponentFields with safe property access
 analyzeComponentFields(componentName, relevantFiles, componentInfo) {
     console.log(`📋 Analyzing fields for component: ${componentName}`);
     
     const fieldAnalysis = {
         componentName: componentName,
-        componentType: componentInfo.type,
+        componentType: componentInfo && componentInfo.type ? componentInfo.type : 'Unknown',
         totalFields: 0,
         fields: [],
         fieldsByLevel: {},
@@ -2828,8 +2829,8 @@ analyzeComponentFields(componentName, relevantFiles, componentInfo) {
         }
     };
     
-    // Extract fields from the main component file (copybook)
-    if (componentInfo.sourceFile) {
+    // Safely extract fields from the main component file (copybook)
+    if (componentInfo && componentInfo.sourceFile) {
         const fields = this.extractFieldsFromCopybook(componentInfo.sourceFile);
         fieldAnalysis.fields = fields;
         fieldAnalysis.totalFields = fields.length;
@@ -2848,10 +2849,50 @@ analyzeComponentFields(componentName, relevantFiles, componentInfo) {
         
         // Build field hierarchy
         fieldAnalysis.fieldHierarchy = this.buildFieldHierarchy(fields);
+    } else {
+        // Try to find fields in any of the relevant files
+        console.log('⚠️ No main source file identified, searching all relevant files for fields...');
+        
+        relevantFiles.forEach(file => {
+            if (file.type === 'Copybook' || file.name.toLowerCase().includes('.cpy') || 
+                file.content.toUpperCase().includes('01 ')) {
+                
+                console.log(`🔍 Trying to extract fields from: ${file.name}`);
+                const fields = this.extractFieldsFromCopybook(file);
+                
+                if (fields.length > fieldAnalysis.totalFields) {
+                    // Use the file with the most fields as the primary source
+                    fieldAnalysis.fields = fields;
+                    fieldAnalysis.totalFields = fields.length;
+                    
+                    // Clear previous statistics
+                    fieldAnalysis.fieldsByLevel = {};
+                    fieldAnalysis.statistics = {
+                        level01Count: 0, level05Count: 0, level10Count: 0, level15Count: 0, otherLevels: 0,
+                        picXCount: 0, picSCount: 0, pic9Count: 0, redefinesCount: 0, occursCount: 0
+                    };
+                    
+                    // Rebuild with new primary file
+                    fields.forEach(field => {
+                        const level = field.level || '01';
+                        if (!fieldAnalysis.fieldsByLevel[level]) {
+                            fieldAnalysis.fieldsByLevel[level] = [];
+                        }
+                        fieldAnalysis.fieldsByLevel[level].push(field);
+                        this.updateFieldStatistics(field, fieldAnalysis.statistics);
+                    });
+                    
+                    fieldAnalysis.fieldHierarchy = this.buildFieldHierarchy(fields);
+                    console.log(`✅ Found ${fields.length} fields in ${file.name}`);
+                }
+            }
+        });
     }
     
     // Analyze field usage in other files
-    const otherFiles = relevantFiles.filter(f => f.id !== componentInfo.sourceFile?.id);
+    const sourceFileId = componentInfo && componentInfo.sourceFile ? componentInfo.sourceFile.id : null;
+    const otherFiles = relevantFiles.filter(f => f.id !== sourceFileId);
+    
     otherFiles.forEach(file => {
         const usage = this.analyzeFieldUsageInFile(file, fieldAnalysis.fields, componentName);
         
@@ -2872,7 +2913,10 @@ analyzeComponentFields(componentName, relevantFiles, componentInfo) {
             fieldUsage.writeOperations.push(...usage[fieldName].writeOperations);
             fieldUsage.calculations.push(...usage[fieldName].calculations);
             fieldUsage.validations.push(...usage[fieldName].validations);
-            fieldUsage.files.push(file.name);
+            
+            if (!fieldUsage.files.includes(file.name)) {
+                fieldUsage.files.push(file.name);
+            }
         });
     });
     
@@ -3802,7 +3846,6 @@ buildFieldHierarchy(fields) {
     return hierarchy;
 }
 
-// Enhanced component identification
 identifyComponentDetails(componentName) {
     console.log(`🔍 Identifying component details for: ${componentName}`);
     
@@ -3828,33 +3871,69 @@ identifyComponentDetails(componentName) {
     
     // Check uploaded files to identify component type
     for (const file of this.uploadedFiles) {
-        const fileName = file.name.toUpperCase();
-        const fileBaseName = fileName.replace(/\.(CPY|COPYBOOK|CBL|COB|JCL|TXT)$/i, '');
-        
-        // Check if this file contains our component
-        const isMatch = componentInfo.searchVariants.some(variant => 
-            fileName === variant || 
-            fileBaseName === variant ||
-            fileName.includes(variant) ||
-            file.content.toUpperCase().includes(`01 ${variant}`) ||
-            file.content.toUpperCase().includes(`COPY ${variant}`)
-        );
-        
-        if (isMatch) {
-            componentInfo.sourceFile = file;
-            componentInfo.isMainComponent = true;
+        try {
+            const fileName = file.name.toUpperCase();
+            const fileBaseName = fileName.replace(/\.(CPY|COPYBOOK|CBL|COB|JCL|TXT)$/i, '');
             
-            // Determine type based on file and content
-            if (file.type === 'Copybook' || fileName.includes('.CPY') || fileName.includes('.COPYBOOK')) {
-                componentInfo.type = 'Copybook';
-            } else if (file.type === 'COBOL Program' || fileName.includes('.CBL') || fileName.includes('.COB')) {
-                componentInfo.type = 'COBOL Program';
-            } else if (file.type === 'JCL Job' || fileName.includes('.JCL')) {
-                componentInfo.type = 'JCL Job';
+            // Check if this file contains our component
+            const isMatch = componentInfo.searchVariants.some(variant => {
+                try {
+                    return fileName === variant || 
+                           fileBaseName === variant ||
+                           fileName.includes(variant) ||
+                           (file.content && file.content.toUpperCase().includes(`01 ${variant}`)) ||
+                           (file.content && file.content.toUpperCase().includes(`COPY ${variant}`));
+                } catch (error) {
+                    console.warn(`Error checking variant ${variant} in file ${fileName}:`, error);
+                    return false;
+                }
+            });
+            
+            if (isMatch) {
+                componentInfo.sourceFile = file;
+                componentInfo.isMainComponent = true;
+                
+                // Determine type based on file and content
+                if (file.type === 'Copybook' || fileName.includes('.CPY') || fileName.includes('.COPYBOOK')) {
+                    componentInfo.type = 'Copybook';
+                } else if (file.type === 'COBOL Program' || fileName.includes('.CBL') || fileName.includes('.COB')) {
+                    componentInfo.type = 'COBOL Program';
+                } else if (file.type === 'JCL Job' || fileName.includes('.JCL')) {
+                    componentInfo.type = 'JCL Job';
+                } else if (file.content && file.content.toUpperCase().includes('01 ')) {
+                    componentInfo.type = 'Copybook'; // Assume copybook if it has field definitions
+                }
+                
+                console.log(`✅ Component identified: ${componentInfo.type} in ${file.name}`);
+                break;
             }
-            
-            console.log(`✅ Component identified: ${componentInfo.type} in ${file.name}`);
-            break;
+        } catch (error) {
+            console.warn(`Error processing file ${file.name}:`, error);
+            continue;
+        }
+    }
+    
+    // If no exact match found, try to infer from file types
+    if (!componentInfo.sourceFile) {
+        console.log('⚠️ No exact match found, trying to infer component type...');
+        
+        // Look for any copybook files or files with field definitions
+        for (const file of this.uploadedFiles) {
+            try {
+                if (file.type === 'Copybook' || 
+                    file.name.toLowerCase().includes('.cpy') ||
+                    (file.content && file.content.toUpperCase().includes('01 '))) {
+                    
+                    componentInfo.sourceFile = file;
+                    componentInfo.type = 'Copybook';
+                    componentInfo.isMainComponent = true;
+                    console.log(`✅ Inferred component type: Copybook from ${file.name}`);
+                    break;
+                }
+            } catch (error) {
+                console.warn(`Error inferring type from file ${file.name}:`, error);
+                continue;
+            }
         }
     }
     
@@ -4620,14 +4699,15 @@ sleep(ms) {
 }
 
 // Enhanced file finding with better component matching
+// Fixed findRelevantFilesEnhanced with safe property access
 findRelevantFiles(componentName, componentInfo) {
     console.log(`🔍 Finding files relevant to component: ${componentName}`);
     
     const relevantFiles = [];
     const addedFiles = new Set();
     
-    // Always include the main component file if found
-    if (componentInfo.sourceFile && !addedFiles.has(componentInfo.sourceFile.id)) {
+    // Safely check for main component file
+    if (componentInfo && componentInfo.sourceFile && !addedFiles.has(componentInfo.sourceFile.id)) {
         relevantFiles.push(componentInfo.sourceFile);
         addedFiles.add(componentInfo.sourceFile.id);
         console.log(`✅ Added main component file: ${componentInfo.sourceFile.name}`);
@@ -4639,8 +4719,13 @@ findRelevantFiles(componentName, componentInfo) {
         
         const fileContent = file.content.toUpperCase();
         
+        // Use componentInfo.searchVariants if available, otherwise create basic variants
+        const searchVariants = componentInfo && componentInfo.searchVariants ? 
+            componentInfo.searchVariants : 
+            [componentName.toUpperCase(), componentName.toUpperCase() + '.CPY'];
+        
         // Check for COPY statements referencing our component
-        const hasReference = componentInfo.searchVariants.some(variant => {
+        const hasReference = searchVariants.some(variant => {
             return fileContent.includes(`COPY ${variant}`) ||
                    fileContent.includes(`COPY ${variant}.CPY`) ||
                    fileContent.includes(`COPY ${variant}.COPYBOOK`) ||
@@ -4655,8 +4740,9 @@ findRelevantFiles(componentName, componentInfo) {
         }
         
         // For copybooks, also include programs that might use fields
-        if (componentInfo.type === 'Copybook') {
-            const hasFieldReference = componentInfo.searchVariants.some(variant => {
+        const componentType = componentInfo && componentInfo.type ? componentInfo.type : 'Unknown';
+        if (componentType === 'Copybook') {
+            const hasFieldReference = searchVariants.some(variant => {
                 return fileContent.includes(variant) && 
                        (fileContent.includes('MOVE') || fileContent.includes('COMPUTE') || fileContent.includes('IF'));
             });
@@ -4672,6 +4758,7 @@ findRelevantFiles(componentName, componentInfo) {
     console.log(`📁 Found ${relevantFiles.length} relevant files for ${componentName}`);
     return relevantFiles;
 }
+
 
 // Detect component type method (if missing)
 detectComponentType(componentName, files) {
@@ -5867,32 +5954,33 @@ getMissingSuggestions(depType) {
 }
 
 // Enhanced component analysis context building
+// Safe version of buildEnhancedAnalysisContext
 buildEnhancedAnalysisContext(componentName, friendlyName, relevantFiles, fieldAnalysis, dependencies, dependencyAnalysis, componentInfo) {
     const context = {
         component: {
             name: componentName,
             friendlyName: friendlyName,
-            type: componentInfo.type,
-            isMainComponent: componentInfo.isMainComponent,
-            sourceFile: componentInfo.sourceFile?.name
+            type: componentInfo && componentInfo.type ? componentInfo.type : 'Unknown',
+            isMainComponent: componentInfo && componentInfo.isMainComponent ? componentInfo.isMainComponent : false,
+            sourceFile: componentInfo && componentInfo.sourceFile ? componentInfo.sourceFile.name : 'Unknown'
         },
         files: relevantFiles.map(file => ({
             name: file.name,
             type: file.type,
-            content: file.content.substring(0, 1500), // Limit for token management
-            lines: file.content.split('\n').length
+            content: file.content ? file.content.substring(0, 1500) : '', // Safe content access
+            lines: file.content ? file.content.split('\n').length : 0
         })),
         fieldAnalysis: {
-            totalFields: fieldAnalysis.totalFields,
-            fieldCategories: fieldAnalysis.fieldCategories,
-            statistics: fieldAnalysis.statistics,
-            businessLogicCount: fieldAnalysis.businessLogic.length
+            totalFields: fieldAnalysis ? fieldAnalysis.totalFields : 0,
+            fieldCategories: fieldAnalysis ? fieldAnalysis.fieldCategories : { input: [], output: [], calculated: [], control: [], static: [], unused: [] },
+            statistics: fieldAnalysis ? fieldAnalysis.statistics : {},
+            businessLogicCount: fieldAnalysis && fieldAnalysis.businessLogic ? fieldAnalysis.businessLogic.length : 0
         },
-        dependencies: dependencies,
+        dependencies: dependencies || {},
         dependencyStatus: {
-            found: dependencyAnalysis.found,
-            missing: dependencyAnalysis.missing,
-            summary: dependencyAnalysis.summary
+            found: dependencyAnalysis && dependencyAnalysis.found ? dependencyAnalysis.found : {},
+            missing: dependencyAnalysis && dependencyAnalysis.missing ? dependencyAnalysis.missing : {},
+            summary: dependencyAnalysis && dependencyAnalysis.summary ? dependencyAnalysis.summary : { foundCount: 0, missingCount: 0 }
         },
         analysisRequest: {
             timestamp: new Date().toISOString(),
