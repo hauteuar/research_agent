@@ -3463,201 +3463,650 @@ displayFieldMatrix(componentName, results, friendlyName) {
     const container = document.getElementById('fieldMatrixContent');
     if (!container) return;
 
-    console.log('📋 Displaying field matrix for:', componentName);
-    console.log('Results object:', results);
-
-    // Get field analysis from multiple sources
-    let fieldAnalysis = results.fieldAnalysis;
-    let llmFieldAnalysis = results.llmAnalysis?.fieldAnalysis;
+    // Get component-specific field analysis
+    const componentSpecificFields = this.filterFieldsForComponent(componentName, results.fieldAnalysis);
+    const mergedFieldData = this.mergeFieldAnalysisData(componentSpecificFields, results.llmAnalysis?.fieldAnalysis);
     
-    console.log('Field analysis:', fieldAnalysis);
-    console.log('LLM field analysis:', llmFieldAnalysis);
-
-    // Merge field analysis data
-    const componentSpecificFields = this.filterFieldsForComponent(componentName, fieldAnalysis);
-    const mergedFieldData = this.mergeFieldAnalysisData(componentSpecificFields, llmFieldAnalysis);
-    //const mergedFieldData = this.mergeFieldAnalysisData(fieldAnalysis, llmFieldAnalysis);
+    // Enhance field data with update/modification patterns
+    this.enhanceFieldsWithUpdateAnalysis(mergedFieldData, results);
     
     if (!mergedFieldData || mergedFieldData.totalFields === 0) {
-        container.innerHTML = `
-            <div class="analysis-header">
-                <h3 class="analysis-title">📋 Field Matrix: ${friendlyName}</h3>
-                <p class="analysis-meta">Attempting to extract field information for ${friendlyName}...</p>
-            </div>
-            
-            <!-- Try to extract fields manually -->
-            <div class="result-card">
-                <h4>🔍 Field Extraction Attempt</h4>
-                ${this.attemptManualFieldExtraction(results, componentName)}
-            </div>
-        `;
+        container.innerHTML = this.renderNoFieldsFound(friendlyName, componentName);
         return;
     }
 
     let html = `
         <div class="analysis-header">
-            <h3 class="analysis-title">📋 Field Matrix: ${friendlyName}</h3>
+            <h3 class="analysis-title">📋 Enhanced Field Matrix: ${friendlyName}</h3>
             <p class="analysis-meta">
-                Comprehensive field analysis for ${friendlyName} - ${mergedFieldData.totalFields} fields analyzed
+                Complete field analysis including update patterns for ${friendlyName} - 
+                ${mergedFieldData.totalFields} fields analyzed with update tracking
             </p>
         </div>
 
-        <!-- Field Statistics -->
+        <!-- Enhanced Field Statistics with Update Info -->
         <div class="metrics-grid" style="margin-bottom: 24px;">
             <div class="metric-card">
                 <div class="metric-value">${mergedFieldData.totalFields}</div>
                 <div class="metric-label">Total Fields</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value">${mergedFieldData.fieldCategories.input.length}</div>
+                <div class="metric-value">${mergedFieldData.fieldCategories.input?.length || 0}</div>
                 <div class="metric-label">Input Fields</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value">${mergedFieldData.fieldCategories.calculated.length}</div>
+                <div class="metric-value">${mergedFieldData.fieldCategories.updated?.length || 0}</div>
+                <div class="metric-label">Updated Fields</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">${mergedFieldData.fieldCategories.calculated?.length || 0}</div>
                 <div class="metric-label">Calculated Fields</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value">${mergedFieldData.fieldCategories.unused.length}</div>
+                <div class="metric-value">${mergedFieldData.fieldCategories.output?.length || 0}</div>
+                <div class="metric-label">Output Fields</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">${mergedFieldData.fieldCategories.unused?.length || 0}</div>
                 <div class="metric-label">Unused Fields</div>
             </div>
         </div>
 
-        <!-- Field Categories -->
+        <!-- Enhanced Field Categories with Update Fields -->
         <div class="result-card">
-            <h4>📊 Field Categorization</h4>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 16px;">
+            <h4>📊 Enhanced Field Categorization</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 16px;">
                 ${this.renderFieldCategory('Input Fields', mergedFieldData.fieldCategories.input, '#10b981', '📥')}
+                ${this.renderFieldCategory('Updated Fields', mergedFieldData.fieldCategories.updated, '#f59e0b', '🔄')}
                 ${this.renderFieldCategory('Output Fields', mergedFieldData.fieldCategories.output, '#3b82f6', '📤')}
-                ${this.renderFieldCategory('Calculated Fields', mergedFieldData.fieldCategories.calculated, '#f59e0b', '🧮')}
-                ${this.renderFieldCategory('Control Fields', mergedFieldData.fieldCategories.control, '#8b5cf6', '🎛️')}
-                ${this.renderFieldCategory('Static Fields', mergedFieldData.fieldCategories.static, '#6b7280', '📌')}
+                ${this.renderFieldCategory('Calculated Fields', mergedFieldData.fieldCategories.calculated, '#8b5cf6', '🧮')}
+                ${this.renderFieldCategory('Control Fields', mergedFieldData.fieldCategories.control, '#6b7280', '🎛️')}
+                ${this.renderFieldCategory('Static Fields', mergedFieldData.fieldCategories.static, '#64748b', '📌')}
                 ${this.renderFieldCategory('Unused Fields', mergedFieldData.fieldCategories.unused, '#ef4444', '❌')}
             </div>
         </div>
 
-        <!-- Key Fields Detail -->
-        ${mergedFieldData.keyFields && mergedFieldData.keyFields.length > 0 ? `
-            <div class="result-card">
-                <h4>🔑 Key Fields Analysis</h4>
-                <div style="background: #f0f9ff; padding: 16px; border-radius: 8px; border: 1px solid #bae6fd;">
-                    ${mergedFieldData.keyFields.map(field => `
-                        <div style="background: white; padding: 12px; margin: 8px 0; border-radius: 6px; border-left: 4px solid #3b82f6;">
-                            <div style="font-weight: 600; color: #1e40af; margin-bottom: 4px;">${field}</div>
-                            <div style="font-size: 12px; color: #1e40af;">
-                                Primary field used in ${friendlyName} processing
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        ` : ''}
+        <!-- Field Update Analysis -->
+        ${this.renderFieldUpdateAnalysis(mergedFieldData)}
 
-        <!-- Detailed Field List -->
-        ${mergedFieldData.fields && mergedFieldData.fields.length > 0 ? `
-            <div class="result-card">
-                <h4>📋 Detailed Field Analysis</h4>
-                <div style="max-height: 400px; overflow-y: auto; margin-top: 16px;">
-                    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
-                        <thead style="background: #f8fafc; position: sticky; top: 0;">
-                            <tr>
-                                <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Level</th>
-                                <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Field Name</th>
-                                <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Picture</th>
-                                <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Type</th>
-                                <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Length</th>
-                                <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Usage</th>
-                                <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Category</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${mergedFieldData.fields.map(field => this.renderFieldRow(field, mergedFieldData.fieldCategories)).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        ` : ''}
+        <!-- Detailed Field List with Update Info -->
+        ${this.renderEnhancedFieldTable(mergedFieldData)}
 
-        <!-- Business Logic -->
-        ${mergedFieldData.businessLogic && mergedFieldData.businessLogic.length > 0 ? `
-            <div class="result-card">
-                <h4>🧠 Business Logic Identified</h4>
-                <div style="max-height: 300px; overflow-y: auto; margin-top: 16px;">
-                    ${mergedFieldData.businessLogic.map(logic => `
-                        <div style="background: #f8fafc; padding: 12px; margin-bottom: 8px; border-radius: 6px; border-left: 4px solid ${this.getLogicColor(logic.type)};">
-                            <div style="font-weight: 600; color: #1f2937; margin-bottom: 4px;">
-                                ${logic.type} - ${logic.complexity || 'MEDIUM'} Complexity
-                            </div>
-                            <div style="font-family: monospace; font-size: 11px; background: white; padding: 8px; border-radius: 4px; margin-bottom: 8px;">
-                                ${logic.description}
-                            </div>
-                            ${logic.file ? `
-                                <div style="font-size: 10px; color: #6b7280;">
-                                    File: ${logic.file} | Line: ${logic.lineNumber || 'N/A'} | Fields: ${(logic.fields || logic.affectedFields || []).join(', ') || 'None'}
-                                </div>
-                            ` : ''}
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        ` : ''}
-
-        <!-- Field Usage Patterns -->
-        ${mergedFieldData.fieldUsagePatterns ? `
-            <div class="result-card">
-                <h4>🔄 Field Usage Patterns</h4>
-                <div style="background: #fef3c7; padding: 16px; border-radius: 8px; border: 1px solid #fcd34d; margin-top: 16px;">
-                    <div style="color: #92400e; font-size: 14px; line-height: 1.6;">
-                        ${mergedFieldData.fieldUsagePatterns}
-                    </div>
-                </div>
-            </div>
-        ` : ''}
-
-        <!-- Data Flow Summary -->
-        ${mergedFieldData.dataFlowSummary ? `
-            <div class="result-card">
-                <h4>🌊 Data Flow Summary</h4>
-                <div style="background: #eff6ff; padding: 16px; border-radius: 8px; border: 1px solid #bfdbfe; margin-top: 16px;">
-                    <div style="color: #1e40af; font-size: 14px; line-height: 1.6;">
-                        ${mergedFieldData.dataFlowSummary}
-                    </div>
-                </div>
-            </div>
-        ` : ''}
-
-        <!-- Field Statistics Details -->
-        ${mergedFieldData.statistics ? `
-            <div class="result-card">
-                <h4>📈 Field Statistics</h4>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-top: 16px;">
-                    <div style="background: #f8fafc; padding: 12px; border-radius: 6px;">
-                        <h6 style="color: #1e40af; margin-bottom: 8px;">By Level</h6>
-                        <div style="font-size: 12px;">
-                            Level 01: ${mergedFieldData.statistics.level01Count || 0}<br>
-                            Level 05: ${mergedFieldData.statistics.level05Count || 0}<br>
-                            Level 10: ${mergedFieldData.statistics.level10Count || 0}<br>
-                            Level 15: ${mergedFieldData.statistics.level15Count || 0}<br>
-                            Other: ${mergedFieldData.statistics.otherLevels || 0}
-                        </div>
-                    </div>
-                    <div style="background: #f8fafc; padding: 12px; border-radius: 6px;">
-                        <h6 style="color: #1e40af; margin-bottom: 8px;">By Data Type</h6>
-                        <div style="font-size: 12px;">
-                            Alphanumeric (X): ${mergedFieldData.statistics.picXCount || 0}<br>
-                            Numeric (9): ${mergedFieldData.statistics.pic9Count || 0}<br>
-                            Signed (S): ${mergedFieldData.statistics.picSCount || 0}<br>
-                            Redefines: ${mergedFieldData.statistics.redefinesCount || 0}<br>
-                            Occurs: ${mergedFieldData.statistics.occursCount || 0}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        ` : ''}
+        <!-- Business Logic & Field Relationships -->
+        ${this.renderFieldBusinessLogic(mergedFieldData)}
     `;
     
     container.innerHTML = html;
 }
+renderFieldBusinessLogic(fieldData) {
+    const businessLogic = fieldData.businessLogic || [];
+    
+    if (businessLogic.length === 0) {
+        return '';
+    }
+    
+    return `
+        <div class="result-card">
+            <h4>🧠 Field-Related Business Logic</h4>
+            <div style="max-height: 300px; overflow-y: auto; margin-top: 16px;">
+                ${businessLogic.map(logic => `
+                    <div style="background: #f8fafc; padding: 12px; margin-bottom: 8px; border-radius: 6px; border-left: 4px solid ${this.getLogicColor(logic.type)};">
+                        <div style="font-weight: 600; color: #1f2937; margin-bottom: 4px;">
+                            ${logic.type} - ${logic.complexity || 'MEDIUM'} Complexity
+                        </div>
+                        <div style="font-family: monospace; font-size: 11px; background: white; padding: 8px; border-radius: 4px; margin-bottom: 8px;">
+                            ${logic.description}
+                        </div>
+                        ${logic.affectedFields && logic.affectedFields.length > 0 ? `
+                            <div style="font-size: 10px; color: #6b7280;">
+                                <strong>Affected Fields:</strong> ${logic.affectedFields.join(', ')}
+                            </div>
+                        ` : ''}
+                        ${logic.file ? `
+                            <div style="font-size: 10px; color: #6b7280; margin-top: 4px;">
+                                File: ${logic.file} | Line: ${logic.lineNumber || 'N/A'}
+                            </div>
+                        ` : ''}
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
 
+getUsagePatternDescription(pattern) {
+    const descriptions = {
+        'BATCH_PROCESSING': 'Primarily used in batch processing environments with sequential file operations',
+        'ONLINE_TRANSACTION': 'Interactive CICS transaction processing with real-time data access',
+        'DATA_STORAGE': 'Data structure definition and storage layout specification',
+        'INTERFACE_PROCESSING': 'Interface and data exchange between systems or programs',
+        'REPORTING': 'Report generation and data presentation formatting',
+        'HYBRID': 'Mixed usage pattern across multiple processing environments'
+    };
+    return descriptions[pattern] || 'Component usage pattern analysis completed';
+}
+
+renderDataFlowSummary(dataFlow) {
+    if (!dataFlow) {
+        return 'Data flow analysis not available';
+    }
+    
+    return `
+        <strong>Input Sources:</strong> ${(dataFlow.inputs || []).length}<br>
+        <strong>Output Destinations:</strong> ${(dataFlow.outputs || []).length}<br>
+        <strong>Transformations:</strong> ${(dataFlow.transformations || []).length}<br>
+        <strong>Validations:</strong> ${(dataFlow.validations || []).length}
+    `;
+}
+
+renderProgramUsageDetails(lifecycleFlow) {
+    return `
+        <div class="result-card">
+            <h4>🔗 Program Interaction Details</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 16px;">
+                
+                <!-- Creation Programs -->
+                ${this.renderProgramCategory('Creation Programs', lifecycleFlow.creationSources, '#059669', '🌱')}
+                
+                <!-- Input Programs -->
+                ${this.renderProgramCategory('Input Programs', lifecycleFlow.inputPrograms, '#2563eb', '📖')}
+                
+                <!-- Update Programs -->
+                ${this.renderProgramCategory('Update Programs', lifecycleFlow.updatePrograms, '#d97706', '⚙️')}
+                
+                <!-- CICS Screens -->
+                ${this.renderProgramCategory('CICS Interactions', lifecycleFlow.cicsScreens, '#7c3aed', '🖥️')}
+                
+                <!-- Batch Jobs -->
+                ${this.renderProgramCategory('Batch Jobs', lifecycleFlow.batchJobs, '#dc2626', '📊')}
+            </div>
+        </div>
+    `;
+}
+
+renderProgramCategory(title, programs, color, icon) {
+    const programList = programs || [];
+    
+    return `
+        <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; border-left: 4px solid ${color};">
+            <h6 style="color: ${color}; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                ${icon} ${title} (${programList.length})
+            </h6>
+            ${programList.length > 0 ? `
+                <div style="max-height: 150px; overflow-y: auto;">
+                    ${programList.map(prog => `
+                        <div style="background: #f9fafb; padding: 8px; margin: 4px 0; border-radius: 4px; font-size: 11px;">
+                            <div style="font-weight: 600; color: #1f2937;">${prog.program || prog.job || prog.screen || 'Unknown'}</div>
+                            ${prog.operation ? `<div style="color: #6b7280;">Operation: ${prog.operation}</div>` : ''}
+                            ${prog.file ? `<div style="color: #6b7280;">File: ${prog.file}</div>` : ''}
+                            ${prog.confidence ? `<div style="color: #6b7280;">Confidence: ${Math.round(prog.confidence * 100)}%</div>` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            ` : `
+                <div style="color: #9ca3af; font-size: 12px; text-align: center; padding: 20px;">
+                    No ${title.toLowerCase()} identified
+                </div>
+            `}
+        </div>
+    `;
+}
+
+getStagePrograms(programs, stage) {
+    if (!programs || programs.length === 0) {
+        return 'No programs';
+    }
+    
+    const programNames = programs.slice(0, 2).map(p => {
+        if (typeof p === 'string') return p;
+        return p.program || p.job || p.screen || 'Unknown';
+    });
+    
+    const result = programNames.join(', ');
+    return programs.length > 2 ? `${result}...` : result;
+}
+
+renderDetailedLifecyclePhases(lifecycleFlow, friendlyName) {
+    return `
+        <div class="result-card">
+            <h4>📋 Detailed Lifecycle Phases for ${friendlyName}</h4>
+            <div style="margin-top: 16px;">
+                
+                <!-- Creation Phase Detail -->
+                <div style="background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                    <h5 style="color: #059669; margin-bottom: 12px;">🌱 Creation Phase</h5>
+                    <div style="color: #065f46; font-size: 13px; line-height: 1.5; margin-bottom: 12px;">
+                        Programs and processes that create or initialize ${friendlyName} data structures and populate initial values.
+                    </div>
+                    ${this.renderPhasePrograms(lifecycleFlow.creationSources, 'creation')}
+                </div>
+                
+                <!-- Processing Phase Detail -->
+                <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                    <h5 style="color: #2563eb; margin-bottom: 12px;">⚙️ Processing Phase</h5>
+                    <div style="color: #1d4ed8; font-size: 13px; line-height: 1.5; margin-bottom: 12px;">
+                        Programs that read, validate, transform, and update ${friendlyName} throughout its operational lifecycle.
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <div>
+                            <h6 style="color: #1e40af; margin-bottom: 8px;">📖 Input Operations</h6>
+                            ${this.renderPhasePrograms(lifecycleFlow.inputPrograms, 'input')}
+                        </div>
+                        <div>
+                            <h6 style="color: #1e40af; margin-bottom: 8px;">🔄 Update Operations</h6>
+                            ${this.renderPhasePrograms(lifecycleFlow.updatePrograms, 'update')}
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Output Phase Detail -->
+                <div style="background: #fef2f2; border: 1px solid #fca5a5; border-radius: 8px; padding: 16px;">
+                    <h5 style="color: #dc2626; margin-bottom: 12px;">📤 Output Phase</h5>
+                    <div style="color: #991b1b; font-size: 13px; line-height: 1.5; margin-bottom: 12px;">
+                        Final processing, reporting, transmission, and archival operations for ${friendlyName}.
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <div>
+                            <h6 style="color: #b91c1c; margin-bottom: 8px;">🖥️ CICS Operations</h6>
+                            ${this.renderPhasePrograms(lifecycleFlow.cicsScreens, 'cics')}
+                        </div>
+                        <div>
+                            <h6 style="color: #b91c1c; margin-bottom: 8px;">📊 Batch Operations</h6>
+                            ${this.renderPhasePrograms(lifecycleFlow.batchJobs, 'batch')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+renderPhasePrograms(programs, phase) {
+    if (!programs || programs.length === 0) {
+        return `
+            <div style="background: white; padding: 8px; border-radius: 4px; font-size: 11px; color: #9ca3af; text-align: center;">
+                No ${phase} programs identified
+            </div>
+        `;
+    }
+    
+    return `
+        <div style="max-height: 120px; overflow-y: auto;">
+            ${programs.map(prog => `
+                <div style="background: white; padding: 8px; margin: 4px 0; border-radius: 4px; border-left: 3px solid #059669; font-size: 11px;">
+                    <div style="font-weight: 600; color: #1f2937; margin-bottom: 2px;">
+                        ${prog.program || prog.job || prog.screen || 'Unknown Program'}
+                    </div>
+                    ${prog.operation ? `<div style="color: #6b7280;">Operation: ${prog.operation}</div>` : ''}
+                    ${prog.file ? `<div style="color: #6b7280;">Source: ${prog.file}</div>` : ''}
+                    ${prog.lineNumber ? `<div style="color: #6b7280;">Line: ${prog.lineNumber}</div>` : ''}
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+renderFileOperationsAnalysis(lifecycleFlow, friendlyName) {
+    const dataFlow = lifecycleFlow.dataFlow || {};
+    
+    return `
+        <div class="result-card">
+            <h4>📊 File Operations Analysis</h4>
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-top: 16px;">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+                    
+                    <!-- Input Operations -->
+                    <div style="background: white; padding: 12px; border-radius: 6px; border-left: 4px solid #10b981;">
+                        <h6 style="color: #059669; margin-bottom: 8px;">📥 Input Operations</h6>
+                        <div style="font-size: 12px; color: #065f46;">
+                            <strong>Sources:</strong> ${(dataFlow.inputs || []).length}<br>
+                            <strong>Files:</strong> ${(dataFlow.inputs || []).slice(0, 3).join(', ')}${(dataFlow.inputs || []).length > 3 ? '...' : ''}
+                        </div>
+                    </div>
+                    
+                    <!-- Transformation Operations -->
+                    <div style="background: white; padding: 12px; border-radius: 6px; border-left: 4px solid #f59e0b;">
+                        <h6 style="color: #d97706; margin-bottom: 8px;">🔄 Transformations</h6>
+                        <div style="font-size: 12px; color: #92400e;">
+                            <strong>Operations:</strong> ${(dataFlow.transformations || []).length}<br>
+                            <strong>Fields:</strong> ${(dataFlow.transformations || []).slice(0, 3).join(', ')}${(dataFlow.transformations || []).length > 3 ? '...' : ''}
+                        </div>
+                    </div>
+                    
+                    <!-- Validation Operations -->
+                    <div style="background: white; padding: 12px; border-radius: 6px; border-left: 4px solid #8b5cf6;">
+                        <h6 style="color: #7c3aed; margin-bottom: 8px;">✅ Validations</h6>
+                        <div style="font-size: 12px; color: #6b21a8;">
+                            <strong>Checks:</strong> ${(dataFlow.validations || []).length}<br>
+                            <strong>Fields:</strong> ${(dataFlow.validations || []).slice(0, 3).join(', ')}${(dataFlow.validations || []).length > 3 ? '...' : ''}
+                        </div>
+                    </div>
+                    
+                    <!-- Output Operations -->
+                    <div style="background: white; padding: 12px; border-radius: 6px; border-left: 4px solid #3b82f6;">
+                        <h6 style="color: #2563eb; margin-bottom: 8px;">📤 Output Operations</h6>
+                        <div style="font-size: 12px; color: #1d4ed8;">
+                            <strong>Destinations:</strong> ${(dataFlow.outputs || []).length}<br>
+                            <strong>Files:</strong> ${(dataFlow.outputs || []).slice(0, 3).join(', ')}${(dataFlow.outputs || []).length > 3 ? '...' : ''}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+renderLifecycleRiskAssessment(lifecycleFlow, results) {
+    const riskFactors = lifecycleFlow.riskAssessment || [];
+    const dependencyRisks = results.dependencyAnalysis?.summary?.missingCount || 0;
+    
+    let overallRisk = 'LOW';
+    let riskColor = '#059669';
+    let riskBg = '#ecfdf5';
+    
+    if (riskFactors.length >= 3 || dependencyRisks >= 5) {
+        overallRisk = 'HIGH';
+        riskColor = '#dc2626';
+        riskBg = '#fef2f2';
+    } else if (riskFactors.length >= 1 || dependencyRisks >= 2) {
+        overallRisk = 'MEDIUM';
+        riskColor = '#d97706';
+        riskBg = '#fffbeb';
+    }
+    
+    return `
+        <div class="result-card">
+            <h4>⚠️ Lifecycle Risk Assessment</h4>
+            <div style="background: ${riskBg}; border: 1px solid ${riskColor}; border-radius: 8px; padding: 16px; margin-top: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <div style="font-weight: 600; color: ${riskColor}; font-size: 16px;">
+                        🎯 OVERALL RISK: ${overallRisk}
+                    </div>
+                    <div style="background: ${riskColor}; color: white; padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;">
+                        ${overallRisk} RISK
+                    </div>
+                </div>
+                
+                <div style="color: ${riskColor}; font-size: 13px; line-height: 1.5; margin-bottom: 12px;">
+                    ${this.generateLifecycleRiskDescription(overallRisk, riskFactors.length, dependencyRisks)}
+                </div>
+                
+                ${riskFactors.length > 0 ? `
+                    <div style="background: white; padding: 12px; border-radius: 6px; margin-top: 12px;">
+                        <div style="font-weight: 600; color: ${riskColor}; margin-bottom: 8px;">Identified Risk Factors:</div>
+                        <div style="font-size: 12px; color: #374151;">
+                            ${riskFactors.map(risk => `• ${risk.description || risk}`).join('<br>')}
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+}
+
+generateLifecycleRiskDescription(riskLevel, riskFactors, dependencyRisks) {
+    switch (riskLevel) {
+        case 'HIGH':
+            return `High risk detected with ${riskFactors} lifecycle issues and ${dependencyRisks} missing dependencies. This component may experience significant operational challenges and requires immediate attention to resolve critical dependencies and lifecycle gaps.`;
+        case 'MEDIUM':
+            return `Medium risk level with some lifecycle concerns (${riskFactors} factors) and ${dependencyRisks} missing dependencies. While functional, this component would benefit from dependency resolution and lifecycle optimization.`;
+        case 'LOW':
+            return `Low risk assessment indicates a well-structured component with minimal lifecycle concerns and complete dependency coverage. This component appears stable and ready for production use.`;
+        default:
+            return `Lifecycle risk assessment completed for this component.`;
+    }
+}
+
+buildLifecycleInfoForChat(analysisData) {
+    const lifecycle = analysisData.lifecycleFlow || {};
+    
+    let info = `Usage Pattern: ${lifecycle.usagePattern || 'Unknown'}\n`;
+    info += `Creation Programs: ${(lifecycle.creationSources || []).length}\n`;
+    info += `Input Programs: ${(lifecycle.inputPrograms || []).length}\n`;
+    info += `Update Programs: ${(lifecycle.updatePrograms || []).length}\n`;
+    info += `CICS Screens: ${(lifecycle.cicsScreens || []).length}\n`;
+    info += `Batch Jobs: ${(lifecycle.batchJobs || []).length}\n`;
+    
+    if (lifecycle.dataFlow) {
+        info += `Data Flow - Inputs: ${(lifecycle.dataFlow.inputs || []).length}, Outputs: ${(lifecycle.dataFlow.outputs || []).length}, Transformations: ${(lifecycle.dataFlow.transformations || []).length}\n`;
+    }
+    
+    return info;
+}
+
+buildBusinessLogicForChat(analysisData) {
+    const businessRules = analysisData.llmAnalysis?.businessRules || [];
+    const fieldBusinessLogic = analysisData.fieldAnalysis?.businessLogic || [];
+    
+    let logic = `Business Rules: ${businessRules.length}\n`;
+    
+    if (businessRules.length > 0) {
+        logic += `Rules Summary:\n`;
+        businessRules.forEach((rule, index) => {
+            logic += `${index + 1}. ${rule.type}: ${rule.description}\n`;
+        });
+    }
+    
+    if (fieldBusinessLogic.length > 0) {
+        logic += `Field Logic: ${fieldBusinessLogic.length} operations\n`;
+    }
+    
+    return logic;
+}
+
+buildUsagePatternsForChat(analysisData) {
+    const fieldAnalysis = analysisData.fieldAnalysis || {};
+    const lifecycle = analysisData.lifecycleFlow || {};
+    
+    let patterns = `Primary Pattern: ${lifecycle.usagePattern || 'Unknown'}\n`;
+    
+    if (fieldAnalysis.fieldCategories) {
+        patterns += `Field Usage:\n`;
+        patterns += `- Input Operations: ${fieldAnalysis.fieldCategories.input?.length || 0}\n`;
+        patterns += `- Update Operations: ${fieldAnalysis.fieldCategories.updated?.length || 0}\n`;
+        patterns += `- Output Operations: ${fieldAnalysis.fieldCategories.output?.length || 0}\n`;
+        patterns += `- Unused Fields: ${fieldAnalysis.fieldCategories.unused?.length || 0}\n`;
+    }
+    
+    return patterns;
+}
+
+renderDependencyUsageInfo(depName, depType) {
+    // This would analyze how the dependency is actually used in the code
+    return `
+        <div style="background: #f0f9ff; padding: 6px; border-radius: 3px; margin-top: 4px;">
+            <div style="font-size: 10px; color: #1e40af; font-weight: 600;">Usage Analysis:</div>
+            <div style="font-size: 9px; color: #1d4ed8;">
+                ${this.getUsageDescription(depName, depType)}
+            </div>
+        </div>
+    `;
+}
+
+getUsageDescription(depName, depType) {
+    const descriptions = {
+        'copyStatements': `COPY ${depName} - Field definitions included`,
+        'callStatements': `CALL ${depName} - Program execution reference`,
+        'execStatements': `EXEC ${depName} - Batch execution reference`,
+        'fileReferences': `${depName} - File I/O operations`
+    };
+    return descriptions[depType] || `${depName} - Referenced in code`;
+}
+
+renderDependencyUsageAnalysis(componentName, dependencyAnalysis, results) {
+    return `
+        <div class="result-card">
+            <h4>🔍 Dependency Usage Analysis</h4>
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-top: 16px;">
+                <div style="color: #374151; margin-bottom: 16px; font-size: 13px;">
+                    Analysis of how ${componentName} interacts with its dependencies in the system architecture.
+                </div>
+                
+                <!-- Usage Impact Matrix -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
+                    
+                    <!-- Critical Dependencies -->
+                    <div style="background: #fef2f2; padding: 16px; border-radius: 8px; border: 1px solid #fca5a5;">
+                        <h5 style="color: #dc2626; margin-bottom: 12px;">🔴 Critical Dependencies</h5>
+                        <div style="font-size: 12px; color: #991b1b; line-height: 1.5;">
+                            Dependencies required for compilation and basic functionality.
+                            <div style="margin-top: 8px; font-weight: 600;">
+                                Missing: ${dependencyAnalysis.summary?.missingCount || 0}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Available Dependencies -->
+                    <div style="background: #ecfdf5; padding: 16px; border-radius: 8px; border: 1px solid #a7f3d0;">
+                        <h5 style="color: #059669; margin-bottom: 12px;">🟢 Available Dependencies</h5>
+                        <div style="font-size: 12px; color: #065f46; line-height: 1.5;">
+                            Dependencies successfully located and ready for use.
+                            <div style="margin-top: 8px; font-weight: 600;">
+                                Found: ${dependencyAnalysis.summary?.foundCount || 0}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Usage Patterns -->
+                    <div style="background: #eff6ff; padding: 16px; border-radius: 8px; border: 1px solid #bfdbfe;">
+                        <h5 style="color: #2563eb; margin-bottom: 12px;">📊 Usage Patterns</h5>
+                        <div style="font-size: 12px; color: #1d4ed8; line-height: 1.5;">
+                            How dependencies are referenced and utilized in the code.
+                            <div style="margin-top: 8px; font-weight: 600;">
+                                Pattern: ${results.lifecycleFlow?.usagePattern || 'Standard'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Additional helper methods for enhanced functionality
+
+renderEnhancedDependencyDashboard(dependencyAnalysis) {
+    const { found, missing, summary } = dependencyAnalysis;
+    const totalDeps = summary.foundCount + summary.missingCount;
+    const coveragePercent = totalDeps > 0 ? Math.round((summary.foundCount / totalDeps) * 100) : 0;
+    
+    let healthStatus = 'EXCELLENT';
+    let healthColor = '#059669';
+    let healthBg = '#ecfdf5';
+    
+    if (coveragePercent < 70) {
+        healthStatus = 'CRITICAL';
+        healthColor = '#dc2626';
+        healthBg = '#fef2f2';
+    } else if (coveragePercent < 90) {
+        healthStatus = 'WARNING';
+        healthColor = '#d97706';
+        healthBg = '#fffbeb';
+    }
+    
+    return `
+        <div class="result-card">
+            <h4>📊 Enhanced Dependency Dashboard</h4>
+            
+            <!-- Health Status Banner -->
+            <div style="background: ${healthBg}; border: 2px solid ${healthColor}; border-radius: 8px; padding: 16px; margin-bottom: 20px; text-align: center;">
+                <div style="font-size: 18px; font-weight: 700; color: ${healthColor}; margin-bottom: 8px;">
+                    🎯 DEPENDENCY HEALTH: ${healthStatus}
+                </div>
+                <div style="color: ${healthColor}; font-size: 14px;">
+                    ${coveragePercent}% of dependencies are available (${summary.foundCount}/${totalDeps})
+                </div>
+            </div>
+            
+            <!-- Coverage Metrics Grid -->
+            <div class="metrics-grid" style="margin-bottom: 20px;">
+                <div class="metric-card" style="background: ${coveragePercent >= 90 ? '#ecfdf5' : coveragePercent >= 70 ? '#fffbeb' : '#fef2f2'};">
+                    <div class="metric-value" style="color: ${coveragePercent >= 90 ? '#059669' : coveragePercent >= 70 ? '#d97706' : '#dc2626'};">${coveragePercent}%</div>
+                    <div class="metric-label">Coverage Rate</div>
+                </div>
+                <div class="metric-card" style="background: #ecfdf5;">
+                    <div class="metric-value" style="color: #059669;">${summary.foundCount}</div>
+                    <div class="metric-label">✅ Available</div>
+                </div>
+                <div class="metric-card" style="background: #fef2f2;">
+                    <div class="metric-value" style="color: #dc2626;">${summary.missingCount}</div>
+                    <div class="metric-label">❌ Missing</div>
+                </div>
+                <div class="metric-card" style="background: #f0f9ff;">
+                    <div class="metric-value" style="color: #2563eb;">${Object.keys(found).length}</div>
+                    <div class="metric-label">📁 Categories</div>
+                </div>
+            </div>
+
+            <!-- Actionable Insights -->
+            <div style="background: #f8fafc; border-radius: 8px; padding: 16px; border: 1px solid #e2e8f0;">
+                <h5 style="color: #1f2937; margin-bottom: 12px;">💡 Actionable Insights</h5>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px;">
+                    ${this.renderDependencyInsight('Compilation Risk', summary.missingCount === 0 ? 'LOW' : summary.missingCount < 3 ? 'MEDIUM' : 'HIGH')}
+                    ${this.renderDependencyInsight('Runtime Stability', coveragePercent >= 95 ? 'STABLE' : coveragePercent >= 80 ? 'MODERATE' : 'UNSTABLE')}
+                    ${this.renderDependencyInsight('Maintenance Effort', totalDeps <= 5 ? 'LOW' : totalDeps <= 15 ? 'MEDIUM' : 'HIGH')}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+renderDependencyInsight(label, status) {
+    const statusConfig = {
+        'LOW': { color: '#059669', bg: '#ecfdf5', icon: '🟢' },
+        'MEDIUM': { color: '#d97706', bg: '#fffbeb', icon: '🟡' },
+        'HIGH': { color: '#dc2626', bg: '#fef2f2', icon: '🔴' },
+        'STABLE': { color: '#059669', bg: '#ecfdf5', icon: '✅' },
+        'MODERATE': { color: '#d97706', bg: '#fffbeb', icon: '⚠️' },
+        'UNSTABLE': { color: '#dc2626', bg: '#fef2f2', icon: '❌' }
+    };
+    
+    const config = statusConfig[status] || statusConfig['MEDIUM'];
+    
+    return `
+        <div style="background: ${config.bg}; padding: 12px; border-radius: 6px; border: 1px solid ${config.color}; text-align: center;">
+            <div style="font-size: 12px; color: ${config.color}; font-weight: 600; margin-bottom: 4px;">
+                ${label}
+            </div>
+            <div style="font-size: 14px; color: ${config.color}; font-weight: 700;">
+                ${config.icon} ${status}
+            </div>
+        </div>
+    `;
+}
+
+renderNoFieldsFound(friendlyName, componentName) {
+    return `
+        <div class="analysis-header">
+            <h3 class="analysis-title">📋 Field Matrix: ${friendlyName}</h3>
+            <p class="analysis-meta">No fields found for component ${componentName}</p>
+        </div>
+        
+        <div class="result-card">
+            <h4>🔍 Field Analysis Status</h4>
+            <div style="background: #fef3c7; padding: 20px; border-radius: 8px; border: 1px solid #fcd34d; text-align: center;">
+                <div style="color: #92400e; font-weight: 600; margin-bottom: 12px; font-size: 16px;">
+                    ⚠️ No Fields Detected
+                </div>
+                <div style="color: #a16207; font-size: 14px; line-height: 1.5; margin-bottom: 16px;">
+                    This could indicate that the component is not a copybook/record layout,<br>
+                    or field definitions are in a format not currently recognized.
+                </div>
+                
+                <!-- Troubleshooting Guide -->
+                <div style="background: white; padding: 16px; border-radius: 6px; text-align: left;">
+                    <div style="color: #92400e; font-weight: 600; margin-bottom: 8px;">🔧 Troubleshooting Steps:</div>
+                    <div style="color: #a16207; font-size: 12px; line-height: 1.6;">
+                        1. Verify the component name matches the actual copybook/record name<br>
+                        2. Check if field definitions use standard COBOL syntax (01, 05, 10 levels)<br>
+                        3. Ensure copybook files are uploaded with proper extensions (.cpy, .copybook)<br>
+                        4. Confirm the component contains data structure definitions
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
 // Merge field analysis data from multiple sources
 mergeFieldAnalysisData(fieldAnalysis, llmFieldAnalysis) {
     console.log('🔄 Merging field analysis data...');
@@ -3892,40 +4341,38 @@ categorizeExtractedFields(fields) {
     return categories;
 }
 
-// Enhanced display method that handles both successful and fallback responses
+// Enhanced displayAnalysisResults to show actual data
 displayAnalysisResults(componentName, results, friendlyName) {
     console.log('📊 Displaying enhanced analysis results for:', friendlyName || componentName);
-    console.log('📋 Results type:', results.error ? 'Error/Fallback' : 'Success');
-    console.log('🎯 Has LLM analysis:', !!results.llmAnalysis);
+    console.log('Full results object:', results);
     
     const container = document.getElementById('lifecycleContent');
     if (!container) return;
     
-    // Handle both successful and fallback responses
-    const llmAnalysis = results.llmAnalysis || results.fallbackData || results;
-    const isEnhancedFallback = llmAnalysis.enhancedFallback || llmAnalysis.partialSuccess;
-    const hasRawResponse = llmAnalysis.rawLLMResponse && llmAnalysis.rawLLMResponse.length > 0;
+    // Extract real data from results
+    const llmAnalysis = results.llmAnalysis || {};
+    const fieldAnalysis = results.fieldAnalysis || {};
+    const dependencyAnalysis = results.dependencyAnalysis || {};
     
     let html = `
         <div class="analysis-header">
             <h3 class="analysis-title">🤖 Analysis: ${friendlyName || componentName}</h3>
             <p class="analysis-meta">
-                Component: <strong>${results.componentType || llmAnalysis.componentType || 'Unknown'}</strong> • 
-                Method: <strong>${results.analysisMethod || llmAnalysis.analysisScope || 'Enhanced'}</strong> • 
+                Component: <strong>${results.componentType || 'Unknown'}</strong> • 
+                Method: <strong>${results.analysisMethod || 'Enhanced'}</strong> • 
                 Files: <strong>${results.filesAnalyzed ? results.filesAnalyzed.length : 0}</strong> • 
-                Completed: <strong>${new Date(results.timestamp || llmAnalysis.timestamp || Date.now()).toLocaleString()}</strong>
-                ${isEnhancedFallback ? ' • <span style="color: #f59e0b;">⚠️ Enhanced Fallback</span>' : ''}
+                Completed: <strong>${new Date(results.timestamp).toLocaleString()}</strong>
             </p>
         </div>
         
         <!-- Quality Metrics -->
         <div class="metrics-grid">
             <div class="metric-card">
-                <div class="metric-value">${results.qualityScore || llmAnalysis.qualityScore || 0}/10</div>
+                <div class="metric-value">${results.qualityScore || 0}/10</div>
                 <div class="metric-label">Analysis Quality</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value">${results.completeness?.score || (llmAnalysis.partialSuccess ? 70 : 30)}%</div>
+                <div class="metric-value">${results.completeness?.score || 0}%</div>
                 <div class="metric-label">Completeness</div>
             </div>
             <div class="metric-card">
@@ -3933,39 +4380,10 @@ displayAnalysisResults(componentName, results, friendlyName) {
                 <div class="metric-label">Files Analyzed</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value">${results.dependencyAnalysis ? results.dependencyAnalysis.summary?.foundCount || 0 : 0}</div>
+                <div class="metric-value">${dependencyAnalysis.summary?.foundCount || 0}</div>
                 <div class="metric-label">Dependencies Found</div>
             </div>
         </div>
-
-        <!-- Enhanced Fallback Notice -->
-        ${isEnhancedFallback ? `
-            <div class="result-card">
-                <h4>🔄 Enhanced Analysis Results</h4>
-                <div style="background: #fef3c7; padding: 16px; border-radius: 8px; border: 1px solid #fcd34d;">
-                    <div style="color: #92400e; font-weight: 600; margin-bottom: 8px;">
-                        ${llmAnalysis.partialSuccess ? '✅ Partial Success - Useful Content Extracted' : '⚠️ Enhanced Fallback - Analysis Reconstructed'}
-                    </div>
-                    <div style="color: #a16207; font-size: 13px; line-height: 1.5;">
-                        ${llmAnalysis.partialSuccess ? 
-                            'LLM response contained valuable analysis data that was successfully extracted despite JSON parsing issues.' :
-                            'Analysis was reconstructed from available data using intelligent fallback methods.'}
-                        ${llmAnalysis.parseError ? `<br><strong>Parse Error:</strong> ${llmAnalysis.parseError}` : ''}
-                    </div>
-                    ${hasRawResponse ? `
-                        <div style="margin-top: 12px;">
-                            <button onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'; this.textContent = this.nextElementSibling.style.display === 'none' ? '🔽 Show Raw Response' : '🔼 Hide Raw Response';" 
-                                    style="background: #d97706; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 11px;">
-                                🔽 Show Raw Response
-                            </button>
-                            <div style="display: none; margin-top: 8px; background: white; padding: 12px; border-radius: 6px; border: 1px solid #e5e7eb; max-height: 200px; overflow-y: auto;">
-                                <pre style="font-size: 10px; color: #374151; white-space: pre-wrap;">${llmAnalysis.rawLLMResponse.substring(0, 1000)}${llmAnalysis.rawLLMResponse.length > 1000 ? '...' : ''}</pre>
-                            </div>
-                        </div>
-                    ` : ''}
-                </div>
-            </div>
-        ` : ''}
 
         <!-- Business Purpose -->
         ${llmAnalysis.businessPurpose ? `
@@ -3974,7 +4392,6 @@ displayAnalysisResults(componentName, results, friendlyName) {
                 <div style="background: #f0f9ff; padding: 16px; border-radius: 8px; border: 1px solid #bae6fd;">
                     <div style="color: #1e40af; font-size: 14px; line-height: 1.6;">
                         ${llmAnalysis.businessPurpose}
-                        ${isEnhancedFallback ? '<br><small style="color: #6b7280; font-style: italic;">*Extracted using enhanced analysis methods</small>' : ''}
                     </div>
                 </div>
             </div>
@@ -3987,262 +4404,33 @@ displayAnalysisResults(componentName, results, friendlyName) {
                 <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
                     <div style="color: #374151; font-size: 14px; line-height: 1.6;">
                         ${llmAnalysis.technicalSummary}
-                        ${isEnhancedFallback ? '<br><small style="color: #6b7280; font-style: italic;">*Generated from enhanced extraction</small>' : ''}
                     </div>
                 </div>
             </div>
         ` : ''}
 
         <!-- Field Analysis Summary -->
-        ${this.renderFieldAnalysisSummary(results.fieldAnalysis, llmAnalysis.fieldAnalysis, isEnhancedFallback)}
+        ${this.renderFieldAnalysisSummary(fieldAnalysis, llmAnalysis.fieldAnalysis)}
 
         <!-- Business Rules -->
-        ${this.renderBusinessRules(llmAnalysis.businessRules, isEnhancedFallback)}
-
-        <!-- Dependencies Summary -->
-        ${this.renderDependencySummary(results.dependencyAnalysis, llmAnalysis.dependencies, isEnhancedFallback)}
-
-        <!-- Lifecycle Summary -->
-        ${this.renderLifecycleSummary(results.lifecycleFlow, llmAnalysis.lifecyclePhases, friendlyName, isEnhancedFallback)}
+        ${this.renderBusinessRules(llmAnalysis.businessRules)}
 
         <!-- Recommendations -->
-        ${this.renderRecommendations(llmAnalysis.recommendations, isEnhancedFallback)}
+        ${this.renderRecommendations(llmAnalysis.recommendations)}
 
         <!-- Risk Factors -->
-        ${this.renderRiskFactors(llmAnalysis.riskFactors, isEnhancedFallback)}
-
-        <!-- Raw Response Content Analysis (for enhanced fallbacks) -->
-        ${isEnhancedFallback && llmAnalysis.responseContentAnalysis ? `
-            <div class="result-card">
-                <h4>🔍 Content Analysis Details</h4>
-                <div style="background: #f1f5f9; padding: 16px; border-radius: 8px; border: 1px solid #cbd5e1;">
-                    <div style="color: #475569; font-size: 13px; line-height: 1.5;">
-                        <strong>Response Analysis Results:</strong><br>
-                        • Field Information: ${llmAnalysis.responseContentAnalysis.hasFieldInfo ? '✅ Detected' : '❌ Not detected'}<br>
-                        • Program Information: ${llmAnalysis.responseContentAnalysis.hasProgramInfo ? '✅ Detected' : '❌ Not detected'}<br>
-                        • Business Information: ${llmAnalysis.responseContentAnalysis.hasBusinessInfo ? '✅ Detected' : '❌ Not detected'}<br>
-                        • Field Count Extracted: ${llmAnalysis.responseContentAnalysis.fieldCount || 'None'}<br>
-                        • Programs Detected: ${llmAnalysis.responseContentAnalysis.programs?.join(', ') || 'None'}<br>
-                        • Insights Extracted: ${llmAnalysis.responseContentAnalysis.insights?.length || 0}
-                        ${llmAnalysis.responseContentAnalysis.insights?.length > 0 ? `<br><br><strong>Key Insights:</strong><br>${llmAnalysis.responseContentAnalysis.insights.map(insight => `• ${insight}`).join('<br>')}` : ''}
-                    </div>
-                </div>
-            </div>
-        ` : ''}
-
-        <!-- Emergency Fallback Notice -->
-        ${llmAnalysis.emergencyCreated ? `
-            <div class="result-card">
-                <h4>🚨 Emergency Analysis Results</h4>
-                <div style="background: #fef2f2; padding: 16px; border-radius: 8px; border: 1px solid #fca5a5;">
-                    <div style="color: #991b1b; font-weight: 600; margin-bottom: 8px;">
-                        ⚠️ Emergency Fallback - Complete Analysis Failure
-                    </div>
-                    <div style="color: #7f1d1d; font-size: 13px; line-height: 1.5;">
-                        The primary analysis process failed completely. This emergency fallback provides basic component information
-                        based on uploaded files and component identification.
-                        ${llmAnalysis.originalError ? `<br><br><strong>Original Error:</strong> ${llmAnalysis.originalError}` : ''}
-                        <br><br><strong>Recommended Actions:</strong>
-                        <br>• Check LLM server connection and configuration
-                        <br>• Verify component name and file uploads
-                        <br>• Review console logs for detailed error information
-                        <br>• Consider manual analysis of the component
-                    </div>
-                </div>
-            </div>
-        ` : ''}
-
-        <!-- Analysis Actions -->
-        <div class="result-card">
-            <h4>🎯 Next Steps</h4>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-top: 16px;">
-                <div style="background: #f0f9ff; padding: 16px; border-radius: 8px; border: 1px solid #bae6fd;">
-                    <h5 style="color: #1e40af; margin-bottom: 8px;">📋 Field Matrix</h5>
-                    <p style="font-size: 12px; color: #1d4ed8; margin-bottom: 12px;">
-                        View detailed field-level analysis and categorization
-                    </p>
-                    <button onclick="document.querySelector('[data-tab=\"fieldmatrix\"]').click()" 
-                            style="background: #3b82f6; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 11px; cursor: pointer;">
-                        View Fields
-                    </button>
-                </div>
-                
-                <div style="background: #f0fdf4; padding: 16px; border-radius: 8px; border: 1px solid #bbf7d0;">
-                    <h5 style="color: #166534; margin-bottom: 8px;">🔗 Dependencies</h5>
-                    <p style="font-size: 12px; color: #15803d; margin-bottom: 12px;">
-                        Explore component dependencies and relationships
-                    </p>
-                    <button onclick="document.querySelector('[data-tab=\"dependencies\"]').click()" 
-                            style="background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 11px; cursor: pointer;">
-                        View Dependencies
-                    </button>
-                </div>
-                
-                <div style="background: #fffbeb; padding: 16px; border-radius: 8px; border: 1px solid #fcd34d;">
-                    <h5 style="color: #92400e; margin-bottom: 8px;">🌊 Lifecycle</h5>
-                    <p style="font-size: 12px; color: #a16207; margin-bottom: 12px;">
-                        Review complete component lifecycle flow
-                    </p>
-                    <button onclick="document.querySelector('[data-tab=\"fileflow\"]').click()" 
-                            style="background: #f59e0b; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 11px; cursor: pointer;">
-                        View Lifecycle
-                    </button>
-                </div>
-                
-                <div style="background: #fdf4ff; padding: 16px; border-radius: 8px; border: 1px solid #e9d5ff;">
-                    <h5 style="color: #7c3aed; margin-bottom: 8px;">💬 Ask Questions</h5>
-                    <p style="font-size: 12px; color: #8b5cf6; margin-bottom: 12px;">
-                        Chat with the analysis assistant about this component
-                    </p>
-                    <button onclick="document.getElementById('chatInput').focus()" 
-                            style="background: #8b5cf6; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 11px; cursor: pointer;">
-                        Start Chat
-                    </button>
-                </div>
-            </div>
-        </div>
+        ${this.renderRiskFactors(llmAnalysis.riskFactors)}
     `;
-    
+
     container.innerHTML = html;
-
-    // Update other tabs with the analysis results
-    this.displayFieldMatrix(componentName, results, friendlyName);
-    this.displayUsagePatterns(componentName, results, friendlyName);
-    this.displayDependencies(componentName, results, friendlyName);
-    this.displayFileLifecycle(componentName, results, friendlyName);
 }
 
-// Enhanced lifecycle summary renderer
-renderLifecycleSummary(lifecycleFlow, llmLifecyclePhases, friendlyName, isEnhancedFallback) {
-    const lifecycle = lifecycleFlow || llmLifecyclePhases || {};
-    
-    const creationCount = (lifecycle.creationSources?.length || 0) + (lifecycle.creation?.length || 0);
-    const processingCount = (lifecycle.inputPrograms?.length || 0) + (lifecycle.updatePrograms?.length || 0) + (lifecycle.processing?.length || 0);
-    const outputCount = (lifecycle.cicsScreens?.length || 0) + (lifecycle.batchJobs?.length || 0) + (lifecycle.output?.length || 0);
-    
-    if (creationCount === 0 && processingCount === 0 && outputCount === 0) {
-        return '';
-    }
-    
-    return `
-        <div class="result-card">
-            <h4>🌊 Lifecycle Summary</h4>
-            <div style="margin-bottom: 16px; text-align: center;">
-                <span style="background: #3b82f6; color: white; padding: 8px 16px; border-radius: 8px; font-weight: bold;">
-                    ${lifecycleFlow?.usagePattern || 'COMPONENT_LIFECYCLE'}
-                </span>
-            </div>
-            
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px;">
-                <div style="text-align: center; background: #ecfdf5; padding: 12px; border-radius: 6px; border: 1px solid #a7f3d0;">
-                    <div style="font-size: 1.2rem; font-weight: bold; color: #059669;">${creationCount}</div>
-                    <div style="font-size: 10px; color: #065f46;">🌱 Creation</div>
-                </div>
-                <div style="text-align: center; background: #eff6ff; padding: 12px; border-radius: 6px; border: 1px solid #bfdbfe;">
-                    <div style="font-size: 1.2rem; font-weight: bold; color: #2563eb;">${processingCount}</div>
-                    <div style="font-size: 10px; color: #1d4ed8;">⚙️ Processing</div>
-                </div>
-                <div style="text-align: center; background: #fdf4ff; padding: 12px; border-radius: 6px; border: 1px solid #e9d5ff;">
-                    <div style="font-size: 1.2rem; font-weight: bold; color: #7c3aed;">${outputCount}</div>
-                    <div style="font-size: 10px; color: #6b21a8;">📤 Output</div>
-                </div>
-            </div>
-            
-            ${isEnhancedFallback ? `
-                <div style="font-size: 11px; color: #6b7280; font-style: italic; margin-top: 8px; text-align: center;">
-                    *Lifecycle analysis reconstructed from available data
-                </div>
-            ` : ''}
-        </div>
-    `;
-}
-// Enhanced recommendations renderer
-renderRecommendations(recommendations, isEnhancedFallback) {
-    if (!recommendations || recommendations.length === 0) {
-        return '';
-    }
-    
-    return `
-        <div class="result-card">
-            <h4>💡 Recommendations</h4>
-            <div style="background: #fef3c7; padding: 16px; border-radius: 8px; border: 1px solid #fcd34d; margin-top: 16px;">
-                ${recommendations.map((rec, index) => `
-                    <div style="margin-bottom: 8px; color: #92400e; font-size: 13px;">
-                        <strong>💡 ${index + 1}.</strong> ${rec}
-                    </div>
-                `).join('')}
-                ${isEnhancedFallback ? `
-                    <div style="font-size: 11px; color: #a16207; font-style: italic; margin-top: 12px; border-top: 1px solid #fcd34d; padding-top: 8px;">
-                        *Recommendations generated using enhanced analysis methods. Manual verification suggested.
-                    </div>
-                ` : ''}
-            </div>
-        </div>
-    `;
-}
-
-// Enhanced risk factors renderer
-renderRiskFactors(riskFactors, isEnhancedFallback) {
-    if (!riskFactors || riskFactors.length === 0) {
-        return '';
-    }
-    
-    return `
-        <div class="result-card">
-            <h4>⚠️ Risk Factors</h4>
-            <div style="background: #fef2f2; padding: 16px; border-radius: 8px; border: 1px solid #fecaca; margin-top: 16px;">
-                ${riskFactors.map((risk, index) => `
-                    <div style="margin-bottom: 8px; color: #991b1b; font-size: 13px;">
-                        <strong>⚠️ ${index + 1}.</strong> ${risk}
-                    </div>
-                `).join('')}
-                ${isEnhancedFallback ? `
-                    <div style="font-size: 11px; color: #7f1d1d; font-style: italic; margin-top: 12px; border-top: 1px solid #fecaca; padding-top: 8px;">
-                        *Risk assessment based on enhanced fallback analysis. Additional risks may exist.
-                    </div>
-                ` : ''}
-            </div>
-        </div>
-    `;
-}
-
-// Helper methods for enhanced rendering
-getRiskColor(riskLevel) {
-    const colors = {
-        'LOW': '#10b981',
-        'MEDIUM': '#f59e0b', 
-        'HIGH': '#ef4444'
-    };
-    return colors[riskLevel] || colors.MEDIUM;
-}
-
-getLogicColor(type) {
-    const colors = {
-        'VALIDATION': '#8b5cf6',
-        'CALCULATION': '#f59e0b',
-        'CONTROL': '#3b82f6',
-        'EXTRACTED': '#10b981',
-        'OTHER': '#6b7280'
-    };
-    return colors[type] || colors.OTHER;
-}
-// Enhanced field analysis summary renderer
-renderFieldAnalysisSummary(fieldAnalysis, llmFieldAnalysis, isEnhancedFallback) {
+// Render field analysis summary
+renderFieldAnalysisSummary(fieldAnalysis, llmFieldAnalysis) {
     const merged = this.mergeFieldAnalysisData(fieldAnalysis, llmFieldAnalysis);
     
     if (!merged || merged.totalFields === 0) {
-        return `
-            <div class="result-card">
-                <h4>📋 Field Analysis Summary</h4>
-                <div style="background: #f9fafb; padding: 16px; border-radius: 8px; border: 1px solid #e5e7eb; text-align: center;">
-                    <div style="color: #6b7280; font-size: 14px;">
-                        ${isEnhancedFallback ? 
-                            'Field analysis was reconstructed using available data. Limited field information available.' :
-                            'No detailed field analysis available for this component.'}
-                    </div>
-                </div>
-            </div>
-        `;
+        return '';
     }
     
     return `
@@ -4273,7 +4461,6 @@ renderFieldAnalysisSummary(fieldAnalysis, llmFieldAnalysis, isEnhancedFallback) 
                     <div style="background: #f0f9ff; padding: 8px; border-radius: 4px; border: 1px solid #bae6fd;">
                         <div style="color: #1e40af; font-size: 12px;">
                             ${merged.keyFields.join(', ')}
-                            ${isEnhancedFallback ? '<br><small style="font-style: italic; color: #6b7280;">*Identified through enhanced extraction</small>' : ''}
                         </div>
                     </div>
                 </div>
@@ -4282,8 +4469,8 @@ renderFieldAnalysisSummary(fieldAnalysis, llmFieldAnalysis, isEnhancedFallback) 
     `;
 }
 
-// Enhanced business rules renderer
-renderBusinessRules(businessRules, isEnhancedFallback) {
+// Render business rules
+renderBusinessRules(businessRules) {
     if (!businessRules || businessRules.length === 0) {
         return '';
     }
@@ -4307,103 +4494,6 @@ renderBusinessRules(businessRules, isEnhancedFallback) {
                         ` : ''}
                     </div>
                 `).join('')}
-                ${isEnhancedFallback ? `
-                    <div style="font-size: 11px; color: #6b7280; font-style: italic; margin-top: 8px;">
-                        *Business rules extracted using enhanced analysis methods
-                    </div>
-                ` : ''}
-            </div>
-        </div>
-    `;
-}
-
-
-// Enhanced field analysis summary renderer
-renderFieldAnalysisSummary(fieldAnalysis, llmFieldAnalysis, isEnhancedFallback) {
-    const merged = this.mergeFieldAnalysisData(fieldAnalysis, llmFieldAnalysis);
-    
-    if (!merged || merged.totalFields === 0) {
-        return `
-            <div class="result-card">
-                <h4>📋 Field Analysis Summary</h4>
-                <div style="background: #f9fafb; padding: 16px; border-radius: 8px; border: 1px solid #e5e7eb; text-align: center;">
-                    <div style="color: #6b7280; font-size: 14px;">
-                        ${isEnhancedFallback ? 
-                            'Field analysis was reconstructed using available data. Limited field information available.' :
-                            'No detailed field analysis available for this component.'}
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-    
-    return `
-        <div class="result-card">
-            <h4>📋 Field Analysis Summary</h4>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin: 16px 0;">
-                <div style="text-align: center; background: #ecfdf5; padding: 12px; border-radius: 6px;">
-                    <div style="font-size: 1.2rem; font-weight: bold; color: #059669;">${merged.totalFields}</div>
-                    <div style="font-size: 10px; color: #065f46;">Total Fields</div>
-                </div>
-                <div style="text-align: center; background: #eff6ff; padding: 12px; border-radius: 6px;">
-                    <div style="font-size: 1.2rem; font-weight: bold; color: #2563eb;">${merged.fieldCategories.input.length}</div>
-                    <div style="font-size: 10px; color: #1d4ed8;">Input Fields</div>
-                </div>
-                <div style="text-align: center; background: #fffbeb; padding: 12px; border-radius: 6px;">
-                    <div style="font-size: 1.2rem; font-weight: bold; color: #d97706;">${merged.fieldCategories.calculated.length}</div>
-                    <div style="font-size: 10px; color: #92400e;">Calculated</div>
-                </div>
-                <div style="text-align: center; background: #fef2f2; padding: 12px; border-radius: 6px;">
-                    <div style="font-size: 1.2rem; font-weight: bold; color: #dc2626;">${merged.fieldCategories.unused.length}</div>
-                    <div style="font-size: 10px; color: #991b1b;">Unused</div>
-                </div>
-            </div>
-            
-            ${merged.keyFields && merged.keyFields.length > 0 ? `
-                <div style="margin-top: 12px;">
-                    <div style="font-weight: 600; color: #1f2937; margin-bottom: 8px;">🔑 Key Fields:</div>
-                    <div style="background: #f0f9ff; padding: 8px; border-radius: 4px; border: 1px solid #bae6fd;">
-                        <div style="color: #1e40af; font-size: 12px;">
-                            ${merged.keyFields.join(', ')}
-                            ${isEnhancedFallback ? '<br><small style="font-style: italic; color: #6b7280;">*Identified through enhanced extraction</small>' : ''}
-                        </div>
-                    </div>
-                </div>
-            ` : ''}
-        </div>
-    `;
-}
-
-// Enhanced business rules renderer
-renderBusinessRules(businessRules, isEnhancedFallback) {
-    if (!businessRules || businessRules.length === 0) {
-        return '';
-    }
-    
-    return `
-        <div class="result-card">
-            <h4>⚖️ Business Rules</h4>
-            <div style="margin-top: 16px;">
-                ${businessRules.map(rule => `
-                    <div style="background: #f8fafc; padding: 12px; margin-bottom: 8px; border-radius: 6px; border-left: 4px solid ${this.getLogicColor(rule.type)};">
-                        <div style="font-weight: 600; color: #1f2937; margin-bottom: 4px;">
-                            ${rule.type} - ${rule.complexity || 'MEDIUM'} Complexity
-                        </div>
-                        <div style="color: #374151; font-size: 13px; margin-bottom: 8px;">
-                            ${rule.description}
-                        </div>
-                        ${rule.fields && rule.fields.length > 0 ? `
-                            <div style="font-size: 11px; color: #6b7280;">
-                                <strong>Fields:</strong> ${rule.fields.join(', ')}
-                            </div>
-                        ` : ''}
-                    </div>
-                `).join('')}
-                ${isEnhancedFallback ? `
-                    <div style="font-size: 11px; color: #6b7280; font-style: italic; margin-top: 8px;">
-                        *Business rules extracted using enhanced analysis methods
-                    </div>
-                ` : ''}
             </div>
         </div>
     `;
@@ -6495,49 +6585,6 @@ extractComprehensiveDependencies(relevantFiles, componentName) {
     container.innerHTML = html;
 }
 
-// Enhanced dependency summary renderer
-renderDependencySummary(dependencyAnalysis, llmDependencies, isEnhancedFallback) {
-    const deps = dependencyAnalysis || { summary: { foundCount: 0, missingCount: 0 } };
-    const llmDeps = llmDependencies || { required: [], missing: [] };
-    
-    const totalFound = deps.summary.foundCount + (llmDeps.required?.length || 0);
-    const totalMissing = deps.summary.missingCount + (llmDeps.missing?.length || 0);
-    
-    if (totalFound === 0 && totalMissing === 0) {
-        return '';
-    }
-    
-    return `
-        <div class="result-card">
-            <h4>🔗 Dependencies Overview</h4>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px;">
-                <div style="text-align: center; background: #ecfdf5; padding: 12px; border-radius: 6px; border: 1px solid #a7f3d0;">
-                    <div style="font-size: 1.2rem; font-weight: bold; color: #059669;">${totalFound}</div>
-                    <div style="font-size: 11px; color: #065f46;">✅ Dependencies Available</div>
-                </div>
-                <div style="text-align: center; background: #fef2f2; padding: 12px; border-radius: 6px; border: 1px solid #fca5a5;">
-                    <div style="font-size: 1.2rem; font-weight: bold; color: #dc2626;">${totalMissing}</div>
-                    <div style="font-size: 11px; color: #991b1b;">❌ Dependencies Missing</div>
-                </div>
-            </div>
-            
-            ${llmDeps.riskAssessment ? `
-                <div style="margin-top: 12px; text-align: center;">
-                    <span style="background: ${this.getRiskColor(llmDeps.riskAssessment)}; color: white; padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;">
-                        Risk Level: ${llmDeps.riskAssessment}
-                    </span>
-                </div>
-            ` : ''}
-            
-            ${isEnhancedFallback ? `
-                <div style="font-size: 11px; color: #6b7280; font-style: italic; margin-top: 8px; text-align: center;">
-                    *Dependency analysis enhanced with fallback extraction methods
-                </div>
-            ` : ''}
-        </div>
-    `;
-}
-
 // Render comprehensive dependency dashboard
 renderDependencyDashboard(dependencyAnalysis) {
     const { found, missing, summary } = dependencyAnalysis;
@@ -6585,47 +6632,80 @@ renderDependencyDashboard(dependencyAnalysis) {
 }
 
         displayUsagePatterns(componentName, results, friendlyName) {
-            const container = document.getElementById('usageContent');
-            if (!container) return;
-            
-            let html = `
-                <div class="analysis-header">
-                    <h3 class="analysis-title">📈 Usage Patterns: ${friendlyName}</h3>
-                    <p class="analysis-meta">Component usage pattern analysis for ${friendlyName}.</p>
+    const container = document.getElementById('usageContent');
+    if (!container) return;
+    
+    const lifecycleFlow = results.lifecycleFlow || {};
+    const fieldAnalysis = results.fieldAnalysis || {};
+    
+    let html = `
+        <div class="analysis-header">
+            <h3 class="analysis-title">📈 Complete Usage Patterns: ${friendlyName}</h3>
+            <p class="analysis-meta">Comprehensive usage analysis including field operations and program interactions for ${friendlyName}.</p>
+        </div>
+        
+        <!-- Primary Usage Pattern -->
+        <div class="result-card">
+            <h4>🎯 Primary Usage Pattern</h4>
+            <div style="background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; text-align: center;">
+                <div style="margin-bottom: 16px;">
+                    <span style="background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; padding: 12px 24px; border-radius: 8px; font-weight: bold; font-size: 16px;">
+                        ${(lifecycleFlow.usagePattern || 'COBOL_PROGRAM').replace(/_/g, ' ')}
+                    </span>
                 </div>
+                <div style="color: #374151; font-size: 14px;">
+                    ${this.getUsagePatternDescription(lifecycleFlow.usagePattern)}
+                </div>
+            </div>
+        </div>
+
+        <!-- Detailed Usage Breakdown -->
+        <div class="result-card">
+            <h4>📊 Detailed Usage Analysis</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 16px;">
                 
-                <div class="result-card">
-                    <h4>📊 Pattern Analysis for ${friendlyName}</h4>
-                    
-                    <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
-                        <div style="text-align: center; margin-bottom: 16px;">
-                            <span style="background: #3b82f6; color: white; padding: 8px 16px; border-radius: 6px; font-weight: bold;">
-                                ${results.lifecycleFlow?.usagePattern || 'ANALYZED'}
-                            </span>
-                        </div>
-                        
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
-                            <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #d1d5db;">
-                                <h6 style="color: #059669; margin-bottom: 8px;">🌱 Creation Patterns</h6>
-                                <p style="font-size: 12px; color: #6b7280;">Programs that create or initialize ${friendlyName}</p>
-                            </div>
-                            
-                            <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #d1d5db;">
-                                <h6 style="color: #2563eb; margin-bottom: 8px;">📖 Access Patterns</h6>
-                                <p style="font-size: 12px; color: #6b7280;">How programs read and access ${friendlyName}</p>
-                            </div>
-                            
-                            <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #d1d5db;">
-                                <h6 style="color: #d97706; margin-bottom: 8px;">⚙️ Update Patterns</h6>
-                                <p style="font-size: 12px; color: #6b7280;">Modification and update operations on ${friendlyName}</p>
-                            </div>
-                        </div>
+                <!-- Field Usage Patterns -->
+                <div style="background: #f0fdf4; padding: 16px; border-radius: 8px; border-left: 4px solid #059669;">
+                    <h6 style="color: #059669; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                        📊 Field Usage Patterns
+                    </h6>
+                    <div style="font-size: 12px; color: #065f46; line-height: 1.6;">
+                        <strong>Total Fields:</strong> ${fieldAnalysis.totalFields || 0}<br>
+                        <strong>Input Operations:</strong> ${fieldAnalysis.fieldCategories?.input?.length || 0} fields<br>
+                        <strong>Update Operations:</strong> ${fieldAnalysis.fieldCategories?.updated?.length || 0} fields<br>
+                        <strong>Output Operations:</strong> ${fieldAnalysis.fieldCategories?.output?.length || 0} fields<br>
+                        <strong>Unused Fields:</strong> ${fieldAnalysis.fieldCategories?.unused?.length || 0} fields
                     </div>
                 </div>
-            `;
-            
-            container.innerHTML = html;
-        }
+                
+                <!-- Program Interaction Patterns -->
+                <div style="background: #eff6ff; padding: 16px; border-radius: 8px; border-left: 4px solid #2563eb;">
+                    <h6 style="color: #2563eb; margin-bottom: 12px;">🔗 Program Interactions</h6>
+                    <div style="font-size: 12px; color: #1d4ed8; line-height: 1.6;">
+                        <strong>Creation Programs:</strong> ${(lifecycleFlow.creationSources || []).length}<br>
+                        <strong>Input Programs:</strong> ${(lifecycleFlow.inputPrograms || []).length}<br>
+                        <strong>Update Programs:</strong> ${(lifecycleFlow.updatePrograms || []).length}<br>
+                        <strong>Output Programs:</strong> ${((lifecycleFlow.cicsScreens || []).length + (lifecycleFlow.batchJobs || []).length)}
+                    </div>
+                </div>
+                
+                <!-- Data Flow Patterns -->
+                <div style="background: #fefce8; padding: 16px; border-radius: 8px; border-left: 4px solid #d97706;">
+                    <h6 style="color: #d97706; margin-bottom: 12px;">🌊 Data Flow</h6>
+                    <div style="font-size: 12px; color: #92400e; line-height: 1.6;">
+                        ${this.renderDataFlowSummary(lifecycleFlow.dataFlow)}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Program Usage Details -->
+        ${this.renderProgramUsageDetails(lifecycleFlow)}
+    `;
+    
+    container.innerHTML = html;
+}
+
 
         /* ===================================================================
 ENHANCED DEPENDENCY DISPLAY METHODS
@@ -6652,24 +6732,22 @@ displayDependencies(componentName, results, friendlyName) {
             </p>
         </div>
 
-        <!-- Dependency Overview Dashboard -->
-        ${this.renderDependencyDashboard(dependencyAnalysis)}
+        <!-- Enhanced Dependency Dashboard -->
+        ${this.renderEnhancedDependencyDashboard(dependencyAnalysis)}
 
-        <!-- Complete Dependency Tree -->
-        ${this.renderCompleteDependencyTree(componentName, dependencyAnalysis, results)}
+        <!-- Detailed Found Dependencies with Programs -->
+        ${this.renderFoundDependenciesWithPrograms(dependencyAnalysis.found)}
 
-        <!-- Cross-Reference Map -->
-        ${this.renderCrossReferenceMap(componentName, dependencyAnalysis, results)}
+        <!-- Missing Dependencies with Search Details -->
+        ${this.renderMissingDependenciesDetailed(dependencyAnalysis.missing)}
 
-        <!-- Impact Analysis -->
-        ${this.renderDependencyImpactAnalysis(componentName, dependencyAnalysis)}
-
-        <!-- Detailed Dependency Breakdown -->
-        ${this.renderDetailedDependencyBreakdown(dependencyAnalysis)}
+        <!-- Cross-Reference Analysis -->
+        ${this.renderDependencyUsageAnalysis(componentName, dependencyAnalysis, results)}
     `;
     
     container.innerHTML = html;
 }
+
 
 // Render complete dependency tree
 renderCompleteDependencyTree(componentName, dependencyAnalysis, results) {
@@ -6698,7 +6776,7 @@ renderCompleteDependencyTree(componentName, dependencyAnalysis, results) {
 }
 
 // Render found dependencies section
-renderFoundDependencies(foundDeps) {
+renderFoundDependenciesWithPrograms(foundDeps) {
     const totalFound = Object.values(foundDeps).reduce((sum, deps) => sum + deps.length, 0);
     
     if (totalFound === 0) {
@@ -6721,23 +6799,35 @@ renderFoundDependencies(foundDeps) {
     Object.entries(foundDeps).forEach(([depType, dependencies]) => {
         if (dependencies.length > 0) {
             html += `
-                <div style="margin-bottom: 20px;">
+                <div style="margin-bottom: 24px;">
                     <h5 style="color: #059669; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
                         ${this.getDependencyIcon(depType)} ${this.getDependencyLabel(depType)} (${dependencies.length})
                     </h5>
                     <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px;">
                         ${dependencies.map(dep => `
-                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; margin: 4px 0; background: white; border-radius: 6px; border-left: 4px solid #10b981;">
-                                <div>
-                                    <div style="font-weight: 600; color: #065f46;">${dep.name}</div>
-                                    <div style="font-size: 11px; color: #166534;">
-                                        Found in: <strong>${dep.foundIn}</strong> | 
-                                        Match: ${dep.matchType} | 
-                                        Confidence: ${Math.round(dep.confidence * 100)}%
+                            <div style="background: white; padding: 12px; margin: 8px 0; border-radius: 6px; border-left: 4px solid #10b981; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                                <div style="display: flex; justify-content: space-between; align-items: start;">
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: 600; color: #065f46; margin-bottom: 6px; font-size: 14px;">
+                                            📁 ${dep.name}
+                                        </div>
+                                        <div style="background: #ecfdf5; padding: 8px; border-radius: 4px; margin-bottom: 8px;">
+                                            <div style="font-size: 11px; color: #166534; line-height: 1.4;">
+                                                <strong>Found in:</strong> <span style="font-family: monospace; background: white; padding: 2px 4px; border-radius: 2px;">${dep.foundIn}</span><br>
+                                                <strong>Match Type:</strong> ${dep.matchType || 'FILENAME'}<br>
+                                                <strong>Confidence:</strong> <span style="font-weight: 600;">${Math.round((dep.confidence || 1) * 100)}%</span>
+                                            </div>
+                                        </div>
+                                        ${this.renderDependencyUsageInfo(dep.name, depType)}
                                     </div>
-                                </div>
-                                <div style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: 600;">
-                                    FOUND
+                                    <div style="text-align: center;">
+                                        <div style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; margin-bottom: 4px;">
+                                            AVAILABLE
+                                        </div>
+                                        <div style="font-size: 9px; color: #065f46;">
+                                            ✅ Ready
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         `).join('')}
@@ -6752,7 +6842,7 @@ renderFoundDependencies(foundDeps) {
 }
 
 // Render missing dependencies section
-renderMissingDependencies(missingDeps) {
+renderMissingDependenciesDetailed(missingDeps) {
     const totalMissing = Object.values(missingDeps).reduce((sum, deps) => sum + deps.length, 0);
     
     if (totalMissing === 0) {
@@ -6774,7 +6864,7 @@ renderMissingDependencies(missingDeps) {
                 <div style="color: #991b1b; font-weight: 600; margin-bottom: 8px;">⚠️ Impact Assessment</div>
                 <div style="color: #7f1d1d; font-size: 13px;">
                     Missing dependencies may cause compilation errors or runtime issues. 
-                    Consider uploading the missing files or verifying the dependency names.
+                    These components are referenced but not found in uploaded files.
                 </div>
             </div>
             <div style="margin-top: 16px;">
@@ -6783,35 +6873,49 @@ renderMissingDependencies(missingDeps) {
     Object.entries(missingDeps).forEach(([depType, dependencies]) => {
         if (dependencies.length > 0) {
             html += `
-                <div style="margin-bottom: 20px;">
+                <div style="margin-bottom: 24px;">
                     <h5 style="color: #dc2626; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
-                        ${this.getDependencyIcon(depType)} ${this.getDependencyLabel(depType)} (${dependencies.length})
+                        ${this.getDependencyIcon(depType)} Missing ${this.getDependencyLabel(depType)} (${dependencies.length})
                     </h5>
                     <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px;">
                         ${dependencies.map(dep => `
-                            <div style="padding: 8px 12px; margin: 4px 0; background: white; border-radius: 6px; border-left: 4px solid #ef4444;">
-                                <div style="display: flex; justify-content: between; align-items: center;">
+                            <div style="background: white; padding: 12px; margin: 8px 0; border-radius: 6px; border-left: 4px solid #ef4444; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                                <div style="display: flex; justify-content: space-between; align-items: start;">
                                     <div style="flex: 1;">
-                                        <div style="font-weight: 600; color: #991b1b; margin-bottom: 4px;">${dep.name}</div>
-                                        <div style="font-size: 11px; color: #7f1d1d; margin-bottom: 8px;">
-                                            ${dep.reason || 'Not found in uploaded files'}
+                                        <div style="font-weight: 600; color: #991b1b; margin-bottom: 6px; font-size: 14px;">
+                                            📋 ${dep.name}
                                         </div>
-                                        <div style="font-size: 10px; color: #6b7280;">
-                                            <strong>Searched variants:</strong> ${dep.searchVariants ? dep.searchVariants.join(', ') : 'N/A'}
+                                        <div style="background: #fef2f2; padding: 8px; border-radius: 4px; margin-bottom: 8px;">
+                                            <div style="font-size: 11px; color: #7f1d1d; line-height: 1.4;">
+                                                <strong>Status:</strong> Not found in uploaded files<br>
+                                                <strong>Search Type:</strong> ${this.getSearchTypeDescription(depType)}<br>
+                                                <strong>Expected:</strong> ${this.getExpectedFileType(depType)}
+                                            </div>
+                                        </div>
+                                        <div style="background: #f1f5f9; padding: 8px; border-radius: 4px;">
+                                            <div style="font-size: 10px; color: #475569;">
+                                                <strong>Searched variants:</strong><br>
+                                                <code style="font-size: 9px; color: #64748b;">${(dep.searchVariants || [dep.name]).join(', ')}</code>
+                                            </div>
                                         </div>
                                     </div>
-                                    <div style="background: #ef4444; color: white; padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: 600;">
-                                        MISSING
+                                    <div style="text-align: center;">
+                                        <div style="background: #ef4444; color: white; padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; margin-bottom: 4px;">
+                                            MISSING
+                                        </div>
+                                        <div style="font-size: 9px; color: #991b1b;">
+                                            ❌ Upload
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         `).join('')}
                         
-                        <!-- Suggestions for missing dependencies -->
-                        <div style="background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px; padding: 8px; margin-top: 8px;">
-                            <div style="font-size: 11px; color: #92400e; font-weight: 600; margin-bottom: 4px;">💡 Suggestions:</div>
-                            <div style="font-size: 10px; color: #a16207;">
-                                ${this.getMissingSuggestions(depType)}
+                        <!-- Actionable Suggestions -->
+                        <div style="background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px; padding: 12px; margin-top: 12px;">
+                            <div style="font-size: 11px; color: #92400e; font-weight: 600; margin-bottom: 6px;">💡 How to resolve these missing ${this.getDependencyLabel(depType)}:</div>
+                            <div style="font-size: 11px; color: #a16207; line-height: 1.4;">
+                                ${this.getDetailedResolutionSteps(depType)}
                             </div>
                         </div>
                     </div>
@@ -6822,6 +6926,214 @@ renderMissingDependencies(missingDeps) {
 
     html += `</div></div>`;
     return html;
+}
+
+
+getSearchTypeDescription(depType) {
+    const descriptions = {
+        'copyStatements': 'Copybook files (.cpy, .copybook)',
+        'callStatements': 'Called programs (.cbl, .cob)',
+        'execStatements': 'Executed programs (JCL, procedures)',
+        'fileReferences': 'File definitions (FD, SELECT statements)'
+    };
+    return descriptions[depType] || 'Referenced components';
+}
+
+getExpectedFileType(depType) {
+    const types = {
+        'copyStatements': '.cpy, .copybook files',
+        'callStatements': '.cbl, .cob program files',
+        'execStatements': '.jcl, procedure files',
+        'fileReferences': 'File definition statements'
+    };
+    return types[depType] || 'Related files';
+}
+
+getDetailedResolutionSteps(depType) {
+    const steps = {
+        'copyStatements': `
+            1. Locate copybook library files (.cpy, .copybook)<br>
+            2. Check SYSLIB or copybook directories<br>
+            3. Upload files with exact names or common variants<br>
+            4. Verify COPY statements reference correct names
+        `,
+        'callStatements': `
+            1. Find called program source files (.cbl, .cob)<br>
+            2. Check program libraries and load modules<br>
+            3. Upload source code for called programs<br>
+            4. Verify CALL statements use correct program names
+        `,
+        'execStatements': `
+            1. Locate JCL procedures and job streams<br>
+            2. Check PROCLIB and procedure libraries<br>
+            3. Upload .jcl and procedure files<br>
+            4. Verify EXEC statements reference valid programs
+        `,
+        'fileReferences': `
+            1. Find file definition statements (FD, SELECT)<br>
+            2. Check for data set definitions in JCL<br>
+            3. Upload related file structure definitions<br>
+            4. Verify file names match DD statements
+        `
+    };
+    return steps[depType] || 'Upload the missing component files';
+}
+enhanceFieldsWithUpdateAnalysis(fieldData, results) {
+    if (!fieldData.fieldCategories) {
+        fieldData.fieldCategories = {};
+    }
+    
+    // Add new category for updated fields
+    fieldData.fieldCategories.updated = [];
+    
+    // Analyze field usage patterns to identify updated fields
+    const files = results.filesAnalyzed || [];
+    const uploadedFiles = this.uploadedFiles || [];
+    
+    (fieldData.fields || []).forEach(field => {
+        let isUpdated = false;
+        
+        uploadedFiles.forEach(file => {
+            const content = file.content.toUpperCase();
+            const fieldName = field.name.toUpperCase();
+            
+            // Check for update operations
+            const updatePatterns = [
+                new RegExp(`MOVE\\s+.*\\s+TO\\s+${fieldName}`, 'i'),
+                new RegExp(`COMPUTE\\s+${fieldName}`, 'i'),
+                new RegExp(`ADD\\s+.*\\s+TO\\s+${fieldName}`, 'i'),
+                new RegExp(`SUBTRACT\\s+.*\\s+FROM\\s+${fieldName}`, 'i'),
+                new RegExp(`MULTIPLY\\s+.*\\s+BY\\s+${fieldName}`, 'i'),
+                new RegExp(`DIVIDE\\s+.*\\s+INTO\\s+${fieldName}`, 'i'),
+                new RegExp(`ACCEPT\\s+${fieldName}`, 'i'),
+                new RegExp(`READ\\s+.*\\s+INTO\\s+${fieldName}`, 'i')
+            ];
+            
+            if (updatePatterns.some(pattern => pattern.test(content))) {
+                isUpdated = true;
+            }
+        });
+        
+        if (isUpdated && !fieldData.fieldCategories.updated.includes(field.name)) {
+            fieldData.fieldCategories.updated.push(field.name);
+        }
+    });
+}
+
+renderFieldUpdateAnalysis(fieldData) {
+    const updatedFields = fieldData.fieldCategories.updated || [];
+    
+    if (updatedFields.length === 0) {
+        return `
+            <div class="result-card">
+                <h4>🔄 Field Update Analysis</h4>
+                <div style="background: #f9fafb; padding: 16px; border-radius: 8px; border: 1px solid #e5e7eb; text-align: center;">
+                    <div style="color: #6b7280;">No field update operations detected in the analyzed code</div>
+                </div>
+            </div>
+        `;
+    }
+    
+    return `
+        <div class="result-card">
+            <h4>🔄 Field Update Analysis</h4>
+            <div style="background: #fef3c7; padding: 16px; border-radius: 8px; border: 1px solid #fcd34d; margin-top: 16px;">
+                <div style="color: #92400e; font-weight: 600; margin-bottom: 12px;">
+                    📊 Update Operations Summary
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+                    <div style="background: white; padding: 12px; border-radius: 6px;">
+                        <div style="font-weight: 600; color: #f59e0b; text-align: center; font-size: 18px;">${updatedFields.length}</div>
+                        <div style="text-align: center; font-size: 11px; color: #92400e;">Fields Modified</div>
+                    </div>
+                    <div style="background: white; padding: 12px; border-radius: 6px;">
+                        <div style="font-weight: 600; color: #f59e0b; text-align: center; font-size: 18px;">${Math.round((updatedFields.length / fieldData.totalFields) * 100)}%</div>
+                        <div style="text-align: center; font-size: 11px; color: #92400e;">Update Rate</div>
+                    </div>
+                </div>
+                <div style="margin-top: 12px;">
+                    <div style="font-size: 12px; color: #a16207; font-weight: 600; margin-bottom: 6px;">Updated Fields:</div>
+                    <div style="font-size: 11px; color: #a16207; line-height: 1.4;">
+                        ${updatedFields.slice(0, 10).join(', ')}${updatedFields.length > 10 ? ` and ${updatedFields.length - 10} more...` : ''}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+renderEnhancedFieldTable(fieldData) {
+    if (!fieldData.fields || fieldData.fields.length === 0) {
+        return '';
+    }
+    
+    return `
+        <div class="result-card">
+            <h4>📋 Complete Field Analysis Table</h4>
+            <div style="max-height: 450px; overflow-y: auto; margin-top: 16px;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+                    <thead style="background: #f8fafc; position: sticky; top: 0;">
+                        <tr>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Level</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Field Name</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Picture</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Type</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Length</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Usage</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Category</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #e2e8f0;">Operations</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${fieldData.fields.map(field => this.renderEnhancedFieldRow(field, fieldData.fieldCategories)).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
+renderEnhancedFieldRow(field, categories) {
+    const category = this.getFieldCategory(field.name, categories);
+    const categoryColor = this.getCategoryColor(category);
+    const operations = this.getFieldOperations(field.name, categories);
+    
+    return `
+        <tr style="border-bottom: 1px solid #f3f4f6;">
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">${field.level}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 600;">${field.name}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-family: monospace;">${field.picture || '-'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">${field.dataType}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">${field.length || '-'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">${field.usage || 'DISPLAY'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">
+                <span style="background: ${categoryColor}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px;">
+                    ${category}
+                </span>
+            </td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-size: 9px;">${operations}</td>
+        </tr>
+    `;
+}
+
+getFieldOperations(fieldName, categories) {
+    const operations = [];
+    
+    Object.entries(categories).forEach(([category, fields]) => {
+        if (fields && fields.includes(fieldName)) {
+            switch (category) {
+                case 'input': operations.push('📥 Read'); break;
+                case 'output': operations.push('📤 Write'); break;
+                case 'updated': operations.push('🔄 Update'); break;
+                case 'calculated': operations.push('🧮 Calc'); break;
+                case 'control': operations.push('🎛️ Control'); break;
+                case 'static': operations.push('📌 Static'); break;
+                case 'unused': operations.push('❌ Unused'); break;
+            }
+        }
+    });
+    
+    return operations.join(', ') || '-';
 }
 
 // Render detailed dependency analysis
@@ -7492,108 +7804,6 @@ extractNumericValue(text, fieldName) {
     return null;
 }
 
-extractProgramNamesFromText(text) {
-    const programPattern = /(?:TMSBMDS\d+|TMS\d+\w+|[A-Z]{3,}\d+)/g;
-    const matches = text.match(programPattern);
-    return matches ? [...new Set(matches)] : [];
-}
-
-extractInsightsFromText(text) {
-    const insights = [];
-    
-    // Look for analytical statements
-    const sentences = text.split(/[.!?]+/);
-    sentences.forEach(sentence => {
-        const trimmed = sentence.trim();
-        if (trimmed.length > 20 && 
-            (trimmed.includes('analysis') || 
-             trimmed.includes('field') || 
-             trimmed.includes('program') ||
-             trimmed.includes('used to'))) {
-            insights.push(trimmed);
-        }
-    });
-    
-    return insights.slice(0, 3); // Limit to 3 insights
-}
-
-extractBusinessPurpose(text) {
-    const patterns = [
-        /business purpose[:\s]+([^.]+\.)/i,
-        /purpose[:\s]+([^.]+\.)/i,
-        /used to\s+([^.]+\.)/i,
-        /serves as\s+([^.]+\.)/i
-    ];
-    
-    for (const pattern of patterns) {
-        const match = text.match(pattern);
-        if (match) return match[1].trim();
-    }
-    
-    return 'Business purpose analysis based on component structure and field usage patterns';
-}
-
-extractTechnicalSummary(text) {
-    const patterns = [
-        /technical summary[:\s]+([^.]+\.)/i,
-        /technically[:\s]+([^.]+\.)/i,
-        /consists of\s+([^.]+\.)/i
-    ];
-    
-    for (const pattern of patterns) {
-        const match = text.match(pattern);
-        if (match) return match[1].trim();
-    }
-    
-    return 'COBOL program component with field structures and program dependencies';
-}
-
-// Create smart fallback for completely failed responses
-createSmartFallback(responseText) {
-    const componentName = this.currentAnalyzedComponent || 'Unknown';
-    const friendlyName = document.getElementById('friendlyName')?.value || componentName;
-    
-    return {
-        componentName: componentName,
-        friendlyName: friendlyName,
-        componentType: 'Unknown',
-        analysisScope: 'MINIMAL_FALLBACK',
-        businessPurpose: 'Analysis failed - manual review required',
-        technicalSummary: 'Technical analysis could not be completed',
-        fieldAnalysis: {
-            totalFields: 0,
-            keyFields: [],
-            fieldCategories: { input: [], output: [], calculated: [], control: [] }
-        },
-        businessRules: [],
-        dependencies: {
-            required: [],
-            optional: [],
-            missing: [],
-            riskAssessment: 'HIGH'
-        },
-        lifecyclePhases: {
-            creation: [],
-            processing: [],
-            output: [],
-            archival: []
-        },
-        qualityScore: 1,
-        recommendations: [
-            'Analysis failed completely',
-            'Check LLM server connection and response format',
-            'Consider manual analysis',
-            'Verify component name and uploaded files'
-        ],
-        riskFactors: [
-            'Complete analysis failure',
-            'No reliable data available'
-        ],
-        failed: true,
-        originalResponse: responseText ? responseText.substring(0, 500) : 'No response',
-        timestamp: new Date().toISOString()
-    };
-}
 
 // Extract array from text
 extractArrayFromText(text, fieldName) {
@@ -8415,109 +8625,55 @@ INSTRUCTIONS:
 }
 
         displayFileLifecycle(componentName, results, friendlyName) {
-            const container = document.getElementById('fileflowContent');
-            if (!container) return;
-            
-            let html = `
-                <div class="analysis-header">
-                    <h3 class="analysis-title">🌊 File Lifecycle: ${friendlyName}</h3>
-                    <p class="analysis-meta">Complete lifecycle from creation through usage patterns for ${friendlyName}.</p>
+    const container = document.getElementById('fileflowContent');
+    if (!container) return;
+    
+    const lifecycleFlow = results.lifecycleFlow || {};
+    
+    let html = `
+        <div class="analysis-header">
+            <h3 class="analysis-title">🌊 Complete File Lifecycle: ${friendlyName}</h3>
+            <p class="analysis-meta">End-to-end lifecycle analysis from creation through archival for ${friendlyName}</p>
+        </div>
+        
+        <!-- Enhanced Dynamic Flow Diagram -->
+        <div class="flow-diagram">
+            <h4 style="color: #1e40af; margin-bottom: 16px; text-center;">📊 Complete Lifecycle Flow for ${friendlyName}</h4>
+            <div class="flow-container">
+                <div class="flow-stage creation">
+                    <div class="flow-stage-title">🌱 Creation</div>
+                    <div class="flow-count">${(lifecycleFlow.creationSources || []).length}</div>
+                    <div class="flow-programs">${this.getStagePrograms(lifecycleFlow.creationSources, 'creation')}</div>
+                    <div class="flow-arrow"></div>
                 </div>
                 
-                <!-- Dynamic Flow Diagram -->
-                <div class="flow-diagram">
-                    <h4 style="color: #1e40af; margin-bottom: 16px; text-center;">📊 Dynamic Lifecycle Flow for ${friendlyName}</h4>
-                    <div class="flow-container">
-                        <div class="flow-stage creation">
-                            <div class="flow-stage-title">🌱 Creation</div>
-                            <div class="flow-count">${(results.lifecycleFlow?.creationSources || []).length}</div>
-                            <div class="flow-programs">${(results.lifecycleFlow?.creationSources || []).slice(0, 2).map(s => s.program || 'Unknown').join(', ') || 'No programs'}</div>
-                            <div class="flow-arrow"></div>
-                        </div>
-                        
-                        <div class="flow-stage processing">
-                            <div class="flow-stage-title">⚙️ Processing</div>
-                            <div class="flow-count">${((results.lifecycleFlow?.inputPrograms || []).length + (results.lifecycleFlow?.updatePrograms || []).length)}</div>
-                            <div class="flow-programs">Read & Update</div>
-                            <div class="flow-arrow"></div>
-                        </div>
-                        
-                        <div class="flow-stage output">
-                            <div class="flow-stage-title">📤 Output</div>
-                            <div class="flow-count">${((results.lifecycleFlow?.cicsScreens || []).length + (results.lifecycleFlow?.batchJobs || []).length)}</div>
-                            <div class="flow-programs">CICS & Batch</div>
-                        </div>
-                    </div>
+                <div class="flow-stage processing">
+                    <div class="flow-stage-title">⚙️ Processing</div>
+                    <div class="flow-count">${((lifecycleFlow.inputPrograms || []).length + (lifecycleFlow.updatePrograms || []).length)}</div>
+                    <div class="flow-programs">${this.getStagePrograms([...(lifecycleFlow.inputPrograms || []), ...(lifecycleFlow.updatePrograms || [])], 'processing')}</div>
+                    <div class="flow-arrow"></div>
                 </div>
                 
-                <div class="result-card">
-                    <h4>🌊 Detailed Lifecycle Flow for ${friendlyName}</h4>
-                    <p>Complete file lifecycle analysis showing how ${friendlyName} moves through the system:</p>
-                    
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-top: 16px;">
-                        <div style="background: #ecfdf5; padding: 16px; border-radius: 8px; border-left: 4px solid #059669;">
-                            <h6 style="color: #059669; margin-bottom: 8px;">🌱 Creation Phase</h6>
-                            <p style="font-size: 12px; color: #065f46;">
-                                Programs and processes that create or initialize ${friendlyName} data.
-                            </p>
-                        </div>
-                        
-                        <div style="background: #eff6ff; padding: 16px; border-radius: 8px; border-left: 4px solid #2563eb;">
-                            <h6 style="color: #2563eb; margin-bottom: 8px;">⚙️ Processing Phase</h6>
-                            <p style="font-size: 12px; color: #1d4ed8;">
-                                Programs that read, validate, and update ${friendlyName} throughout its lifecycle.
-                            </p>
-                        </div>
-                        
-                        <div style="background: #fef2f2; padding: 16px; border-radius: 8px; border-left: 4px solid #dc2626;">
-                            <h6 style="color: #dc2626; margin-bottom: 8px;">📤 Output Phase</h6>
-                            <p style="font-size: 12px; color: #991b1b;">
-                                Final processing, reporting, and archival of ${friendlyName} data.
-                            </p>
-                            <!-- Quality Metrics -->
-                <div class="metrics-grid">
-                    <div class="metric-card">
-                        <div class="metric-value">${results.qualityScore}/10</div>
-                        <div class="metric-label">Analysis Quality</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-value">${results.completeness.score}%</div>
-                        <div class="metric-label">Completeness</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-value">${results.filesAnalyzed.length}</div>
-                        <div class="metric-label">Files Analyzed</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-value">${results.dependencyAnalysis.summary.foundCount}</div>
-                        <div class="metric-label">Dependencies Found</div>
-                    </div>
+                <div class="flow-stage output">
+                    <div class="flow-stage-title">📤 Output</div>
+                    <div class="flow-count">${((lifecycleFlow.cicsScreens || []).length + (lifecycleFlow.batchJobs || []).length)}</div>
+                    <div class="flow-programs">${this.getStagePrograms([...(lifecycleFlow.cicsScreens || []), ...(lifecycleFlow.batchJobs || [])], 'output')}</div>
                 </div>
-            `;
+            </div>
+        </div>
+        
+        <!-- Detailed Lifecycle Phases -->
+        ${this.renderDetailedLifecyclePhases(lifecycleFlow, friendlyName)}
 
-            // Display dependency analysis
-            if (results.dependencyAnalysis) {
-                html += this.displayDependencyAnalysis(results.dependencyAnalysis);
-            }
+        <!-- File Operations Analysis -->
+        ${this.renderFileOperationsAnalysis(lifecycleFlow, friendlyName)}
 
-            // Display LLM analysis results
-            if (results.llmAnalysis) {
-                html += this.displayLLMResults(results.llmAnalysis, friendlyName);
-            }
-
-            // Display lifecycle flow summary
-            if (results.lifecycleFlow) {
-                html += this.displayLifecycleFlowSummary(results.lifecycleFlow, friendlyName);
-            }
-            
-            container.innerHTML = html;
-
-            // Update other tabs
-            this.displayFieldMatrix(componentName, results, friendlyName);
-            this.displayUsagePatterns(componentName, results, friendlyName);
-            this.displayDependencies(componentName, results, friendlyName);
-            this.displayFileLifecycle(componentName, results, friendlyName);
-        }
+        <!-- Lifecycle Risk Assessment -->
+        ${this.renderLifecycleRiskAssessment(lifecycleFlow, results)}
+    `;
+    
+    container.innerHTML = html;
+}
 
         displayDependencyAnalysis(dependencyAnalysis) {
             const found = dependencyAnalysis.found || {};
@@ -8840,49 +8996,6 @@ displayFieldMatrix(componentName, results, friendlyName) {
 }
 
 
-        displayUsagePatterns(componentName, results, friendlyName) {
-            const container = document.getElementById('usageContent');
-            if (!container) return;
-            
-            let html = `
-                <div class="analysis-header">
-                    <h3 class="analysis-title">📈 Usage Patterns: ${friendlyName}</h3>
-                    <p class="analysis-meta">Component usage pattern analysis for ${friendlyName}.</p>
-                </div>
-                
-                <div class="result-card">
-                    <h4>📊 Pattern Analysis for ${friendlyName}</h4>
-                    
-                    <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
-                        <div style="text-align: center; margin-bottom: 16px;">
-                            <span style="background: #3b82f6; color: white; padding: 8px 16px; border-radius: 6px; font-weight: bold;">
-                                ${results.lifecycleFlow?.usagePattern || 'ANALYZED'}
-                            </span>
-                        </div>
-                        
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
-                            <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #d1d5db;">
-                                <h6 style="color: #059669; margin-bottom: 8px;">🌱 Creation Patterns</h6>
-                                <p style="font-size: 12px; color: #6b7280;">Programs that create or initialize ${friendlyName}</p>
-                            </div>
-                            
-                            <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #d1d5db;">
-                                <h6 style="color: #2563eb; margin-bottom: 8px;">📖 Access Patterns</h6>
-                                <p style="font-size: 12px; color: #6b7280;">How programs read and access ${friendlyName}</p>
-                            </div>
-                            
-                            <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #d1d5db;">
-                                <h6 style="color: #d97706; margin-bottom: 8px;">⚙️ Update Patterns</h6>
-                                <p style="font-size: 12px; color: #6b7280;">Modification and update operations on ${friendlyName}</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            container.innerHTML = html;
-        }
-
         displayDependencies(componentName, results, friendlyName) {
             const container = document.getElementById('dependenciesContent');
             if (!container) return;
@@ -8907,73 +9020,7 @@ displayFieldMatrix(componentName, results, friendlyName) {
             container.innerHTML = html;
         }
 
-        displayFileLifecycle(componentName, results, friendlyName) {
-            const container = document.getElementById('fileflowContent');
-            if (!container) return;
-            
-            let html = `
-                <div class="analysis-header">
-                    <h3 class="analysis-title">🌊 File Lifecycle: ${friendlyName}</h3>
-                    <p class="analysis-meta">Complete lifecycle from creation through usage patterns for ${friendlyName}.</p>
-                </div>
-                
-                <!-- Dynamic Flow Diagram -->
-                <div class="flow-diagram">
-                    <h4 style="color: #1e40af; margin-bottom: 16px; text-center;">📊 Dynamic Lifecycle Flow for ${friendlyName}</h4>
-                    <div class="flow-container">
-                        <div class="flow-stage creation">
-                            <div class="flow-stage-title">🌱 Creation</div>
-                            <div class="flow-count">${(results.lifecycleFlow?.creationSources || []).length}</div>
-                            <div class="flow-programs">${(results.lifecycleFlow?.creationSources || []).slice(0, 2).map(s => s.program || 'Unknown').join(', ') || 'No programs'}</div>
-                            <div class="flow-arrow"></div>
-                        </div>
-                        
-                        <div class="flow-stage processing">
-                            <div class="flow-stage-title">⚙️ Processing</div>
-                            <div class="flow-count">${((results.lifecycleFlow?.inputPrograms || []).length + (results.lifecycleFlow?.updatePrograms || []).length)}</div>
-                            <div class="flow-programs">Read & Update</div>
-                            <div class="flow-arrow"></div>
-                        </div>
-                        
-                        <div class="flow-stage output">
-                            <div class="flow-stage-title">📤 Output</div>
-                            <div class="flow-count">${((results.lifecycleFlow?.cicsScreens || []).length + (results.lifecycleFlow?.batchJobs || []).length)}</div>
-                            <div class="flow-programs">CICS & Batch</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="result-card">
-                    <h4>🌊 Detailed Lifecycle Flow for ${friendlyName}</h4>
-                    <p>Complete file lifecycle analysis showing how ${friendlyName} moves through the system:</p>
-                    
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-top: 16px;">
-                        <div style="background: #ecfdf5; padding: 16px; border-radius: 8px; border-left: 4px solid #059669;">
-                            <h6 style="color: #059669; margin-bottom: 8px;">🌱 Creation Phase</h6>
-                            <p style="font-size: 12px; color: #065f46;">
-                                Programs and processes that create or initialize ${friendlyName} data.
-                            </p>
-                        </div>
-                        
-                        <div style="background: #eff6ff; padding: 16px; border-radius: 8px; border-left: 4px solid #2563eb;">
-                            <h6 style="color: #2563eb; margin-bottom: 8px;">⚙️ Processing Phase</h6>
-                            <p style="font-size: 12px; color: #1d4ed8;">
-                                Programs that read, validate, and update ${friendlyName} throughout its lifecycle.
-                            </p>
-                        </div>
-                        
-                        <div style="background: #fef2f2; padding: 16px; border-radius: 8px; border-left: 4px solid #dc2626;">
-                            <h6 style="color: #dc2626; margin-bottom: 8px;">📤 Output Phase</h6>
-                            <p style="font-size: 12px; color: #991b1b;">
-                                Final processing, reporting, and archival of ${friendlyName} data.
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            container.innerHTML = html;
-        }
+        
 
         /* ===================================================================
         EXPORT FUNCTIONALITY
@@ -9170,19 +9217,21 @@ displayFieldMatrix(componentName, results, friendlyName) {
         }
 
         // Simplified LLM API call - in real implementation, include full LLM integration
-        // Enhanced LLM API call with better response handling
-async callLLMAPI(prompt, retries = 0) {
+        async callLLMAPI(prompt, retries = 0) {
     let resultText = '';
     
     try {
-        console.log(`🤖 Making LLM API call attempt ${retries + 1}...`);
+        console.log(`Making LLM API call attempt ${retries + 1}...`);
         
+        // Intelligent token estimation and chunking
         const estimatedTokens = this.estimateTokenCount(prompt);
-        console.log(`📊 Estimated tokens: ${estimatedTokens}, Max allowed: ${this.maxTokens}`);
+        console.log(`Estimated tokens: ${estimatedTokens}, Max allowed: ${this.maxTokens}`);
         
         let processedPrompt = prompt;
+        
+        // If prompt exceeds token limit, apply intelligent chunking
         if (estimatedTokens > this.maxTokens * 0.8) {
-            console.log('🔄 Applying intelligent chunking...');
+            console.log('Applying intelligent chunking...');
             processedPrompt = await this.applyIntelligentChunking(prompt);
         }
         
@@ -9201,7 +9250,7 @@ async callLLMAPI(prompt, retries = 0) {
                 frequency_penalty: 0.1,
                 presence_penalty: 0.0
             }),
-            signal: AbortSignal.timeout(90000)
+            signal: AbortSignal.timeout(90000) // 90 second timeout
         });
 
         if (!response.ok) {
@@ -9209,7 +9258,7 @@ async callLLMAPI(prompt, retries = 0) {
         }
 
         const data = await response.json();
-        console.log('📥 LLM API Response received, keys:', Object.keys(data));
+        console.log('LLM API Response received, keys:', Object.keys(data));
         
         // Extract text from various response formats
         if (data.text) {
@@ -9232,44 +9281,33 @@ async callLLMAPI(prompt, retries = 0) {
             throw new Error('No valid text content in LLM response');
         }
 
-        console.log(`📏 LLM response length: ${resultText.length} chars`);
-        console.log(`📝 LLM response preview: ${resultText.substring(0, 200)}...`);
+        console.log(`LLM response length: ${resultText.length} chars`);
         
         // Update token display
         this.updateTokenDisplay(this.estimateTokenCount(processedPrompt + resultText));
 
-        // ENHANCED: Try multiple parsing strategies before giving up
+        // Parse the response
         const parseResult = this.parseAndValidateLLMResponse(resultText);
         
         if (parseResult.success) {
-            console.log('✅ LLM JSON parsing successful');
+            console.log('LLM JSON parsing successful');
             return parseResult.data;
         } else {
-            console.warn('⚠️ LLM JSON parsing failed, using enhanced fallback');
-            
-            // Even if parsing fails, try to extract useful information
-            const enhancedFallback = parseResult.fallbackData;
-            
-            // Add the raw response for debugging
-            enhancedFallback.rawLLMResponse = resultText;
-            enhancedFallback.parseAttempted = true;
-            enhancedFallback.parseError = parseResult.error;
-            
-            // If we have meaningful content in the response, indicate partial success
-            if (this.hasUsefulContent(resultText)) {
-                enhancedFallback.partialSuccess = true;
-                enhancedFallback.qualityScore = Math.max(enhancedFallback.qualityScore || 3, 5);
-                console.log('📊 Response contains useful content despite parsing failure');
+            console.warn('LLM JSON parsing failed, using fallback');
+            if (parseResult.fallbackData) {
+                parseResult.fallbackData.rawResponse = resultText.substring(0, 1000);
+                parseResult.fallbackData.parseError = parseResult.error;
+                return parseResult.fallbackData;
+            } else {
+                throw new Error(`JSON parsing failed: ${parseResult.error}`);
             }
-            
-            return enhancedFallback;
         }
 
     } catch (error) {
-        console.error(`❌ LLM API call attempt ${retries + 1} failed:`, error);
+        console.error(`LLM API call attempt ${retries + 1} failed:`, error);
         
         if (retries < 2) {
-            console.log(`🔄 Retrying LLM API call (${retries + 1}/2)...`);
+            console.log(`Retrying LLM API call (${retries + 1}/2)...`);
             await this.sleep(2000 * (retries + 1));
             return this.callLLMAPI(prompt, retries + 1);
         }
@@ -9285,24 +9323,6 @@ async callLLMAPI(prompt, retries = 0) {
         };
     }
 }
-
-// Check if response contains useful content even if JSON parsing fails
-hasUsefulContent(responseText) {
-    const usefulIndicators = [
-        /\d+\s+fields/i,
-        /business\s+purpose/i,
-        /technical\s+summary/i,
-        /key\s+fields/i,
-        /recommendations/i,
-        /analysis/i,
-        /TMSBMDS|TMS\d+/i,
-        /copybook/i,
-        /program/i
-    ];
-    
-    return usefulIndicators.some(pattern => pattern.test(responseText));
-}
-
 
 /* ===================================================================
 ENHANCED MAINFRAME ANALYZER - INTELLIGENT CHUNKING AND CHAT
@@ -9522,40 +9542,75 @@ buildChatContext(question, analysisData, friendlyName) {
     const context = `MAINFRAME ANALYSIS CHAT ASSISTANT
 
 CONTEXT:
-You are a helpful assistant analyzing mainframe components. Provide detailed, accurate responses based on the analysis data.
+You are a mainframe analysis expert. Provide detailed responses based on comprehensive analysis data.
 
-COMPONENT: ${analysisData.componentName} (${friendlyName})
-TYPE: ${analysisData.componentType}
-ANALYSIS METHOD: ${analysisData.analysisMethod}
+COMPONENT ANALYSIS:
+Component: ${analysisData.componentName} (${friendlyName})
+Type: ${analysisData.componentType}
+Quality Score: ${analysisData.qualityScore}/10
+Files Analyzed: ${(analysisData.filesAnalyzed || []).join(', ')}
 
-ANALYSIS RESULTS:
-${JSON.stringify(analysisData.llmAnalysis, null, 2)}
+COMPLETE FIELD ANALYSIS:
+${this.buildFieldAnalysisForChat(analysisData)}
 
-DEPENDENCY STATUS:
-Found Dependencies: ${analysisData.dependencyAnalysis?.summary?.foundCount || 0}
-Missing Dependencies: ${analysisData.dependencyAnalysis?.summary?.missingCount || 0}
-Details: ${JSON.stringify(analysisData.dependencyAnalysis?.found, null, 2)}
+COMPLETE DEPENDENCY STATUS:
+${this.buildDependencyStatusForChat(analysisData)}
 
-LIFECYCLE FLOW:
-${JSON.stringify(analysisData.lifecycleFlow, null, 2)}
+LIFECYCLE INFORMATION:
+${this.buildLifecycleInfoForChat(analysisData)}
 
-CHAT HISTORY:
+BUSINESS LOGIC & RULES:
+${this.buildBusinessLogicForChat(analysisData)}
+
+USAGE PATTERNS:
+${this.buildUsagePatternsForChat(analysisData)}
+
+RECENT CHAT HISTORY:
 ${this.getChatHistoryForContext()}
 
 USER QUESTION: "${question}"
 
 INSTRUCTIONS:
-1. Provide a helpful, detailed response based on the analysis data
-2. Use the friendly name "${friendlyName}" when referring to the component
-3. Include specific examples and data from the analysis
-4. Format response with markdown for better readability
-5. If the question cannot be answered from the data, explain what's available
-6. Keep responses focused and actionable
+1. Provide detailed, technical responses based on the complete analysis data above
+2. Use specific field names, program names, and dependency details from the data
+3. Reference actual numbers and statistics from the analysis
+4. Format with markdown for readability (**bold**, *italic*, \`code\`)
+5. Include specific examples from the component analysis
+6. If asked about dependencies, provide both found and missing details
+7. For field questions, categorize as input/output/calculated/control/static/unused
+8. Use the friendly name "${friendlyName}" when referring to the component
 
 RESPONSE:`;
 
     return context;
 }
+
+
+
+buildDependencyStatusForChat(analysisData) {
+    const dependencyAnalysis = analysisData.dependencyAnalysis || {};
+    const found = dependencyAnalysis.found || {};
+    const missing = dependencyAnalysis.missing || {};
+    
+    let depInfo = `Summary: ${dependencyAnalysis.summary?.foundCount || 0} found, ${dependencyAnalysis.summary?.missingCount || 0} missing\n\n`;
+    
+    // Found dependencies with details
+    Object.entries(found).forEach(([type, deps]) => {
+        if (deps && deps.length > 0) {
+            depInfo += `Found ${this.getDependencyLabel(type)}: ${deps.map(d => `${d.name} (in ${d.foundIn})`).join(', ')}\n`;
+        }
+    });
+    
+    // Missing dependencies with search details
+    Object.entries(missing).forEach(([type, deps]) => {
+        if (deps && deps.length > 0) {
+            depInfo += `Missing ${this.getDependencyLabel(type)}: ${deps.map(d => d.name).join(', ')}\n`;
+        }
+    });
+    
+    return depInfo;
+}
+
 
 // Apply chunking specifically for chat context
 async applyChatChunking(context) {
@@ -9606,6 +9661,34 @@ getChatHistoryForContext() {
     return recentMessages.map(msg => 
         `${msg.sender}: ${msg.content.substring(0, 200)}${msg.content.length > 200 ? '...' : ''}`
     ).join('\n');
+}
+
+
+buildFieldAnalysisForChat(analysisData) {
+    const fieldAnalysis = analysisData.fieldAnalysis || {};
+    const llmFieldAnalysis = analysisData.llmAnalysis?.fieldAnalysis || {};
+    
+    let fieldInfo = `Total Fields: ${fieldAnalysis.totalFields || 0}\n`;
+    
+    if (fieldAnalysis.fieldCategories) {
+        fieldInfo += `Field Categories:
+- Input Fields (${fieldAnalysis.fieldCategories.input?.length || 0}): ${(fieldAnalysis.fieldCategories.input || []).join(', ')}
+- Output Fields (${fieldAnalysis.fieldCategories.output?.length || 0}): ${(fieldAnalysis.fieldCategories.output || []).join(', ')}
+- Calculated Fields (${fieldAnalysis.fieldCategories.calculated?.length || 0}): ${(fieldAnalysis.fieldCategories.calculated || []).join(', ')}
+- Control Fields (${fieldAnalysis.fieldCategories.control?.length || 0}): ${(fieldAnalysis.fieldCategories.control || []).join(', ')}
+- Static Fields (${fieldAnalysis.fieldCategories.static?.length || 0}): ${(fieldAnalysis.fieldCategories.static || []).join(', ')}
+- Unused Fields (${fieldAnalysis.fieldCategories.unused?.length || 0}): ${(fieldAnalysis.fieldCategories.unused || []).join(', ')}\n`;
+    }
+    
+    if (llmFieldAnalysis.keyFields?.length > 0) {
+        fieldInfo += `Key Fields: ${llmFieldAnalysis.keyFields.join(', ')}\n`;
+    }
+    
+    if (llmFieldAnalysis.fieldUsagePatterns) {
+        fieldInfo += `Usage Patterns: ${llmFieldAnalysis.fieldUsagePatterns}\n`;
+    }
+    
+    return fieldInfo;
 }
 
 // Extract response from LLM chat call
