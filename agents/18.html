@@ -5864,62 +5864,6 @@ extractDependenciesFromFile(file) {
     return dependencies;
 }
 
-// Enhanced response parsing with multiple fallback strategies
-parseAndValidateLLMResponse(responseText) {
-    console.log('🔍 Parsing LLM response...');
-    
-    try {
-        // Clean the response text
-        let cleanedText = this.cleanLLMResponse(responseText);
-        
-        // Try direct JSON parsing first
-        try {
-            const parsed = JSON.parse(cleanedText);
-            if (this.validateLLMResponseStructure(parsed)) {
-                return { success: true, data: parsed };
-            }
-        } catch (jsonError) {
-            console.warn('Direct JSON parsing failed:', jsonError.message);
-        }
-        
-        // Try extracting JSON from response
-        const extractedJson = this.extractJSONFromResponse(cleanedText);
-        if (extractedJson) {
-            try {
-                const parsed = JSON.parse(extractedJson);
-                if (this.validateLLMResponseStructure(parsed)) {
-                    return { success: true, data: parsed };
-                }
-            } catch (extractError) {
-                console.warn('Extracted JSON parsing failed:', extractError.message);
-            }
-        }
-        
-        // Try parsing as partial JSON
-        const partialResult = this.parsePartialJSON(cleanedText);
-        if (partialResult.success) {
-            return partialResult;
-        }
-        
-        // Create fallback from text content
-        const fallbackData = this.createFallbackFromText(responseText);
-        
-        return {
-            success: false,
-            error: 'Could not parse as valid JSON',
-            fallbackData: fallbackData
-        };
-        
-    } catch (error) {
-        console.error('Response parsing error:', error);
-        return {
-            success: false,
-            error: error.message,
-            fallbackData: this.createComponentFallback(responseText)
-        };
-    }
-}
-
 
 // Validate LLM response structure
 validateLLMResponseStructure(data) {
@@ -6410,40 +6354,213 @@ extractComprehensiveDependencies(relevantFiles, componentName) {
         }
 
         displayLLMResults(llmAnalysis, friendlyName) {
-            return `
-                <div class="result-card">
-                    <h4>🤖 LLM Analysis Results for ${friendlyName}</h4>
-                    
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px;">
-                        <div style="background: #eff6ff; padding: 12px; border-radius: 6px; text-align: center; border: 1px solid #bfdbfe;">
-                            <div style="font-weight: bold; color: #1d4ed8;">${llmAnalysis.componentType}</div>
-                            <div style="font-size: 10px; color: #1e40af;">Component Type</div>
-                        </div>
-                        <div style="background: #f0f9ff; padding: 12px; border-radius: 6px; text-align: center; border: 1px solid #bae6fd;">
-                            <div style="font-weight: bold; color: #0284c7;">${llmAnalysis.analysisScope}</div>
-                            <div style="font-size: 10px; color: #0ea5e9;">Analysis Scope</div>
-                        </div>
-                        <div style="background: #fefce8; padding: 12px; border-radius: 6px; text-align: center; border: 1px solid #fde047;">
-                            <div style="font-weight: bold; color: #ca8a04;">${llmAnalysis.qualityScore}/10</div>
-                            <div style="font-size: 10px; color: #eab308;">Quality Score</div>
+    console.log('📊 Displaying LLM Results for:', friendlyName);
+    console.log('📊 LLM Analysis Object:', llmAnalysis);
+    console.log('📊 LLM Analysis Keys:', Object.keys(llmAnalysis || {}));
+    
+    // Defensive programming - ensure we have a valid object
+    if (!llmAnalysis || typeof llmAnalysis !== 'object') {
+        console.warn('⚠️ Invalid LLM analysis object:', llmAnalysis);
+        return this.renderLLMResultsError(friendlyName, 'Invalid LLM analysis data');
+    }
+    
+    // Extract values with fallbacks
+    const componentType = this.safeGet(llmAnalysis, 'componentType') || 
+                         this.safeGet(llmAnalysis, 'type') || 
+                         'Unknown Component';
+                         
+    const analysisScope = this.safeGet(llmAnalysis, 'analysisScope') || 
+                         this.safeGet(llmAnalysis, 'scope') || 
+                         'Standard Analysis';
+                         
+    const qualityScore = this.safeGet(llmAnalysis, 'qualityScore') || 
+                        this.safeGet(llmAnalysis, 'score') || 
+                        'N/A';
+                        
+    const businessPurpose = this.safeGet(llmAnalysis, 'businessPurpose') || 
+                           this.safeGet(llmAnalysis, 'purpose') || 
+                           null;
+                           
+    const technicalSummary = this.safeGet(llmAnalysis, 'technicalSummary') || 
+                            this.safeGet(llmAnalysis, 'summary') || 
+                            null;
+                            
+    const recommendations = this.safeGetArray(llmAnalysis, 'recommendations') || 
+                           this.safeGetArray(llmAnalysis, 'recommendation') || 
+                           [];
+                           
+    const modernizationOpportunities = this.safeGetArray(llmAnalysis, 'modernizationOpportunities') || 
+                                      this.safeGetArray(llmAnalysis, 'modernization') || 
+                                      [];
+                                      
+    const riskFactors = this.safeGetArray(llmAnalysis, 'riskFactors') || 
+                       this.safeGetArray(llmAnalysis, 'risks') || 
+                       [];
+
+    console.log('📊 Extracted Values:', {
+        componentType, analysisScope, qualityScore, 
+        businessPurpose: businessPurpose ? 'Present' : 'Missing',
+        recommendations: recommendations.length,
+        modernizationOpportunities: modernizationOpportunities.length,
+        riskFactors: riskFactors.length
+    });
+
+    return `
+        <div class="result-card">
+            <h4>🤖 LLM Analysis Results for ${friendlyName}</h4>
+            
+            <!-- Analysis Overview -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px;">
+                <div style="background: #eff6ff; padding: 12px; border-radius: 6px; text-align: center; border: 1px solid #bfdbfe;">
+                    <div style="font-weight: bold; color: #1d4ed8; font-size: 13px;">${componentType}</div>
+                    <div style="font-size: 10px; color: #1e40af;">Component Type</div>
+                </div>
+                <div style="background: #f0f9ff; padding: 12px; border-radius: 6px; text-align: center; border: 1px solid #bae6fd;">
+                    <div style="font-weight: bold; color: #0284c7; font-size: 13px;">${analysisScope}</div>
+                    <div style="font-size: 10px; color: #0ea5e9;">Analysis Scope</div>
+                </div>
+                <div style="background: #fefce8; padding: 12px; border-radius: 6px; text-align: center; border: 1px solid #fde047;">
+                    <div style="font-weight: bold; color: #ca8a04; font-size: 13px;">${qualityScore}${typeof qualityScore === 'number' ? '/10' : ''}</div>
+                    <div style="font-size: 10px; color: #eab308;">Quality Score</div>
+                </div>
+            </div>
+
+            <!-- Business Purpose -->
+            ${businessPurpose ? `
+                <div style="margin-bottom: 16px;">
+                    <h5 style="color: #1e40af; margin-bottom: 8px;">🎯 Business Purpose</h5>
+                    <div style="background: #f0f9ff; padding: 12px; border-radius: 6px; border: 1px solid #bae6fd;">
+                        <div style="color: #1e40af; font-size: 13px; line-height: 1.5;">
+                            ${businessPurpose}
                         </div>
                     </div>
-
-                    ${llmAnalysis.recommendations && llmAnalysis.recommendations.length > 0 ? `
-                        <div style="margin-top: 16px;">
-                            <h5 style="color: #1e40af; margin-bottom: 10px;">💡 Recommendations:</h5>
-                            <div style="background: #fef3c7; padding: 12px; border-radius: 6px; border: 1px solid #fcd34d;">
-                                ${llmAnalysis.recommendations.map((rec, index) => `
-                                    <div style="margin-bottom: 6px; font-size: 13px; color: #92400e;">
-                                        <strong>💡 ${index + 1}.</strong> ${rec}
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                    ` : ''}
                 </div>
-            `;
+            ` : ''}
+
+            <!-- Technical Summary -->
+            ${technicalSummary ? `
+                <div style="margin-bottom: 16px;">
+                    <h5 style="color: #1e40af; margin-bottom: 8px;">🔧 Technical Summary</h5>
+                    <div style="background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px solid #e2e8f0;">
+                        <div style="color: #374151; font-size: 13px; line-height: 1.5;">
+                            ${technicalSummary}
+                        </div>
+                    </div>
+                </div>
+            ` : ''}
+
+            <!-- Recommendations -->
+            ${recommendations.length > 0 ? `
+                <div style="margin-bottom: 16px;">
+                    <h5 style="color: #1e40af; margin-bottom: 10px;">💡 Recommendations</h5>
+                    <div style="background: #fef3c7; padding: 12px; border-radius: 6px; border: 1px solid #fcd34d;">
+                        ${recommendations.map((rec, index) => `
+                            <div style="margin-bottom: 6px; font-size: 13px; color: #92400e; line-height: 1.4;">
+                                <strong>💡 ${index + 1}.</strong> ${rec}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            ` : ''}
+
+            <!-- Modernization Opportunities -->
+            ${modernizationOpportunities.length > 0 ? `
+                <div style="margin-bottom: 16px;">
+                    <h5 style="color: #1e40af; margin-bottom: 10px;">🚀 Modernization Opportunities</h5>
+                    <div style="background: #ecfdf5; padding: 12px; border-radius: 6px; border: 1px solid #a7f3d0;">
+                        ${modernizationOpportunities.map((opp, index) => `
+                            <div style="margin-bottom: 6px; font-size: 13px; color: #065f46; line-height: 1.4;">
+                                <strong>🚀 ${index + 1}.</strong> ${opp}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            ` : ''}
+
+            <!-- Risk Factors -->
+            ${riskFactors.length > 0 ? `
+                <div style="margin-bottom: 16px;">
+                    <h5 style="color: #1e40af; margin-bottom: 10px;">⚠️ Risk Factors</h5>
+                    <div style="background: #fef2f2; padding: 12px; border-radius: 6px; border: 1px solid #fecaca;">
+                        ${riskFactors.map((risk, index) => `
+                            <div style="margin-bottom: 6px; font-size: 13px; color: #991b1b; line-height: 1.4;">
+                                <strong>⚠️ ${index + 1}.</strong> ${risk}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            ` : ''}
+
+            <!-- Debug Information (can be removed in production) -->
+            ${this.shouldShowDebugInfo() ? `
+                <div style="margin-top: 16px; padding: 12px; background: #f1f5f9; border-radius: 6px; border: 1px solid #cbd5e1;">
+                    <details style="font-size: 11px; color: #64748b;">
+                        <summary style="cursor: pointer; font-weight: 600;">🐛 Debug: LLM Response Structure</summary>
+                        <pre style="margin-top: 8px; white-space: pre-wrap; max-height: 200px; overflow-y: auto;">${JSON.stringify(llmAnalysis, null, 2)}</pre>
+                    </details>
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+// Helper function to safely get values from nested objects
+safeGet(obj, path, defaultValue = null) {
+    if (!obj || typeof obj !== 'object') {
+        return defaultValue;
+    }
+    
+    // Handle dot notation paths like 'field.subfield'
+    const keys = path.split('.');
+    let current = obj;
+    
+    for (const key of keys) {
+        if (current === null || current === undefined || typeof current !== 'object') {
+            return defaultValue;
         }
+        current = current[key];
+    }
+    
+    return current !== undefined ? current : defaultValue;
+}
+
+// Helper function to safely get arrays
+safeGetArray(obj, path, defaultValue = []) {
+    const value = this.safeGet(obj, path, defaultValue);
+    if (Array.isArray(value)) {
+        return value;
+    }
+    if (typeof value === 'string' && value.trim()) {
+        // If it's a string, try to split it into an array
+        return [value];
+    }
+    return defaultValue;
+}
+
+// Helper function to render error state
+renderLLMResultsError(friendlyName, errorMessage) {
+    return `
+        <div class="result-card">
+            <h4>🤖 LLM Analysis Results for ${friendlyName}</h4>
+            <div style="background: #fef2f2; padding: 16px; border-radius: 8px; border: 1px solid #fca5a5; text-align: center;">
+                <div style="color: #991b1b; font-weight: 600; margin-bottom: 8px;">
+                    ⚠️ Analysis Data Issue
+                </div>
+                <div style="color: #7f1d1d; font-size: 13px;">
+                    ${errorMessage}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Helper function to determine if debug info should be shown
+shouldShowDebugInfo() {
+    // Show debug info if we're in development mode or if explicitly enabled
+    return window.location.hostname === 'localhost' || 
+           window.location.search.includes('debug=true') ||
+           localStorage.getItem('showDebugInfo') === 'true';
+}
 
         displayLifecycleFlowSummary(lifecycleFlow, friendlyName) {
             return `
@@ -7474,15 +7591,19 @@ parseAndValidateLLMResponse(responseText) {
         try {
             const parsed = JSON.parse(cleanedText);
             console.log('✅ Direct JSON parsing successful');
+            console.log('📊 Parsed object keys:', Object.keys(parsed));
             
-            if (this.validateLLMResponseStructure(parsed)) {
+            // Enhanced validation and normalization
+            const normalized = this.normalizeLLMResponse(parsed);
+            
+            if (this.validateLLMResponseStructure(normalized)) {
                 return { 
                     success: true, 
-                    data: this.enhanceResponseData(parsed) 
+                    data: this.enhanceResponseData(normalized) 
                 };
             } else {
                 console.warn('⚠️ Response structure validation failed, trying to fix...');
-                const enhanced = this.enhancePartialResponse(parsed);
+                const enhanced = this.enhancePartialResponse(normalized);
                 return { 
                     success: true, 
                     data: enhanced 
@@ -7501,8 +7622,9 @@ parseAndValidateLLMResponse(responseText) {
                 const parsed = JSON.parse(cleanedExtracted);
                 console.log('✅ Extracted JSON parsing successful');
                 
-                const enhanced = this.validateLLMResponseStructure(parsed) ? 
-                    parsed : this.enhancePartialResponse(parsed);
+                const normalized = this.normalizeLLMResponse(parsed);
+                const enhanced = this.validateLLMResponseStructure(normalized) ? 
+                    normalized : this.enhancePartialResponse(normalized);
                 
                 return { 
                     success: true, 
@@ -7524,17 +7646,6 @@ parseAndValidateLLMResponse(responseText) {
             };
         }
         
-        // Strategy 4: Pattern-based extraction
-        console.log('🔄 Attempting pattern-based extraction...');
-        const patternExtracted = this.extractByPatterns(responseText);
-        if (patternExtracted.success) {
-            console.log('✅ Pattern-based extraction successful');
-            return { 
-                success: true, 
-                data: this.enhanceResponseData(patternExtracted.data) 
-            };
-        }
-        
         // Final fallback with enhanced data extraction
         console.log('🔄 Creating enhanced fallback from response content...');
         const fallbackData = this.createEnhancedFallbackFromResponse(responseText);
@@ -7553,6 +7664,81 @@ parseAndValidateLLMResponse(responseText) {
             fallbackData: this.createSmartFallback(responseText)
         };
     }
+}
+
+// NEW: Normalize LLM response to ensure consistent structure
+normalizeLLMResponse(parsed) {
+    console.log('🔄 Normalizing LLM response structure...');
+    
+    // Handle case where response is wrapped in extra structure
+    if (parsed.response && typeof parsed.response === 'object') {
+        parsed = parsed.response;
+    }
+    if (parsed.data && typeof parsed.data === 'object') {
+        parsed = parsed.data;
+    }
+    if (parsed.result && typeof parsed.result === 'object') {
+        parsed = parsed.result;
+    }
+    
+    // Normalize field names (handle variations)
+    const normalized = { ...parsed };
+    
+    // Component type normalization
+    if (!normalized.componentType && normalized.type) {
+        normalized.componentType = normalized.type;
+    }
+    if (!normalized.componentType && normalized.component_type) {
+        normalized.componentType = normalized.component_type;
+    }
+    
+    // Analysis scope normalization
+    if (!normalized.analysisScope && normalized.scope) {
+        normalized.analysisScope = normalized.scope;
+    }
+    if (!normalized.analysisScope && normalized.analysis_scope) {
+        normalized.analysisScope = normalized.analysis_scope;
+    }
+    
+    // Quality score normalization
+    if (!normalized.qualityScore && normalized.score) {
+        normalized.qualityScore = normalized.score;
+    }
+    if (!normalized.qualityScore && normalized.quality_score) {
+        normalized.qualityScore = normalized.quality_score;
+    }
+    
+    // Business purpose normalization
+    if (!normalized.businessPurpose && normalized.purpose) {
+        normalized.businessPurpose = normalized.purpose;
+    }
+    if (!normalized.businessPurpose && normalized.business_purpose) {
+        normalized.businessPurpose = normalized.business_purpose;
+    }
+    
+    // Technical summary normalization
+    if (!normalized.technicalSummary && normalized.summary) {
+        normalized.technicalSummary = normalized.summary;
+    }
+    if (!normalized.technicalSummary && normalized.technical_summary) {
+        normalized.technicalSummary = normalized.technical_summary;
+    }
+    
+    // Array fields normalization
+    const arrayFields = ['recommendations', 'modernizationOpportunities', 'riskFactors', 'businessRules'];
+    arrayFields.forEach(field => {
+        if (!Array.isArray(normalized[field])) {
+            if (typeof normalized[field] === 'string') {
+                // Try to split string into array
+                normalized[field] = normalized[field].split(/[,\n]/).map(s => s.trim()).filter(s => s.length > 0);
+            } else {
+                normalized[field] = [];
+            }
+        }
+    });
+    
+    console.log('✅ Response normalization complete');
+    return normalized;
 }
 
 // Enhanced fallback creation from actual response content
@@ -8086,69 +8272,6 @@ extractRecommendationsFromText(text) {
     ];
 }
 
-// Enhanced parseAndValidateLLMResponse with better fallback
-parseAndValidateLLMResponse(responseText) {
-    console.log('🔍 Enhanced LLM response parsing...');
-    
-    try {
-        // Clean the response text
-        let cleanedText = this.cleanLLMResponse(responseText);
-        console.log('Cleaned text preview:', cleanedText.substring(0, 200));
-        
-        // Try direct JSON parsing first
-        try {
-            const parsed = JSON.parse(cleanedText);
-            console.log('✅ Direct JSON parsing successful');
-            if (this.validateLLMResponseStructure(parsed)) {
-                return { success: true, data: this.enhanceResponseData(parsed) };
-            } else {
-                console.warn('⚠️ Response structure validation failed');
-            }
-        } catch (jsonError) {
-            console.warn('Direct JSON parsing failed:', jsonError.message);
-        }
-        
-        // Try extracting JSON from response
-        const extractedJson = this.extractJSONFromResponse(responseText);
-        if (extractedJson) {
-            try {
-                const cleanedExtracted = this.cleanLLMResponse(extractedJson);
-                const parsed = JSON.parse(cleanedExtracted);
-                console.log('✅ Extracted JSON parsing successful');
-                if (this.validateLLMResponseStructure(parsed)) {
-                    return { success: true, data: this.enhanceResponseData(parsed) };
-                }
-            } catch (extractError) {
-                console.warn('Extracted JSON parsing failed:', extractError.message);
-            }
-        }
-        
-        // Try manual JSON reconstruction
-        const reconstructed = this.reconstructJSONFromText(responseText);
-        if (reconstructed.success) {
-            console.log('✅ JSON reconstruction successful');
-            return { success: true, data: this.enhanceResponseData(reconstructed.data) };
-        }
-        
-        // Create comprehensive fallback from text
-        console.log('🔄 Creating comprehensive fallback from response text...');
-        const fallbackData = this.createComprehensiveFallbackFromText(responseText);
-        
-        return {
-            success: false,
-            error: 'Could not parse as valid JSON, using comprehensive fallback',
-            fallbackData: fallbackData
-        };
-        
-    } catch (error) {
-        console.error('Response parsing error:', error);
-        return {
-            success: false,
-            error: error.message,
-            fallbackData: this.createComponentFallback(componentName, friendlyName, responseText)
-        };
-    }
-}
 
 // Reconstruct JSON from text response
 reconstructJSONFromText(text) {
