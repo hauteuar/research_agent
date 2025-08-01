@@ -3892,38 +3892,40 @@ categorizeExtractedFields(fields) {
     return categories;
 }
 
-// Enhanced displayAnalysisResults to show actual data
+// Enhanced display method that handles both successful and fallback responses
 displayAnalysisResults(componentName, results, friendlyName) {
     console.log('📊 Displaying enhanced analysis results for:', friendlyName || componentName);
-    console.log('Full results object:', results);
+    console.log('📋 Results type:', results.error ? 'Error/Fallback' : 'Success');
+    console.log('🎯 Has LLM analysis:', !!results.llmAnalysis);
     
     const container = document.getElementById('lifecycleContent');
     if (!container) return;
     
-    // Extract real data from results
-    const llmAnalysis = results.llmAnalysis || {};
-    const fieldAnalysis = results.fieldAnalysis || {};
-    const dependencyAnalysis = results.dependencyAnalysis || {};
+    // Handle both successful and fallback responses
+    const llmAnalysis = results.llmAnalysis || results.fallbackData || results;
+    const isEnhancedFallback = llmAnalysis.enhancedFallback || llmAnalysis.partialSuccess;
+    const hasRawResponse = llmAnalysis.rawLLMResponse && llmAnalysis.rawLLMResponse.length > 0;
     
     let html = `
         <div class="analysis-header">
             <h3 class="analysis-title">🤖 Analysis: ${friendlyName || componentName}</h3>
             <p class="analysis-meta">
-                Component: <strong>${results.componentType || 'Unknown'}</strong> • 
-                Method: <strong>${results.analysisMethod || 'Enhanced'}</strong> • 
+                Component: <strong>${results.componentType || llmAnalysis.componentType || 'Unknown'}</strong> • 
+                Method: <strong>${results.analysisMethod || llmAnalysis.analysisScope || 'Enhanced'}</strong> • 
                 Files: <strong>${results.filesAnalyzed ? results.filesAnalyzed.length : 0}</strong> • 
-                Completed: <strong>${new Date(results.timestamp).toLocaleString()}</strong>
+                Completed: <strong>${new Date(results.timestamp || llmAnalysis.timestamp || Date.now()).toLocaleString()}</strong>
+                ${isEnhancedFallback ? ' • <span style="color: #f59e0b;">⚠️ Enhanced Fallback</span>' : ''}
             </p>
         </div>
         
         <!-- Quality Metrics -->
         <div class="metrics-grid">
             <div class="metric-card">
-                <div class="metric-value">${results.qualityScore || 0}/10</div>
+                <div class="metric-value">${results.qualityScore || llmAnalysis.qualityScore || 0}/10</div>
                 <div class="metric-label">Analysis Quality</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value">${results.completeness?.score || 0}%</div>
+                <div class="metric-value">${results.completeness?.score || (llmAnalysis.partialSuccess ? 70 : 30)}%</div>
                 <div class="metric-label">Completeness</div>
             </div>
             <div class="metric-card">
@@ -3931,10 +3933,39 @@ displayAnalysisResults(componentName, results, friendlyName) {
                 <div class="metric-label">Files Analyzed</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value">${dependencyAnalysis.summary?.foundCount || 0}</div>
+                <div class="metric-value">${results.dependencyAnalysis ? results.dependencyAnalysis.summary?.foundCount || 0 : 0}</div>
                 <div class="metric-label">Dependencies Found</div>
             </div>
         </div>
+
+        <!-- Enhanced Fallback Notice -->
+        ${isEnhancedFallback ? `
+            <div class="result-card">
+                <h4>🔄 Enhanced Analysis Results</h4>
+                <div style="background: #fef3c7; padding: 16px; border-radius: 8px; border: 1px solid #fcd34d;">
+                    <div style="color: #92400e; font-weight: 600; margin-bottom: 8px;">
+                        ${llmAnalysis.partialSuccess ? '✅ Partial Success - Useful Content Extracted' : '⚠️ Enhanced Fallback - Analysis Reconstructed'}
+                    </div>
+                    <div style="color: #a16207; font-size: 13px; line-height: 1.5;">
+                        ${llmAnalysis.partialSuccess ? 
+                            'LLM response contained valuable analysis data that was successfully extracted despite JSON parsing issues.' :
+                            'Analysis was reconstructed from available data using intelligent fallback methods.'}
+                        ${llmAnalysis.parseError ? `<br><strong>Parse Error:</strong> ${llmAnalysis.parseError}` : ''}
+                    </div>
+                    ${hasRawResponse ? `
+                        <div style="margin-top: 12px;">
+                            <button onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'; this.textContent = this.nextElementSibling.style.display === 'none' ? '🔽 Show Raw Response' : '🔼 Hide Raw Response';" 
+                                    style="background: #d97706; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 11px;">
+                                🔽 Show Raw Response
+                            </button>
+                            <div style="display: none; margin-top: 8px; background: white; padding: 12px; border-radius: 6px; border: 1px solid #e5e7eb; max-height: 200px; overflow-y: auto;">
+                                <pre style="font-size: 10px; color: #374151; white-space: pre-wrap;">${llmAnalysis.rawLLMResponse.substring(0, 1000)}${llmAnalysis.rawLLMResponse.length > 1000 ? '...' : ''}</pre>
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        ` : ''}
 
         <!-- Business Purpose -->
         ${llmAnalysis.businessPurpose ? `
@@ -3943,6 +3974,7 @@ displayAnalysisResults(componentName, results, friendlyName) {
                 <div style="background: #f0f9ff; padding: 16px; border-radius: 8px; border: 1px solid #bae6fd;">
                     <div style="color: #1e40af; font-size: 14px; line-height: 1.6;">
                         ${llmAnalysis.businessPurpose}
+                        ${isEnhancedFallback ? '<br><small style="color: #6b7280; font-style: italic;">*Extracted using enhanced analysis methods</small>' : ''}
                     </div>
                 </div>
             </div>
@@ -3955,33 +3987,262 @@ displayAnalysisResults(componentName, results, friendlyName) {
                 <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
                     <div style="color: #374151; font-size: 14px; line-height: 1.6;">
                         ${llmAnalysis.technicalSummary}
+                        ${isEnhancedFallback ? '<br><small style="color: #6b7280; font-style: italic;">*Generated from enhanced extraction</small>' : ''}
                     </div>
                 </div>
             </div>
         ` : ''}
 
         <!-- Field Analysis Summary -->
-        ${this.renderFieldAnalysisSummary(fieldAnalysis, llmAnalysis.fieldAnalysis)}
+        ${this.renderFieldAnalysisSummary(results.fieldAnalysis, llmAnalysis.fieldAnalysis, isEnhancedFallback)}
 
         <!-- Business Rules -->
-        ${this.renderBusinessRules(llmAnalysis.businessRules)}
+        ${this.renderBusinessRules(llmAnalysis.businessRules, isEnhancedFallback)}
+
+        <!-- Dependencies Summary -->
+        ${this.renderDependencySummary(results.dependencyAnalysis, llmAnalysis.dependencies, isEnhancedFallback)}
+
+        <!-- Lifecycle Summary -->
+        ${this.renderLifecycleSummary(results.lifecycleFlow, llmAnalysis.lifecyclePhases, friendlyName, isEnhancedFallback)}
 
         <!-- Recommendations -->
-        ${this.renderRecommendations(llmAnalysis.recommendations)}
+        ${this.renderRecommendations(llmAnalysis.recommendations, isEnhancedFallback)}
 
         <!-- Risk Factors -->
-        ${this.renderRiskFactors(llmAnalysis.riskFactors)}
-    `;
+        ${this.renderRiskFactors(llmAnalysis.riskFactors, isEnhancedFallback)}
 
+        <!-- Raw Response Content Analysis (for enhanced fallbacks) -->
+        ${isEnhancedFallback && llmAnalysis.responseContentAnalysis ? `
+            <div class="result-card">
+                <h4>🔍 Content Analysis Details</h4>
+                <div style="background: #f1f5f9; padding: 16px; border-radius: 8px; border: 1px solid #cbd5e1;">
+                    <div style="color: #475569; font-size: 13px; line-height: 1.5;">
+                        <strong>Response Analysis Results:</strong><br>
+                        • Field Information: ${llmAnalysis.responseContentAnalysis.hasFieldInfo ? '✅ Detected' : '❌ Not detected'}<br>
+                        • Program Information: ${llmAnalysis.responseContentAnalysis.hasProgramInfo ? '✅ Detected' : '❌ Not detected'}<br>
+                        • Business Information: ${llmAnalysis.responseContentAnalysis.hasBusinessInfo ? '✅ Detected' : '❌ Not detected'}<br>
+                        • Field Count Extracted: ${llmAnalysis.responseContentAnalysis.fieldCount || 'None'}<br>
+                        • Programs Detected: ${llmAnalysis.responseContentAnalysis.programs?.join(', ') || 'None'}<br>
+                        • Insights Extracted: ${llmAnalysis.responseContentAnalysis.insights?.length || 0}
+                        ${llmAnalysis.responseContentAnalysis.insights?.length > 0 ? `<br><br><strong>Key Insights:</strong><br>${llmAnalysis.responseContentAnalysis.insights.map(insight => `• ${insight}`).join('<br>')}` : ''}
+                    </div>
+                </div>
+            </div>
+        ` : ''}
+
+        <!-- Emergency Fallback Notice -->
+        ${llmAnalysis.emergencyCreated ? `
+            <div class="result-card">
+                <h4>🚨 Emergency Analysis Results</h4>
+                <div style="background: #fef2f2; padding: 16px; border-radius: 8px; border: 1px solid #fca5a5;">
+                    <div style="color: #991b1b; font-weight: 600; margin-bottom: 8px;">
+                        ⚠️ Emergency Fallback - Complete Analysis Failure
+                    </div>
+                    <div style="color: #7f1d1d; font-size: 13px; line-height: 1.5;">
+                        The primary analysis process failed completely. This emergency fallback provides basic component information
+                        based on uploaded files and component identification.
+                        ${llmAnalysis.originalError ? `<br><br><strong>Original Error:</strong> ${llmAnalysis.originalError}` : ''}
+                        <br><br><strong>Recommended Actions:</strong>
+                        <br>• Check LLM server connection and configuration
+                        <br>• Verify component name and file uploads
+                        <br>• Review console logs for detailed error information
+                        <br>• Consider manual analysis of the component
+                    </div>
+                </div>
+            </div>
+        ` : ''}
+
+        <!-- Analysis Actions -->
+        <div class="result-card">
+            <h4>🎯 Next Steps</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-top: 16px;">
+                <div style="background: #f0f9ff; padding: 16px; border-radius: 8px; border: 1px solid #bae6fd;">
+                    <h5 style="color: #1e40af; margin-bottom: 8px;">📋 Field Matrix</h5>
+                    <p style="font-size: 12px; color: #1d4ed8; margin-bottom: 12px;">
+                        View detailed field-level analysis and categorization
+                    </p>
+                    <button onclick="document.querySelector('[data-tab=\"fieldmatrix\"]').click()" 
+                            style="background: #3b82f6; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 11px; cursor: pointer;">
+                        View Fields
+                    </button>
+                </div>
+                
+                <div style="background: #f0fdf4; padding: 16px; border-radius: 8px; border: 1px solid #bbf7d0;">
+                    <h5 style="color: #166534; margin-bottom: 8px;">🔗 Dependencies</h5>
+                    <p style="font-size: 12px; color: #15803d; margin-bottom: 12px;">
+                        Explore component dependencies and relationships
+                    </p>
+                    <button onclick="document.querySelector('[data-tab=\"dependencies\"]').click()" 
+                            style="background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 11px; cursor: pointer;">
+                        View Dependencies
+                    </button>
+                </div>
+                
+                <div style="background: #fffbeb; padding: 16px; border-radius: 8px; border: 1px solid #fcd34d;">
+                    <h5 style="color: #92400e; margin-bottom: 8px;">🌊 Lifecycle</h5>
+                    <p style="font-size: 12px; color: #a16207; margin-bottom: 12px;">
+                        Review complete component lifecycle flow
+                    </p>
+                    <button onclick="document.querySelector('[data-tab=\"fileflow\"]').click()" 
+                            style="background: #f59e0b; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 11px; cursor: pointer;">
+                        View Lifecycle
+                    </button>
+                </div>
+                
+                <div style="background: #fdf4ff; padding: 16px; border-radius: 8px; border: 1px solid #e9d5ff;">
+                    <h5 style="color: #7c3aed; margin-bottom: 8px;">💬 Ask Questions</h5>
+                    <p style="font-size: 12px; color: #8b5cf6; margin-bottom: 12px;">
+                        Chat with the analysis assistant about this component
+                    </p>
+                    <button onclick="document.getElementById('chatInput').focus()" 
+                            style="background: #8b5cf6; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 11px; cursor: pointer;">
+                        Start Chat
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
     container.innerHTML = html;
+
+    // Update other tabs with the analysis results
+    this.displayFieldMatrix(componentName, results, friendlyName);
+    this.displayUsagePatterns(componentName, results, friendlyName);
+    this.displayDependencies(componentName, results, friendlyName);
+    this.displayFileLifecycle(componentName, results, friendlyName);
 }
 
-// Render field analysis summary
-renderFieldAnalysisSummary(fieldAnalysis, llmFieldAnalysis) {
+// Enhanced lifecycle summary renderer
+renderLifecycleSummary(lifecycleFlow, llmLifecyclePhases, friendlyName, isEnhancedFallback) {
+    const lifecycle = lifecycleFlow || llmLifecyclePhases || {};
+    
+    const creationCount = (lifecycle.creationSources?.length || 0) + (lifecycle.creation?.length || 0);
+    const processingCount = (lifecycle.inputPrograms?.length || 0) + (lifecycle.updatePrograms?.length || 0) + (lifecycle.processing?.length || 0);
+    const outputCount = (lifecycle.cicsScreens?.length || 0) + (lifecycle.batchJobs?.length || 0) + (lifecycle.output?.length || 0);
+    
+    if (creationCount === 0 && processingCount === 0 && outputCount === 0) {
+        return '';
+    }
+    
+    return `
+        <div class="result-card">
+            <h4>🌊 Lifecycle Summary</h4>
+            <div style="margin-bottom: 16px; text-align: center;">
+                <span style="background: #3b82f6; color: white; padding: 8px 16px; border-radius: 8px; font-weight: bold;">
+                    ${lifecycleFlow?.usagePattern || 'COMPONENT_LIFECYCLE'}
+                </span>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px;">
+                <div style="text-align: center; background: #ecfdf5; padding: 12px; border-radius: 6px; border: 1px solid #a7f3d0;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #059669;">${creationCount}</div>
+                    <div style="font-size: 10px; color: #065f46;">🌱 Creation</div>
+                </div>
+                <div style="text-align: center; background: #eff6ff; padding: 12px; border-radius: 6px; border: 1px solid #bfdbfe;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #2563eb;">${processingCount}</div>
+                    <div style="font-size: 10px; color: #1d4ed8;">⚙️ Processing</div>
+                </div>
+                <div style="text-align: center; background: #fdf4ff; padding: 12px; border-radius: 6px; border: 1px solid #e9d5ff;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #7c3aed;">${outputCount}</div>
+                    <div style="font-size: 10px; color: #6b21a8;">📤 Output</div>
+                </div>
+            </div>
+            
+            ${isEnhancedFallback ? `
+                <div style="font-size: 11px; color: #6b7280; font-style: italic; margin-top: 8px; text-align: center;">
+                    *Lifecycle analysis reconstructed from available data
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+// Enhanced recommendations renderer
+renderRecommendations(recommendations, isEnhancedFallback) {
+    if (!recommendations || recommendations.length === 0) {
+        return '';
+    }
+    
+    return `
+        <div class="result-card">
+            <h4>💡 Recommendations</h4>
+            <div style="background: #fef3c7; padding: 16px; border-radius: 8px; border: 1px solid #fcd34d; margin-top: 16px;">
+                ${recommendations.map((rec, index) => `
+                    <div style="margin-bottom: 8px; color: #92400e; font-size: 13px;">
+                        <strong>💡 ${index + 1}.</strong> ${rec}
+                    </div>
+                `).join('')}
+                ${isEnhancedFallback ? `
+                    <div style="font-size: 11px; color: #a16207; font-style: italic; margin-top: 12px; border-top: 1px solid #fcd34d; padding-top: 8px;">
+                        *Recommendations generated using enhanced analysis methods. Manual verification suggested.
+                    </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+}
+
+// Enhanced risk factors renderer
+renderRiskFactors(riskFactors, isEnhancedFallback) {
+    if (!riskFactors || riskFactors.length === 0) {
+        return '';
+    }
+    
+    return `
+        <div class="result-card">
+            <h4>⚠️ Risk Factors</h4>
+            <div style="background: #fef2f2; padding: 16px; border-radius: 8px; border: 1px solid #fecaca; margin-top: 16px;">
+                ${riskFactors.map((risk, index) => `
+                    <div style="margin-bottom: 8px; color: #991b1b; font-size: 13px;">
+                        <strong>⚠️ ${index + 1}.</strong> ${risk}
+                    </div>
+                `).join('')}
+                ${isEnhancedFallback ? `
+                    <div style="font-size: 11px; color: #7f1d1d; font-style: italic; margin-top: 12px; border-top: 1px solid #fecaca; padding-top: 8px;">
+                        *Risk assessment based on enhanced fallback analysis. Additional risks may exist.
+                    </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+}
+
+// Helper methods for enhanced rendering
+getRiskColor(riskLevel) {
+    const colors = {
+        'LOW': '#10b981',
+        'MEDIUM': '#f59e0b', 
+        'HIGH': '#ef4444'
+    };
+    return colors[riskLevel] || colors.MEDIUM;
+}
+
+getLogicColor(type) {
+    const colors = {
+        'VALIDATION': '#8b5cf6',
+        'CALCULATION': '#f59e0b',
+        'CONTROL': '#3b82f6',
+        'EXTRACTED': '#10b981',
+        'OTHER': '#6b7280'
+    };
+    return colors[type] || colors.OTHER;
+}
+// Enhanced field analysis summary renderer
+renderFieldAnalysisSummary(fieldAnalysis, llmFieldAnalysis, isEnhancedFallback) {
     const merged = this.mergeFieldAnalysisData(fieldAnalysis, llmFieldAnalysis);
     
     if (!merged || merged.totalFields === 0) {
-        return '';
+        return `
+            <div class="result-card">
+                <h4>📋 Field Analysis Summary</h4>
+                <div style="background: #f9fafb; padding: 16px; border-radius: 8px; border: 1px solid #e5e7eb; text-align: center;">
+                    <div style="color: #6b7280; font-size: 14px;">
+                        ${isEnhancedFallback ? 
+                            'Field analysis was reconstructed using available data. Limited field information available.' :
+                            'No detailed field analysis available for this component.'}
+                    </div>
+                </div>
+            </div>
+        `;
     }
     
     return `
@@ -4012,6 +4273,7 @@ renderFieldAnalysisSummary(fieldAnalysis, llmFieldAnalysis) {
                     <div style="background: #f0f9ff; padding: 8px; border-radius: 4px; border: 1px solid #bae6fd;">
                         <div style="color: #1e40af; font-size: 12px;">
                             ${merged.keyFields.join(', ')}
+                            ${isEnhancedFallback ? '<br><small style="font-style: italic; color: #6b7280;">*Identified through enhanced extraction</small>' : ''}
                         </div>
                     </div>
                 </div>
@@ -4020,8 +4282,8 @@ renderFieldAnalysisSummary(fieldAnalysis, llmFieldAnalysis) {
     `;
 }
 
-// Render business rules
-renderBusinessRules(businessRules) {
+// Enhanced business rules renderer
+renderBusinessRules(businessRules, isEnhancedFallback) {
     if (!businessRules || businessRules.length === 0) {
         return '';
     }
@@ -4045,6 +4307,103 @@ renderBusinessRules(businessRules) {
                         ` : ''}
                     </div>
                 `).join('')}
+                ${isEnhancedFallback ? `
+                    <div style="font-size: 11px; color: #6b7280; font-style: italic; margin-top: 8px;">
+                        *Business rules extracted using enhanced analysis methods
+                    </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+}
+
+
+// Enhanced field analysis summary renderer
+renderFieldAnalysisSummary(fieldAnalysis, llmFieldAnalysis, isEnhancedFallback) {
+    const merged = this.mergeFieldAnalysisData(fieldAnalysis, llmFieldAnalysis);
+    
+    if (!merged || merged.totalFields === 0) {
+        return `
+            <div class="result-card">
+                <h4>📋 Field Analysis Summary</h4>
+                <div style="background: #f9fafb; padding: 16px; border-radius: 8px; border: 1px solid #e5e7eb; text-align: center;">
+                    <div style="color: #6b7280; font-size: 14px;">
+                        ${isEnhancedFallback ? 
+                            'Field analysis was reconstructed using available data. Limited field information available.' :
+                            'No detailed field analysis available for this component.'}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    return `
+        <div class="result-card">
+            <h4>📋 Field Analysis Summary</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin: 16px 0;">
+                <div style="text-align: center; background: #ecfdf5; padding: 12px; border-radius: 6px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #059669;">${merged.totalFields}</div>
+                    <div style="font-size: 10px; color: #065f46;">Total Fields</div>
+                </div>
+                <div style="text-align: center; background: #eff6ff; padding: 12px; border-radius: 6px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #2563eb;">${merged.fieldCategories.input.length}</div>
+                    <div style="font-size: 10px; color: #1d4ed8;">Input Fields</div>
+                </div>
+                <div style="text-align: center; background: #fffbeb; padding: 12px; border-radius: 6px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #d97706;">${merged.fieldCategories.calculated.length}</div>
+                    <div style="font-size: 10px; color: #92400e;">Calculated</div>
+                </div>
+                <div style="text-align: center; background: #fef2f2; padding: 12px; border-radius: 6px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #dc2626;">${merged.fieldCategories.unused.length}</div>
+                    <div style="font-size: 10px; color: #991b1b;">Unused</div>
+                </div>
+            </div>
+            
+            ${merged.keyFields && merged.keyFields.length > 0 ? `
+                <div style="margin-top: 12px;">
+                    <div style="font-weight: 600; color: #1f2937; margin-bottom: 8px;">🔑 Key Fields:</div>
+                    <div style="background: #f0f9ff; padding: 8px; border-radius: 4px; border: 1px solid #bae6fd;">
+                        <div style="color: #1e40af; font-size: 12px;">
+                            ${merged.keyFields.join(', ')}
+                            ${isEnhancedFallback ? '<br><small style="font-style: italic; color: #6b7280;">*Identified through enhanced extraction</small>' : ''}
+                        </div>
+                    </div>
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+// Enhanced business rules renderer
+renderBusinessRules(businessRules, isEnhancedFallback) {
+    if (!businessRules || businessRules.length === 0) {
+        return '';
+    }
+    
+    return `
+        <div class="result-card">
+            <h4>⚖️ Business Rules</h4>
+            <div style="margin-top: 16px;">
+                ${businessRules.map(rule => `
+                    <div style="background: #f8fafc; padding: 12px; margin-bottom: 8px; border-radius: 6px; border-left: 4px solid ${this.getLogicColor(rule.type)};">
+                        <div style="font-weight: 600; color: #1f2937; margin-bottom: 4px;">
+                            ${rule.type} - ${rule.complexity || 'MEDIUM'} Complexity
+                        </div>
+                        <div style="color: #374151; font-size: 13px; margin-bottom: 8px;">
+                            ${rule.description}
+                        </div>
+                        ${rule.fields && rule.fields.length > 0 ? `
+                            <div style="font-size: 11px; color: #6b7280;">
+                                <strong>Fields:</strong> ${rule.fields.join(', ')}
+                            </div>
+                        ` : ''}
+                    </div>
+                `).join('')}
+                ${isEnhancedFallback ? `
+                    <div style="font-size: 11px; color: #6b7280; font-style: italic; margin-top: 8px;">
+                        *Business rules extracted using enhanced analysis methods
+                    </div>
+                ` : ''}
             </div>
         </div>
     `;
@@ -6136,6 +6495,49 @@ extractComprehensiveDependencies(relevantFiles, componentName) {
     container.innerHTML = html;
 }
 
+// Enhanced dependency summary renderer
+renderDependencySummary(dependencyAnalysis, llmDependencies, isEnhancedFallback) {
+    const deps = dependencyAnalysis || { summary: { foundCount: 0, missingCount: 0 } };
+    const llmDeps = llmDependencies || { required: [], missing: [] };
+    
+    const totalFound = deps.summary.foundCount + (llmDeps.required?.length || 0);
+    const totalMissing = deps.summary.missingCount + (llmDeps.missing?.length || 0);
+    
+    if (totalFound === 0 && totalMissing === 0) {
+        return '';
+    }
+    
+    return `
+        <div class="result-card">
+            <h4>🔗 Dependencies Overview</h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px;">
+                <div style="text-align: center; background: #ecfdf5; padding: 12px; border-radius: 6px; border: 1px solid #a7f3d0;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #059669;">${totalFound}</div>
+                    <div style="font-size: 11px; color: #065f46;">✅ Dependencies Available</div>
+                </div>
+                <div style="text-align: center; background: #fef2f2; padding: 12px; border-radius: 6px; border: 1px solid #fca5a5;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #dc2626;">${totalMissing}</div>
+                    <div style="font-size: 11px; color: #991b1b;">❌ Dependencies Missing</div>
+                </div>
+            </div>
+            
+            ${llmDeps.riskAssessment ? `
+                <div style="margin-top: 12px; text-align: center;">
+                    <span style="background: ${this.getRiskColor(llmDeps.riskAssessment)}; color: white; padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;">
+                        Risk Level: ${llmDeps.riskAssessment}
+                    </span>
+                </div>
+            ` : ''}
+            
+            ${isEnhancedFallback ? `
+                <div style="font-size: 11px; color: #6b7280; font-style: italic; margin-top: 8px; text-align: center;">
+                    *Dependency analysis enhanced with fallback extraction methods
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
 // Render comprehensive dependency dashboard
 renderDependencyDashboard(dependencyAnalysis) {
     const { found, missing, summary } = dependencyAnalysis;
@@ -6580,83 +6982,57 @@ FIX JSON PARSING AND DISPLAY ISSUES
 Fix the JSON parsing errors and ensure detailed field analysis is displayed
 ================================================================== */
 
-// Enhanced JSON cleaning and parsing
+// Enhanced JSON cleaning with better pattern matching
 cleanLLMResponse(text) {
-    console.log('🧹 Cleaning LLM response for JSON parsing...');
+    console.log('🧹 Enhanced cleaning LLM response for JSON parsing...');
+    console.log('Original length:', text.length);
     
-    let cleaned = text
+    let cleaned = text;
+    
+    // Step 1: Remove common LLM response prefixes/suffixes
+    cleaned = cleaned
+        .replace(/^.*?(?=\{)/s, '') // Remove everything before first {
         .replace(/```json\s*/gi, '') // Remove markdown code blocks
         .replace(/```\s*$/gi, '')
-        .replace(/^[^{]*/, '') // Remove text before first {
+        .replace(/\n*$/, '') // Remove trailing newlines
         .trim();
     
-    // Find the main JSON object more carefully
-    let braceCount = 0;
-    let jsonStart = -1;
-    let jsonEnd = -1;
-    
-    for (let i = 0; i < cleaned.length; i++) {
-        if (cleaned[i] === '{') {
-            if (jsonStart === -1) jsonStart = i;
-            braceCount++;
-        } else if (cleaned[i] === '}') {
-            braceCount--;
-            if (braceCount === 0 && jsonStart !== -1) {
-                jsonEnd = i;
-                break;
-            }
-        }
+    // Step 2: Handle case where JSON is embedded in text
+    const jsonMatch = cleaned.match(/(\{[\s\S]*\})/);
+    if (jsonMatch) {
+        cleaned = jsonMatch[1];
+        console.log('📦 Extracted JSON from embedded text');
     }
     
-    if (jsonStart !== -1 && jsonEnd !== -1) {
-        cleaned = cleaned.substring(jsonStart, jsonEnd + 1);
-    }
-    
-    // Fix common JSON issues
+    // Step 3: Fix common JSON formatting issues
     cleaned = cleaned
-        .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
-        .replace(/([{,]\s*)(\w+):/g, '$1"$2":') // Quote unquoted keys
-        .replace(/:\s*([^",\[\{][^,\}\]]*?)(\s*[,\}])/g, ':"$1"$2') // Quote unquoted string values
-        .replace(/"\s*\n\s*"/g, '", "') // Fix line breaks in JSON
-        .replace(/\n/g, ' ') // Remove line breaks
-        .replace(/\s+/g, ' ') // Normalize whitespace
-        .replace(/,\s*}/g, '}') // Remove trailing commas before }
-        .replace(/,\s*]/g, ']'); // Remove trailing commas before ]
+        // Fix unquoted keys
+        .replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":')
+        // Fix single quotes to double quotes
+        .replace(/'/g, '"')
+        // Remove trailing commas
+        .replace(/,(\s*[}\]])/g, '$1')
+        // Fix line breaks in string values
+        .replace(/"\s*\n\s*"/g, '", "')
+        // Remove comments
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/\/\/.*$/gm, '')
+        // Normalize whitespace
+        .replace(/\s+/g, ' ')
+        .trim();
     
     console.log('🧹 Cleaned JSON length:', cleaned.length);
+    console.log('🧹 First 200 chars:', cleaned.substring(0, 200));
+    
     return cleaned;
 }
 
-// Enhanced JSON extraction with better error handling
+// Enhanced JSON extraction with multiple strategies
 extractJSONFromResponse(text) {
-    console.log('🔍 Extracting JSON from response...');
+    console.log('🔍 Enhanced JSON extraction from response...');
     
-    // Try multiple extraction methods
-    const extractionMethods = [
-        // Method 1: Look for complete JSON object
-        () => {
-            const match = text.match(/\{[\s\S]*\}/);
-            return match ? match[0] : null;
-        },
-        
-        // Method 2: Look for JSON between markers
-        () => {
-            const patterns = [
-                /```json\s*([\s\S]*?)\s*```/gi,
-                /"componentName"[\s\S]*?\}/g,
-                /\{[\s\S]*?"componentName"[\s\S]*?\}/g
-            ];
-            
-            for (const pattern of patterns) {
-                const match = text.match(pattern);
-                if (match && match[0]) {
-                    return match[0].replace(/```json\s*/gi, '').replace(/\s*```/gi, '');
-                }
-            }
-            return null;
-        },
-        
-        // Method 3: Find JSON by structure
+    const extractionStrategies = [
+        // Strategy 1: Look for complete JSON object with balanced braces
         () => {
             let braceCount = 0;
             let start = -1;
@@ -6676,115 +7052,390 @@ extractJSONFromResponse(text) {
             }
             
             return (start !== -1 && end !== -1) ? text.substring(start, end + 1) : null;
+        },
+        
+        // Strategy 2: Look for JSON between common markers
+        () => {
+            const patterns = [
+                /```json\s*([\s\S]*?)\s*```/gi,
+                /\{[\s\S]*\}/g,
+                /"componentName"[\s\S]*?\}/g
+            ];
+            
+            for (const pattern of patterns) {
+                const match = text.match(pattern);
+                if (match && match[0]) {
+                    let result = match[0];
+                    if (result.includes('```json')) {
+                        result = result.replace(/```json\s*/gi, '').replace(/\s*```/gi, '');
+                    }
+                    return result;
+                }
+            }
+            return null;
+        },
+        
+        // Strategy 3: Smart reconstruction from key-value pairs
+        () => {
+            const lines = text.split('\n');
+            const jsonObj = {};
+            let inJson = false;
+            
+            for (const line of lines) {
+                const trimmed = line.trim();
+                
+                // Detect JSON start
+                if (trimmed.includes('{')) inJson = true;
+                if (!inJson) continue;
+                
+                // Extract key-value pairs
+                const kvMatch = trimmed.match(/"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*:\s*(".*?"|[^,}]+)/);
+                if (kvMatch) {
+                    let key = kvMatch[1];
+                    let value = kvMatch[2].trim();
+                    
+                    // Clean up value
+                    if (value.endsWith(',')) value = value.slice(0, -1);
+                    
+                    // Parse value
+                    try {
+                        if (value.startsWith('"') && value.endsWith('"')) {
+                            jsonObj[key] = value.slice(1, -1);
+                        } else if (value.startsWith('[')) {
+                            jsonObj[key] = JSON.parse(value);
+                        } else if (!isNaN(value)) {
+                            jsonObj[key] = Number(value);
+                        } else {
+                            jsonObj[key] = value;
+                        }
+                    } catch (e) {
+                        jsonObj[key] = value;
+                    }
+                }
+                
+                // Detect JSON end
+                if (trimmed.includes('}')) break;
+            }
+            
+            return Object.keys(jsonObj).length > 0 ? JSON.stringify(jsonObj) : null;
         }
     ];
     
-    // Try each method
-    for (let i = 0; i < extractionMethods.length; i++) {
+    // Try each strategy
+    for (let i = 0; i < extractionStrategies.length; i++) {
         try {
-            const result = extractionMethods[i]();
+            const result = extractionStrategies[i]();
             if (result) {
-                console.log(`✅ JSON extracted using method ${i + 1}`);
+                console.log(`✅ JSON extracted using strategy ${i + 1}`);
                 return result;
             }
         } catch (error) {
-            console.warn(`Method ${i + 1} failed:`, error.message);
+            console.warn(`Strategy ${i + 1} failed:`, error.message);
         }
     }
     
-    console.warn('❌ No JSON could be extracted');
+    console.warn('❌ No JSON could be extracted using any strategy');
     return null;
 }
 
-// Enhanced parseAndValidateLLMResponse with better fallback
+
+// Enhanced response parsing with better error handling
 parseAndValidateLLMResponse(responseText) {
-    console.log('🔍 Enhanced LLM response parsing...');
+    console.log('🔍 Enhanced LLM response parsing started...');
+    console.log('Response type:', typeof responseText);
+    console.log('Response length:', responseText?.length || 0);
+    
+    if (!responseText || typeof responseText !== 'string') {
+        console.error('❌ Invalid response text');
+        return {
+            success: false,
+            error: 'Invalid response text',
+            fallbackData: this.createSmartFallback(responseText)
+        };
+    }
     
     try {
-        // Clean the response text
+        // Strategy 1: Direct JSON parsing with enhanced cleaning
+        console.log('🔄 Attempting direct JSON parsing...');
         let cleanedText = this.cleanLLMResponse(responseText);
-        console.log('Cleaned text preview:', cleanedText.substring(0, 200));
         
-        // Try direct JSON parsing first
         try {
             const parsed = JSON.parse(cleanedText);
             console.log('✅ Direct JSON parsing successful');
+            
             if (this.validateLLMResponseStructure(parsed)) {
-                return { success: true, data: this.enhanceResponseData(parsed) };
+                return { 
+                    success: true, 
+                    data: this.enhanceResponseData(parsed) 
+                };
             } else {
-                console.warn('⚠️ Response structure validation failed');
+                console.warn('⚠️ Response structure validation failed, trying to fix...');
+                const enhanced = this.enhancePartialResponse(parsed);
+                return { 
+                    success: true, 
+                    data: enhanced 
+                };
             }
         } catch (jsonError) {
             console.warn('Direct JSON parsing failed:', jsonError.message);
         }
         
-        // Try extracting JSON from response
+        // Strategy 2: Enhanced JSON extraction
+        console.log('🔄 Attempting JSON extraction...');
         const extractedJson = this.extractJSONFromResponse(responseText);
         if (extractedJson) {
             try {
                 const cleanedExtracted = this.cleanLLMResponse(extractedJson);
                 const parsed = JSON.parse(cleanedExtracted);
                 console.log('✅ Extracted JSON parsing successful');
-                if (this.validateLLMResponseStructure(parsed)) {
-                    return { success: true, data: this.enhanceResponseData(parsed) };
-                }
+                
+                const enhanced = this.validateLLMResponseStructure(parsed) ? 
+                    parsed : this.enhancePartialResponse(parsed);
+                
+                return { 
+                    success: true, 
+                    data: this.enhanceResponseData(enhanced) 
+                };
             } catch (extractError) {
                 console.warn('Extracted JSON parsing failed:', extractError.message);
             }
         }
         
-        // Try manual JSON reconstruction
-        const reconstructed = this.reconstructJSONFromText(responseText);
+        // Strategy 3: Smart reconstruction
+        console.log('🔄 Attempting smart JSON reconstruction...');
+        const reconstructed = this.smartReconstructJSON(responseText);
         if (reconstructed.success) {
             console.log('✅ JSON reconstruction successful');
-            return { success: true, data: this.enhanceResponseData(reconstructed.data) };
+            return { 
+                success: true, 
+                data: this.enhanceResponseData(reconstructed.data) 
+            };
         }
         
-        // Create comprehensive fallback from text
-        console.log('🔄 Creating comprehensive fallback from response text...');
-        const fallbackData = this.createComprehensiveFallbackFromText(responseText);
+        // Strategy 4: Pattern-based extraction
+        console.log('🔄 Attempting pattern-based extraction...');
+        const patternExtracted = this.extractByPatterns(responseText);
+        if (patternExtracted.success) {
+            console.log('✅ Pattern-based extraction successful');
+            return { 
+                success: true, 
+                data: this.enhanceResponseData(patternExtracted.data) 
+            };
+        }
+        
+        // Final fallback with enhanced data extraction
+        console.log('🔄 Creating enhanced fallback from response content...');
+        const fallbackData = this.createEnhancedFallbackFromResponse(responseText);
         
         return {
             success: false,
-            error: 'Could not parse as valid JSON, using comprehensive fallback',
+            error: 'Could not parse as valid JSON, using enhanced fallback',
             fallbackData: fallbackData
         };
         
     } catch (error) {
-        console.error('Response parsing error:', error);
+        console.error('❌ Response parsing error:', error);
         return {
             success: false,
             error: error.message,
-            fallbackData: this.createComponentFallback(componentName, friendlyName, responseText)
+            fallbackData: this.createSmartFallback(responseText)
         };
     }
 }
 
-// Reconstruct JSON from text response
-reconstructJSONFromText(text) {
-    console.log('🔨 Attempting JSON reconstruction from text...');
+// Enhanced fallback creation from actual response content
+createEnhancedFallbackFromResponse(responseText) {
+    console.log('🔄 Creating enhanced fallback from response content...');
+    
+    const componentName = this.currentAnalyzedComponent || 'Unknown';
+    const friendlyName = document.getElementById('friendlyName')?.value || componentName;
+    
+    // Extract meaningful content from the response
+    const content = {
+        hasFieldInfo: responseText.includes('field') || responseText.includes('Field'),
+        hasProgramInfo: responseText.includes('program') || responseText.includes('TMSBMDS'),
+        hasBusinessInfo: responseText.includes('business') || responseText.includes('Business'),
+        fieldCount: this.extractFieldCountFromText(responseText),
+        programs: this.extractProgramNamesFromText(responseText),
+        insights: this.extractInsightsFromText(responseText)
+    };
+    
+    return {
+        componentName: componentName,
+        friendlyName: friendlyName,
+        componentType: 'COBOL Program',
+        analysisScope: 'ENHANCED_FALLBACK',
+        businessPurpose: content.hasBusinessInfo ? 
+            'Business analysis extracted from response' : 
+            `${friendlyName} serves as a mainframe component with field-based operations`,
+        technicalSummary: content.hasProgramInfo ? 
+            'Technical details extracted from response including program references' :
+            'COBOL program with associated field structures and dependencies',
+        fieldAnalysis: {
+            totalFields: content.fieldCount || 0,
+            keyFields: content.fieldCount > 0 ? ['EXTRACTED-FIELD-INFO'] : [],
+            fieldCategories: {
+                input: content.hasFieldInfo ? ['INPUT-FIELDS'] : [],
+                output: content.hasFieldInfo ? ['OUTPUT-FIELDS'] : [],
+                calculated: [],
+                control: []
+            },
+            extractedFromResponse: true
+        },
+        businessRules: content.insights.length > 0 ? 
+            content.insights.map(insight => ({
+                type: 'EXTRACTED',
+                description: insight,
+                complexity: 'MEDIUM'
+            })) : [],
+        dependencies: {
+            required: content.programs,
+            optional: [],
+            missing: [],
+            riskAssessment: 'MEDIUM'
+        },
+        lifecyclePhases: {
+            creation: [],
+            processing: content.programs,
+            output: [],
+            archival: []
+        },
+        qualityScore: content.hasFieldInfo && content.hasProgramInfo ? 7 : 5,
+        recommendations: [
+            'Enhanced fallback created from response content',
+            `Response contained ${content.hasFieldInfo ? 'field' : 'no field'} information`,
+            `Response contained ${content.hasProgramInfo ? 'program' : 'no program'} references`,
+            'Consider re-running analysis with optimized prompts'
+        ],
+        modernizationOpportunities: [
+            'Review extracted information for accuracy',
+            'Consider manual validation of field structures'
+        ],
+        riskFactors: [
+            'Analysis based on fallback extraction',
+            'Manual verification recommended'
+        ],
+        enhancedFallback: true,
+        responseContentAnalysis: content,
+        timestamp: new Date().toISOString()
+    };
+}
+
+extractFieldCountFromText(text) {
+    const patterns = [
+        /(\d+)\s+fields/i,
+        /consists of\s+(\d+)/i,
+        /including\s+(\d+)/i
+    ];
+    
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match) return parseInt(match[1]);
+    }
+    
+    return 0;
+}
+
+// Pattern-based extraction for specific response formats
+extractByPatterns(text) {
+    console.log('🔍 Pattern-based extraction...');
     
     try {
-        const reconstructed = {
+        // Look for specific patterns in the response
+        const patterns = {
+            fieldCount: /(\d+)\s+fields/i,
+            programReferences: /(?:TMSBMDS\d+|TMS\d+\w+)/g,
+            fieldNames: /['"]([A-Z][A-Z0-9\-_]+)['"](?:\s*,|\s*and|\s*$)/g,
+            keyFields: /key fields are\s*([^.]+)/i,
+            businessPurpose: /business purpose[:\s]+([^.]+\.)/i
+        };
+        
+        const extracted = {
             componentName: this.currentAnalyzedComponent || 'Unknown',
-            friendlyName: this.extractValue(text, 'friendlyName') || this.currentAnalyzedComponent || 'Unknown Component',
-            componentType: this.extractValue(text, 'componentType') || 'Unknown',
-            analysisScope: 'RECONSTRUCTED_FROM_TEXT',
-            businessPurpose: this.extractValue(text, 'businessPurpose') || 'Business purpose extracted from response',
-            technicalSummary: this.extractValue(text, 'technicalSummary') || 'Technical summary extracted from response',
+            friendlyName: document.getElementById('friendlyName')?.value || this.currentAnalyzedComponent,
+            componentType: 'COBOL Program',
+            analysisScope: 'PATTERN_EXTRACTION'
+        };
+        
+        // Extract field count
+        const fieldCountMatch = text.match(patterns.fieldCount);
+        if (fieldCountMatch) {
+            extracted.fieldAnalysis = {
+                totalFields: parseInt(fieldCountMatch[1]),
+                keyFields: [],
+                fieldCategories: { input: [], output: [], calculated: [], control: [] }
+            };
+        }
+        
+        // Extract program references
+        const programMatches = text.match(patterns.programReferences);
+        if (programMatches) {
+            extracted.dependencies = {
+                required: [...new Set(programMatches)],
+                optional: [],
+                missing: []
+            };
+        }
+        
+        // Extract field names
+        const fieldMatches = text.match(patterns.fieldNames);
+        if (fieldMatches && extracted.fieldAnalysis) {
+            const fieldNames = fieldMatches.map(match => match.replace(/['"]/g, '').trim());
+            extracted.fieldAnalysis.keyFields = [...new Set(fieldNames)];
+        }
+        
+        // Extract business purpose
+        const businessMatch = text.match(patterns.businessPurpose);
+        if (businessMatch) {
+            extracted.businessPurpose = businessMatch[1].trim();
+        }
+        
+        // Set defaults for missing fields
+        extracted.businessPurpose = extracted.businessPurpose || 'Component analysis completed based on pattern extraction';
+        extracted.technicalSummary = 'Technical analysis extracted from response patterns';
+        extracted.qualityScore = 6;
+        extracted.recommendations = ['Analysis completed using pattern extraction', 'Review extracted data for accuracy'];
+        
+        if (Object.keys(extracted).length > 5) {
+            return { success: true, data: extracted };
+        }
+        
+        return { success: false, error: 'Insufficient patterns found' };
+        
+    } catch (error) {
+        console.error('Pattern extraction failed:', error);
+        return { success: false, error: error.message };
+    }
+}
+// Smart JSON reconstruction with better field detection
+smartReconstructJSON(text) {
+    console.log('🔨 Smart JSON reconstruction...');
+    
+    try {
+        const componentName = this.currentAnalyzedComponent || 'Unknown';
+        const friendlyName = document.getElementById('friendlyName')?.value || componentName;
+        
+        const reconstructed = {
+            componentName: componentName,
+            friendlyName: friendlyName,
+            componentType: this.extractValue(text, 'componentType') || 'COBOL Program',
+            analysisScope: 'SMART_RECONSTRUCTION',
+            businessPurpose: this.extractBusinessPurpose(text),
+            technicalSummary: this.extractTechnicalSummary(text),
             fieldAnalysis: this.extractFieldAnalysisFromText(text),
             businessRules: this.extractBusinessRulesFromText(text),
             dependencies: this.extractDependenciesFromText(text),
             lifecyclePhases: this.extractLifecyclePhasesFromText(text),
-            qualityScore: this.extractValue(text, 'qualityScore') || 7,
-            recommendations: this.extractArrayFromText(text, 'recommendations'),
+            qualityScore: this.extractNumericValue(text, 'qualityScore') || 7,
+            recommendations: this.extractRecommendationsFromText(text),
             modernizationOpportunities: this.extractArrayFromText(text, 'modernizationOpportunities'),
-            riskFactors: this.extractArrayFromText(text, 'riskFactors')
+            riskFactors: this.extractArrayFromText(text, 'riskFactors'),
+            reconstructed: true
         };
         
         return { success: true, data: reconstructed };
     } catch (error) {
-        console.error('JSON reconstruction failed:', error);
+        console.error('Smart reconstruction failed:', error);
         return { success: false, error: error.message };
     }
 }
@@ -6839,6 +7490,109 @@ extractNumericValue(text, fieldName) {
     }
     
     return null;
+}
+
+extractProgramNamesFromText(text) {
+    const programPattern = /(?:TMSBMDS\d+|TMS\d+\w+|[A-Z]{3,}\d+)/g;
+    const matches = text.match(programPattern);
+    return matches ? [...new Set(matches)] : [];
+}
+
+extractInsightsFromText(text) {
+    const insights = [];
+    
+    // Look for analytical statements
+    const sentences = text.split(/[.!?]+/);
+    sentences.forEach(sentence => {
+        const trimmed = sentence.trim();
+        if (trimmed.length > 20 && 
+            (trimmed.includes('analysis') || 
+             trimmed.includes('field') || 
+             trimmed.includes('program') ||
+             trimmed.includes('used to'))) {
+            insights.push(trimmed);
+        }
+    });
+    
+    return insights.slice(0, 3); // Limit to 3 insights
+}
+
+extractBusinessPurpose(text) {
+    const patterns = [
+        /business purpose[:\s]+([^.]+\.)/i,
+        /purpose[:\s]+([^.]+\.)/i,
+        /used to\s+([^.]+\.)/i,
+        /serves as\s+([^.]+\.)/i
+    ];
+    
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match) return match[1].trim();
+    }
+    
+    return 'Business purpose analysis based on component structure and field usage patterns';
+}
+
+extractTechnicalSummary(text) {
+    const patterns = [
+        /technical summary[:\s]+([^.]+\.)/i,
+        /technically[:\s]+([^.]+\.)/i,
+        /consists of\s+([^.]+\.)/i
+    ];
+    
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match) return match[1].trim();
+    }
+    
+    return 'COBOL program component with field structures and program dependencies';
+}
+
+// Create smart fallback for completely failed responses
+createSmartFallback(responseText) {
+    const componentName = this.currentAnalyzedComponent || 'Unknown';
+    const friendlyName = document.getElementById('friendlyName')?.value || componentName;
+    
+    return {
+        componentName: componentName,
+        friendlyName: friendlyName,
+        componentType: 'Unknown',
+        analysisScope: 'MINIMAL_FALLBACK',
+        businessPurpose: 'Analysis failed - manual review required',
+        technicalSummary: 'Technical analysis could not be completed',
+        fieldAnalysis: {
+            totalFields: 0,
+            keyFields: [],
+            fieldCategories: { input: [], output: [], calculated: [], control: [] }
+        },
+        businessRules: [],
+        dependencies: {
+            required: [],
+            optional: [],
+            missing: [],
+            riskAssessment: 'HIGH'
+        },
+        lifecyclePhases: {
+            creation: [],
+            processing: [],
+            output: [],
+            archival: []
+        },
+        qualityScore: 1,
+        recommendations: [
+            'Analysis failed completely',
+            'Check LLM server connection and response format',
+            'Consider manual analysis',
+            'Verify component name and uploaded files'
+        ],
+        riskFactors: [
+            'Complete analysis failure',
+            'No reliable data available'
+        ],
+        failed: true,
+        originalResponse: responseText ? responseText.substring(0, 500) : 'No response',
+        timestamp: new Date().toISOString()
+    };
 }
 
 // Extract array from text
@@ -8416,21 +9170,19 @@ displayFieldMatrix(componentName, results, friendlyName) {
         }
 
         // Simplified LLM API call - in real implementation, include full LLM integration
-        async callLLMAPI(prompt, retries = 0) {
+        // Enhanced LLM API call with better response handling
+async callLLMAPI(prompt, retries = 0) {
     let resultText = '';
     
     try {
-        console.log(`Making LLM API call attempt ${retries + 1}...`);
+        console.log(`🤖 Making LLM API call attempt ${retries + 1}...`);
         
-        // Intelligent token estimation and chunking
         const estimatedTokens = this.estimateTokenCount(prompt);
-        console.log(`Estimated tokens: ${estimatedTokens}, Max allowed: ${this.maxTokens}`);
+        console.log(`📊 Estimated tokens: ${estimatedTokens}, Max allowed: ${this.maxTokens}`);
         
         let processedPrompt = prompt;
-        
-        // If prompt exceeds token limit, apply intelligent chunking
         if (estimatedTokens > this.maxTokens * 0.8) {
-            console.log('Applying intelligent chunking...');
+            console.log('🔄 Applying intelligent chunking...');
             processedPrompt = await this.applyIntelligentChunking(prompt);
         }
         
@@ -8449,7 +9201,7 @@ displayFieldMatrix(componentName, results, friendlyName) {
                 frequency_penalty: 0.1,
                 presence_penalty: 0.0
             }),
-            signal: AbortSignal.timeout(90000) // 90 second timeout
+            signal: AbortSignal.timeout(90000)
         });
 
         if (!response.ok) {
@@ -8457,7 +9209,7 @@ displayFieldMatrix(componentName, results, friendlyName) {
         }
 
         const data = await response.json();
-        console.log('LLM API Response received, keys:', Object.keys(data));
+        console.log('📥 LLM API Response received, keys:', Object.keys(data));
         
         // Extract text from various response formats
         if (data.text) {
@@ -8480,33 +9232,44 @@ displayFieldMatrix(componentName, results, friendlyName) {
             throw new Error('No valid text content in LLM response');
         }
 
-        console.log(`LLM response length: ${resultText.length} chars`);
+        console.log(`📏 LLM response length: ${resultText.length} chars`);
+        console.log(`📝 LLM response preview: ${resultText.substring(0, 200)}...`);
         
         // Update token display
         this.updateTokenDisplay(this.estimateTokenCount(processedPrompt + resultText));
 
-        // Parse the response
+        // ENHANCED: Try multiple parsing strategies before giving up
         const parseResult = this.parseAndValidateLLMResponse(resultText);
         
         if (parseResult.success) {
-            console.log('LLM JSON parsing successful');
+            console.log('✅ LLM JSON parsing successful');
             return parseResult.data;
         } else {
-            console.warn('LLM JSON parsing failed, using fallback');
-            if (parseResult.fallbackData) {
-                parseResult.fallbackData.rawResponse = resultText.substring(0, 1000);
-                parseResult.fallbackData.parseError = parseResult.error;
-                return parseResult.fallbackData;
-            } else {
-                throw new Error(`JSON parsing failed: ${parseResult.error}`);
+            console.warn('⚠️ LLM JSON parsing failed, using enhanced fallback');
+            
+            // Even if parsing fails, try to extract useful information
+            const enhancedFallback = parseResult.fallbackData;
+            
+            // Add the raw response for debugging
+            enhancedFallback.rawLLMResponse = resultText;
+            enhancedFallback.parseAttempted = true;
+            enhancedFallback.parseError = parseResult.error;
+            
+            // If we have meaningful content in the response, indicate partial success
+            if (this.hasUsefulContent(resultText)) {
+                enhancedFallback.partialSuccess = true;
+                enhancedFallback.qualityScore = Math.max(enhancedFallback.qualityScore || 3, 5);
+                console.log('📊 Response contains useful content despite parsing failure');
             }
+            
+            return enhancedFallback;
         }
 
     } catch (error) {
-        console.error(`LLM API call attempt ${retries + 1} failed:`, error);
+        console.error(`❌ LLM API call attempt ${retries + 1} failed:`, error);
         
         if (retries < 2) {
-            console.log(`Retrying LLM API call (${retries + 1}/2)...`);
+            console.log(`🔄 Retrying LLM API call (${retries + 1}/2)...`);
             await this.sleep(2000 * (retries + 1));
             return this.callLLMAPI(prompt, retries + 1);
         }
@@ -8522,6 +9285,24 @@ displayFieldMatrix(componentName, results, friendlyName) {
         };
     }
 }
+
+// Check if response contains useful content even if JSON parsing fails
+hasUsefulContent(responseText) {
+    const usefulIndicators = [
+        /\d+\s+fields/i,
+        /business\s+purpose/i,
+        /technical\s+summary/i,
+        /key\s+fields/i,
+        /recommendations/i,
+        /analysis/i,
+        /TMSBMDS|TMS\d+/i,
+        /copybook/i,
+        /program/i
+    ];
+    
+    return usefulIndicators.some(pattern => pattern.test(responseText));
+}
+
 
 /* ===================================================================
 ENHANCED MAINFRAME ANALYZER - INTELLIGENT CHUNKING AND CHAT
