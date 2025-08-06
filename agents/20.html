@@ -7211,6 +7211,863 @@ renderDependencyDashboard(dependencyAnalysis) {
         `;
     }
 
+    renderDataFlowAnalysisCollapsible(lifecycleFlow) {
+        const dataFlow = lifecycleFlow.dataFlow || {};
+        const totalOperations = (dataFlow.inputs || []).length + 
+                               (dataFlow.outputs || []).length + 
+                               (dataFlow.transformations || []).length + 
+                               (dataFlow.validations || []).length;
+        
+        return `
+            <div class="collapsible-section">
+                <div class="collapsible-header" onclick="analyzer.toggleCollapsibleSection(this)">
+                    <div class="collapsible-title">
+                        🌊 Data Flow & Transformation Analysis
+                        <span class="status-indicator status-good">${totalOperations} OPERATIONS</span>
+                    </div>
+                    <span class="collapsible-icon">🔽</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-inner">
+                        <!-- Data Flow Summary -->
+                        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 20px;">
+                            <h6 style="color: #1e40af; margin-bottom: 12px;">📊 Data Flow Overview</h6>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+                                
+                                <!-- Input Operations -->
+                                <div style="background: white; padding: 12px; border-radius: 6px; border-left: 4px solid #10b981;">
+                                    <h6 style="color: #059669; margin-bottom: 8px;">📥 Input Operations</h6>
+                                    <div style="font-size: 12px; color: #065f46;">
+                                        <strong>Sources:</strong> ${(dataFlow.inputs || []).length}<br>
+                                        <strong>Files:</strong> ${(dataFlow.inputs || []).slice(0, 3).join(', ')}${(dataFlow.inputs || []).length > 3 ? '...' : ''}
+                                    </div>
+                                </div>
+                                
+                                <!-- Transformation Operations -->
+                                <div style="background: white; padding: 12px; border-radius: 6px; border-left: 4px solid #f59e0b;">
+                                    <h6 style="color: #d97706; margin-bottom: 8px;">🔄 Transformations</h6>
+                                    <div style="font-size: 12px; color: #92400e;">
+                                        <strong>Operations:</strong> ${(dataFlow.transformations || []).length}<br>
+                                        <strong>Fields:</strong> ${(dataFlow.transformations || []).slice(0, 3).join(', ')}${(dataFlow.transformations || []).length > 3 ? '...' : ''}
+                                    </div>
+                                </div>
+                                
+                                <!-- Validation Operations -->
+                                <div style="background: white; padding: 12px; border-radius: 6px; border-left: 4px solid #8b5cf6;">
+                                    <h6 style="color: #7c3aed; margin-bottom: 8px;">✅ Validations</h6>
+                                    <div style="font-size: 12px; color: #6b21a8;">
+                                        <strong>Checks:</strong> ${(dataFlow.validations || []).length}<br>
+                                        <strong>Fields:</strong> ${(dataFlow.validations || []).slice(0, 3).join(', ')}${(dataFlow.validations || []).length > 3 ? '...' : ''}
+                                    </div>
+                                </div>
+                                
+                                <!-- Output Operations -->
+                                <div style="background: white; padding: 12px; border-radius: 6px; border-left: 4px solid #3b82f6;">
+                                    <h6 style="color: #2563eb; margin-bottom: 8px;">📤 Output Operations</h6>
+                                    <div style="font-size: 12px; color: #1d4ed8;">
+                                        <strong>Destinations:</strong> ${(dataFlow.outputs || []).length}<br>
+                                        <strong>Files:</strong> ${(dataFlow.outputs || []).slice(0, 3).join(', ')}${(dataFlow.outputs || []).length > 3 ? '...' : ''}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Data Flow Diagram -->
+                        <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px;">
+                            <h6 style="color: #1e40af; margin-bottom: 16px;">🔄 Flow Visualization</h6>
+                            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+                                
+                                <div style="background: #ecfdf5; padding: 12px; border-radius: 8px; border: 1px solid #a7f3d0; text-align: center; min-width: 120px;">
+                                    <div style="font-weight: 600; color: #059669; margin-bottom: 4px;">📥 INPUT</div>
+                                    <div style="font-size: 12px; color: #065f46;">${(dataFlow.inputs || []).length} sources</div>
+                                </div>
+                                
+                                <div style="color: #6b7280; font-size: 20px;">→</div>
+                                
+                                <div style="background: #fffbeb; padding: 12px; border-radius: 8px; border: 1px solid #fcd34d; text-align: center; min-width: 120px;">
+                                    <div style="font-weight: 600; color: #d97706; margin-bottom: 4px;">🔄 PROCESS</div>
+                                    <div style="font-size: 12px; color: #92400e;">${(dataFlow.transformations || []).length} transforms</div>
+                                </div>
+                                
+                                <div style="color: #6b7280; font-size: 20px;">→</div>
+                                
+                                <div style="background: #f0f9ff; padding: 12px; border-radius: 8px; border: 1px solid #bfdbfe; text-align: center; min-width: 120px;">
+                                    <div style="font-weight: 600; color: #2563eb; margin-bottom: 4px;">✅ VALIDATE</div>
+                                    <div style="font-size: 12px; color: #1d4ed8;">${(dataFlow.validations || []).length} checks</div>
+                                </div>
+                                
+                                <div style="color: #6b7280; font-size: 20px;">→</div>
+                                
+                                <div style="background: #fdf4ff; padding: 12px; border-radius: 8px; border: 1px solid #e9d5ff; text-align: center; min-width: 120px;">
+                                    <div style="font-weight: 600; color: #7c3aed; margin-bottom: 4px;">📤 OUTPUT</div>
+                                    <div style="font-size: 12px; color: #6b21a8;">${(dataFlow.outputs || []).length} destinations</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    renderFieldUsagePatternsCollapsible(fieldAnalysis) {
+        if (!fieldAnalysis || !fieldAnalysis.fieldCategories) return '';
+        
+        const categories = fieldAnalysis.fieldCategories;
+        const totalFields = fieldAnalysis.totalFields || 0;
+        
+        return `
+            <div class="collapsible-section">
+                <div class="collapsible-header" onclick="analyzer.toggleCollapsibleSection(this)">
+                    <div class="collapsible-title">
+                        📊 Field Usage Distribution Analysis
+                        <span class="status-indicator status-good">${totalFields} FIELDS</span>
+                    </div>
+                    <span class="collapsible-icon">🔽</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-inner">
+                        <!-- Usage Distribution Chart -->
+                        <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 16px;">
+                            <h6 style="color: #1e40af; margin-bottom: 16px;">📈 Field Usage Distribution</h6>
+                            
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
+                                <!-- Input Fields -->
+                                <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #d1d5db;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                        <span style="font-size: 12px; font-weight: 600; color: #10b981;">📥 Input</span>
+                                        <span style="font-size: 14px; font-weight: 700; color: #10b981;">${(categories.input || []).length}</span>
+                                    </div>
+                                    <div style="background: #f3f4f6; height: 4px; border-radius: 2px; overflow: hidden;">
+                                        <div style="background: #10b981; height: 100%; width: ${totalFields > 0 ? ((categories.input || []).length / totalFields) * 100 : 0}%;"></div>
+                                    </div>
+                                    <div style="font-size: 10px; color: #6b7280; margin-top: 4px;">
+                                        ${totalFields > 0 ? Math.round(((categories.input || []).length / totalFields) * 100) : 0}% of total
+                                    </div>
+                                </div>
+
+                                <!-- Output Fields -->
+                                <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #d1d5db;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                        <span style="font-size: 12px; font-weight: 600; color: #3b82f6;">📤 Output</span>
+                                        <span style="font-size: 14px; font-weight: 700; color: #3b82f6;">${(categories.output || []).length}</span>
+                                    </div>
+                                    <div style="background: #f3f4f6; height: 4px; border-radius: 2px; overflow: hidden;">
+                                        <div style="background: #3b82f6; height: 100%; width: ${totalFields > 0 ? ((categories.output || []).length / totalFields) * 100 : 0}%;"></div>
+                                    </div>
+                                    <div style="font-size: 10px; color: #6b7280; margin-top: 4px;">
+                                        ${totalFields > 0 ? Math.round(((categories.output || []).length / totalFields) * 100) : 0}% of total
+                                    </div>
+                                </div>
+
+                                <!-- Calculated Fields -->
+                                <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #d1d5db;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                        <span style="font-size: 12px; font-weight: 600; color: #f59e0b;">🧮 Calculated</span>
+                                        <span style="font-size: 14px; font-weight: 700; color: #f59e0b;">${(categories.calculated || []).length}</span>
+                                    </div>
+                                    <div style="background: #f3f4f6; height: 4px; border-radius: 2px; overflow: hidden;">
+                                        <div style="background: #f59e0b; height: 100%; width: ${totalFields > 0 ? ((categories.calculated || []).length / totalFields) * 100 : 0}%;"></div>
+                                    </div>
+                                    <div style="font-size: 10px; color: #6b7280; margin-top: 4px;">
+                                        ${totalFields > 0 ? Math.round(((categories.calculated || []).length / totalFields) * 100) : 0}% of total
+                                    </div>
+                                </div>
+
+                                <!-- Unused Fields -->
+                                <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #d1d5db;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                        <span style="font-size: 12px; font-weight: 600; color: #ef4444;">❌ Unused</span>
+                                        <span style="font-size: 14px; font-weight: 700; color: #ef4444;">${(categories.unused || []).length}</span>
+                                    </div>
+                                    <div style="background: #f3f4f6; height: 4px; border-radius: 2px; overflow: hidden;">
+                                        <div style="background: #ef4444; height: 100%; width: ${totalFields > 0 ? ((categories.unused || []).length / totalFields) * 100 : 0}%;"></div>
+                                    </div>
+                                    <div style="font-size: 10px; color: #6b7280; margin-top: 4px;">
+                                        ${totalFields > 0 ? Math.round(((categories.unused || []).length / totalFields) * 100) : 0}% of total
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Field Usage Insights -->
+                        <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px;">
+                            <h6 style="color: #1e40af; margin-bottom: 12px;">💡 Usage Insights</h6>
+                            ${this.generateFieldUsageInsights(categories, totalFields)}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    renderPerformanceInsightsCollapsible(lifecycleFlow, fieldAnalysis) {
+        const insights = this.generatePerformanceInsights(lifecycleFlow, fieldAnalysis);
+        
+        return `
+            <div class="collapsible-section">
+                <div class="collapsible-header" onclick="analyzer.toggleCollapsibleSection(this)">
+                    <div class="collapsible-title">
+                        ⚡ Performance & Optimization Insights
+                        <span class="status-indicator status-good">${insights.length} INSIGHTS</span>
+                    </div>
+                    <span class="collapsible-icon">🔽</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-inner">
+                        <div style="display: grid; gap: 16px;">
+                            ${insights.map(insight => `
+                                <div style="background: ${insight.background}; padding: 16px; border-radius: 8px; border: 1px solid ${insight.border};">
+                                    <div style="display: flex; align-items: start; gap: 12px;">
+                                        <div style="font-size: 24px;">${insight.icon}</div>
+                                        <div style="flex: 1;">
+                                            <h6 style="color: ${insight.color}; margin-bottom: 8px; font-weight: 600;">
+                                                ${insight.title}
+                                            </h6>
+                                            <p style="color: ${insight.textColor}; font-size: 13px; line-height: 1.5; margin-bottom: 8px;">
+                                                ${insight.description}
+                                            </p>
+                                            ${insight.recommendation ? `
+                                                <div style="background: rgba(255, 255, 255, 0.7); padding: 8px; border-radius: 4px; margin-top: 8px;">
+                                                    <div style="font-size: 11px; font-weight: 600; color: ${insight.color}; margin-bottom: 4px;">💡 Recommendation:</div>
+                                                    <div style="font-size: 11px; color: ${insight.textColor};">${insight.recommendation}</div>
+                                                </div>
+                                            ` : ''}
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    renderFieldBusinessLogicCollapsible(mergedFieldData) {
+        const businessLogic = mergedFieldData.businessLogic || [];
+        if (businessLogic.length === 0) return '';
+        
+        return `
+            <div class="collapsible-section">
+                <div class="collapsible-header" onclick="analyzer.toggleCollapsibleSection(this)">
+                    <div class="collapsible-title">
+                        🧠 Field-Related Business Logic
+                        <span class="status-indicator status-good">${businessLogic.length} RULES</span>
+                    </div>
+                    <span class="collapsible-icon">🔽</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-inner">
+                        <div style="max-height: 400px; overflow-y: auto;">
+                            ${businessLogic.map(logic => `
+                                <div style="background: #f8fafc; padding: 12px; margin-bottom: 8px; border-radius: 6px; border-left: 4px solid ${this.getLogicColor(logic.type)};">
+                                    <div style="font-weight: 600; color: #1f2937; margin-bottom: 4px;">
+                                        ${logic.type} - ${logic.complexity || 'MEDIUM'} Complexity
+                                    </div>
+                                    <div style="font-family: monospace; font-size: 11px; background: white; padding: 8px; border-radius: 4px; margin-bottom: 8px;">
+                                        ${logic.description}
+                                    </div>
+                                    ${logic.affectedFields && logic.affectedFields.length > 0 ? `
+                                        <div style="font-size: 10px; color: #6b7280;">
+                                            <strong>Affected Fields:</strong> ${logic.affectedFields.join(', ')}
+                                        </div>
+                                    ` : ''}
+                                    ${logic.file ? `
+                                        <div style="font-size: 10px; color: #6b7280; margin-top: 4px;">
+                                            File: ${logic.file} | Line: ${logic.lineNumber || 'N/A'}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    renderFieldStatisticsCollapsible(mergedFieldData) {
+        if (!mergedFieldData.statistics) return '';
+        
+        const stats = mergedFieldData.statistics;
+        
+        return `
+            <div class="collapsible-section">
+                <div class="collapsible-header" onclick="analyzer.toggleCollapsibleSection(this)">
+                    <div class="collapsible-title">
+                        📈 Detailed Field Statistics
+                        <span class="status-indicator status-good">COMPREHENSIVE</span>
+                    </div>
+                    <span class="collapsible-icon">🔽</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-inner">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
+                            
+                            <!-- Level Distribution -->
+                            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                                <h6 style="color: #1e40af; margin-bottom: 12px;">📊 By Level Distribution</h6>
+                                <div style="space-y: 8px;">
+                                    ${this.renderStatBar('Level 01', stats.level01Count || 0, mergedFieldData.totalFields, '#059669')}
+                                    ${this.renderStatBar('Level 05', stats.level05Count || 0, mergedFieldData.totalFields, '#2563eb')}
+                                    ${this.renderStatBar('Level 10', stats.level10Count || 0, mergedFieldData.totalFields, '#f59e0b')}
+                                    ${this.renderStatBar('Level 15', stats.level15Count || 0, mergedFieldData.totalFields, '#8b5cf6')}
+                                    ${this.renderStatBar('Other Levels', stats.otherLevels || 0, mergedFieldData.totalFields, '#6b7280')}
+                                </div>
+                            </div>
+                            
+                            <!-- Data Type Distribution -->
+                            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                                <h6 style="color: #1e40af; margin-bottom: 12px;">🔤 By Data Type</h6>
+                                <div style="space-y: 8px;">
+                                    ${this.renderStatBar('Alphanumeric (X)', stats.picXCount || 0, mergedFieldData.totalFields, '#10b981')}
+                                    ${this.renderStatBar('Numeric (9)', stats.pic9Count || 0, mergedFieldData.totalFields, '#3b82f6')}
+                                    ${this.renderStatBar('Signed (S)', stats.picSCount || 0, mergedFieldData.totalFields, '#f59e0b')}
+                                </div>
+                            </div>
+                            
+                            <!-- Special Attributes -->
+                            <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                                <h6 style="color: #1e40af; margin-bottom: 12px;">⚡ Special Attributes</h6>
+                                <div style="space-y: 8px;">
+                                    ${this.renderStatBar('Redefines', stats.redefinesCount || 0, mergedFieldData.totalFields, '#dc2626')}
+                                    ${this.renderStatBar('Occurs', stats.occursCount || 0, mergedFieldData.totalFields, '#7c3aed')}
+                                </div>
+                                
+                                <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid #e2e8f0;">
+                                    <div style="font-size: 11px; color: #6b7280; line-height: 1.5;">
+                                        <strong>Complexity Indicators:</strong><br>
+                                        Redefines: ${stats.redefinesCount || 0} fields use memory optimization<br>
+                                        Occurs: ${stats.occursCount || 0} fields are arrays/tables
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    renderDependencyImpactCollapsible(componentName, dependencyAnalysis) {
+        const { summary } = dependencyAnalysis;
+        const totalDeps = summary.foundCount + summary.missingCount;
+        const riskLevel = this.calculateDependencyRiskLevel(summary);
+        
+        return `
+            <div class="collapsible-section">
+                <div class="collapsible-header" onclick="analyzer.toggleCollapsibleSection(this)">
+                    <div class="collapsible-title">
+                        💥 Dependency Impact Assessment
+                        <span class="status-indicator ${this.getRiskStatusClass(riskLevel)}">${riskLevel} RISK</span>
+                    </div>
+                    <span class="collapsible-icon">🔽</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-inner">
+                        ${this.renderDependencyImpactAnalysis(componentName, dependencyAnalysis)}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    renderCrossReferenceMapCollapsible(componentName, dependencyAnalysis, results) {
+        return `
+            <div class="collapsible-section">
+                <div class="collapsible-header" onclick="analyzer.toggleCollapsibleSection(this)">
+                    <div class="collapsible-title">
+                        🗺️ Cross-Reference & Relationship Map
+                        <span class="status-indicator status-good">MAPPED</span>
+                    </div>
+                    <span class="collapsible-icon">🔽</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-inner">
+                        ${this.renderCrossReferenceMap(componentName, dependencyAnalysis, results)}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    generateFieldUsageInsights(categories, totalFields) {
+        const insights = [];
+        
+        const unusedPercent = totalFields > 0 ? ((categories.unused || []).length / totalFields) * 100 : 0;
+        const calculatedPercent = totalFields > 0 ? ((categories.calculated || []).length / totalFields) * 100 : 0;
+        const inputPercent = totalFields > 0 ? ((categories.input || []).length / totalFields) * 100 : 0;
+        
+        if (unusedPercent > 30) {
+            insights.push(`⚠️ High unused field ratio (${Math.round(unusedPercent)}%) suggests potential for cleanup and optimization.`);
+        } else if (unusedPercent < 10) {
+            insights.push(`✅ Excellent field utilization rate (${Math.round(100 - unusedPercent)}%) indicates well-optimized structure.`);
+        }
+        
+        if (calculatedPercent > 20) {
+            insights.push(`🧮 High calculated field ratio (${Math.round(calculatedPercent)}%) indicates complex business logic processing.`);
+        }
+        
+        if (inputPercent > 60) {
+            insights.push(`📥 High input field ratio (${Math.round(inputPercent)}%) suggests component is primarily used for data collection.`);
+        }
+        
+        if (insights.length === 0) {
+            insights.push(`📊 Field distribution appears balanced across different usage categories.`);
+        }
+        
+        return `
+            <div style="background: #f0f9ff; padding: 12px; border-radius: 6px; border: 1px solid #bae6fd;">
+                ${insights.map(insight => `
+                    <div style="color: #1e40af; font-size: 13px; line-height: 1.5; margin-bottom: 8px;">
+                        ${insight}
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    generatePerformanceInsights(lifecycleFlow, fieldAnalysis) {
+        const insights = [];
+        
+        // Memory usage insight
+        const totalFields = fieldAnalysis?.totalFields || 0;
+        if (totalFields > 200) {
+            insights.push({
+                icon: '🧠',
+                title: 'Memory Usage Optimization',
+                description: `Component has ${totalFields} fields which may impact memory usage. Consider field-level analysis for optimization opportunities.`,
+                recommendation: 'Review unused fields and consider REDEFINES clauses for memory efficiency.',
+                background: '#fffbeb',
+                border: '#fcd34d',
+                color: '#d97706',
+                textColor: '#92400e'
+            });
+        }
+        
+        // Processing complexity insight
+        const totalPrograms = this.getTotalProgramCount(lifecycleFlow);
+        if (totalPrograms > 10) {
+            insights.push({
+                icon: '⚡',
+                title: 'Processing Complexity',
+                description: `Component interacts with ${totalPrograms} programs, indicating high integration complexity.`,
+                recommendation: 'Consider consolidating similar operations and optimizing program call patterns.',
+                background: '#f0f9ff',
+                border: '#bfdbfe',
+                color: '#2563eb',
+                textColor: '#1d4ed8'
+            });
+        }
+        
+        // I/O efficiency insight
+        const ioOperations = (lifecycleFlow.inputPrograms || []).length + (lifecycleFlow.updatePrograms || []).length;
+        if (ioOperations > 5) {
+            insights.push({
+                icon: '💾',
+                title: 'I/O Operation Efficiency',
+                description: `Multiple I/O operations (${ioOperations}) detected. This may impact performance in high-volume scenarios.`,
+                recommendation: 'Consider batching operations and implementing read-ahead strategies.',
+                background: '#fef2f2',
+                border: '#fecaca',
+                color: '#dc2626',
+                textColor: '#991b1b'
+            });
+        }
+        
+        // Validation overhead insight
+        const validationCount = (lifecycleFlow.dataFlow?.validations || []).length;
+        if (validationCount > 8) {
+            insights.push({
+                icon: '✅',
+                title: 'Validation Overhead',
+                description: `High number of validation operations (${validationCount}) may create processing bottlenecks.`,
+                recommendation: 'Optimize validation logic and consider early validation patterns.',
+                background: '#f3f4f6',
+                border: '#d1d5db',
+                color: '#6b7280',
+                textColor: '#4b5563'
+            });
+        }
+        
+        // Default insight if none generated
+        if (insights.length === 0) {
+            insights.push({
+                icon: '🎯',
+                title: 'Optimized Performance Profile',
+                description: 'Component shows good performance characteristics with balanced resource usage and efficient processing patterns.',
+                recommendation: 'Continue monitoring and maintain current optimization levels.',
+                background: '#ecfdf5',
+                border: '#a7f3d0',
+                color: '#059669',
+                textColor: '#065f46'
+            });
+        }
+        
+        return insights;
+    }
+
+    renderStatBar(label, value, total, color) {
+        const percentage = total > 0 ? (value / total) * 100 : 0;
+        
+        return `
+            <div style="margin-bottom: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <span style="font-size: 11px; color: #374151; font-weight: 500;">${label}</span>
+                    <span style="font-size: 11px; color: ${color}; font-weight: 600;">${value}</span>
+                </div>
+                <div style="background: #f3f4f6; height: 4px; border-radius: 2px; overflow: hidden;">
+                    <div style="background: ${color}; height: 100%; width: ${Math.min(percentage, 100)}%; transition: width 0.3s ease;"></div>
+                </div>
+                <div style="font-size: 9px; color: #9ca3af; margin-top: 2px;">
+                    ${Math.round(percentage)}% of total fields
+                </div>
+            </div>
+        `;
+    }
+
+    calculateDependencyRiskLevel(summary) {
+        const totalDeps = summary.foundCount + summary.missingCount;
+        const missingPercent = totalDeps > 0 ? (summary.missingCount / totalDeps) * 100 : 0;
+        
+        if (missingPercent === 0) return 'LOW';
+        if (missingPercent < 30) return 'MEDIUM';
+        return 'HIGH';
+    }
+
+    // ENHANCED TECHNICAL SUMMARY SECTION
+    renderTechnicalSummarySection(llmAnalysis, results) {
+        if (!llmAnalysis.technicalSummary) return '';
+        
+        return `
+            <div class="collapsible-section">
+                <div class="collapsible-header" onclick="analyzer.toggleCollapsibleSection(this)">
+                    <div class="collapsible-title">
+                        🔧 Technical Architecture & Structure
+                        <span class="status-indicator status-good">ANALYZED</span>
+                    </div>
+                    <span class="collapsible-icon">🔽</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-inner">
+                        <!-- Main Technical Summary -->
+                        <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 16px;">
+                            <p style="color: #374151; font-size: 14px; line-height: 1.6;">
+                                ${llmAnalysis.technicalSummary}
+                            </p>
+                        </div>
+                        
+                        <!-- Technical Metrics Grid -->
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
+                            
+                            <!-- Architecture Overview -->
+                            <div style="background: white; padding: 16px; border-radius: 8px; border: 1px solid #d1d5db;">
+                                <h6 style="color: #1f2937; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                                    🏗️ Architecture
+                                </h6>
+                                <div style="font-size: 12px; color: #6b7280; line-height: 1.6;">
+                                    <strong>Type:</strong> ${results.componentType || 'Unknown'}<br>
+                                    <strong>Fields:</strong> ${results.fieldAnalysis?.totalFields || 0}<br>
+                                    <strong>Files:</strong> ${results.filesAnalyzed?.length || 0} analyzed<br>
+                                    <strong>Method:</strong> ${results.analysisMethod || 'Standard'}
+                                </div>
+                            </div>
+                            
+                            <!-- Processing Characteristics -->
+                            <div style="background: white; padding: 16px; border-radius: 8px; border: 1px solid #d1d5db;">
+                                <h6 style="color: #1f2937; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                                    🔄 Processing
+                                </h6>
+                                <div style="font-size: 12px; color: #6b7280; line-height: 1.6;">
+                                    <strong>Pattern:</strong> ${(results.lifecycleFlow?.usagePattern || 'Unknown').replace(/_/g, ' ')}<br>
+                                    <strong>Input Programs:</strong> ${(results.lifecycleFlow?.inputPrograms || []).length}<br>
+                                    <strong>Update Programs:</strong> ${(results.lifecycleFlow?.updatePrograms || []).length}<br>
+                                    <strong>CICS Screens:</strong> ${(results.lifecycleFlow?.cicsScreens || []).length}
+                                </div>
+                            </div>
+                            
+                            <!-- Integration Complexity -->
+                            <div style="background: white; padding: 16px; border-radius: 8px; border: 1px solid #d1d5db;">
+                                <h6 style="color: #1f2937; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                                    🔗 Integration
+                                </h6>
+                                <div style="font-size: 12px; color: #6b7280; line-height: 1.6;">
+                                    <strong>Total Dependencies:</strong> ${(results.dependencyAnalysis?.summary?.foundCount || 0) + (results.dependencyAnalysis?.summary?.missingCount || 0)}<br>
+                                    <strong>Available:</strong> ${results.dependencyAnalysis?.summary?.foundCount || 0}<br>
+                                    <strong>Missing:</strong> ${results.dependencyAnalysis?.summary?.missingCount || 0}<br>
+                                    <strong>Coverage:</strong> ${this.calculateDependencyCoverage(results.dependencyAnalysis)}%
+                                </div>
+                            </div>
+                            
+                            <!-- Quality Metrics -->
+                            <div style="background: white; padding: 16px; border-radius: 8px; border: 1px solid #d1d5db;">
+                                <h6 style="color: #1f2937; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                                    📊 Quality Metrics
+                                </h6>
+                                <div style="font-size: 12px; color: #6b7280; line-height: 1.6;">
+                                    <strong>Quality Score:</strong> ${results.qualityScore || 0}/10<br>
+                                    <strong>Completeness:</strong> ${results.completeness?.score || 0}%<br>
+                                    <strong>Business Rules:</strong> ${(llmAnalysis.businessRules || []).length}<br>
+                                    <strong>Risk Level:</strong> <span style="color: ${this.getRiskLevelColor(this.calculateRiskLevel(results))}">${this.calculateRiskLevel(results)}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Technical Recommendations -->
+                        ${this.renderTechnicalRecommendations(results)}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    renderTechnicalRecommendations(results) {
+        const recommendations = [];
+        
+        // Architecture recommendations
+        const fieldCount = results.fieldAnalysis?.totalFields || 0;
+        if (fieldCount > 300) {
+            recommendations.push({
+                icon: '🏗️',
+                title: 'Consider Field Restructuring',
+                description: `Component has ${fieldCount} fields. Consider breaking into smaller, more focused structures.`,
+                priority: 'MEDIUM'
+            });
+        }
+        
+        // Integration recommendations
+        const missingDeps = results.dependencyAnalysis?.summary?.missingCount || 0;
+        if (missingDeps > 0) {
+            recommendations.push({
+                icon: '🔗',
+                title: 'Resolve Missing Dependencies',
+                description: `${missingDeps} dependencies are missing. Locate and upload required components.`,
+                priority: 'HIGH'
+            });
+        }
+        
+        // Performance recommendations
+        const totalPrograms = this.getTotalProgramCount(results.lifecycleFlow || {});
+        if (totalPrograms > 15) {
+            recommendations.push({
+                icon: '⚡',
+                title: 'Optimize Program Interactions',
+                description: `Component interacts with ${totalPrograms} programs. Consider consolidating related operations.`,
+                priority: 'MEDIUM'
+            });
+        }
+        
+        if (recommendations.length === 0) {
+            recommendations.push({
+                icon: '✅',
+                title: 'Well-Structured Component',
+                description: 'Component shows good technical architecture with balanced complexity.',
+                priority: 'INFO'
+            });
+        }
+        
+        return `
+            <div style="background: #f0fdf4; padding: 16px; border-radius: 8px; border: 1px solid #a7f3d0; margin-top: 16px;">
+                <h6 style="color: #059669; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                    💡 Technical Recommendations
+                </h6>
+                <div style="display: grid; gap: 8px;">
+                    ${recommendations.map(rec => `
+                        <div style="background: white; padding: 10px; border-radius: 6px; border-left: 4px solid ${this.getPriorityColor(rec.priority)};">
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                                <span>${rec.icon}</span>
+                                <span style="font-weight: 600; color: #374151; font-size: 13px;">${rec.title}</span>
+                                <span style="background: ${this.getPriorityColor(rec.priority)}; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">
+                                    ${rec.priority}
+                                </span>
+                            </div>
+                            <div style="color: #6b7280; font-size: 12px; line-height: 1.4;">
+                                ${rec.description}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    renderBusinessRulesSection(llmAnalysis) {
+        const businessRules = llmAnalysis.businessRules || [];
+        if (businessRules.length === 0) return '';
+        
+        return `
+            <div class="collapsible-section">
+                <div class="collapsible-header" onclick="analyzer.toggleCollapsibleSection(this)">
+                    <div class="collapsible-title">
+                        ⚖️ Business Rules & Validation Logic
+                        <span class="status-indicator status-excellent">${businessRules.length} RULES</span>
+                    </div>
+                    <span class="collapsible-icon">🔽</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-inner">
+                        <!-- Rules Overview -->
+                        <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 16px;">
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;">
+                                ${this.renderBusinessRuleStats(businessRules)}
+                            </div>
+                        </div>
+                        
+                        <!-- Detailed Rules -->
+                        <div style="display: grid; gap: 12px;">
+                            ${businessRules.map((rule, index) => `
+                                <div style="background: ${this.getRuleBackgroundColor(rule.type)}; padding: 14px; border-radius: 8px; border-left: 4px solid ${this.getRuleColor(rule.type)};">
+                                    <div style="display: flex; justify-content: between; align-items: start; margin-bottom: 8px;">
+                                        <div>
+                                            <div style="font-weight: 600; color: ${this.getRuleTextColor(rule.type)}; margin-bottom: 4px;">
+                                                ${rule.type} Rule ${index + 1}
+                                                <span style="background: ${this.getRuleColor(rule.type)}; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 8px;">
+                                                    ${rule.complexity || 'MEDIUM'}
+                                                </span>
+                                            </div>
+                                            <div style="font-size: 13px; color: ${this.getRuleDescriptionColor(rule.type)}; margin-bottom: 8px; line-height: 1.5;">
+                                                ${rule.description}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    ${rule.fields && rule.fields.length > 0 ? `
+                                        <div style="background: rgba(255, 255, 255, 0.7); padding: 8px; border-radius: 4px;">
+                                            <div style="font-size: 11px; font-weight: 600; color: ${this.getRuleTextColor(rule.type)}; margin-bottom: 4px;">
+                                                📋 Affected Fields:
+                                            </div>
+                                            <div style="font-size: 11px; color: ${this.getRuleDescriptionColor(rule.type)};">
+                                                ${rule.fields.join(', ')}
+                                            </div>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    renderRecommendationsSection(llmAnalysis) {
+        const recommendations = llmAnalysis.recommendations || [];
+        if (recommendations.length === 0) return '';
+        
+        return `
+            <div class="collapsible-section">
+                <div class="collapsible-header" onclick="analyzer.toggleCollapsibleSection(this)">
+                    <div class="collapsible-title">
+                        💡 Recommendations & Action Items
+                        <span class="status-indicator status-warning">${recommendations.length} ITEMS</span>
+                    </div>
+                    <span class="collapsible-icon">🔽</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-inner">
+                        <!-- Priority Distribution -->
+                        <div style="background: #fef3c7; padding: 16px; border-radius: 8px; border: 1px solid #fcd34d; margin-bottom: 16px;">
+                            <div style="color: #92400e; font-weight: 600; margin-bottom: 12px;">📊 Priority Distribution</div>
+                            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; text-align: center;">
+                                <div style="background: rgba(239, 68, 68, 0.1); padding: 8px; border-radius: 6px;">
+                                    <div style="font-weight: 700; color: #dc2626;">${this.getRecommendationsByPriority(recommendations, 'HIGH').length}</div>
+                                    <div style="font-size: 10px; color: #991b1b;">HIGH PRIORITY</div>
+                                </div>
+                                <div style="background: rgba(59, 130, 246, 0.1); padding: 8px; border-radius: 6px;">
+                                    <div style="font-weight: 700; color: #2563eb;">${this.getRecommendationsByPriority(recommendations, 'MEDIUM').length}</div>
+                                    <div style="font-size: 10px; color: #1d4ed8;">MEDIUM PRIORITY</div>
+                                </div>
+                                <div style="background: rgba(16, 185, 129, 0.1); padding: 8px; border-radius: 6px;">
+                                    <div style="font-weight: 700; color: #059669;">${this.getRecommendationsByPriority(recommendations, 'LOW').length}</div>
+                                    <div style="font-size: 10px; color: #065f46;">LOW PRIORITY</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Detailed Recommendations -->
+                        <div style="display: grid; gap: 12px;">
+                            ${recommendations.map((rec, index) => `
+                                <div style="background: white; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid ${this.getPriorityColor(this.getRecommendationPriority(index))};">
+                                    <div style="display: flex; align-items: start; gap: 12px;">
+                                        <span style="background: ${this.getPriorityColor(this.getRecommendationPriority(index))}; color: white; padding: 6px 10px; border-radius: 6px; font-size: 10px; font-weight: 600; min-width: 50px; text-align: center;">
+                                            ${this.getRecommendationPriority(index)}
+                                        </span>
+                                        <div style="flex: 1;">
+                                            <div style="font-weight: 600; color: #1f2937; margin-bottom: 6px;">
+                                                💡 Recommendation ${index + 1}
+                                            </div>
+                                            <div style="color: #6b7280; font-size: 13px; line-height: 1.5;">
+                                                ${rec}
+                                            </div>
+                                            <div style="margin-top: 8px; padding: 8px; background: #f8fafc; border-radius: 4px;">
+                                                <div style="font-size: 11px; color: #6b7280;">
+                                                    <strong>Impact:</strong> ${this.getRecommendationImpact(index)} • 
+                                                    <strong>Effort:</strong> ${this.getRecommendationEffort(index)}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    renderRiskFactorsSection(llmAnalysis, results) {
+        const riskFactors = llmAnalysis.riskFactors || [];
+        if (riskFactors.length === 0) return '';
+        
+        const riskLevel = this.calculateRiskLevel(results);
+        
+        return `
+            <div class="collapsible-section">
+                <div class="collapsible-header" onclick="analyzer.toggleCollapsibleSection(this)">
+                    <div class="collapsible-title">
+                        ⚠️ Risk Assessment & Mitigation
+                        <span class="status-indicator ${this.getRiskStatusClass(riskLevel)}">${riskLevel} RISK</span>
+                    </div>
+                    <span class="collapsible-icon">🔽</span>
+                </div>
+                <div class="collapsible-content">
+                    <div class="collapsible-inner">
+                        <!-- Risk Level Banner -->
+                        <div style="background: ${this.getRiskBackgroundColor(riskLevel)}; border: 2px solid ${this.getRiskBorderColor(riskLevel)}; border-radius: 8px; padding: 16px; margin-bottom: 16px; text-align: center;">
+                            <div style="font-size: 18px; font-weight: 700; color: ${this.getRiskTextColor(riskLevel)}; margin-bottom: 8px;">
+                                🎯 OVERALL RISK LEVEL: ${riskLevel}
+                            </div>
+                            <div style="color: ${this.getRiskTextColor(riskLevel)}; font-size: 14px;">
+                                ${this.getRiskLevelDescription(riskLevel, results)}
+                            </div>
+                        </div>
+                        
+                        <!-- Risk Factors -->
+                        <div style="display: grid; gap: 12px; margin-bottom: 16px;">
+                            ${riskFactors.map((risk, index) => `
+                                <div style="background: #fef2f2; padding: 12px; border-radius: 6px; border-left: 4px solid #ef4444;">
+                                    <div style="display: flex; align-items: start; gap: 10px;">
+                                        <span style="color: #dc2626; font-size: 16px;">⚠️</span>
+                                        <div>
+                                            <div style="font-weight: 600; color: #991b1b; margin-bottom: 4px;">Risk Factor ${index + 1}</div>
+                                            <div style="font-size: 13px; color: #991b1b; line-height: 1.5;">
+                                                ${risk}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                        
+                        <!-- Mitigation Strategies -->
+                        ${this.renderRiskMitigationStrategies(riskLevel)}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
     // COLLAPSIBLE UTILITY METHODS
 
     toggleCollapsibleSection(header) {
