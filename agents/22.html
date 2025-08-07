@@ -1,0 +1,2400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Mainframe Analyzer - Professional Edition</title>
+    <style>
+        /* ============================================
+           PART 1: CORE STYLES AND LAYOUT
+           White background with blue/grey theme
+           ============================================ */
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            /* Color Palette - Professional Blue/Grey Theme */
+            --primary-blue: #2563eb;
+            --primary-blue-dark: #1e40af;
+            --primary-blue-light: #3b82f6;
+            --secondary-blue: #60a5fa;
+            --accent-blue: #93c5fd;
+            
+            --grey-50: #f9fafb;
+            --grey-100: #f3f4f6;
+            --grey-200: #e5e7eb;
+            --grey-300: #d1d5db;
+            --grey-400: #9ca3af;
+            --grey-500: #6b7280;
+            --grey-600: #4b5563;
+            --grey-700: #374151;
+            --grey-800: #1f2937;
+            --grey-900: #111827;
+            
+            --success-green: #10b981;
+            --warning-yellow: #f59e0b;
+            --error-red: #ef4444;
+            --info-blue: #3b82f6;
+            
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+            
+            --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+            --transition-normal: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+            --transition-slow: 500ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #ffffff;
+            color: var(--grey-800);
+            line-height: 1.6;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Main Container */
+        .main-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background: var(--grey-50);
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, var(--primary-blue) 0%, var(--primary-blue-dark) 100%);
+            color: white;
+            padding: 1.5rem 2rem;
+            box-shadow: var(--shadow-md);
+            position: relative;
+            z-index: 100;
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            max-width: 100%;
+        }
+
+        .header h1 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .header-icon {
+            width: 32px;
+            height: 32px;
+            background: white;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary-blue);
+            font-size: 1.25rem;
+        }
+
+        .header-subtitle {
+            font-size: 0.9rem;
+            opacity: 0.9;
+            margin-left: 3rem;
+        }
+
+        /* Content Layout */
+        .content-wrapper {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Collapsible Panels */
+        .panel {
+            background: white;
+            position: relative;
+            transition: all var(--transition-normal);
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid var(--grey-200);
+        }
+
+        .panel.left {
+            width: 420px;
+            min-width: 60px;
+        }
+
+        .panel.left.collapsed {
+            width: 60px;
+        }
+
+        .panel.right {
+            width: 400px;
+            min-width: 60px;
+            border-left: 1px solid var(--grey-200);
+            border-right: none;
+        }
+
+        .panel.right.collapsed {
+            width: 60px;
+        }
+
+        .panel-header {
+            padding: 1rem;
+            background: var(--grey-50);
+            border-bottom: 1px solid var(--grey-200);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            min-height: 60px;
+        }
+
+        .panel-title {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 600;
+            color: var(--grey-700);
+            font-size: 0.95rem;
+        }
+
+        .panel-icon {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary-blue);
+        }
+
+        .collapse-btn {
+            width: 32px;
+            height: 32px;
+            border: none;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--grey-600);
+            transition: all var(--transition-fast);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .collapse-btn:hover {
+            background: var(--primary-blue);
+            color: white;
+            transform: scale(1.05);
+            box-shadow: var(--shadow-md);
+        }
+
+        .panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1.5rem;
+            transition: opacity var(--transition-normal);
+        }
+
+        .panel.collapsed .panel-content {
+            opacity: 0;
+            pointer-events: none;
+            padding: 0;
+        }
+
+        .panel.collapsed .panel-title span {
+            display: none;
+        }
+
+        .panel.collapsed .panel-header {
+            flex-direction: column;
+            padding: 1rem 0.5rem;
+        }
+
+        .panel.collapsed .collapse-btn {
+            margin-top: 0.5rem;
+        }
+
+        /* Main Content Area */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: white;
+            overflow: hidden;
+        }
+
+        /* Tabs */
+        .tabs-container {
+            background: white;
+            border-bottom: 1px solid var(--grey-200);
+            padding: 0 1.5rem;
+            display: flex;
+            align-items: center;
+            min-height: 56px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .tab {
+            padding: 0.75rem 1.5rem;
+            background: transparent;
+            border: none;
+            color: var(--grey-600);
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            position: relative;
+            transition: all var(--transition-fast);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .tab:hover {
+            color: var(--primary-blue);
+            background: var(--grey-50);
+        }
+
+        .tab.active {
+            color: var(--primary-blue);
+        }
+
+        .tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--primary-blue);
+            border-radius: 3px 3px 0 0;
+        }
+
+        .tab-icon {
+            width: 18px;
+            height: 18px;
+            opacity: 0.8;
+        }
+
+        /* Tab Content Area */
+        .tab-content-container {
+            flex: 1;
+            overflow-y: auto;
+            background: var(--grey-50);
+        }
+
+        .tab-content {
+            display: none;
+            padding: 1.5rem;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Summary Section */
+        .summary-section {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--grey-200);
+        }
+
+        .summary-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--grey-100);
+        }
+
+        .summary-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+
+        .summary-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--grey-800);
+        }
+
+        .summary-content {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .summary-item {
+            padding: 1rem;
+            background: var(--grey-50);
+            border-radius: 8px;
+            border: 1px solid var(--grey-200);
+        }
+
+        .summary-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: var(--grey-500);
+            margin-bottom: 0.25rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .summary-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary-blue);
+        }
+
+        .summary-description {
+            font-size: 0.85rem;
+            color: var(--grey-600);
+            margin-top: 0.25rem;
+        }
+
+        /* Collapsible Sections */
+        .collapsible-section {
+            background: white;
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--grey-200);
+            overflow: hidden;
+            transition: all var(--transition-normal);
+        }
+
+        .collapsible-header {
+            padding: 1rem 1.5rem;
+            background: white;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all var(--transition-fast);
+            user-select: none;
+        }
+
+        .collapsible-header:hover {
+            background: var(--grey-50);
+        }
+
+        .collapsible-title {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-weight: 600;
+            color: var(--grey-700);
+        }
+
+        .collapsible-icon {
+            width: 20px;
+            height: 20px;
+            color: var(--primary-blue);
+        }
+
+        .expand-icon {
+            width: 20px;
+            height: 20px;
+            color: var(--grey-400);
+            transition: transform var(--transition-fast);
+        }
+
+        .collapsible-section.expanded .expand-icon {
+            transform: rotate(180deg);
+        }
+
+        .collapsible-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height var(--transition-normal);
+            background: var(--grey-50);
+        }
+
+        .collapsible-section.expanded .collapsible-content {
+            max-height: 2000px;
+        }
+
+        .collapsible-body {
+            padding: 1.5rem;
+        }
+
+        /* Scrollbar Styles */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--grey-100);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--grey-400);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--grey-500);
+        }
+
+        /* Loading States */
+        .loading-skeleton {
+            background: linear-gradient(90deg, var(--grey-100) 25%, var(--grey-200) 50%, var(--grey-100) 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+            border-radius: 4px;
+            height: 20px;
+            margin: 0.5rem 0;
+        }
+
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* ============================================
+           PART 2: FORM COMPONENTS AND UI ELEMENTS
+           ============================================ */
+
+        /* Form Elements */
+        .form-section {
+            margin-bottom: 1.5rem;
+            padding: 1.25rem;
+            background: white;
+            border-radius: 10px;
+            border: 1px solid var(--grey-200);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .form-section-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--grey-700);
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--grey-700);
+            margin-bottom: 0.5rem;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 0.625rem 0.875rem;
+            border: 1px solid var(--grey-300);
+            border-radius: 6px;
+            font-size: 0.9rem;
+            transition: all var(--transition-fast);
+            background: white;
+            color: var(--grey-800);
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary-blue);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .form-input::placeholder {
+            color: var(--grey-400);
+        }
+
+        /* Friendly Name Input Group */
+        .input-group {
+            display: flex;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        .input-group .form-input {
+            flex: 1;
+        }
+
+        .friendly-name-tag {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.75rem;
+            background: var(--primary-blue);
+            color: white;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            margin-left: 0.5rem;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 0.625rem 1.25rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: var(--primary-blue);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: var(--primary-blue-dark);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .btn-success {
+            background: var(--success-green);
+            color: white;
+        }
+
+        .btn-success:hover:not(:disabled) {
+            background: #059669;
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .btn-secondary {
+            background: var(--grey-200);
+            color: var(--grey-700);
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: var(--grey-300);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .btn-danger {
+            background: var(--error-red);
+            color: white;
+        }
+
+        .btn-danger:hover:not(:disabled) {
+            background: #dc2626;
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .btn-block {
+            width: 100%;
+        }
+
+        /* Upload Area */
+        .upload-area {
+            border: 2px dashed var(--grey-300);
+            border-radius: 10px;
+            padding: 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            background: var(--grey-50);
+            margin-bottom: 1rem;
+        }
+
+        .upload-area:hover {
+            border-color: var(--primary-blue);
+            background: rgba(37, 99, 235, 0.05);
+        }
+
+        .upload-area.drag-over {
+            border-color: var(--primary-blue);
+            background: rgba(37, 99, 235, 0.1);
+            transform: scale(0.98);
+        }
+
+        .upload-icon {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            color: var(--primary-blue);
+        }
+
+        .upload-text {
+            color: var(--grey-700);
+            font-weight: 500;
+            margin-bottom: 0.25rem;
+        }
+
+        .upload-subtext {
+            color: var(--grey-500);
+            font-size: 0.85rem;
+        }
+
+        /* File List */
+        .file-list {
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 1rem;
+        }
+
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem;
+            background: white;
+            border: 1px solid var(--grey-200);
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+            transition: all var(--transition-fast);
+        }
+
+        .file-item:hover {
+            box-shadow: var(--shadow-sm);
+            transform: translateX(2px);
+        }
+
+        .file-info {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex: 1;
+        }
+
+        .file-icon {
+            width: 32px;
+            height: 32px;
+            background: var(--grey-100);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary-blue);
+        }
+
+        .file-details {
+            flex: 1;
+        }
+
+        .file-name {
+            font-weight: 500;
+            color: var(--grey-800);
+            font-size: 0.9rem;
+        }
+
+        .file-meta {
+            font-size: 0.75rem;
+            color: var(--grey-500);
+            margin-top: 0.125rem;
+        }
+
+        .file-remove {
+            width: 28px;
+            height: 28px;
+            border: none;
+            background: var(--error-red);
+            color: white;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all var(--transition-fast);
+        }
+
+        .file-remove:hover {
+            background: #dc2626;
+            transform: scale(1.1);
+        }
+
+        /* Status Indicators */
+        .status-indicator {
+            padding: 0.75rem;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+            margin-bottom: 1rem;
+        }
+
+        .status-indicator.connected {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: var(--success-green);
+        }
+
+        .status-indicator.connecting {
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            color: var(--warning-yellow);
+        }
+
+        .status-indicator.disconnected {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: var(--error-red);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Token Usage Bar */
+        .token-info {
+            background: var(--grey-50);
+            border: 1px solid var(--grey-200);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .token-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .token-label {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--grey-700);
+        }
+
+        .token-count {
+            font-size: 0.85rem;
+            color: var(--grey-600);
+        }
+
+        .token-bar {
+            height: 6px;
+            background: var(--grey-200);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .token-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: all var(--transition-normal);
+        }
+
+        .token-fill.safe {
+            background: var(--success-green);
+        }
+
+        .token-fill.warning {
+            background: var(--warning-yellow);
+        }
+
+        .token-fill.danger {
+            background: var(--error-red);
+        }
+
+        .token-warning {
+            font-size: 0.75rem;
+            color: var(--grey-600);
+            margin-top: 0.5rem;
+        }
+
+        /* Component Suggestions */
+        .suggestions-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid var(--grey-200);
+            border-radius: 6px;
+            box-shadow: var(--shadow-lg);
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+            margin-top: 0.25rem;
+            display: none;
+        }
+
+        .suggestions-dropdown.show {
+            display: block;
+        }
+
+        .suggestion-item {
+            padding: 0.75rem;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            border-bottom: 1px solid var(--grey-100);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .suggestion-item:last-child {
+            border-bottom: none;
+        }
+
+        .suggestion-item:hover {
+            background: var(--primary-blue);
+            color: white;
+        }
+
+        .suggestion-item-name {
+            font-weight: 500;
+            font-size: 0.9rem;
+        }
+
+        .suggestion-item-type {
+            font-size: 0.75rem;
+            opacity: 0.8;
+        }
+
+        .suggestion-item-badge {
+            margin-left: auto;
+            padding: 0.125rem 0.5rem;
+            background: var(--primary-blue);
+            color: white;
+            border-radius: 10px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
+        .suggestion-item:hover .suggestion-item-badge {
+            background: white;
+            color: var(--primary-blue);
+        }
+
+        /* Chat Styles */
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .chat-suggestions {
+            padding: 1rem;
+            background: var(--grey-50);
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+
+        .chat-suggestions-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--grey-700);
+            margin-bottom: 0.75rem;
+        }
+
+        .chat-suggestion-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .chat-suggestion-btn {
+            padding: 0.375rem 0.75rem;
+            background: white;
+            border: 1px solid var(--grey-300);
+            border-radius: 20px;
+            font-size: 0.8rem;
+            color: var(--grey-700);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+
+        .chat-suggestion-btn:hover {
+            background: var(--primary-blue);
+            color: white;
+            border-color: var(--primary-blue);
+            transform: translateY(-1px);
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            background: var(--grey-50);
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+
+        .chat-message {
+            margin-bottom: 1rem;
+            animation: fadeInUp 0.3s ease;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .chat-message.user {
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .chat-message.assistant {
+            display: flex;
+            justify-content: flex-start;
+        }
+
+        .chat-bubble {
+            max-width: 85%;
+            padding: 1rem;
+            border-radius: 12px;
+            position: relative;
+        }
+
+        .user .chat-bubble {
+            background: var(--primary-blue);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .assistant .chat-bubble {
+            background: white;
+            color: var(--grey-800);
+            border: 1px solid var(--grey-200);
+            border-bottom-left-radius: 4px;
+        }
+
+        .chat-message-header {
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            opacity: 0.8;
+        }
+
+        .chat-message-content {
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        .chat-message-content strong {
+            font-weight: 600;
+            color: var(--primary-blue);
+        }
+
+        .assistant .chat-message-content strong {
+            color: var(--primary-blue);
+        }
+
+        .user .chat-message-content strong {
+            color: white;
+        }
+
+        .chat-message-time {
+            font-size: 0.7rem;
+            opacity: 0.6;
+            margin-top: 0.5rem;
+        }
+
+        .chat-input-section {
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid var(--grey-200);
+        }
+
+        .chat-input-group {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .chat-input {
+            flex: 1;
+            padding: 0.75rem;
+            border: 1px solid var(--grey-300);
+            border-radius: 8px;
+            resize: none;
+            min-height: 44px;
+            max-height: 120px;
+            font-size: 0.9rem;
+            transition: all var(--transition-fast);
+        }
+
+        .chat-input:focus {
+            outline: none;
+            border-color: var(--primary-blue);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .chat-send-btn {
+            padding: 0.75rem 1.25rem;
+            background: var(--primary-blue);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 500;
+        }
+
+        .chat-send-btn:hover:not(:disabled) {
+            background: var(--primary-blue-dark);
+            transform: translateY(-1px);
+        }
+
+        .chat-send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Loading Indicator */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.95);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+
+        .loading-overlay.show {
+            display: flex;
+        }
+
+        .loading-content {
+            text-align: center;
+        }
+
+        .loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid var(--grey-200);
+            border-top-color: var(--primary-blue);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--grey-800);
+            margin-bottom: 0.5rem;
+        }
+
+        .loading-status {
+            font-size: 0.9rem;
+            color: var(--grey-600);
+            margin-bottom: 1rem;
+        }
+
+        .loading-progress {
+            width: 200px;
+            height: 4px;
+            background: var(--grey-200);
+            border-radius: 2px;
+            overflow: hidden;
+            margin: 0 auto;
+        }
+
+        .loading-progress-fill {
+            height: 100%;
+            background: var(--primary-blue);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+        }
+
+        /* Alert Messages */
+        .alert {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            box-shadow: var(--shadow-lg);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            max-width: 400px;
+            animation: slideInRight 0.3s ease;
+            z-index: 10000;
+        }
+
+        @keyframes slideInRight {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .alert-success {
+            background: var(--success-green);
+            color: white;
+        }
+
+        .alert-error {
+            background: var(--error-red);
+            color: white;
+        }
+
+        .alert-warning {
+            background: var(--warning-yellow);
+            color: white;
+        }
+
+        .alert-info {
+            background: var(--info-blue);
+            color: white;
+        }
+
+        .alert-icon {
+            font-size: 1.25rem;
+        }
+
+        .alert-message {
+            flex: 1;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        /* Metric Cards */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .metric-card {
+            background: white;
+            border: 1px solid var(--grey-200);
+            border-radius: 10px;
+            padding: 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            transition: all var(--transition-fast);
+        }
+
+        .metric-card:hover {
+            box-shadow: var(--shadow-md);
+            transform: translateY(-2px);
+        }
+
+        .metric-icon {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.5rem;
+        }
+
+        .metric-details {
+            flex: 1;
+        }
+
+        .metric-label {
+            font-size: 0.75rem;
+            color: var(--grey-500);
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .metric-value {
+            font-size: 1.75rem;
+            font-weight: bold;
+            color: var(--grey-800);
+        }
+
+        .metric-change {
+            font-size: 0.85rem;
+            margin-top: 0.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .metric-change.positive {
+            color: var(--success-green);
+        }
+
+        .metric-change.negative {
+            color: var(--error-red);
+        }
+
+        /* Table Styles */
+        .data-table {
+            width: 100%;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid var(--grey-200);
+        }
+
+        .data-table thead {
+            background: var(--grey-50);
+        }
+
+        .data-table th {
+            padding: 0.75rem;
+            text-align: left;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--grey-700);
+            border-bottom: 1px solid var(--grey-200);
+        }
+
+        .data-table td {
+            padding: 0.75rem;
+            font-size: 0.9rem;
+            color: var(--grey-800);
+            border-bottom: 1px solid var(--grey-100);
+        }
+
+        .data-table tbody tr:hover {
+            background: var(--grey-50);
+        }
+
+        .data-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* Badge Styles */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.625rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .badge-primary {
+            background: rgba(37, 99, 235, 0.1);
+            color: var(--primary-blue);
+        }
+
+        .badge-success {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success-green);
+        }
+
+        .badge-warning {
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--warning-yellow);
+        }
+
+        .badge-danger {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--error-red);
+        }
+
+        .badge-grey {
+            background: var(--grey-100);
+            color: var(--grey-600);
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <!-- Header -->
+        <div class="header">
+            <div class="header-content">
+                <h1>
+                    <div class="header-icon">🔬</div>
+                    Enhanced Mainframe Analyzer
+                    <span class="header-subtitle">Professional Edition with LLM-Powered Analysis</span>
+                </h1>
+            </div>
+        </div>
+
+        <!-- Main Content Wrapper -->
+        <div class="content-wrapper">
+            <!-- Left Panel - Component Analysis -->
+            <div class="panel left" id="leftPanel">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <div class="panel-icon">🎯</div>
+                        <span>Component Analysis</span>
+                    </div>
+                    <button class="collapse-btn" onclick="togglePanel('left')">
+                        ◀
+                    </button>
+                </div>
+                <div class="panel-content" id="leftPanelContent">
+                    <!-- Component Analysis Section -->
+                    <div class="form-section">
+                        <div class="form-section-title">
+                            <span style="color: var(--primary-blue);">🎯</span>
+                            Component Analysis
+                        </div>
+                        
+                        <!-- Component Name Inputs -->
+                        <div class="form-group">
+                            <label class="form-label">Component Name *</label>
+                            <div style="position: relative;">
+                                <input type="text" 
+                                       id="componentName" 
+                                       class="form-input" 
+                                       placeholder="e.g., CUSTOMER-RECORD, ACCOUNT-COPY"
+                                       autocomplete="off">
+                                <div id="componentSuggestions" class="suggestions-dropdown"></div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">Friendly Name (Optional)</label>
+                            <input type="text" 
+                                   id="friendlyName" 
+                                   class="form-input" 
+                                   placeholder="e.g., Customer Master Record">
+                            <small style="color: var(--grey-500); font-size: 0.75rem;">
+                                This name will be displayed in all analysis results
+                            </small>
+                        </div>
+
+                        <!-- Token Usage -->
+                        <div id="tokenInfo" class="token-info" style="display: none;">
+                            <div class="token-header">
+                                <span class="token-label">Token Usage</span>
+                                <span id="tokenCount" class="token-count">0 / 4000</span>
+                            </div>
+                            <div class="token-bar">
+                                <div id="tokenFill" class="token-fill safe" style="width: 0%"></div>
+                            </div>
+                            <div id="tokenWarning" class="token-warning"></div>
+                        </div>
+
+                        <button id="analyzeComponentBtn" class="btn btn-primary btn-block" disabled>
+                            <span>🔍</span>
+                            Analyze Component
+                        </button>
+                    </div>
+
+                    <!-- vLLM Server Setup -->
+                    <div class="form-section">
+                        <div class="form-section-title">
+                            <span style="color: var(--success-green);">🚀</span>
+                            vLLM Server Setup
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">Server Endpoint</label>
+                            <input type="text" 
+                                   id="vllmEndpoint" 
+                                   class="form-input" 
+                                   placeholder="http://localhost:8000" 
+                                   value="http://localhost:8000">
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">Max Tokens</label>
+                            <input type="number" 
+                                   id="maxTokens" 
+                                   class="form-input" 
+                                   value="4000" 
+                                   min="1000" 
+                                   max="8000">
+                        </div>
+
+                        <button id="validateApiBtn" class="btn btn-success btn-block">
+                            <span>🔐</span>
+                            Test Connection
+                        </button>
+
+                        <div id="apiStatus" class="status-indicator disconnected">
+                            <span class="status-dot"></span>
+                            <span>Enter server details and test connection</span>
+                        </div>
+                    </div>
+
+                    <!-- File Upload Section -->
+                    <div class="form-section">
+                        <div class="form-section-title">
+                            <span style="color: var(--info-blue);">📁</span>
+                            Upload Mainframe Files
+                        </div>
+
+                        <div class="upload-area" id="uploadArea">
+                            <div class="upload-icon">📤</div>
+                            <div class="upload-text">Drop files here or click to browse</div>
+                            <div class="upload-subtext">COBOL (.cbl), Copybooks (.cpy), JCL (.jcl)</div>
+                            <input type="file" 
+                                   id="fileInput" 
+                                   multiple 
+                                   accept=".cbl,.cob,.cpy,.copybook,.jcl,.txt,.proc" 
+                                   style="display: none;">
+                        </div>
+
+                        <div id="uploadedFiles" class="file-list"></div>
+                    </div>
+
+                    <!-- Quick Actions -->
+                    <div class="form-section">
+                        <div class="form-section-title">
+                            <span style="color: var(--warning-yellow);">⚡</span>
+                            Quick Actions
+                        </div>
+
+                        <button id="bulkAnalyzeBtn" class="btn btn-secondary btn-block" disabled style="margin-bottom: 0.75rem;">
+                            <span>📊</span>
+                            Bulk Analyze
+                        </button>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem;">
+                            <button id="exportJsonBtn" class="btn btn-secondary" disabled>
+                                <span>📋</span>
+                                Export JSON
+                            </button>
+                            <button id="exportMdBtn" class="btn btn-secondary" disabled>
+                                <span>📝</span>
+                                Export MD
+                            </button>
+                        </div>
+
+                        <button id="clearBtn" class="btn btn-danger btn-block">
+                            <span>🗑️</span>
+                            Clear All Data
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Content Area -->
+            <div class="main-content">
+                <!-- Tabs -->
+                <div class="tabs-container">
+                    <button class="tab active" data-tab="lifecycle">
+                        <span class="tab-icon">🔄</span>
+                        Analysis Results
+                    </button>
+                    <button class="tab" data-tab="fieldmatrix">
+                        <span class="tab-icon">📋</span>
+                        Field Matrix
+                    </button>
+                    <button class="tab" data-tab="usage">
+                        <span class="tab-icon">📈</span>
+                        Usage Patterns
+                    </button>
+                    <button class="tab" data-tab="dependencies">
+                        <span class="tab-icon">🔗</span>
+                        Dependencies
+                    </button>
+                    <button class="tab" data-tab="fileflow">
+                        <span class="tab-icon">🌊</span>
+                        File Lifecycle
+                    </button>
+                </div>
+
+                <!-- Tab Content -->
+                <!-- Tab Content -->
+                <div class="tab-content-container">
+                    <!-- Analysis Results Tab -->
+                    <div id="lifecycle" class="tab-content active">
+                        <!-- Summary Section -->
+                        <div class="summary-section">
+                            <div class="summary-header">
+                                <div class="summary-icon">📊</div>
+                                <div class="summary-title">Analysis Summary</div>
+                            </div>
+                            <div class="summary-content">
+                                <div class="summary-item">
+                                    <div class="summary-label">Component</div>
+                                    <div class="summary-value" id="summaryComponent">-</div>
+                                    <div class="summary-description">Analyzed component</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-label">Quality Score</div>
+                                    <div class="summary-value" id="summaryQuality">-</div>
+                                    <div class="summary-description">Analysis quality</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-label">Files</div>
+                                    <div class="summary-value" id="summaryFiles">0</div>
+                                    <div class="summary-description">Files analyzed</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-label">Dependencies</div>
+                                    <div class="summary-value" id="summaryDeps">0</div>
+                                    <div class="summary-description">Total dependencies</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Collapsible Sections -->
+                        <div class="collapsible-section expanded">
+                            <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                                <div class="collapsible-title">
+                                    <span class="collapsible-icon">🔍</span>
+                                    Component Details
+                                </div>
+                                <span class="expand-icon">▼</span>
+                            </div>
+                            <div class="collapsible-content">
+                                <div class="collapsible-body" id="lifecycleDetails">
+                                    <p>Component analysis details will appear here after analysis.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="collapsible-section">
+                            <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                                <div class="collapsible-title">
+                                    <span class="collapsible-icon">🤖</span>
+                                    LLM Analysis Results
+                                </div>
+                                <span class="expand-icon">▼</span>
+                            </div>
+                            <div class="collapsible-content">
+                                <div class="collapsible-body" id="llmResults">
+                                    <p>LLM analysis results will appear here.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="collapsible-section">
+                            <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                                <div class="collapsible-title">
+                                    <span class="collapsible-icon">💡</span>
+                                    Recommendations
+                                </div>
+                                <span class="expand-icon">▼</span>
+                            </div>
+                            <div class="collapsible-content">
+                                <div class="collapsible-body" id="recommendations">
+                                    <p>Analysis recommendations will appear here.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Field Matrix Tab -->
+                    <div id="fieldmatrix" class="tab-content">
+                        <!-- Summary Section -->
+                        <div class="summary-section">
+                            <div class="summary-header">
+                                <div class="summary-icon">📋</div>
+                                <div class="summary-title">Field Matrix Summary</div>
+                            </div>
+                            <div class="summary-content">
+                                <div class="summary-item">
+                                    <div class="summary-label">Total Fields</div>
+                                    <div class="summary-value" id="totalFields">0</div>
+                                    <div class="summary-description">Fields identified</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-label">Input Fields</div>
+                                    <div class="summary-value" id="inputFields">0</div>
+                                    <div class="summary-description">Input operations</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-label">Output Fields</div>
+                                    <div class="summary-value" id="outputFields">0</div>
+                                    <div class="summary-description">Output operations</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-label">Unused Fields</div>
+                                    <div class="summary-value" id="unusedFields">0</div>
+                                    <div class="summary-description">Not referenced</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Field Matrix Content -->
+                        <div class="collapsible-section expanded">
+                            <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                                <div class="collapsible-title">
+                                    <span class="collapsible-icon">📊</span>
+                                    Field Analysis Matrix
+                                </div>
+                                <span class="expand-icon">▼</span>
+                            </div>
+                            <div class="collapsible-content">
+                                <div class="collapsible-body" id="fieldMatrixContent">
+                                    <p>Field matrix analysis will appear here after component analysis.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="collapsible-section">
+                            <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                                <div class="collapsible-title">
+                                    <span class="collapsible-icon">📈</span>
+                                    Field Usage Statistics
+                                </div>
+                                <span class="expand-icon">▼</span>
+                            </div>
+                            <div class="collapsible-content">
+                                <div class="collapsible-body" id="fieldStatistics">
+                                    <p>Field usage statistics will appear here.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Usage Patterns Tab -->
+                    <div id="usage" class="tab-content">
+                        <!-- Summary Section -->
+                        <div class="summary-section">
+                            <div class="summary-header">
+                                <div class="summary-icon">📈</div>
+                                <div class="summary-title">Usage Patterns Summary</div>
+                            </div>
+                            <div class="summary-content">
+                                <div class="summary-item">
+                                    <div class="summary-label">Pattern Type</div>
+                                    <div class="summary-value" id="patternType">-</div>
+                                    <div class="summary-description">Usage pattern</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-label">Creation</div>
+                                    <div class="summary-value" id="creationCount">0</div>
+                                    <div class="summary-description">Creation sources</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-label">Reading</div>
+                                    <div class="summary-value" id="readingCount">0</div>
+                                    <div class="summary-description">Read programs</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-label">Updates</div>
+                                    <div class="summary-value" id="updateCount">0</div>
+                                    <div class="summary-description">Update programs</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Usage Pattern Details -->
+                        <div class="collapsible-section expanded">
+                            <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                                <div class="collapsible-title">
+                                    <span class="collapsible-icon">🔄</span>
+                                    Usage Pattern Analysis
+                                </div>
+                                <span class="expand-icon">▼</span>
+                            </div>
+                            <div class="collapsible-content">
+                                <div class="collapsible-body" id="usageContent">
+                                    <p>Usage pattern analysis will appear here after component analysis.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="collapsible-section">
+                            <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                                <div class="collapsible-title">
+                                    <span class="collapsible-icon">📊</span>
+                                    Program Usage Distribution
+                                </div>
+                                <span class="expand-icon">▼</span>
+                            </div>
+                            <div class="collapsible-content">
+                                <div class="collapsible-body" id="programDistribution">
+                                    <p>Program usage distribution will appear here.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dependencies Tab -->
+                    <div id="dependencies" class="tab-content">
+                        <!-- Summary Section -->
+                        <div class="summary-section">
+                            <div class="summary-header">
+                                <div class="summary-icon">🔗</div>
+                                <div class="summary-title">Dependencies Summary</div>
+                            </div>
+                            <div class="summary-content">
+                                <div class="summary-item">
+                                    <div class="summary-label">Found</div>
+                                    <div class="summary-value" id="foundDeps">0</div>
+                                    <div class="summary-description">Available deps</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-label">Missing</div>
+                                    <div class="summary-value" id="missingDeps">0</div>
+                                    <div class="summary-description">Missing deps</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-label">Copybooks</div>
+                                    <div class="summary-value" id="copybookDeps">0</div>
+                                    <div class="summary-description">Copybook refs</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-label">Programs</div>
+                                    <div class="summary-value" id="programDeps">0</div>
+                                    <div class="summary-description">Program calls</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Dependency Details -->
+                        <div class="collapsible-section expanded">
+                            <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                                <div class="collapsible-title">
+                                    <span class="collapsible-icon">✅</span>
+                                    Found Dependencies
+                                </div>
+                                <span class="expand-icon">▼</span>
+                            </div>
+                            <div class="collapsible-content">
+                                <div class="collapsible-body" id="foundDependencies">
+                                    <p>Found dependencies will appear here.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="collapsible-section">
+                            <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                                <div class="collapsible-title">
+                                    <span class="collapsible-icon">❌</span>
+                                    Missing Dependencies
+                                </div>
+                                <span class="expand-icon">▼</span>
+                            </div>
+                            <div class="collapsible-content">
+                                <div class="collapsible-body" id="missingDependencies">
+                                    <p>Missing dependencies will appear here.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- File Lifecycle Tab -->
+                    <div id="fileflow" class="tab-content">
+                        <!-- Summary Section -->
+                        <div class="summary-section">
+                            <div class="summary-header">
+                                <div class="summary-icon">🌊</div>
+                                <div class="summary-title">File Lifecycle Summary</div>
+                            </div>
+                            <div class="summary-content">
+                                <div class="summary-item">
+                                    <div class="summary-label">Lifecycle Stage</div>
+                                    <div class="summary-value" id="lifecycleStage">-</div>
+                                    <div class="summary-description">Current stage</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-label">Programs</div>
+                                    <div class="summary-value" id="totalPrograms">0</div>
+                                    <div class="summary-description">Total programs</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-label">CICS</div>
+                                    <div class="summary-value" id="cicsCount">0</div>
+                                    <div class="summary-description">CICS screens</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-label">Batch</div>
+                                    <div class="summary-value" id="batchCount">0</div>
+                                    <div class="summary-description">Batch jobs</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Lifecycle Flow Details -->
+                        <div class="collapsible-section expanded">
+                            <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                                <div class="collapsible-title">
+                                    <span class="collapsible-icon">🌊</span>
+                                    Complete Lifecycle Flow
+                                </div>
+                                <span class="expand-icon">▼</span>
+                            </div>
+                            <div class="collapsible-content">
+                                <div class="collapsible-body" id="fileflowContent">
+                                    <p>File lifecycle flow analysis will appear here after component analysis.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="collapsible-section">
+                            <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                                <div class="collapsible-title">
+                                    <span class="collapsible-icon">📋</span>
+                                    Field Lifecycle Details
+                                </div>
+                                <span class="expand-icon">▼</span>
+                            </div>
+                            <div class="collapsible-content">
+                                <div class="collapsible-body" id="fieldLifecycle">
+                                    <p>Field lifecycle details will appear here.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel - Chat -->
+            <div class="panel right" id="rightPanel">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <div class="panel-icon">💬</div>
+                        <span>Analysis Chat</span>
+                    </div>
+                    <button class="collapse-btn" onclick="togglePanel('right')">
+                        ▶
+                    </button>
+                </div>
+                <div class="panel-content" id="rightPanelContent">
+                    <!-- Chat Container -->
+                    <div class="chat-container">
+                        <!-- Chat Header Info -->
+                        <div style="padding: 1rem; background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%); color: white; border-radius: 10px; margin-bottom: 1rem;">
+                            <h3 style="font-size: 1rem; margin-bottom: 0.5rem;">💬 LLM Analysis Chat</h3>
+                            <p style="font-size: 0.8rem; opacity: 0.9;">Interactive chat with rich formatting and export</p>
+                        </div>
+
+                        <!-- Chat Suggestions -->
+                        <div id="chatSuggestions" class="chat-suggestions" style="display: none;">
+                            <div class="chat-suggestions-title">💡 Suggested Questions:</div>
+                            <div class="chat-suggestion-chips">
+                                <button class="chat-suggestion-btn" data-question="Explain the file lifecycle flow for this component">
+                                    📊 File Lifecycle
+                                </button>
+                                <button class="chat-suggestion-btn" data-question="What fields are updated by which programs?">
+                                    🔄 Field Updates
+                                </button>
+                                <button class="chat-suggestion-btn" data-question="Show me the creation and purge process">
+                                    🌊 Creation/Purge
+                                </button>
+                                <button class="chat-suggestion-btn" data-question="Which programs only read vs modify data?">
+                                    📖 Read/Write Patterns
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Chat Messages Area -->
+                        <div class="chat-messages" id="chatMessages">
+                            <div class="chat-message assistant">
+                                <div class="chat-bubble">
+                                    <div class="chat-message-header">LLM Analysis Assistant</div>
+                                    <div class="chat-message-content">
+                                        👋 <strong>Welcome to LLM-Enhanced Mainframe Analysis!</strong>
+                                        <br><br>
+                                        I can provide detailed analysis using advanced language models including:
+                                        <br><br>
+                                        🧠 <strong>Smart Field Analysis:</strong> Context-aware field lifecycle tracking<br>
+                                        ⚖️ <strong>Business Logic Extraction:</strong> Intelligent rule and validation discovery<br>
+                                        🔗 <strong>Dependency Mapping:</strong> Comprehensive relationship analysis<br>
+                                        🌊 <strong>File Lifecycle Flow:</strong> Creation to purge tracking with program mapping<br>
+                                        💡 <strong>Modernization Guidance:</strong> AI-powered optimization recommendations
+                                        <br><br>
+                                        <em>Upload files and analyze a component to unlock the full power of LLM analysis!</em>
+                                    </div>
+                                    <div class="chat-message-time">${new Date().toLocaleTimeString()}</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Chat Input Section -->
+                        <div class="chat-input-section">
+                            <div class="chat-input-group">
+                                <textarea id="chatInput" 
+                                          class="chat-input" 
+                                          placeholder="Ask about field flows, program dependencies, lifecycle patterns..." 
+                                          disabled 
+                                          rows="1"></textarea>
+                                <button id="chatSendBtn" class="chat-send-btn" disabled>
+                                    <span>Send</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingIndicator">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <div class="loading-title">🤖 Analyzing Component</div>
+            <div class="loading-status" id="loadingStatus">Processing component analysis...</div>
+            <div class="loading-progress">
+                <div class="loading-progress-fill" id="progressFill" style="width: 0%"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================
+        // PART 6: JavaScript Base and UI Functions
+        // ============================================
+        
+        // Basic UI Functions
+        function togglePanel(side) {
+            const panel = document.getElementById(side + 'Panel');
+            panel.classList.toggle('collapsed');
+            
+            // Update button icon
+            const btn = panel.querySelector('.collapse-btn');
+            if (side === 'left') {
+                btn.textContent = panel.classList.contains('collapsed') ? '▶' : '◀';
+            } else {
+                btn.textContent = panel.classList.contains('collapsed') ? '◀' : '▶';
+            }
+            
+            // Save state to localStorage
+            localStorage.setItem(side + 'PanelCollapsed', panel.classList.contains('collapsed'));
+        }
+
+        function toggleCollapsible(header) {
+            const section = header.parentElement;
+            section.classList.toggle('expanded');
+        }
+
+        // Initialize tabs
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                // Remove active from all tabs
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                
+                // Add active to clicked tab
+                this.classList.add('active');
+                const tabId = this.getAttribute('data-tab');
+                document.getElementById(tabId).classList.add('active');
+            });
+        });
+
+        // Restore panel states from localStorage
+        window.addEventListener('DOMContentLoaded', function() {
+            if (localStorage.getItem('leftPanelCollapsed') === 'true') {
+                togglePanel('left');
+            }
+            if (localStorage.getItem('rightPanelCollapsed') === 'true') {
+                togglePanel('right');
+            }
+        });
+
+        // Enhanced Mainframe Analyzer Class
+        class EnhancedMainframeAnalyzer {
+            constructor() {
+                // Core properties
+                this.uploadedFiles = [];
+                this.analysisResults = {};
+                this.componentSuggestions = [];
+                this.serverValidated = false;
+                this.vllmEndpoint = 'http://localhost:8000';
+                this.maxTokens = 4000;
+                this.storageKey = 'enhanced_mainframe_analysis';
+                this.currentAnalyzedComponent = null;
+                this.currentFriendlyName = null;
+                this.chatHistory = [];
+                
+                // Token management
+                this.averageCharsPerToken = 3;
+                this.tokenSafetyMargin = 0.7;
+                
+                // Initialize
+                this.initializeEventListeners();
+                this.loadStoredData();
+                this.initializeChat();
+                
+                console.log('🚀 Enhanced Mainframe Analyzer Initialized');
+            }
+
+            // Initialize Event Listeners
+            initializeEventListeners() {
+                // Component Analysis
+                const componentInput = document.getElementById('componentName');
+                const friendlyNameInput = document.getElementById('friendlyName');
+                const analyzeBtn = document.getElementById('analyzeComponentBtn');
+                
+                if (componentInput) {
+                    componentInput.addEventListener('input', () => this.onComponentInput());
+                }
+                
+                if (friendlyNameInput) {
+                    friendlyNameInput.addEventListener('input', () => this.onFriendlyNameInput());
+                }
+                
+                if (analyzeBtn) {
+                    analyzeBtn.addEventListener('click', () => this.analyzeComponent());
+                }
+                
+                // API Validation
+                const validateBtn = document.getElementById('validateApiBtn');
+                if (validateBtn) {
+                    validateBtn.addEventListener('click', () => this.validateConnection());
+                }
+                
+                // File Upload
+                const uploadArea = document.getElementById('uploadArea');
+                const fileInput = document.getElementById('fileInput');
+                
+                if (uploadArea && fileInput) {
+                    uploadArea.addEventListener('click', () => {
+                        if (this.serverValidated) fileInput.click();
+                    });
+                    uploadArea.addEventListener('drop', (e) => this.handleFileDrop(e));
+                    uploadArea.addEventListener('dragover', (e) => this.handleDragOver(e));
+                    uploadArea.addEventListener('dragleave', (e) => this.handleDragLeave(e));
+                    fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
+                }
+                
+                // Quick Actions
+                const bulkBtn = document.getElementById('bulkAnalyzeBtn');
+                const exportJsonBtn = document.getElementById('exportJsonBtn');
+                const exportMdBtn = document.getElementById('exportMdBtn');
+                const clearBtn = document.getElementById('clearBtn');
+                
+                if (bulkBtn) bulkBtn.addEventListener('click', () => this.bulkAnalyze());
+                if (exportJsonBtn) exportJsonBtn.addEventListener('click', () => this.exportResults('json'));
+                if (exportMdBtn) exportMdBtn.addEventListener('click', () => this.exportResults('markdown'));
+                if (clearBtn) clearBtn.addEventListener('click', () => this.clearAllData());
+                
+                // Settings
+                const endpointInput = document.getElementById('vllmEndpoint');
+                const maxTokensInput = document.getElementById('maxTokens');
+                
+                if (endpointInput) {
+                    endpointInput.addEventListener('input', () => this.onEndpointChange());
+                }
+                
+                if (maxTokensInput) {
+                    maxTokensInput.addEventListener('input', () => this.onSettingsChange());
+                }
+                
+                // Hide suggestions when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (!e.target.closest('#componentName')) {
+                        const suggestions = document.getElementById('componentSuggestions');
+                        if (suggestions) suggestions.classList.remove('show');
+                    }
+                });
+            }
+
+            // Component Input Handler
+            onComponentInput() {
+                const input = document.getElementById('componentName');
+                const suggestions = document.getElementById('componentSuggestions');
+                
+                if (!input || !suggestions) return;
+                
+                const value = input.value.trim().toUpperCase();
+                
+                if (value.length < 2) {
+                    suggestions.classList.remove('show');
+                    this.validateForm();
+                    return;
+                }
+                
+                const filtered = this.componentSuggestions.filter(item => 
+                    item.name.includes(value)
+                ).slice(0, 8);
+                
+                if (filtered.length > 0) {
+                    let html = '';
+                    filtered.forEach(item => {
+                        const icon = this.getComponentIcon(item.type);
+                        html += `
+                            <div class="suggestion-item" onclick="analyzer.selectSuggestion('${item.name}')">
+                                <span>${icon}</span>
+                                <span class="suggestion-item-name">${item.name}</span>
+                                <span class="suggestion-item-type">(${item.type})</span>
+                                ${item.level ? `<span class="suggestion-item-badge">L${item.level}</span>` : ''}
+                            </div>
+                        `;
+                    });
+                    suggestions.innerHTML = html;
+                    suggestions.classList.add('show');
+                } else {
+                    suggestions.classList.remove('show');
+                }
+                
+                this.updateTokenDisplay();
+                this.validateForm();
+            }
+
+            // Friendly Name Input Handler
+            onFriendlyNameInput() {
+                const input = document.getElementById('friendlyName');
+                if (input) {
+                    this.currentFriendlyName = input.value.trim() || null;
+                }
+            }
+
+            // Select Component Suggestion
+            selectSuggestion(componentName) {
+                const input = document.getElementById('componentName');
+                const suggestions = document.getElementById('componentSuggestions');
+                
+                if (input) input.value = componentName;
+                if (suggestions) suggestions.classList.remove('show');
+                
+                this.validateForm();
+                this.updateTokenDisplay();
+            }
+
+            // Get Component Icon
+            getComponentIcon(type) {
+                const icons = {
+                    'RECORD_LAYOUT': '🎯',
+                    'PROGRAM': '💼',
+                    'COPYBOOK': '📚',
+                    'FILE': '📁'
+                };
+                return icons[type] || '📋';
+            }
+
+            // Display Name Helper
+            getDisplayName() {
+                return this.currentFriendlyName || this.currentAnalyzedComponent || 'Component';
+            }
+
+            // Update Token Display
+            updateTokenDisplay() {
+                const input = document.getElementById('componentName');
+                const tokenInfo = document.getElementById('tokenInfo');
+                const tokenCount = document.getElementById('tokenCount');
+                const tokenFill = document.getElementById('tokenFill');
+                const tokenWarning = document.getElementById('tokenWarning');
+                
+                if (!input || !tokenInfo) return;
+                
+                const text = input.value;
+                const estimatedTokens = Math.ceil(text.length / this.averageCharsPerToken);
+                
+                tokenInfo.style.display = 'block';
+                tokenCount.textContent = `${estimatedTokens} / ${this.maxTokens}`;
+                
+                const percentage = (estimatedTokens / this.maxTokens) * 100;
+                tokenFill.style.width = `${Math.min(percentage, 100)}%`;
+                
+                tokenFill.className = 'token-fill';
+                if (percentage <= 50) {
+                    tokenFill.classList.add('safe');
+                    tokenWarning.textContent = '🟢 Optimal token usage';
+                } else if (percentage <= 70) {
+                    tokenFill.classList.add('warning');
+                    tokenWarning.textContent = '🟡 Moderate usage';
+                } else {
+                    tokenFill.classList.add('danger');
+                    tokenWarning.textContent = '🔴 High usage - consider simplifying';
+                }
+            }
+
+            // Validate Form
+            validateForm() {
+                const hasFiles = this.uploadedFiles.length > 0;
+                const hasComponent = document.getElementById('componentName')?.value.trim().length > 0;
+                const hasConnection = this.serverValidated;
+                
+                const analyzeBtn = document.getElementById('analyzeComponentBtn');
+                const bulkBtn = document.getElementById('bulkAnalyzeBtn');
+                
+                if (analyzeBtn) analyzeBtn.disabled = !(hasFiles && hasComponent && hasConnection);
+                if (bulkBtn) bulkBtn.disabled = !(hasFiles && hasConnection);
+                
+                const hasResults = Object.keys(this.analysisResults).length > 0;
+                const exportJsonBtn = document.getElementById('exportJsonBtn');
+                const exportMdBtn = document.getElementById('exportMdBtn');
+                
+                if (exportJsonBtn) exportJsonBtn.disabled = !hasResults;
+                if (exportMdBtn) exportMdBtn.disabled = !hasResults;
+            }
+
+            // Show/Hide Loading
+            showLoading() {
+                const loading = document.getElementById('loadingIndicator');
+                if (loading) loading.classList.add('show');
+            }
+
+            hideLoading() {
+                const loading = document.getElementById('loadingIndicator');
+                if (loading) loading.classList.remove('show');
+            }
+
+            updateLoadingStatus(status) {
+                const statusEl = document.getElementById('loadingStatus');
+                if (statusEl) statusEl.textContent = status;
+            }
+
+            updateProgress(percentage) {
+                const progressFill = document.getElementById('progressFill');
+                if (progressFill) progressFill.style.width = `${percentage}%`;
+            }
+
+            // Alert Messages
+            showMessage(type, message, duration = 3000) {
+                const alert = document.createElement('div');
+                alert.className = `alert alert-${type}`;
+                alert.innerHTML = `
+                    <span class="alert-icon">${type === 'success' ? '✅' : type === 'error' ? '❌' : type === 'warning' ? '⚠️' : 'ℹ️'}</span>
+                    <span class="alert-message">${message}</span>
+                `;
+                document.body.appendChild(alert);
+                
+                setTimeout(() => {
+                    if (alert.parentNode) {
+                        alert.style.animation = 'slideInRight 0.3s ease reverse';
+                        setTimeout(() => alert.remove(), 300);
+                    }
+                }, duration);
+            }
+
+            showSuccess(message) { this.showMessage('success', message); }
+            showError(message) { this.showMessage('error', message, 5000); }
+            showWarning(message) { this.showMessage('warning', message, 4000); }
+            showInfo(message) { this.showMessage('info', message); }
+
+            // Placeholder methods (to be implemented in next parts)
+            async validateConnection() {
+                this.showInfo('Validating connection...');
+                // Implementation in Part 7
+            }
+
+            async analyzeComponent() {
+                this.showInfo('Starting analysis...');
+                // Implementation in Part 7
+            }
+
+            handleFileDrop(e) {
+                e.preventDefault();
+                // Implementation in Part 7
+            }
+
+            handleDragOver(e) {
+                e.preventDefault();
+                const uploadArea = document.getElementById('uploadArea');
+                if (uploadArea) uploadArea.classList.add('drag-over');
+            }
+
+            handleDragLeave(e) {
+                e.preventDefault();
+                const uploadArea = document.getElementById('uploadArea');
+                if (uploadArea) uploadArea.classList.remove('drag-over');
+            }
+
+            handleFileSelect(e) {
+                // Implementation in Part 7
+            }
+
+            onEndpointChange() {
+                this.serverValidated = false;
+                this.updateConnectionStatus('disconnected', 'Connection not validated');
+                this.validateForm();
+            }
+
+            onSettingsChange() {
+                const maxTokensInput = document.getElementById('maxTokens');
+                if (maxTokensInput) {
+                    this.maxTokens = parseInt(maxTokensInput.value) || 4000;
+                    this.saveToStorage();
+                }
+            }
+
+            updateConnectionStatus(status, message) {
+                const statusEl = document.getElementById('apiStatus');
+                if (statusEl) {
+                    statusEl.className = `status-indicator ${status}`;
+                    statusEl.innerHTML = `
+                        <span class="status-dot"></span>
+                        <span>${message}</span>
+                    `;
+                }
+            }
+
+            bulkAnalyze() {
+                this.showInfo('Bulk analysis feature coming soon');
+            }
+
+            exportResults(format) {
+                this.showInfo(`Export as ${format} feature coming soon`);
+            }
+
+            clearAllData() {
+                if (confirm('Are you sure you want to clear all data?')) {
+                    this.uploadedFiles = [];
+                    this.analysisResults = {};
+                    localStorage.removeItem(this.storageKey);
+                    this.showSuccess('All data cleared');
+                    this.validateForm();
+                }
+            }
+
+            loadStoredData() {
+                // Implementation in Part 7
+            }
+
+            saveToStorage() {
+                // Implementation in Part 7
+            }
+
+            initializeChat() {
+                // Implementation in Part 7
+            }
+        }
+
+        // Initialize analyzer on page load
+        let analyzer;
+        document.addEventListener('DOMContentLoaded', function() {
+            analyzer = new EnhancedMainframeAnalyzer();
+            console.log('✅ Enhanced Mainframe Analyzer Ready!');
+        });
+    </script>
+</body>
+</html>
