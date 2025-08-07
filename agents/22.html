@@ -2922,6 +2922,51 @@ analyzeFieldUsageInProgram(fieldName, programFile) {
         }
     });
 
+    // PERFORM statements with business logic
+if (trimmed.includes('PERFORM') && trimmed.includes(fieldUpper)) {
+    usage.isValidated = true;
+    usage.operations.push({
+        type: 'business_logic',
+        operation: 'PERFORM',
+        line: lineNum + 1,
+        context: trimmed.substring(0, 100)
+    });
+}
+
+// Business rule validations
+const businessRulePatterns = [
+    /IF\s+.*${fieldUpper}.*\s+(>|<|=|NOT)/,
+    /WHEN\s+.*${fieldUpper}.*\s+(>|<|=|NOT)/,
+    /EVALUATE\s+.*${fieldUpper}/,
+    /SEARCH\s+.*${fieldUpper}/
+];
+
+businessRulePatterns.forEach((pattern, index) => {
+    if (pattern.test(trimmed.replace('${fieldUpper}', fieldUpper))) {
+        usage.isValidated = true;
+        usage.operations.push({
+            type: 'business_rule',
+            operation: ['CONDITION', 'WHEN_CONDITION', 'EVALUATE', 'SEARCH'][index],
+            line: lineNum + 1,
+            context: trimmed.substring(0, 100),
+            ruleType: 'validation'
+        });
+    }
+});
+
+// Data transformation logic
+if ((trimmed.includes('STRING') || trimmed.includes('UNSTRING') || 
+     trimmed.includes('INSPECT') || trimmed.includes('TRANSFORM')) && 
+    trimmed.includes(fieldUpper)) {
+    usage.isCalculated = true;
+    usage.operations.push({
+        type: 'transformation',
+        operation: 'DATA_TRANSFORMATION',
+        line: lineNum + 1,
+        context: trimmed.substring(0, 100)
+    });
+}
+
     return usage;
 }
 
@@ -3919,89 +3964,47 @@ async analyzeFieldsInComponent(componentName, relevantFiles) {
             fieldUsageAnalysis.referenceFields.push(fieldName);
         }
         // Add business logic analysis for each field
-fields.forEach(field => {
-    const fieldName = field.name;
-    let businessLogic = {
-        validationRules: [],
-        calculations: [],
-        businessMeaning: '',
-        constraints: []
-    };
-    
-    // Extract business logic from programs
-    usingPrograms.forEach(program => {
-        const programLogic = this.extractBusinessLogic(program, [fieldName]);
-        
-        if (programLogic.validationRules.length > 0) {
-            businessLogic.validationRules.push(...programLogic.validationRules);
-        }
-        
-        if (programLogic.calculations.length > 0) {
-            businessLogic.calculations.push(...programLogic.calculations);
-        }
-    });
-    
-    // Determine business meaning from field name and usage
-    businessLogic.businessMeaning = this.determineBusinessMeaning(fieldName, businessLogic);
-    
-    // Add business logic to field
-    field.businessLogic = businessLogic;
-});
+ 
 
 // Add business logic summary to field analysis
-fieldUsageAnalysis.businessLogicSummary = {
+
+        fieldUsageAnalysis.fieldUsageDetails[fieldName] = usageDetails;
+    });
+    fields.forEach(field => {
+        const fieldName = field.name;
+        let businessLogic = {
+            validationRules: [],
+            calculations: [],
+            businessMeaning: '',
+            constraints: []
+        };
+        
+        // Extract business logic from programs
+        usingPrograms.forEach(program => {
+            const programLogic = this.extractBusinessLogic(program, [fieldName]);
+            
+            if (programLogic.validationRules.length > 0) {
+                businessLogic.validationRules.push(...programLogic.validationRules);
+            }
+            
+            if (programLogic.calculations.length > 0) {
+                businessLogic.calculations.push(...programLogic.calculations);
+            }
+        });
+        
+        // Determine business meaning from field name and usage
+        businessLogic.businessMeaning = this.determineBusinessMeaning(fieldName, businessLogic);
+        
+        // Add business logic to field
+        field.businessLogic = businessLogic;
+    });
+
+    fieldUsageAnalysis.businessLogicSummary = {
     totalValidationRules: fields.reduce((sum, f) => sum + (f.businessLogic?.validationRules?.length || 0), 0),
     totalCalculations: fields.reduce((sum, f) => sum + (f.businessLogic?.calculations?.length || 0), 0),
     fieldsWithBusinessLogic: fields.filter(f => f.businessLogic?.validationRules?.length > 0 || f.businessLogic?.calculations?.length > 0).length
 };
-        
-        fieldUsageAnalysis.fieldUsageDetails[fieldName] = usageDetails;
-    });
-    // Enhanced business logic extraction
-// PERFORM statements with business logic
-if (trimmed.includes('PERFORM') && trimmed.includes(fieldUpper)) {
-    usage.isValidated = true;
-    usage.operations.push({
-        type: 'business_logic',
-        operation: 'PERFORM',
-        line: lineNum + 1,
-        context: trimmed.substring(0, 100)
-    });
-}
 
-// Business rule validations
-const businessRulePatterns = [
-    /IF\s+.*${fieldUpper}.*\s+(>|<|=|NOT)/,
-    /WHEN\s+.*${fieldUpper}.*\s+(>|<|=|NOT)/,
-    /EVALUATE\s+.*${fieldUpper}/,
-    /SEARCH\s+.*${fieldUpper}/
-];
-
-businessRulePatterns.forEach((pattern, index) => {
-    if (pattern.test(trimmed.replace('${fieldUpper}', fieldUpper))) {
-        usage.isValidated = true;
-        usage.operations.push({
-            type: 'business_rule',
-            operation: ['CONDITION', 'WHEN_CONDITION', 'EVALUATE', 'SEARCH'][index],
-            line: lineNum + 1,
-            context: trimmed.substring(0, 100),
-            ruleType: 'validation'
-        });
-    }
-});
-
-// Data transformation logic
-if ((trimmed.includes('STRING') || trimmed.includes('UNSTRING') || 
-     trimmed.includes('INSPECT') || trimmed.includes('TRANSFORM')) && 
-    trimmed.includes(fieldUpper)) {
-    usage.isCalculated = true;
-    usage.operations.push({
-        type: 'transformation',
-        operation: 'DATA_TRANSFORMATION',
-        line: lineNum + 1,
-        context: trimmed.substring(0, 100)
-    });
-}
     console.log('Field usage analysis complete:', {
         input: fieldUsageAnalysis.inputFields.length,
         output: fieldUsageAnalysis.outputFields.length,
@@ -4012,6 +4015,140 @@ if ((trimmed.includes('STRING') || trimmed.includes('UNSTRING') ||
     return fieldUsageAnalysis;
 }
 
+
+// Extract Business Rules and Logic
+extractBusinessLogic(programFile, fieldNames) {
+    const businessLogic = {
+        validationRules: [],
+        calculations: [],
+        transformations: [],
+        conditions: [],
+        businessRules: []
+    };
+
+    if (!programFile || !programFile.content) {
+        return businessLogic;
+    }
+
+    const lines = programFile.content.split('\n');
+    
+    lines.forEach((line, lineNum) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // Extract validation rules
+        const validationMatch = trimmed.match(/IF\s+(.*?)\s+THEN/);
+        if (validationMatch) {
+            const condition = validationMatch[1];
+            fieldNames.forEach(fieldName => {
+                if (condition.includes(fieldName.toUpperCase())) {
+                    businessLogic.validationRules.push({
+                        field: fieldName,
+                        condition: condition,
+                        line: lineNum + 1,
+                        type: 'validation',
+                        description: this.interpretValidationRule(condition, fieldName)
+                    });
+                }
+            });
+        }
+
+        // Extract calculations
+        if (trimmed.includes('COMPUTE') || trimmed.includes('ADD') || 
+            trimmed.includes('SUBTRACT') || trimmed.includes('MULTIPLY') || 
+            trimmed.includes('DIVIDE')) {
+            
+            fieldNames.forEach(fieldName => {
+                if (trimmed.includes(fieldName.toUpperCase())) {
+                    businessLogic.calculations.push({
+                        field: fieldName,
+                        operation: trimmed.match(/(COMPUTE|ADD|SUBTRACT|MULTIPLY|DIVIDE)/)?.[1] || 'CALC',
+                        line: lineNum + 1,
+                        formula: trimmed.substring(0, 120),
+                        description: this.interpretCalculation(trimmed, fieldName)
+                    });
+                }
+            });
+        }
+
+        // Extract business rules from comments
+        if (trimmed.startsWith('*') && trimmed.length > 10) {
+            const comment = trimmed.substring(1).trim();
+            if (comment.toLowerCase().includes('business rule') || 
+                comment.toLowerCase().includes('validation') ||
+                comment.toLowerCase().includes('rule:')) {
+                businessLogic.businessRules.push({
+                    line: lineNum + 1,
+                    rule: comment,
+                    type: 'comment_rule'
+                });
+            }
+        }
+    });
+
+    return businessLogic;
+}
+
+// Interpret validation rules
+interpretValidationRule(condition, fieldName) {
+    if (condition.includes('SPACE') || condition.includes('SPACES')) {
+        return `${fieldName} must not be empty/spaces`;
+    } else if (condition.includes('ZERO') || condition.includes('0')) {
+        return `${fieldName} must not be zero`;
+    } else if (condition.includes('>')) {
+        return `${fieldName} must be greater than specified value`;
+    } else if (condition.includes('<')) {
+        return `${fieldName} must be less than specified value`;
+    } else if (condition.includes('=')) {
+        return `${fieldName} must equal specific value`;
+    } else {
+        return `${fieldName} has validation condition: ${condition}`;
+    }
+}
+
+// Interpret calculations
+interpretCalculation(formula, fieldName) {
+    if (formula.includes('COMPUTE')) {
+        return `${fieldName} is calculated using formula`;
+    } else if (formula.includes('ADD')) {
+        return `${fieldName} is incremented/added to`;
+    } else if (formula.includes('SUBTRACT')) {
+        return `${fieldName} is decremented/subtracted from`;
+    } else {
+        return `${fieldName} is used in mathematical operation`;
+    }
+}
+
+// Determine Business Meaning
+determineBusinessMeaning(fieldName, businessLogic) {
+    const name = fieldName.toUpperCase();
+    
+    // Check validation rules for clues
+    if (businessLogic.validationRules.length > 0) {
+        const rule = businessLogic.validationRules[0];
+        if (rule.description.includes('not be empty')) {
+            return `Required ${this.generateFieldPurpose(fieldName).toLowerCase()}`;
+        }
+    }
+    
+    // Enhanced business meaning based on field patterns
+    if (name.includes('CUSTOMER') || name.includes('CUST')) {
+        return 'Customer information management field';
+    } else if (name.includes('ACCOUNT') || name.includes('ACCT')) {
+        return 'Account management and tracking field';
+    } else if (name.includes('TRANSACTION') || name.includes('TRANS')) {
+        return 'Transaction processing and audit field';
+    } else if (name.includes('BALANCE') || name.includes('BAL')) {
+        return 'Financial balance calculation field';
+    } else if (name.includes('STATUS') || name.includes('STAT')) {
+        return 'Status tracking and workflow field';
+    } else if (name.includes('DATE') || name.includes('TIME')) {
+        return 'Temporal tracking and audit field';
+    } else if (name.includes('CODE') || name.includes('CD')) {
+        return 'Reference code for business classification';
+    } else {
+        return this.generateFieldPurpose(fieldName);
+    }
+}
 // Extract Dependencies
 async extractDependencies(relevantFiles) {
     console.log('Extracting dependencies...');
