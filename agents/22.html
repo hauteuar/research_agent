@@ -1353,6 +1353,7 @@
             color: var(--grey-600);
         }
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
 </head>
 <body>
     <div class="main-container">
@@ -2031,31 +2032,140 @@
 
         // Enhanced Mainframe Analyzer Class
         class EnhancedMainframeAnalyzer {
-            constructor() {
-                // Core properties
-                this.uploadedFiles = [];
-                this.analysisResults = {};
-                this.componentSuggestions = [];
-                this.serverValidated = false;
-                this.vllmEndpoint = 'http://localhost:8000';
-                this.maxTokens = 4000;
-                this.storageKey = 'enhanced_mainframe_analysis';
-                this.currentAnalyzedComponent = null;
-                this.currentFriendlyName = null;
-                this.chatHistory = [];
-                
-                // Token management
-                this.averageCharsPerToken = 3;
-                this.tokenSafetyMargin = 0.7;
-                
-                // Initialize
-                this.initializeEventListeners();
-                this.loadStoredData();
-                this.initializeChat();
-                this.addTypingAnimationStyles();
-                
-                console.log('🚀 Enhanced Mainframe Analyzer Initialized');
+           togglePanel(side) {
+            const panel = document.getElementById(side + 'Panel');
+            panel.classList.toggle('collapsed');
+            
+            // Update button icon
+            const btn = panel.querySelector('.collapse-btn');
+            if (side === 'left') {
+                btn.textContent = panel.classList.contains('collapsed') ? '▶' : '◀';
+            } else {
+                btn.textContent = panel.classList.contains('collapsed') ? '◀' : '▶';
             }
+            
+            // Save state to localStorage
+            localStorage.setItem(side + 'PanelCollapsed', panel.classList.contains('collapsed'));
+        }
+
+        toggleCollapsible(header) {
+            const section = header.parentElement;
+            section.classList.toggle('expanded');
+        }
+
+            constructor() {
+    // Core properties
+    this.uploadedFiles = [];
+    this.analysisResults = {};
+    this.componentSuggestions = [];
+    this.serverValidated = false;
+    this.vllmEndpoint = 'http://localhost:8000';
+    this.maxTokens = 4000;
+    this.currentAnalyzedComponent = null;
+    this.currentFriendlyName = null;
+    this.chatHistory = [];
+    
+    // SQLite Database
+    this.db = null;
+    this.dbInitialized = false;
+    
+    // Token management
+    this.averageCharsPerToken = 3;
+    this.tokenSafetyMargin = 0.7;
+    
+    // Initialize
+    this.initializeDatabase();
+    this.initializeEventListeners();
+    this.loadStoredData();
+    this.initializeChat();
+    this.addTypingAnimationStyles();
+    
+    console.log('🚀 Enhanced Mainframe Analyzer Initialized');
+}
+
+// Initialize SQLite Database
+async initializeDatabase() {
+    try {
+        const SQL = await initSqlJs({
+            locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
+        });
+        
+        // Try to load existing database from localStorage
+        const savedDb = localStorage.getItem('mainframe_analyzer_db');
+        if (savedDb) {
+            const uInt8Array = new Uint8Array(JSON.parse(savedDb));
+            this.db = new SQL.Database(uInt8Array);
+        } else {
+            this.db = new SQL.Database();
+        }
+        
+        // Create tables if they don't exist
+        this.createTables();
+        this.dbInitialized = true;
+        console.log('✅ SQLite database initialized');
+        
+    } catch (error) {
+        console.error('Failed to initialize SQLite database:', error);
+        // Fallback to localStorage
+        this.dbInitialized = false;
+    }
+}
+
+// Create Database Tables
+createTables() {
+    if (!this.db) return;
+    
+    // Uploaded Files table
+    this.db.run(`
+        CREATE TABLE IF NOT EXISTS uploaded_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id TEXT UNIQUE,
+            name TEXT,
+            content TEXT,
+            size INTEGER,
+            type TEXT,
+            upload_date TEXT,
+            components TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+    
+    // Analysis Results table
+    this.db.run(`
+        CREATE TABLE IF NOT EXISTS analysis_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            component_name TEXT UNIQUE,
+            friendly_name TEXT,
+            component_type TEXT,
+            results_data TEXT,
+            quality_score INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+    
+    // Chat History table
+    this.db.run(`
+        CREATE TABLE IF NOT EXISTS chat_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            component_name TEXT,
+            sender TEXT,
+            content TEXT,
+            timestamp TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+    
+    // Settings table
+    this.db.run(`
+        CREATE TABLE IF NOT EXISTS settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key TEXT UNIQUE,
+            value TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+}
 
             // Initialize Event Listeners
             initializeEventListeners() {
@@ -2614,27 +2724,38 @@ extractCopybookFields(copybookName, relevantFiles) {
 }
 
 // Find Programs Using a Copybook
+// Find Programs Using a Copybook
 findProgramsUsingCopybook(copybookName) {
     const usingPrograms = [];
-    const copybookUpper = copybookName.toUpperCase().replace('.CPY', '');
+    const copybookUpper = copybookName.toUpperCase();
+    const copybookBase = copybookUpper.replace(/\.(CPY|COPYBOOK|COP)$/, ''); // Remove extension
     
     this.uploadedFiles.forEach(file => {
         if (file.type === 'COBOL Program' || file.content.toUpperCase().includes('PROGRAM-ID')) {
             const content = file.content.toUpperCase();
             
-            // Check for COPY statements
+            // Check for COPY statements with various patterns
             const copyPatterns = [
+                // Direct matches
                 `COPY ${copybookUpper}`,
+                `COPY ${copybookBase}`,
+                // With quotes/apostrophes
                 `COPY "${copybookUpper}"`,
+                `COPY "${copybookBase}"`,
                 `COPY '${copybookUpper}'`,
+                `COPY '${copybookBase}'`,
+                // With periods
                 `COPY ${copybookUpper}.`,
-                `INCLUDE ${copybookUpper}`
+                `COPY ${copybookBase}.`,
+                // Include statements
+                `INCLUDE ${copybookUpper}`,
+                `INCLUDE ${copybookBase}`
             ];
             
             const usesCopybook = copyPatterns.some(pattern => content.includes(pattern));
             
             if (usesCopybook) {
-                console.log(`Program ${file.name} uses copybook ${copybookName}`);
+                console.log(`Program ${file.name} uses copybook ${copybookName} (matched as ${copybookBase})`);
                 usingPrograms.push(file);
             }
         }
@@ -2898,19 +3019,41 @@ removeFile(fileId) {
 }
 
 // Find Relevant Files for Component
+// Find Relevant Files for Component
 findRelevantFiles(componentName) {
+    const componentUpper = componentName.toUpperCase();
+    const componentBase = componentUpper.replace(/\.(CPY|COPYBOOK|COP)$/, ''); // Remove extensions
+    
     return this.uploadedFiles.filter(file => {
-        // Check if file contains the component directly
-        if (file.content.toUpperCase().includes(componentName.toUpperCase()) ||
-            file.name.toUpperCase().includes(componentName.toUpperCase())) {
+        const fileNameUpper = file.name.toUpperCase();
+        const fileNameBase = fileNameUpper.replace(/\.(CPY|COPYBOOK|COP)$/, '');
+        
+        // Direct name match (with or without extensions)
+        if (fileNameUpper.includes(componentUpper) || 
+            fileNameBase === componentBase ||
+            componentBase === fileNameBase) {
             return true;
         }
         
-        // Check if any component in the file matches
+        // Content-based matching with variations
+        const contentUpper = file.content.toUpperCase();
+        if (contentUpper.includes(componentUpper) ||
+            contentUpper.includes(componentBase) ||
+            contentUpper.includes(`COPY ${componentBase}`) ||
+            contentUpper.includes(`"${componentBase}"`) ||
+            contentUpper.includes(`'${componentBase}'`)) {
+            return true;
+        }
+        
+        // Check if any component in the file matches (with variations)
         if (file.components) {
-            return file.components.some(comp => 
-                comp.name.toUpperCase() === componentName.toUpperCase()
-            );
+            return file.components.some(comp => {
+                const compNameUpper = comp.name.toUpperCase();
+                const compNameBase = compNameUpper.replace(/\.(CPY|COPYBOOK|COP)$/, '');
+                return compNameUpper === componentUpper || 
+                       compNameBase === componentBase ||
+                       componentBase === compNameBase;
+            });
         }
         
         return false;
@@ -3346,53 +3489,180 @@ createBasicFallback() {
 }
 
 // Storage Management
-saveToStorage() {
+// Save to SQLite Database
+async saveToStorage() {
+    if (!this.dbInitialized || !this.db) {
+        // Fallback to localStorage
+        try {
+            const data = {
+                uploadedFiles: this.uploadedFiles,
+                analysisResults: this.analysisResults,
+                chatHistory: this.chatHistory,
+                vllmEndpoint: this.vllmEndpoint,
+                maxTokens: this.maxTokens,
+                timestamp: new Date().toISOString()
+            };
+            localStorage.setItem('enhanced_mainframe_analysis', JSON.stringify(data));
+        } catch (error) {
+            console.warn('Failed to save to localStorage:', error);
+        }
+        return;
+    }
+
     try {
-        const data = {
-            uploadedFiles: this.uploadedFiles,
-            analysisResults: this.analysisResults,
-            chatHistory: this.chatHistory,
-            vllmEndpoint: this.vllmEndpoint,
-            maxTokens: this.maxTokens,
-            timestamp: new Date().toISOString()
-        };
-        localStorage.setItem(this.storageKey, JSON.stringify(data));
+        // Save uploaded files
+        this.db.run("DELETE FROM uploaded_files");
+        for (const file of this.uploadedFiles) {
+            this.db.run(`
+                INSERT INTO uploaded_files (file_id, name, content, size, type, upload_date, components)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            `, [
+                file.id, 
+                file.name, 
+                file.content, 
+                file.size, 
+                file.type, 
+                file.uploadDate, 
+                JSON.stringify(file.components || [])
+            ]);
+        }
+        
+        // Save analysis results
+        this.db.run("DELETE FROM analysis_results");
+        for (const [componentName, results] of Object.entries(this.analysisResults)) {
+            this.db.run(`
+                INSERT OR REPLACE INTO analysis_results 
+                (component_name, friendly_name, component_type, results_data, quality_score)
+                VALUES (?, ?, ?, ?, ?)
+            `, [
+                componentName,
+                results.friendlyName || componentName,
+                results.componentType,
+                JSON.stringify(results),
+                results.qualityScore || 0
+            ]);
+        }
+        
+        // Save chat history
+        this.db.run("DELETE FROM chat_history");
+        for (const chat of this.chatHistory) {
+            this.db.run(`
+                INSERT INTO chat_history (component_name, sender, content, timestamp)
+                VALUES (?, ?, ?, ?)
+            `, [
+                this.currentAnalyzedComponent || 'general',
+                chat.sender,
+                chat.content,
+                chat.timestamp
+            ]);
+        }
+        
+        // Save settings
+        this.db.run("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", 
+                   ['vllmEndpoint', this.vllmEndpoint]);
+        this.db.run("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", 
+                   ['maxTokens', this.maxTokens.toString()]);
+        
+        // Save database to localStorage as backup
+        const data = this.db.export();
+        localStorage.setItem('mainframe_analyzer_db', JSON.stringify(Array.from(data)));
+        
+        console.log('✅ Data saved to SQLite database');
+        
     } catch (error) {
-        console.warn('Failed to save to storage:', error);
+        console.error('Failed to save to database:', error);
     }
 }
 
-loadStoredData() {
-    try {
-        const stored = localStorage.getItem(this.storageKey);
-        if (stored) {
-            const data = JSON.parse(stored);
-            this.uploadedFiles = data.uploadedFiles || [];
-            this.analysisResults = data.analysisResults || {};
-            this.chatHistory = data.chatHistory || [];
-            
-            const endpointInput = document.getElementById('vllmEndpoint');
-            const maxTokensInput = document.getElementById('maxTokens');
-            
-            if (data.vllmEndpoint && endpointInput) {
-                endpointInput.value = data.vllmEndpoint;
-                this.vllmEndpoint = data.vllmEndpoint;
+// Load from SQLite Database
+async loadStoredData() {
+    if (!this.dbInitialized || !this.db) {
+        // Fallback to localStorage
+        try {
+            const stored = localStorage.getItem('enhanced_mainframe_analysis');
+            if (stored) {
+                const data = JSON.parse(stored);
+                this.uploadedFiles = data.uploadedFiles || [];
+                this.analysisResults = data.analysisResults || {};
+                this.chatHistory = data.chatHistory || [];
+                
+                if (data.vllmEndpoint) this.vllmEndpoint = data.vllmEndpoint;
+                if (data.maxTokens) this.maxTokens = data.maxTokens;
+                
+                this.updateUIFromLoadedData(data);
+                console.log('📁 Data loaded from localStorage fallback');
             }
-            
-            if (data.maxTokens && maxTokensInput) {
-                maxTokensInput.value = data.maxTokens;
-                this.maxTokens = data.maxTokens;
-            }
-            
-            this.displayUploadedFiles();
-            this.updateComponentSuggestions();
-            this.validateForm();
-            
-            console.log('📁 Stored analysis data loaded successfully');
+        } catch (error) {
+            console.warn('Failed to load from localStorage:', error);
         }
-    } catch (error) {
-        console.warn('Failed to load stored data:', error);
+        return;
     }
+
+    try {
+        // Load uploaded files
+        const filesResult = this.db.exec("SELECT * FROM uploaded_files ORDER BY created_at");
+        if (filesResult.length > 0) {
+            this.uploadedFiles = filesResult[0].values.map(row => ({
+                id: row[1],
+                name: row[2],
+                content: row[3],
+                size: row[4],
+                type: row[5],
+                uploadDate: row[6],
+                components: JSON.parse(row[7] || '[]')
+            }));
+        }
+        
+        // Load analysis results
+        const resultsQuery = this.db.exec("SELECT * FROM analysis_results ORDER BY updated_at DESC");
+        if (resultsQuery.length > 0) {
+            resultsQuery[0].values.forEach(row => {
+                const componentName = row[1];
+                const resultsData = JSON.parse(row[4]);
+                this.analysisResults[componentName] = resultsData;
+            });
+        }
+        
+        // Load chat history
+        const chatQuery = this.db.exec("SELECT * FROM chat_history ORDER BY created_at");
+        if (chatQuery.length > 0) {
+            this.chatHistory = chatQuery[0].values.map(row => ({
+                sender: row[2],
+                content: row[3],
+                timestamp: row[4]
+            }));
+        }
+        
+        // Load settings
+        const settingsQuery = this.db.exec("SELECT key, value FROM settings");
+        if (settingsQuery.length > 0) {
+            settingsQuery[0].values.forEach(row => {
+                const [key, value] = row;
+                if (key === 'vllmEndpoint') this.vllmEndpoint = value;
+                if (key === 'maxTokens') this.maxTokens = parseInt(value);
+            });
+        }
+        
+        this.updateUIFromLoadedData();
+        console.log('✅ Data loaded from SQLite database');
+        
+    } catch (error) {
+        console.error('Failed to load from database:', error);
+    }
+}
+
+// Update UI from loaded data
+updateUIFromLoadedData() {
+    // Update UI elements
+    const endpointInput = document.getElementById('vllmEndpoint');
+    const maxTokensInput = document.getElementById('maxTokens');
+    
+    if (endpointInput) endpointInput.value = this.vllmEndpoint;
+    if (maxTokensInput) maxTokensInput.value = this.maxTokens;
+    
+    this.displayUploadedFiles();
+    this.updateComponentSuggestions();
+    this.validateForm();
 }
 
 // Utility function
@@ -4918,7 +5188,7 @@ async sendChatMessage() {
     this.showChatTyping();
     
     try {
-        const response = await this.processChat Query(message);
+        const response = await this.processChatQuery(message);
         this.hideChatTyping();
         this.addChatMessage('assistant', response);
     } catch (error) {
@@ -5322,9 +5592,10 @@ downloadTextFile(content, filename, mimeType = 'text/plain') {
 }
 
 // Clear All Data
+// Clear All Data
 clearAllData() {
     if (confirm('Are you sure you want to clear all analysis data? This cannot be undone.')) {
-        // Clear data
+        // Clear in-memory data
         this.uploadedFiles = [];
         this.analysisResults = {};
         this.componentSuggestions = [];
@@ -5332,12 +5603,32 @@ clearAllData() {
         this.currentFriendlyName = null;
         this.chatHistory = [];
         
-        // Clear storage
-        localStorage.removeItem(this.storageKey);
+        // Clear SQLite database
+        if (this.dbInitialized && this.db) {
+            try {
+                this.db.run("DELETE FROM uploaded_files");
+                this.db.run("DELETE FROM analysis_results");
+                this.db.run("DELETE FROM chat_history");
+                this.db.run("DELETE FROM settings");
+                
+                // Update localStorage backup
+                const data = this.db.export();
+                localStorage.setItem('mainframe_analyzer_db', JSON.stringify(Array.from(data)));
+            } catch (error) {
+                console.error('Failed to clear database:', error);
+            }
+        }
         
-        // Reset UI
+        // Clear localStorage fallback
+        localStorage.removeItem('enhanced_mainframe_analysis');
+        localStorage.removeItem('mainframe_analyzer_db');
+        
+        // Reset UI (existing code...)
         this.displayUploadedFiles();
         this.validateForm();
+        // ... rest of UI reset code ...
+        
+     
         
         // Clear display areas
         document.getElementById('lifecycleDetails').innerHTML = '<p>No analysis results yet.</p>';
