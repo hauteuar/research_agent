@@ -5511,53 +5511,77 @@ async analyzeDownstreamDependents(componentName, allFiles, dependencyFlow) {
     });
 }
 
-// Resolve Dynamic Call Variables
+// Enhanced Resolve Dynamic Call Variables
 resolveDynamicCallVariable(variableName, programFile) {
     const lines = programFile.content.split('\n');
     const varUpper = variableName.toUpperCase();
+    
+    console.log(`Resolving dynamic call variable: ${variableName}`);
     
     // Look for MOVE statements that set the variable value
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim().toUpperCase();
         
-        // Pattern: MOVE 'PROGRAM-NAME' TO WA-VARIABLE
-        const moveMatch = line.match(new RegExp(`MOVE\\s+['"]*([A-Z][A-Z0-9\\-_]+)['\"]*\\s+TO\\s+${varUpper}`));
-        if (moveMatch) {
-            const programName = moveMatch[1].replace(/['"]/g, '');
-            console.log(`Resolved dynamic call: ${variableName} -> ${programName}`);
+        // Pattern 1: MOVE 'PROGRAM-NAME' TO WA-VARIABLE
+        const moveMatch1 = line.match(new RegExp(`MOVE\\s+['"]+([A-Z][A-Z0-9\\-_]+)['\"]+\\s+TO\\s+${varUpper}`));
+        if (moveMatch1) {
+            const programName = moveMatch1[1];
+            console.log(`✅ Resolved dynamic call (quoted): ${variableName} -> ${programName}`);
             return programName;
         }
         
-        // Pattern: MOVE PROGRAM-NAME TO WA-VARIABLE (without quotes)
+        // Pattern 2: MOVE PROGRAM-NAME TO WA-VARIABLE (without quotes)
         const moveMatch2 = line.match(new RegExp(`MOVE\\s+([A-Z][A-Z0-9\\-_]+)\\s+TO\\s+${varUpper}`));
-        if (moveMatch2) {
+        if (moveMatch2 && !moveMatch2[1].startsWith('WS-') && !moveMatch2[1].startsWith('WA-')) {
             const programName = moveMatch2[1];
-            console.log(`Resolved dynamic call: ${variableName} -> ${programName}`);
+            console.log(`✅ Resolved dynamic call (unquoted): ${variableName} -> ${programName}`);
             return programName;
         }
         
-        // Pattern: Initialize with VALUE clause
-        const valueMatch = line.match(new RegExp(`${varUpper}.*VALUE\\s+['"]*([A-Z][A-Z0-9\\-_]+)['\"]*`));
+        // Pattern 3: Initialize with VALUE clause
+        const valueMatch = line.match(new RegExp(`${varUpper}.*PIC.*VALUE\\s+['"]*([A-Z][A-Z0-9\\-_]+)['\"]*`));
         if (valueMatch) {
-            const programName = valueMatch[1].replace(/['"]/g, '');
-            console.log(`Resolved dynamic call from VALUE: ${variableName} -> ${programName}`);
+            const programName = valueMatch[1];
+            console.log(`✅ Resolved dynamic call from VALUE: ${variableName} -> ${programName}`);
+            return programName;
+        }
+        
+        // Pattern 4: STRING operations building program name
+        const stringMatch = line.match(new RegExp(`STRING\\s+.*['"]*([A-Z][A-Z0-9\\-_]+)['\"]*.*INTO\\s+${varUpper}`));
+        if (stringMatch) {
+            const programName = stringMatch[1];
+            console.log(`✅ Resolved dynamic call from STRING: ${variableName} -> ${programName}`);
             return programName;
         }
     }
     
-    // If we can't resolve it, extract potential program name from variable name
-    // WA-TMSBTSI6 -> TMSBTSI6
-    const extractedMatch = varUpper.match(/WA-(.+)|(.+)-WA|PGM-(.+)|(.+)-PGM/);
-    if (extractedMatch) {
-        const extracted = extractedMatch[1] || extractedMatch[2] || extractedMatch[3] || extractedMatch[4];
-        if (extracted && extracted.length >= 6) {
-            console.log(`Extracted from variable name: ${variableName} -> ${extracted}`);
+    // Fallback: Extract potential program name from variable name patterns
+    const extractionPatterns = [
+        /^WA-(.+)$/,        // WA-PROGRAM -> PROGRAM
+        /^WS-(.+)$/,        // WS-PROGRAM -> PROGRAM  
+        /^(.+)-WA$/,        // PROGRAM-WA -> PROGRAM
+        /^(.+)-WS$/,        // PROGRAM-WS -> PROGRAM
+        /^PGM-(.+)$/,       // PGM-NAME -> NAME
+        /^(.+)-PGM$/,       // NAME-PGM -> NAME
+        /^CALL-(.+)$/,      // CALL-PROGRAM -> PROGRAM
+        /^(.+)-CALL$/,      // PROGRAM-CALL -> PROGRAM
+        /^PROG-(.+)$/,      // PROG-NAME -> NAME
+        /^(.+)-PROG$/       // NAME-PROG -> NAME
+    ];
+    
+    for (const pattern of extractionPatterns) {
+        const match = varUpper.match(pattern);
+        if (match && match[1] && match[1].length >= 4) {
+            const extracted = match[1];
+            console.log(`📝 Extracted from variable pattern: ${variableName} -> ${extracted}`);
             return extracted;
         }
     }
     
+    console.warn(`❌ Could not resolve dynamic call variable: ${variableName}`);
     return null;
 }
+
 // Helper Methods
 extractProgramName(file) {
     const match = file.content.toUpperCase().match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]+)/);
@@ -6159,6 +6183,193 @@ async analyzeProgramFields(programName, relevantFiles) {
     return this.createFallbackFieldAnalysis(programName, basicFields, copybookFiles);
 }
 
+// Find Copybooks Used in Program
+findCopybooksInProgram(programFile, relevantFiles) {
+    const copybookFiles = [];
+    const copybookNames = new Set(); // Prevent duplicates
+    const lines = programFile.content.split('\n');
+    
+    console.log(`Searching for copybooks in program: ${programFile.name}`);
+    
+    lines.forEach((line, lineNum) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // Find COPY statements with various patterns
+        const copyPatterns = [
+            // Standard COPY statements
+            /COPY\s+([A-Z][A-Z0-9\-_]+)/,
+            /COPY\s+"([A-Z][A-Z0-9\-_]+)"/,
+            /COPY\s+'([A-Z][A-Z0-9\-_]+)'/,
+            // COPY with library
+            /COPY\s+([A-Z][A-Z0-9\-_]+)\s+OF/,
+            /COPY\s+"([A-Z][A-Z0-9\-_]+)"\s+OF/,
+            /COPY\s+'([A-Z][A-Z0-9\-_]+)'\s+OF/,
+            // INCLUDE statements (some systems use this)
+            /INCLUDE\s+([A-Z][A-Z0-9\-_]+)/,
+            /INCLUDE\s+"([A-Z][A-Z0-9\-_]+)"/,
+            /INCLUDE\s+'([A-Z][A-Z0-9\-_]+)'/,
+            // ++INCLUDE (some preprocessors)
+            /\+\+INCLUDE\s+([A-Z][A-Z0-9\-_]+)/
+        ];
+        
+        copyPatterns.forEach(pattern => {
+            const copyMatch = trimmed.match(pattern);
+            if (copyMatch) {
+                const copybookName = copyMatch[1].replace(/['"]/g, '').trim();
+                
+                // Skip if already found
+                if (copybookNames.has(copybookName)) {
+                    return;
+                }
+                
+                copybookNames.add(copybookName);
+                console.log(`Found copybook reference: ${copybookName} at line ${lineNum + 1}`);
+                
+                // Try to find the actual copybook file with multiple matching strategies
+                const copybookFile = this.findCopybookFile(copybookName, relevantFiles);
+                
+                if (copybookFile) {
+                    copybookFiles.push({
+                        ...copybookFile,
+                        copybookName: copybookName,
+                        usage: 'INCLUDED',
+                        referenceLine: lineNum + 1,
+                        referenceContext: trimmed
+                    });
+                    console.log(`✅ Matched copybook: ${copybookName} -> ${copybookFile.name}`);
+                } else {
+                    // Add as missing copybook reference
+                    copybookFiles.push({
+                        id: `missing-${copybookName}`,
+                        name: `${copybookName}.cpy`,
+                        copybookName: copybookName,
+                        usage: 'MISSING',
+                        referenceLine: lineNum + 1,
+                        referenceContext: trimmed,
+                        type: 'Missing Copybook',
+                        content: '',
+                        components: []
+                    });
+                    console.warn(`❌ Copybook not found: ${copybookName}`);
+                }
+            }
+        });
+    });
+    
+    console.log(`Copybook search complete: ${copybookFiles.length} references found (${copybookFiles.filter(cb => cb.usage !== 'MISSING').length} available, ${copybookFiles.filter(cb => cb.usage === 'MISSING').length} missing)`);
+    
+    return copybookFiles;
+}
+
+// Enhanced Copybook File Finder
+findCopybookFile(copybookName, relevantFiles) {
+    const copybookUpper = copybookName.toUpperCase();
+    const copybookBase = copybookUpper.replace(/\.(CPY|COPYBOOK|COP|COPY)$/, ''); // Remove common extensions
+    
+    // Strategy 1: Direct file name match (with and without extensions)
+    const directMatches = relevantFiles.filter(f => {
+        const fileNameUpper = f.name.toUpperCase();
+        const fileNameBase = fileNameUpper.replace(/\.(CPY|COPYBOOK|COP|COPY|TXT)$/, '');
+        
+        return fileNameUpper === copybookUpper ||
+               fileNameUpper === `${copybookUpper}.CPY` ||
+               fileNameUpper === `${copybookUpper}.COPYBOOK` ||
+               fileNameUpper === `${copybookUpper}.COP` ||
+               fileNameBase === copybookBase ||
+               fileNameUpper.includes(copybookBase);
+    });
+    
+    if (directMatches.length > 0) {
+        // Prefer exact matches, then copybook files, then closest match
+        const exactMatch = directMatches.find(f => 
+            f.name.toUpperCase() === copybookUpper ||
+            f.name.toUpperCase() === `${copybookUpper}.CPY`
+        );
+        if (exactMatch) return exactMatch;
+        
+        const copybookTypeMatch = directMatches.find(f => f.type === 'Copybook');
+        if (copybookTypeMatch) return copybookTypeMatch;
+        
+        return directMatches[0];
+    }
+    
+    // Strategy 2: Component-based search
+    const componentMatches = relevantFiles.filter(f => 
+        f.components && f.components.some(c => {
+            const compNameUpper = c.name.toUpperCase();
+            const compNameBase = compNameUpper.replace(/\.(CPY|COPYBOOK|COP)$/, '');
+            
+            return compNameUpper === copybookUpper ||
+                   compNameBase === copybookBase ||
+                   (c.type === 'RECORD_LAYOUT' && compNameUpper === copybookUpper);
+        })
+    );
+    
+    if (componentMatches.length > 0) {
+        return componentMatches[0];
+    }
+    
+    // Strategy 3: Content-based search (look for copybook name in content)
+    const contentMatches = relevantFiles.filter(f => {
+        if (f.type === 'Copybook' || f.name.toLowerCase().includes('.cpy')) {
+            const contentUpper = f.content.toUpperCase();
+            // Look for the copybook name in comments or record definitions
+            return contentUpper.includes(copybookBase) ||
+                   contentUpper.includes(`01 ${copybookBase}`) ||
+                   contentUpper.includes(`* ${copybookBase}`);
+        }
+        return false;
+    });
+    
+    if (contentMatches.length > 0) {
+        return contentMatches[0];
+    }
+    
+    // Strategy 4: Partial name matching (for abbreviated copybook names)
+    if (copybookBase.length >= 4) {
+        const partialMatches = relevantFiles.filter(f => {
+            const fileNameUpper = f.name.toUpperCase();
+            const fileNameBase = fileNameUpper.replace(/\.(CPY|COPYBOOK|COP|TXT)$/, '');
+            
+            // Check if copybook name is contained in file name or vice versa
+            return (fileNameBase.includes(copybookBase) || copybookBase.includes(fileNameBase)) &&
+                   (f.type === 'Copybook' || fileNameUpper.includes('.CPY'));
+        });
+        
+        if (partialMatches.length > 0) {
+            return partialMatches[0];
+        }
+    }
+    
+    // Strategy 5: Fuzzy matching for common naming patterns
+    const fuzzyMatches = relevantFiles.filter(f => {
+        if (f.type !== 'Copybook' && !f.name.toLowerCase().includes('.cpy')) {
+            return false;
+        }
+        
+        const fileNameBase = f.name.toUpperCase().replace(/\.(CPY|COPYBOOK|COP|TXT)$/, '');
+        
+        // Common patterns: remove prefixes/suffixes
+        const patterns = [
+            copybookBase.replace(/^(WS|WA|LS|LA)-/, ''), // Remove working storage prefixes
+            copybookBase.replace(/-(WS|WA|LS|LA|REC|RECORD)$/, ''), // Remove suffixes
+            copybookBase.replace(/^(COPY|CPY)-/, ''), // Remove copy prefixes
+            copybookBase.replace(/-(COPY|CPY)$/, '') // Remove copy suffixes
+        ];
+        
+        return patterns.some(pattern => 
+            fileNameBase.includes(pattern) || 
+            pattern.includes(fileNameBase)
+        );
+    });
+    
+    if (fuzzyMatches.length > 0) {
+        console.log(`📝 Fuzzy match found for ${copybookName}: ${fuzzyMatches[0].name}`);
+        return fuzzyMatches[0];
+    }
+    
+    return null;
+}
 // Extract Basic Program Fields (Simple Extraction)
 extractBasicProgramFields(programFile) {
     const fields = [];
