@@ -3394,15 +3394,7 @@ createTables() {
                 this.showInfo(`Export as ${format} feature coming soon`);
             }
 
-            clearAllData() {
-                if (confirm('Are you sure you want to clear all data?')) {
-                    this.uploadedFiles = [];
-                    this.analysisResults = {};
-                    localStorage.removeItem(this.storageKey);
-                    this.showSuccess('All data cleared');
-                    this.validateForm();
-                }
-            }
+           
 // ============================================
 // PART 7: FILE HANDLING AND COMPONENT EXTRACTION
 // Complete file upload, parsing, and component detection
@@ -6017,7 +6009,7 @@ prepareContentForLLM(content, type) {
 
 // Add these methods to the EnhancedMainframeAnalyzer class
 
-// Display Analysis Results
+
 // Display Analysis Results
 displayAnalysisResults(componentName, results) {
     console.log('Displaying analysis results for:', componentName);
@@ -6029,7 +6021,7 @@ displayAnalysisResults(componentName, results) {
     
      // Display dashboard first - NEW
     this.displayDashboard(componentName, results);
-    
+
     // Display main analysis
     this.displayMainAnalysis(displayName, results);
     
@@ -8886,7 +8878,7 @@ downloadTextFile(content, filename, mimeType = 'text/plain') {
     URL.revokeObjectURL(link.href);
 }
 
-// Clear All Data
+
 // Clear All Data
 clearAllData() {
     if (confirm('Are you sure you want to clear all analysis data? This cannot be undone.')) {
