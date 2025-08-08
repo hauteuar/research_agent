@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Enhanced Mainframe Analyzer - Professional Edition</title>
+    <title>Enhanced Code Analyzer - Professional Edition</title>
     <style>
         /* ============================================
            PART 1: CORE STYLES AND LAYOUT
@@ -79,7 +79,7 @@
 
         .header-content {
             display: flex;
-            justify-content: space-between;
+            justify-content: centers;
             align-items: center;
             max-width: 100%;
         }
@@ -2058,8 +2058,8 @@
             <div class="header-content">
                 <h1>
                     <div class="header-icon">🔬</div>
-                    Enhanced Mainframe Analyzer
-                    <span class="header-subtitle">Professional Edition with LLM-Powered Analysis</span>
+                    Enhanced Code Analyzer
+                    <span class="header-subtitle">Powered by LLM-Powered Analysis</span>
                 </h1>
             </div>
         </div>
@@ -2864,7 +2864,7 @@
                                 <div class="chat-bubble">
                                     <div class="chat-message-header">LLM Analysis Assistant</div>
                                     <div class="chat-message-content">
-                                        👋 <strong>Welcome to LLM-Enhanced Mainframe Analysis!</strong>
+                                        👋 <strong>Welcome to LLM-Enhanced Code Analysis!</strong>
                                         <br><br>
                                         I can provide detailed analysis using advanced language models including:
                                         <br><br>
@@ -6125,6 +6125,342 @@ Provide ONLY the JSON response, no additional text.`;
     return await this.callLLMAPI(llmPrompt);
 }
 
+// Analyze Fields in COBOL Program (LLM-Enhanced)
+async analyzeProgramFields(programName, relevantFiles) {
+    console.log(`LLM analyzing fields for COBOL program: ${programName}`);
+    
+    const programFile = relevantFiles.find(f => 
+        f.type === 'COBOL Program' && 
+        (f.name.toUpperCase().includes(programName.toUpperCase()) || 
+         f.content.toUpperCase().includes(`PROGRAM-ID. ${programName.toUpperCase()}`))
+    );
+    
+    if (!programFile) {
+        console.warn('Program file not found for:', programName);
+        return null;
+    }
+    
+    // Simple field extraction for context
+    const basicFields = this.extractBasicProgramFields(programFile);
+    const copybookFiles = this.findCopybooksInProgram(programFile, relevantFiles);
+    
+    console.log(`Found ${basicFields.length} fields and ${copybookFiles.length} copybooks for LLM analysis`);
+    
+    // Let LLM do the heavy lifting
+    const llmFieldAnalysis = await this.analyzeProgramFieldsWithLLM(
+        programName, programFile, basicFields, copybookFiles
+    );
+    
+    if (llmFieldAnalysis && !llmFieldAnalysis.error) {
+        return this.convertLLMToFieldAnalysis(llmFieldAnalysis, programName, basicFields, copybookFiles);
+    }
+    
+    // Fallback to basic structure if LLM fails
+    return this.createFallbackFieldAnalysis(programName, basicFields, copybookFiles);
+}
+
+// Extract Basic Program Fields (Simple Extraction)
+extractBasicProgramFields(programFile) {
+    const fields = [];
+    const lines = programFile.content.split('\n');
+    let inDataDivision = false;
+    let currentSection = 'UNKNOWN';
+    
+    lines.forEach((line, index) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // Track sections
+        if (trimmed.includes('DATA DIVISION')) {
+            inDataDivision = true;
+        } else if (trimmed.includes('PROCEDURE DIVISION')) {
+            inDataDivision = false;
+        }
+        
+        if (inDataDivision) {
+            if (trimmed.includes('WORKING-STORAGE SECTION')) {
+                currentSection = 'WORKING-STORAGE';
+            } else if (trimmed.includes('LINKAGE SECTION')) {
+                currentSection = 'LINKAGE';
+            } else if (trimmed.includes('FILE SECTION')) {
+                currentSection = 'FILE';
+            }
+        }
+        
+        // Simple field extraction
+        const fieldMatch = trimmed.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]*)/);
+        if (fieldMatch && inDataDivision && currentSection !== 'UNKNOWN') {
+            const level = parseInt(fieldMatch[1]);
+            const fieldName = fieldMatch[2];
+            
+            if (level !== 88) {
+                const picMatch = trimmed.match(/PIC\s+([X9VS\(\)]+)/i);
+                
+                fields.push({
+                    name: fieldName,
+                    level: level,
+                    picture: picMatch ? picMatch[1] : '',
+                    section: currentSection,
+                    lineNumber: index + 1
+                });
+            }
+        }
+    });
+    
+    return fields;
+}
+
+// LLM Program Field Analysis
+async analyzeProgramFieldsWithLLM(programName, programFile, basicFields, copybookFiles) {
+    const friendlyName = this.currentFriendlyName || programName;
+    
+    // Prepare program content for LLM (focus on data division and key procedure parts)
+    const programContent = this.prepareProgramContentForLLM(programFile.content);
+    
+    const llmPrompt = `ANALYZE COBOL PROGRAM FIELDS AND USAGE
+
+PROGRAM NAME: ${programName}
+FRIENDLY NAME: ${friendlyName}
+PROGRAM TYPE: COBOL Program
+
+PROGRAM CONTENT (KEY SECTIONS):
+${programContent}
+
+BASIC FIELD INVENTORY:
+${basicFields.slice(0, 20).map(f => `${f.level} ${f.name} ${f.picture ? 'PIC ' + f.picture : ''} (${f.section})`).join('\n')}
+
+COPYBOOKS USED:
+${copybookFiles.map(cb => cb.copybookName).join(', ') || 'None'}
+
+TASK: Analyze this COBOL program's field usage patterns, business logic, and data flow. Focus on:
+1. Which fields are input vs output vs working storage
+2. Business logic and validation rules applied to fields
+3. Field transformation and calculation patterns
+4. Field lifecycle within the program
+5. Integration patterns with copybooks
+
+RETURN JSON FORMAT:
+{
+  "programName": "${programName}",
+  "friendlyName": "${friendlyName}",
+  "fieldAnalysis": {
+    "totalFields": ${basicFields.length},
+    "inputFields": ["list fields used for input operations"],
+    "outputFields": ["list fields used for output operations"],
+    "calculatedFields": ["list fields involved in calculations"],
+    "validatedFields": ["list fields with validation logic"],
+    "workingStorageFields": ["list key working storage fields"],
+    "linkageFields": ["list linkage section fields"],
+    "unusedFields": ["list fields that appear unused"]
+  },
+  "businessLogic": {
+    "fieldValidations": [
+      {
+        "fieldName": "field name",
+        "validationType": "validation type",
+        "rule": "validation rule description",
+        "businessPurpose": "business meaning of validation"
+      }
+    ],
+    "fieldCalculations": [
+      {
+        "fieldName": "field name",
+        "calculationType": "calculation type",
+        "formula": "calculation description",
+        "businessPurpose": "business meaning"
+      }
+    ],
+    "fieldTransformations": [
+      {
+        "sourceField": "source field",
+        "targetField": "target field", 
+        "transformationType": "transformation type",
+        "businessPurpose": "business meaning"
+      }
+    ]
+  },
+  "dataFlow": {
+    "inputSources": ["describe where data comes from"],
+    "outputTargets": ["describe where data goes to"],
+    "processingSteps": ["describe main processing steps"],
+    "copybookIntegration": ["describe how copybooks are used"]
+  },
+  "usagePatterns": {
+    "primaryPattern": "BATCH|ONLINE|UTILITY|INTERFACE",
+    "fieldUsageIntensity": "HIGH|MEDIUM|LOW",
+    "businessCriticality": "CRITICAL|HIGH|MEDIUM|LOW"
+  },
+  "recommendations": [
+    "provide specific recommendations for field optimization",
+    "suggest business logic improvements",
+    "recommend modernization opportunities"
+  ],
+  "qualityScore": 7
+}
+
+Focus on business meaning and actual field usage patterns. Provide ONLY the JSON response.`;
+
+    return await this.callLLMAPI(llmPrompt);
+}
+
+// Prepare Program Content for LLM (Extract Key Sections)
+prepareProgramContentForLLM(content) {
+    const lines = content.split('\n');
+    const keyContent = [];
+    let inDataDivision = false;
+    let inProcedureDivision = false;
+    let procedureLines = 0;
+    const maxProcedureLines = 100; // Limit procedure division content
+    
+    lines.forEach(line => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // Track divisions
+        if (trimmed.includes('DATA DIVISION')) {
+            inDataDivision = true;
+            inProcedureDivision = false;
+            keyContent.push(line);
+        } else if (trimmed.includes('PROCEDURE DIVISION')) {
+            inDataDivision = false;
+            inProcedureDivision = true;
+            procedureLines = 0;
+            keyContent.push(line);
+        }
+        
+        // Include all data division content
+        if (inDataDivision) {
+            keyContent.push(line);
+        }
+        
+        // Include limited procedure division content (focus on business logic)
+        if (inProcedureDivision && procedureLines < maxProcedureLines) {
+            // Include lines with business logic keywords
+            if (trimmed.includes('IF') || trimmed.includes('WHEN') || trimmed.includes('PERFORM') ||
+                trimmed.includes('COMPUTE') || trimmed.includes('MOVE') || trimmed.includes('CALL') ||
+                trimmed.includes('DISPLAY') || trimmed.includes('ACCEPT') || trimmed.includes('EVALUATE') ||
+                trimmed.match(/^[A-Z][A-Z0-9\-_]*\.$/)) { // Paragraph names
+                keyContent.push(line);
+                procedureLines++;
+            }
+        }
+    });
+    
+    const result = keyContent.join('\n');
+    
+    // Truncate if still too long
+    const maxChars = this.maxTokens * this.averageCharsPerToken * 0.4;
+    return result.length > maxChars ? result.substring(0, maxChars) + '\n... [CONTENT TRUNCATED]' : result;
+}
+
+// Convert LLM Response to Field Analysis Structure
+convertLLMToFieldAnalysis(llmResult, programName, basicFields, copybookFiles) {
+    const fieldAnalysis = {
+        fields: basicFields,
+        programs: [{ name: programName, type: 'COBOL Program' }],
+        copybooks: copybookFiles,
+        inputFields: llmResult.fieldAnalysis?.inputFields || [],
+        outputFields: llmResult.fieldAnalysis?.outputFields || [],
+        calculatedFields: llmResult.fieldAnalysis?.calculatedFields || [],
+        validatedFields: llmResult.fieldAnalysis?.validatedFields || [],
+        referenceFields: [],
+        unusedFields: llmResult.fieldAnalysis?.unusedFields || [],
+        fieldUsageDetails: {},
+        businessLogicSummary: {
+            totalFields: basicFields.length,
+            totalValidationRules: llmResult.businessLogic?.fieldValidations?.length || 0,
+            totalCalculations: llmResult.businessLogic?.fieldCalculations?.length || 0,
+            fieldsWithBusinessLogic: 0
+        }
+    };
+    
+    // Build field usage details from LLM analysis
+    basicFields.forEach(field => {
+        const fieldName = field.name;
+        
+        // Determine field usage category
+        let usageCategory = 'WORKING';
+        if (fieldAnalysis.inputFields.includes(fieldName)) usageCategory = 'INPUT';
+        else if (fieldAnalysis.outputFields.includes(fieldName)) usageCategory = 'OUTPUT';
+        else if (fieldAnalysis.calculatedFields.includes(fieldName)) usageCategory = 'CALCULATED';
+        else if (fieldAnalysis.validatedFields.includes(fieldName)) usageCategory = 'VALIDATED';
+        else if (fieldAnalysis.unusedFields.includes(fieldName)) usageCategory = 'UNUSED';
+        
+        // Find business logic for this field
+        const validation = llmResult.businessLogic?.fieldValidations?.find(v => v.fieldName === fieldName);
+        const calculation = llmResult.businessLogic?.fieldCalculations?.find(c => c.fieldName === fieldName);
+        
+        fieldAnalysis.fieldUsageDetails[fieldName] = {
+            category: usageCategory,
+            businessLogic: {
+                validation: validation || null,
+                calculation: calculation || null,
+                businessMeaning: validation?.businessPurpose || calculation?.businessPurpose || 
+                                this.generateFieldPurpose(fieldName)
+            },
+            operations: [],
+            readBy: usageCategory === 'OUTPUT' ? [programName] : [],
+            writtenBy: usageCategory === 'INPUT' ? [programName] : [],
+            referencedBy: usageCategory === 'VALIDATED' ? [programName] : []
+        };
+        
+        // Add to business logic field if has validation or calculation
+        if (validation || calculation) {
+            fieldAnalysis.businessLogicSummary.fieldsWithBusinessLogic++;
+        }
+        
+        // Add business logic to field object
+        field.businessLogic = fieldAnalysis.fieldUsageDetails[fieldName].businessLogic;
+    });
+    
+    // Calculate reference fields
+    fieldAnalysis.referenceFields = basicFields
+        .map(f => f.name)
+        .filter(name => 
+            !fieldAnalysis.inputFields.includes(name) &&
+            !fieldAnalysis.outputFields.includes(name) &&
+            !fieldAnalysis.calculatedFields.includes(name) &&
+            !fieldAnalysis.validatedFields.includes(name) &&
+            !fieldAnalysis.unusedFields.includes(name)
+        );
+    
+    // Store LLM results for reference
+    fieldAnalysis.llmAnalysis = llmResult;
+    
+    console.log('LLM field analysis converted:', {
+        total: fieldAnalysis.fields.length,
+        input: fieldAnalysis.inputFields.length,
+        output: fieldAnalysis.outputFields.length,
+        calculated: fieldAnalysis.calculatedFields.length,
+        validated: fieldAnalysis.validatedFields.length,
+        reference: fieldAnalysis.referenceFields.length,
+        unused: fieldAnalysis.unusedFields.length,
+        withBusinessLogic: fieldAnalysis.businessLogicSummary.fieldsWithBusinessLogic
+    });
+    
+    return fieldAnalysis;
+}
+
+// Fallback Field Analysis
+createFallbackFieldAnalysis(programName, basicFields, copybookFiles) {
+    return {
+        fields: basicFields,
+        programs: [{ name: programName, type: 'COBOL Program' }],
+        copybooks: copybookFiles,
+        inputFields: [],
+        outputFields: [],
+        calculatedFields: [],
+        validatedFields: [],
+        referenceFields: basicFields.map(f => f.name),
+        unusedFields: [],
+        fieldUsageDetails: {},
+        businessLogicSummary: {
+            totalFields: basicFields.length,
+            totalValidationRules: 0,
+            totalCalculations: 0,
+            fieldsWithBusinessLogic: 0
+        },
+        error: 'LLM analysis failed - showing basic field structure only'
+    };
+}
 // Analyze Generic Component with LLM
 async analyzeGenericComponentWithLLM(componentName, relevantFiles, dependencies) {
     console.log(`LLM analyzing generic component: ${componentName}`);
@@ -8120,7 +8456,7 @@ displayFileLifecycle(displayName, results) {
     let html = `
         <h4>File Lifecycle Flow for ${displayName}</h4>
         <div style="background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%); color: white; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;">
-            <div style="font-size: 1.2rem; font-weight: bold;">Usage Pattern: ${flow.usagePattern || 'UNKNOWN'}</div>
+            <div style="font-size: 0.75rem; font-weight: bold;">Usage Pattern: ${flow.usagePattern || 'UNKNOWN'}</div>
         </div>
     `;
     
