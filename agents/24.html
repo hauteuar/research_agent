@@ -1618,6 +1618,436 @@
     color: var(--grey-600);
     line-height: 1.5;
 }
+
+/* ============================================
+   DASHBOARD STYLES
+   ============================================ */
+
+/* Dashboard Header */
+.dashboard-header {
+    background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%);
+    color: white;
+    padding: 2rem;
+    border-radius: 12px;
+    margin-bottom: 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.dashboard-title h3 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+}
+
+.dashboard-subtitle {
+    font-size: 0.95rem;
+    opacity: 0.9;
+}
+
+.dashboard-badges {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.dashboard-badge {
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    padding: 0.5rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.dashboard-badge-icon {
+    font-size: 1.1rem;
+}
+
+/* Dashboard Grid Layout */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    gap: 2rem;
+    margin-bottom: 2rem;
+}
+
+.dashboard-column {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.dashboard-column-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 2px solid var(--grey-200);
+}
+
+.dashboard-column-icon {
+    width: 32px;
+    height: 32px;
+    background: var(--grey-100);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+}
+
+.dashboard-column h4 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--grey-800);
+}
+
+/* Dashboard Cards */
+.dashboard-card {
+    background: white;
+    border: 1px solid var(--grey-200);
+    border-radius: 12px;
+    padding: 1.25rem;
+    transition: all var(--transition-fast);
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+}
+
+.dashboard-card:hover {
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-2px);
+    border-color: var(--primary-blue);
+}
+
+.dashboard-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--primary-blue) 0%, var(--secondary-blue) 100%);
+    transform: scaleX(0);
+    transition: transform var(--transition-fast);
+}
+
+.dashboard-card:hover::before {
+    transform: scaleX(1);
+}
+
+.dashboard-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    position: relative;
+}
+
+.dashboard-card-icon {
+    font-size: 1.25rem;
+}
+
+.dashboard-card-title {
+    font-weight: 600;
+    color: var(--grey-800);
+    flex: 1;
+}
+
+.dashboard-drill-icon {
+    color: var(--grey-400);
+    transition: all var(--transition-fast);
+    font-size: 0.8rem;
+}
+
+.dashboard-card:hover .dashboard-drill-icon {
+    color: var(--primary-blue);
+    transform: translateX(3px);
+}
+
+/* Dashboard Metrics */
+.dashboard-metrics {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.dashboard-metric {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+}
+
+.dashboard-metric-label {
+    font-size: 0.85rem;
+    color: var(--grey-600);
+    flex: 1;
+}
+
+.dashboard-metric-value {
+    font-weight: 600;
+    color: var(--grey-800);
+}
+
+.dashboard-progress {
+    width: 100%;
+    height: 6px;
+    background: var(--grey-200);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-top: 0.25rem;
+}
+
+.dashboard-progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width var(--transition-normal);
+}
+
+.progress-excellent {
+    background: var(--success-green);
+}
+
+.progress-good {
+    background: var(--info-blue);
+}
+
+.progress-warning {
+    background: var(--warning-yellow);
+}
+
+.progress-poor {
+    background: var(--error-red);
+}
+
+/* Metric Badges */
+.metric-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.25rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    gap: 0.25rem;
+}
+
+.metric-badge-excellent {
+    background: rgba(16, 185, 129, 0.1);
+    color: var(--success-green);
+}
+
+.metric-badge-good {
+    background: rgba(59, 130, 246, 0.1);
+    color: var(--info-blue);
+}
+
+.metric-badge-warning {
+    background: rgba(245, 158, 11, 0.1);
+    color: var(--warning-yellow);
+}
+
+.metric-badge-poor {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--error-red);
+}
+
+/* Actionable Insights */
+.dashboard-insights {
+    background: white;
+    border: 1px solid var(--grey-200);
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: var(--shadow-sm);
+}
+
+.insights-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--grey-200);
+}
+
+.insights-icon {
+    font-size: 1.5rem;
+}
+
+.insights-header h4 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--grey-800);
+}
+
+.insights-content {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.insight-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    flex: 1;
+    min-width: 250px;
+}
+
+.insight-critical {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: var(--error-red);
+}
+
+.insight-medium {
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    color: var(--warning-yellow);
+}
+
+.insight-low {
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: var(--success-green);
+}
+
+.insight-metric {
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    color: var(--info-blue);
+}
+
+.insight-next {
+    background: rgba(139, 92, 246, 0.1);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    color: #8b5cf6;
+}
+
+/* Drill-down Modal */
+.drill-down-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    padding: 2rem;
+}
+
+.drill-down-modal.show {
+    display: flex;
+}
+
+.drill-down-content {
+    background: white;
+    border-radius: 16px;
+    padding: 2rem;
+    max-width: 800px;
+    max-height: 90vh;
+    width: 100%;
+    overflow-y: auto;
+    box-shadow: var(--shadow-xl);
+    position: relative;
+}
+
+.drill-down-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid var(--grey-200);
+}
+
+.drill-down-title {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--grey-800);
+}
+
+.drill-down-close {
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: var(--grey-100);
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+}
+
+.drill-down-close:hover {
+    background: var(--error-red);
+    color: white;
+}
+
+.drill-down-body {
+    line-height: 1.6;
+}
+
+/* Responsive Design */
+@media (max-width: 1200px) {
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .dashboard-header {
+        text-align: center;
+        flex-direction: column;
+    }
+    
+    .insights-content {
+        flex-direction: column;
+    }
+    
+    .insight-item {
+        min-width: unset;
+    }
+}
+
+@media (max-width: 768px) {
+    .dashboard-header {
+        padding: 1.5rem;
+    }
+    
+    .dashboard-card {
+        padding: 1rem;
+    }
+    
+    .drill-down-modal {
+        padding: 1rem;
+    }
+    
+    .drill-down-content {
+        padding: 1.5rem;
+        max-height: 95vh;
+    }
+}
+
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
 </head>
@@ -1790,6 +2220,10 @@
             <div class="main-content">
                 <!-- Tabs -->
                 <div class="tabs-container">
+                    <button class="tab active" data-tab="dashboard">
+                        <span class="tab-icon">📊</span>
+                        Dashboard
+                    </button>
                     <button class="tab active" data-tab="lifecycle">
                         <span class="tab-icon">🔄</span>
                         Analysis Results
@@ -1819,6 +2253,156 @@
                 <!-- Tab Content -->
                 <!-- Tab Content -->
                 <div class="tab-content-container">
+                    <!-- Dashboard Tab -->
+                <div id="dashboard" class="tab-content active">
+                    <!-- Executive Summary Header -->
+                    <div class="dashboard-header">
+                        <div class="dashboard-title">
+                            <h3 id="dashboardComponentName">Component Dashboard</h3>
+                            <div class="dashboard-subtitle" id="dashboardSubtitle">Complete analysis overview</div>
+                        </div>
+                        <div class="dashboard-badges" id="dashboardBadges">
+                            <!-- Dynamic badges will be populated here -->
+                        </div>
+                    </div>
+
+                    <!-- Main Dashboard Grid -->
+                    <div class="dashboard-grid">
+                        <!-- Functional Metrics Column -->
+                        <div class="dashboard-column">
+                            <div class="dashboard-column-header">
+                                <div class="dashboard-column-icon">📊</div>
+                                <h4>Functional Metrics</h4>
+                            </div>
+                            
+                            <div class="dashboard-card" onclick="analyzer.drillDown('componentHealth')">
+                                <div class="dashboard-card-header">
+                                    <span class="dashboard-card-icon">🏥</span>
+                                    <span class="dashboard-card-title">Component Health</span>
+                                    <span class="dashboard-drill-icon">▶</span>
+                                </div>
+                                <div class="dashboard-metrics" id="componentHealthMetrics">
+                                    <!-- Dynamic content -->
+                                </div>
+                            </div>
+
+                            <div class="dashboard-card" onclick="analyzer.drillDown('businessImpact')">
+                                <div class="dashboard-card-header">
+                                    <span class="dashboard-card-icon">⚖️</span>
+                                    <span class="dashboard-card-title">Business Impact</span>
+                                    <span class="dashboard-drill-icon">▶</span>
+                                </div>
+                                <div class="dashboard-metrics" id="businessImpactMetrics">
+                                    <!-- Dynamic content -->
+                                </div>
+                            </div>
+
+                            <div class="dashboard-card" onclick="analyzer.drillDown('usagePatterns')">
+                                <div class="dashboard-card-header">
+                                    <span class="dashboard-card-icon">🔄</span>
+                                    <span class="dashboard-card-title">Usage Patterns</span>
+                                    <span class="dashboard-drill-icon">▶</span>
+                                </div>
+                                <div class="dashboard-metrics" id="usagePatternsMetrics">
+                                    <!-- Dynamic content -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Technical Architecture Column -->
+                        <div class="dashboard-column">
+                            <div class="dashboard-column-header">
+                                <div class="dashboard-column-icon">🏗️</div>
+                                <h4>Technical Architecture</h4>
+                            </div>
+
+                            <div class="dashboard-card" onclick="analyzer.drillDown('dependencyFlow')">
+                                <div class="dashboard-card-header">
+                                    <span class="dashboard-card-icon">🗺️</span>
+                                    <span class="dashboard-card-title">Dependency Flow</span>
+                                    <span class="dashboard-drill-icon">▶</span>
+                                </div>
+                                <div class="dashboard-metrics" id="dependencyFlowMetrics">
+                                    <!-- Dynamic content -->
+                                </div>
+                            </div>
+
+                            <div class="dashboard-card" onclick="analyzer.drillDown('fieldAnalysis')">
+                                <div class="dashboard-card-header">
+                                    <span class="dashboard-card-icon">📋</span>
+                                    <span class="dashboard-card-title">Field Analysis</span>
+                                    <span class="dashboard-drill-icon">▶</span>
+                                </div>
+                                <div class="dashboard-metrics" id="fieldAnalysisMetrics">
+                                    <!-- Dynamic content -->
+                                </div>
+                            </div>
+
+                            <div class="dashboard-card" onclick="analyzer.drillDown('programIntegration')">
+                                <div class="dashboard-card-header">
+                                    <span class="dashboard-card-icon">💼</span>
+                                    <span class="dashboard-card-title">Program Integration</span>
+                                    <span class="dashboard-drill-icon">▶</span>
+                                </div>
+                                <div class="dashboard-metrics" id="programIntegrationMetrics">
+                                    <!-- Dynamic content -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Risk & Modernization Column -->
+                        <div class="dashboard-column">
+                            <div class="dashboard-column-header">
+                                <div class="dashboard-column-icon">🚀</div>
+                                <h4>Risk & Modernization</h4>
+                            </div>
+
+                            <div class="dashboard-card" onclick="analyzer.drillDown('riskAssessment')">
+                                <div class="dashboard-card-header">
+                                    <span class="dashboard-card-icon">⚠️</span>
+                                    <span class="dashboard-card-title">Risk Assessment</span>
+                                    <span class="dashboard-drill-icon">▶</span>
+                                </div>
+                                <div class="dashboard-metrics" id="riskAssessmentMetrics">
+                                    <!-- Dynamic content -->
+                                </div>
+                            </div>
+
+                            <div class="dashboard-card" onclick="analyzer.drillDown('modernizationReadiness')">
+                                <div class="dashboard-card-header">
+                                    <span class="dashboard-card-icon">🚀</span>
+                                    <span class="dashboard-card-title">Modernization Readiness</span>
+                                    <span class="dashboard-drill-icon">▶</span>
+                                </div>
+                                <div class="dashboard-metrics" id="modernizationReadinessMetrics">
+                                    <!-- Dynamic content -->
+                                </div>
+                            </div>
+
+                            <div class="dashboard-card" onclick="analyzer.drillDown('performanceIndicators')">
+                                <div class="dashboard-card-header">
+                                    <span class="dashboard-card-icon">📈</span>
+                                    <span class="dashboard-card-title">Performance Indicators</span>
+                                    <span class="dashboard-drill-icon">▶</span>
+                                </div>
+                                <div class="dashboard-metrics" id="performanceIndicatorsMetrics">
+                                    <!-- Dynamic content -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Actionable Insights Footer -->
+                    <div class="dashboard-insights">
+                        <div class="insights-header">
+                            <span class="insights-icon">💡</span>
+                            <h4>Key Actionable Insights</h4>
+                        </div>
+                        <div class="insights-content" id="dashboardInsights">
+                            <!-- Dynamic insights will be populated here -->
+                        </div>
+                    </div>
+                </div>
                     <!-- Analysis Results Tab -->
                     <div id="lifecycle" class="tab-content active">
                         <!-- Summary Section -->
@@ -5443,6 +6027,9 @@ displayAnalysisResults(componentName, results) {
     // Update summary sections for all tabs
     this.updateSummarySection(displayName, results);
     
+     // Display dashboard first - NEW
+    this.displayDashboard(componentName, results);
+    
     // Display main analysis
     this.displayMainAnalysis(displayName, results);
     
@@ -5465,6 +6052,901 @@ displayAnalysisResults(componentName, results) {
     
     // Switch to main results tab
     document.querySelector('.tab[data-tab="lifecycle"]').click();
+}
+
+// ============================================
+// DASHBOARD FUNCTIONALITY
+// ============================================
+
+// Display Dashboard
+displayDashboard(componentName, results) {
+    console.log('Displaying dashboard for:', componentName);
+    
+    const displayName = results.friendlyName || componentName;
+    
+    // Update dashboard header
+    this.updateDashboardHeader(displayName, results);
+    
+    // Update all dashboard metrics
+    this.updateComponentHealthMetrics(results);
+    this.updateBusinessImpactMetrics(results);
+    this.updateUsagePatternsMetrics(results);
+    this.updateDependencyFlowMetrics(results);
+    this.updateFieldAnalysisMetrics(results);
+    this.updateProgramIntegrationMetrics(results);
+    this.updateRiskAssessmentMetrics(results);
+    this.updateModernizationReadinessMetrics(results);
+    this.updatePerformanceIndicatorsMetrics(results);
+    
+    // Update actionable insights
+    this.updateDashboardInsights(results);
+}
+
+// Update Dashboard Header
+updateDashboardHeader(displayName, results) {
+    const nameEl = document.getElementById('dashboardComponentName');
+    const subtitleEl = document.getElementById('dashboardSubtitle');
+    const badgesEl = document.getElementById('dashboardBadges');
+    
+    if (nameEl) nameEl.textContent = `${displayName} Dashboard`;
+    if (subtitleEl) subtitleEl.textContent = `${results.componentType} • Quality ${results.qualityScore}/10 • ${results.filesAnalyzed.length} files analyzed`;
+    
+    if (badgesEl) {
+        const riskLevel = this.calculateRiskLevel(results);
+        const completeness = results.completeness?.score || 0;
+        
+        badgesEl.innerHTML = `
+            <div class="dashboard-badge">
+                <span class="dashboard-badge-icon">🎯</span>
+                <span>Type: ${results.componentType}</span>
+            </div>
+            <div class="dashboard-badge">
+                <span class="dashboard-badge-icon">📊</span>
+                <span>Quality: ${results.qualityScore}/10</span>
+            </div>
+            <div class="dashboard-badge">
+                <span class="dashboard-badge-icon">✅</span>
+                <span>Complete: ${completeness}%</span>
+            </div>
+            <div class="dashboard-badge">
+                <span class="dashboard-badge-icon">${this.getRiskIcon(riskLevel)}</span>
+                <span>Risk: ${riskLevel}</span>
+            </div>
+        `;
+    }
+}
+
+// Component Health Metrics
+updateComponentHealthMetrics(results) {
+    const container = document.getElementById('componentHealthMetrics');
+    if (!container) return;
+    
+    const fieldCoverage = this.calculateFieldCoverage(results);
+    const dependencyCompleteness = this.calculateDependencyCompleteness(results);
+    const businessLogicCoverage = this.calculateBusinessLogicCoverage(results);
+    const usageValidation = this.calculateUsageValidation(results);
+    
+    container.innerHTML = `
+        <div class="dashboard-metric">
+            <span class="dashboard-metric-label">Field Coverage</span>
+            <span class="dashboard-metric-value">${fieldCoverage.percentage}%</span>
+        </div>
+        <div class="dashboard-progress">
+            <div class="dashboard-progress-fill ${this.getProgressClass(fieldCoverage.percentage)}" 
+                 style="width: ${fieldCoverage.percentage}%"></div>
+        </div>
+        
+        <div class="dashboard-metric">
+            <span class="dashboard-metric-label">Dependency Completeness</span>
+            <span class="dashboard-metric-value">${dependencyCompleteness.percentage}%</span>
+        </div>
+        <div class="dashboard-progress">
+            <div class="dashboard-progress-fill ${this.getProgressClass(dependencyCompleteness.percentage)}" 
+                 style="width: ${dependencyCompleteness.percentage}%"></div>
+        </div>
+        
+        <div class="dashboard-metric">
+            <span class="dashboard-metric-label">Business Logic Coverage</span>
+            <span class="dashboard-metric-value">${businessLogicCoverage.percentage}%</span>
+        </div>
+        <div class="dashboard-progress">
+            <div class="dashboard-progress-fill ${this.getProgressClass(businessLogicCoverage.percentage)}" 
+                 style="width: ${businessLogicCoverage.percentage}%"></div>
+        </div>
+        
+        <div class="dashboard-metric">
+            <span class="dashboard-metric-label">Usage Validation</span>
+            <span class="metric-badge ${this.getMetricBadgeClass(usageValidation.percentage)}">${usageValidation.percentage}%</span>
+        </div>
+    `;
+}
+
+// Business Impact Metrics
+updateBusinessImpactMetrics(results) {
+    const container = document.getElementById('businessImpactMetrics');
+    if (!container) return;
+    
+    const businessRules = this.calculateBusinessRules(results);
+    const processCoverage = this.calculateProcessCoverage(results);
+    const dataQuality = this.calculateDataQuality(results);
+    const complianceScore = this.calculateComplianceScore(results);
+    
+    container.innerHTML = `
+        <div class="dashboard-metric">
+            <span class="dashboard-metric-label">Business Rules</span>
+            <span class="dashboard-metric-value">${businessRules.total} rules</span>
+        </div>
+        
+        <div class="dashboard-metric">
+            <span class="dashboard-metric-label">Process Coverage</span>
+            <span class="metric-badge ${this.getMetricBadgeClass(processCoverage.percentage)}">${processCoverage.breakdown}</span>
+        </div>
+        
+        <div class="dashboard-metric">
+            <span class="dashboard-metric-label">Data Quality</span>
+            <span class="dashboard-metric-value">${dataQuality.percentage}%</span>
+        </div>
+        <div class="dashboard-progress">
+            <div class="dashboard-progress-fill ${this.getProgressClass(dataQuality.percentage)}" 
+                 style="width: ${dataQuality.percentage}%"></div>
+        </div>
+        
+        <div class="dashboard-metric">
+            <span class="dashboard-metric-label">Compliance Score</span>
+            <span class="metric-badge ${this.getMetricBadgeClass(complianceScore)}">${complianceScore}/10</span>
+        </div>
+    `;
+}
+
+// Usage Patterns Metrics
+updateUsagePatternsMetrics(results) {
+    const container = document.getElementById('usagePatternsMetrics');
+    if (!container) return;
+    
+    const lifecycle = results.lifecycleFlow || {};
+    
+    container.innerHTML = `
+        <div class="dashboard-metric">
+            <span class="dashboard-metric-label">Creation Sources</span>
+            <span class="dashboard-metric-value">${lifecycle.creationSources?.length || 0} programs</span>
+        </div>
+        
+        <div class="dashboard-metric">
+            <span class="dashboard-metric-label">Read Operations</span>
+            <span class="dashboard-metric-value">${lifecycle.readPrograms?.length || 0} programs</span>
+        </div>
+        
+        <div class="dashboard-metric">
+            <span class="dashboard-metric-label">Update Operations</span>
+            <span class="dashboard-metric-value">${lifecycle.updatePrograms?.length || 0} programs</span>
+        </div>
+        
+        <div class="dashboard-metric">
+            <span class="dashboard-metric-label">Usage Pattern</span>
+            <span class="metric-badge metric-badge-good">${lifecycle.usagePattern || 'UNKNOWN'}</span>
+        </div>
+    `;
+}
+
+// Calculate helper methods
+calculateFieldCoverage(results) {
+    if (!results.fieldAnalysis || !results.fieldAnalysis.fields) {
+        return { percentage: 0, analyzed: 0, total: 0 };
+    }
+    
+    const analyzed = results.fieldAnalysis.fields.length;
+    const unused = results.fieldAnalysis.unusedFields?.length || 0;
+    const total = analyzed + unused;
+    const percentage = total > 0 ? Math.round(((analyzed - unused) / total) * 100) : 0;
+    
+    return { percentage, analyzed, total };
+}
+
+calculateDependencyCompleteness(results) {
+    if (!results.dependencyAnalysis || !results.dependencyAnalysis.summary) {
+        return { percentage: 0, found: 0, missing: 0 };
+    }
+    
+    const found = results.dependencyAnalysis.summary.foundCount;
+    const missing = results.dependencyAnalysis.summary.missingCount;
+    const total = found + missing;
+    const percentage = total > 0 ? Math.round((found / total) * 100) : 100;
+    
+    return { percentage, found, missing };
+}
+
+calculateBusinessLogicCoverage(results) {
+    if (!results.fieldAnalysis || !results.fieldAnalysis.businessLogicSummary) {
+        return { percentage: 0, withLogic: 0, total: 0 };
+    }
+    
+    const withLogic = results.fieldAnalysis.businessLogicSummary.fieldsWithBusinessLogic || 0;
+    const total = results.fieldAnalysis.businessLogicSummary.totalFields || results.totalFields || 0;
+    const percentage = total > 0 ? Math.round((withLogic / total) * 100) : 0;
+    
+    return { percentage, withLogic, total };
+}
+
+calculateUsageValidation(results) {
+    if (!results.fieldAnalysis) {
+        return { percentage: 90 }; // Default good score
+    }
+    
+    const total = results.fieldAnalysis.fields?.length || 0;
+    const unused = results.fieldAnalysis.unusedFields?.length || 0;
+    const percentage = total > 0 ? Math.round(((total - unused) / total) * 100) : 90;
+    
+    return { percentage };
+}
+
+calculateBusinessRules(results) {
+    const validationRules = results.fieldAnalysis?.businessLogicSummary?.totalValidationRules || 0;
+    const calculations = results.fieldAnalysis?.businessLogicSummary?.totalCalculations || 0;
+    return { total: validationRules + calculations, validationRules, calculations };
+}
+
+calculateProcessCoverage(results) {
+    const lifecycle = results.lifecycleFlow || {};
+    const online = lifecycle.cicsScreens?.length || 0;
+    const batch = lifecycle.batchJobs?.length || 0;
+    const total = online + batch + (lifecycle.readPrograms?.length || 0);
+    
+    if (total === 0) return { percentage: 0, breakdown: 'No coverage' };
+    
+    const onlinePct = Math.round((online / total) * 100);
+    const batchPct = Math.round((batch / total) * 100);
+    const otherPct = 100 - onlinePct - batchPct;
+    
+    return { 
+        percentage: 100, 
+        breakdown: `Online(${onlinePct}%), Batch(${batchPct}%), Other(${otherPct}%)`
+    };
+}
+
+calculateDataQuality(results) {
+    const total = results.fieldAnalysis?.fields?.length || 0;
+    const withValidation = results.fieldAnalysis?.businessLogicSummary?.fieldsWithBusinessLogic || 0;
+    const percentage = total > 0 ? Math.round((withValidation / total) * 100) : 0;
+    
+    return { percentage };
+}
+calculateComplianceScore(results) {
+   // Simple compliance scoring based on multiple factors
+   let score = 5; // Base score
+   
+   // Quality score contribution (30%)
+   score += (results.qualityScore || 5) * 0.3;
+   
+   // Dependency completeness (25%)
+   const depCompleteness = this.calculateDependencyCompleteness(results);
+   score += (depCompleteness.percentage / 100) * 2.5;
+   
+   // Business logic coverage (25%)
+   const businessLogic = this.calculateBusinessLogicCoverage(results);
+   score += (businessLogic.percentage / 100) * 2.5;
+   
+   // Field usage efficiency (20%)
+   const fieldCoverage = this.calculateFieldCoverage(results);
+   score += (fieldCoverage.percentage / 100) * 2;
+   
+   return Math.min(Math.round(score * 10) / 10, 10);
+}
+
+calculateRiskLevel(results) {
+   const depCompleteness = this.calculateDependencyCompleteness(results);
+   const fieldCoverage = this.calculateFieldCoverage(results);
+   const missingDeps = results.dependencyAnalysis?.summary?.missingCount || 0;
+   
+   if (missingDeps > 3 || depCompleteness.percentage < 50 || fieldCoverage.percentage < 60) {
+       return 'HIGH';
+   } else if (missingDeps > 1 || depCompleteness.percentage < 80 || fieldCoverage.percentage < 80) {
+       return 'MEDIUM';
+   } else {
+       return 'LOW';
+   }
+}
+
+// More dashboard metric updates...
+updateDependencyFlowMetrics(results) {
+   const container = document.getElementById('dependencyFlowMetrics');
+   if (!container) return;
+   
+   const flow = results.dependencyFlow || {};
+   const upstreamCount = Object.values(flow.upstream || {}).reduce((sum, arr) => sum + arr.length, 0);
+   const downstreamCount = Object.values(flow.downstream || {}).reduce((sum, arr) => sum + arr.length, 0);
+   
+   container.innerHTML = `
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Flow Type</span>
+           <span class="metric-badge metric-badge-good">${flow.flowType || 'UNKNOWN'}</span>
+       </div>
+       
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Upstream Dependencies</span>
+           <span class="dashboard-metric-value">${upstreamCount}</span>
+       </div>
+       
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Downstream Impact</span>
+           <span class="dashboard-metric-value">${downstreamCount}</span>
+       </div>
+       
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Complexity</span>
+           <span class="metric-badge ${this.getComplexityMetricClass(flow.complexity)}">${flow.complexity || 'LOW'}</span>
+       </div>
+   `;
+}
+
+updateFieldAnalysisMetrics(results) {
+   const container = document.getElementById('fieldAnalysisMetrics');
+   if (!container) return;
+   
+   const fieldAnalysis = results.fieldAnalysis || {};
+   const fields = fieldAnalysis.fields || [];
+   
+   // Calculate field type distribution
+   const numericFields = fields.filter(f => f.picture && /9/.test(f.picture)).length;
+   const textFields = fields.filter(f => f.picture && /X/.test(f.picture)).length;
+   const dateFields = fields.filter(f => f.name && /DATE|TIME/.test(f.name)).length;
+   const complexStructures = fields.filter(f => f.redefines || f.occurs > 0).length;
+   
+   container.innerHTML = `
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Total Fields</span>
+           <span class="dashboard-metric-value">${fields.length}</span>
+       </div>
+       
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Field Types</span>
+           <span class="dashboard-metric-value">N(${numericFields}) T(${textFields}) D(${dateFields})</span>
+       </div>
+       
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Complex Structures</span>
+           <span class="dashboard-metric-value">${complexStructures} arrays/redefines</span>
+       </div>
+       
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Validation Density</span>
+           <span class="metric-badge ${this.getMetricBadgeClass(this.calculateValidationDensity(results))}">${this.calculateValidationDensity(results)} per 10</span>
+       </div>
+   `;
+}
+
+updateProgramIntegrationMetrics(results) {
+   const container = document.getElementById('programIntegrationMetrics');
+   if (!container) return;
+   
+   const lifecycle = results.lifecycleFlow || {};
+   const fieldAnalysis = results.fieldAnalysis || {};
+   
+   const cobolPrograms = fieldAnalysis.programs?.length || 0;
+   const jclJobs = lifecycle.batchJobs?.length || 0;
+   const cicsTransactions = lifecycle.cicsScreens?.length || 0;
+   const databaseTables = results.dependencyFlow?.upstream?.databases?.length || 0;
+   
+   container.innerHTML = `
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">COBOL Programs</span>
+           <span class="dashboard-metric-value">${cobolPrograms} active</span>
+       </div>
+       
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">JCL Jobs</span>
+           <span class="dashboard-metric-value">${jclJobs} processes</span>
+       </div>
+       
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">CICS Transactions</span>
+           <span class="dashboard-metric-value">${cicsTransactions} screens</span>
+       </div>
+       
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Database Integration</span>
+           <span class="metric-badge ${databaseTables > 0 ? 'metric-badge-warning' : 'metric-badge-good'}">${databaseTables} tables</span>
+       </div>
+   `;
+}
+
+updateRiskAssessmentMetrics(results) {
+   const container = document.getElementById('riskAssessmentMetrics');
+   if (!container) return;
+   
+   const missingDeps = results.dependencyAnalysis?.summary?.missingCount || 0;
+   const unusedFields = results.fieldAnalysis?.unusedFields?.length || 0;
+   const criticalPaths = this.calculateCriticalPaths(results);
+   const documentationGap = this.calculateDocumentationGap(results);
+   
+   container.innerHTML = `
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Missing Dependencies</span>
+           <span class="metric-badge ${missingDeps > 0 ? 'metric-badge-poor' : 'metric-badge-excellent'}">${missingDeps} critical</span>
+       </div>
+       
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Unused Fields</span>
+           <span class="dashboard-metric-value">${unusedFields} fields</span>
+       </div>
+       
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Single Points of Failure</span>
+           <span class="dashboard-metric-value">${criticalPaths} paths</span>
+       </div>
+       
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Documentation Gap</span>
+           <span class="dashboard-metric-value">${documentationGap}% missing</span>
+       </div>
+   `;
+}
+
+updateModernizationReadinessMetrics(results) {
+   const container = document.getElementById('modernizationReadinessMetrics');
+   if (!container) return;
+   
+   const apiPotential = this.calculateApiPotential(results);
+   const cloudMigration = this.calculateCloudMigration(results);
+   const microserviceExtraction = this.calculateMicroserviceExtraction(results);
+   const refactoringPriority = this.calculateRefactoringPriority(results);
+   
+   container.innerHTML = `
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">API Potential</span>
+           <span class="metric-badge ${this.getApiPotentialClass(apiPotential)}">${apiPotential}</span>
+       </div>
+       
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Cloud Migration</span>
+           <span class="metric-badge ${this.getCloudMigrationClass(cloudMigration)}">${cloudMigration}</span>
+       </div>
+       
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Microservice Extraction</span>
+           <span class="dashboard-metric-value">${microserviceExtraction}% feasible</span>
+       </div>
+       <div class="dashboard-progress">
+           <div class="dashboard-progress-fill ${this.getProgressClass(microserviceExtraction)}" 
+                style="width: ${microserviceExtraction}%"></div>
+       </div>
+       
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Refactoring Priority</span>
+           <span class="metric-badge ${this.getMetricBadgeClass(refactoringPriority * 10)}">${refactoringPriority}/10</span>
+       </div>
+   `;
+}
+
+updatePerformanceIndicatorsMetrics(results) {
+   const container = document.getElementById('performanceIndicatorsMetrics');
+   if (!container) return;
+   
+   const dailyUsage = this.estimateDailyUsage(results);
+   const peakCapacity = this.calculatePeakCapacity(results);
+   const responseImpact = this.calculateResponseImpact(results);
+   const memoryFootprint = this.calculateMemoryFootprint(results);
+   
+   container.innerHTML = `
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Daily Usage Volume</span>
+           <span class="dashboard-metric-value">${dailyUsage} txns</span>
+       </div>
+       
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Peak Load Capacity</span>
+           <span class="dashboard-metric-value">${peakCapacity}% util</span>
+       </div>
+       <div class="dashboard-progress">
+           <div class="dashboard-progress-fill ${peakCapacity > 90 ? 'progress-poor' : peakCapacity > 70 ? 'progress-warning' : 'progress-good'}" 
+                style="width: ${peakCapacity}%"></div>
+       </div>
+       
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Response Impact</span>
+           <span class="dashboard-metric-value">&lt;${responseImpact}ms</span>
+       </div>
+       
+       <div class="dashboard-metric">
+           <span class="dashboard-metric-label">Memory Footprint</span>
+           <span class="dashboard-metric-value">${memoryFootprint}KB</span>
+       </div>
+   `;
+}
+
+// Update Dashboard Insights
+updateDashboardInsights(results) {
+   const container = document.getElementById('dashboardInsights');
+   if (!container) return;
+   
+   const insights = this.generateActionableInsights(results);
+   
+   container.innerHTML = insights.map(insight => `
+       <div class="insight-item insight-${insight.priority}">
+           <span>${insight.icon}</span>
+           <span><strong>${insight.type}:</strong> ${insight.message}</span>
+       </div>
+   `).join('');
+}
+
+// Generate Actionable Insights
+generateActionableInsights(results) {
+   const insights = [];
+   const missingDeps = results.dependencyAnalysis?.summary?.missingCount || 0;
+   const unusedFields = results.fieldAnalysis?.unusedFields?.length || 0;
+   const qualityScore = results.qualityScore || 5;
+   const riskLevel = this.calculateRiskLevel(results);
+   
+   // Critical insights
+   if (missingDeps > 0) {
+       insights.push({
+           priority: 'critical',
+           icon: '🔴',
+           type: 'CRITICAL',
+           message: `${missingDeps} missing dependencies blocking compilation`
+       });
+   }
+   
+   // Medium insights
+   if (unusedFields > 3) {
+       insights.push({
+           priority: 'medium',
+           icon: '🟡',
+           type: 'MEDIUM',
+           message: `${unusedFields} unused fields can be archived`
+       });
+   }
+   
+   // Low/positive insights
+   if (qualityScore >= 7) {
+       insights.push({
+           priority: 'low',
+           icon: '🟢',
+           type: 'LOW',
+           message: 'Well-structured for API modernization'
+       });
+   }
+   
+   // Metric insights
+   insights.push({
+       priority: 'metric',
+       icon: '📊',
+       type: 'METRIC',
+       message: `${Math.round((results.completeness?.score || 0))}% health score - ${qualityScore >= 7 ? 'Good' : qualityScore >= 5 ? 'Fair' : 'Needs attention'} for production`
+   });
+   
+   // Next steps
+   if (missingDeps > 0) {
+       const missingCopybooks = results.dependencyAnalysis?.missing?.copybooks || [];
+       if (missingCopybooks.length > 0) {
+           insights.push({
+               priority: 'next',
+               icon: '💡',
+               type: 'NEXT',
+               message: `Upload missing ${missingCopybooks[0]}.cpy for complete analysis`
+           });
+       }
+   } else {
+       insights.push({
+           priority: 'next',
+           icon: '💡',
+           type: 'NEXT',
+           message: 'Ready for modernization planning phase'
+       });
+   }
+   
+   return insights;
+}
+
+// Drill-down functionality
+drillDown(category) {
+   const results = this.analysisResults[this.currentAnalyzedComponent];
+   if (!results) return;
+   
+   this.showDrillDownModal(category, results);
+}
+
+showDrillDownModal(category, results) {
+   // Create modal if it doesn't exist
+   let modal = document.getElementById('drillDownModal');
+   if (!modal) {
+       modal = document.createElement('div');
+       modal.id = 'drillDownModal';
+       modal.className = 'drill-down-modal';
+       modal.innerHTML = `
+           <div class="drill-down-content">
+               <div class="drill-down-header">
+                   <div class="drill-down-title" id="drillDownTitle"></div>
+                   <button class="drill-down-close" onclick="analyzer.closeDrillDown()">×</button>
+               </div>
+               <div class="drill-down-body" id="drillDownBody"></div>
+           </div>
+       `;
+       document.body.appendChild(modal);
+   }
+   
+   // Populate modal content
+   const titleEl = document.getElementById('drillDownTitle');
+   const bodyEl = document.getElementById('drillDownBody');
+   
+   const content = this.getDrillDownContent(category, results);
+   
+   if (titleEl) titleEl.innerHTML = `<span>${content.icon}</span><span>${content.title}</span>`;
+   if (bodyEl) bodyEl.innerHTML = content.body;
+   
+   modal.classList.add('show');
+}
+
+closeDrillDown() {
+   const modal = document.getElementById('drillDownModal');
+   if (modal) modal.classList.remove('show');
+}
+
+getDrillDownContent(category, results) {
+   switch(category) {
+       case 'componentHealth':
+           return {
+               icon: '🏥',
+               title: 'Component Health Details',
+               body: this.generateComponentHealthDrillDown(results)
+           };
+       case 'businessImpact':
+           return {
+               icon: '⚖️',
+               title: 'Business Impact Analysis',
+               body: this.generateBusinessImpactDrillDown(results)
+           };
+       case 'dependencyFlow':
+           return {
+               icon: '🗺️',
+               title: 'Dependency Flow Details',
+               body: this.generateDependencyFlowDrillDown(results)
+           };
+       // Add more cases for other categories...
+       default:
+           return {
+               icon: '📊',
+               title: 'Detailed Analysis',
+               body: '<p>Detailed analysis for this category is being prepared.</p>'
+           };
+   }
+}
+
+generateComponentHealthDrillDown(results) {
+   const fieldCoverage = this.calculateFieldCoverage(results);
+   const dependencyCompleteness = this.calculateDependencyCompleteness(results);
+   
+   return `
+       <h5>Field Coverage Analysis</h5>
+       <p><strong>Coverage:</strong> ${fieldCoverage.analyzed} out of ${fieldCoverage.total} fields are actively used (${fieldCoverage.percentage}%)</p>
+       <p><strong>Recommendation:</strong> ${fieldCoverage.percentage < 70 ? 'Consider archiving unused fields or investigating why they are not being used.' : 'Good field utilization rate.'}</p>
+       
+       <h5>Dependency Completeness</h5>
+       <p><strong>Status:</strong> ${dependencyCompleteness.found} dependencies found, ${dependencyCompleteness.missing} missing (${dependencyCompleteness.percentage}% complete)</p>
+       ${dependencyCompleteness.missing > 0 ? `<p><strong>Action Required:</strong> Upload missing dependencies to enable full analysis and compilation.</p>` : ''}
+       
+       <h5>Overall Health Score</h5>
+       <p>This component scores <strong>${results.qualityScore}/10</strong> based on structural quality, dependency completeness, and field utilization.</p>
+   `;
+}
+
+generateBusinessImpactDrillDown(results) {
+   const businessRules = this.calculateBusinessRules(results);
+   
+   return `
+       <h5>Business Rules Analysis</h5>
+       <p><strong>Total Rules:</strong> ${businessRules.total} (${businessRules.validationRules} validations, ${businessRules.calculations} calculations)</p>
+       
+       <h5>Process Integration</h5>
+       <p>This component is integrated into multiple business processes:</p>
+       <ul>
+           <li><strong>Online Processing:</strong> ${results.lifecycleFlow?.cicsScreens?.length || 0} CICS screens</li>
+           <li><strong>Batch Processing:</strong> ${results.lifecycleFlow?.batchJobs?.length || 0} batch jobs</li>
+           <li><strong>Data Processing:</strong> ${results.lifecycleFlow?.readPrograms?.length || 0} read programs</li>
+       </ul>
+       
+       <h5>Business Criticality</h5>
+       <p>Based on usage patterns and integration points, this component has a <strong>${this.calculateBusinessCriticality(results)}</strong> business impact level.</p>
+   `;
+}
+
+generateDependencyFlowDrillDown(results) {
+   const flow = results.dependencyFlow || {};
+   const upstreamCount = Object.values(flow.upstream || {}).reduce((sum, arr) => sum + arr.length, 0);
+   const downstreamCount = Object.values(flow.downstream || {}).reduce((sum, arr) => sum + arr.length, 0);
+   
+   return `
+       <h5>Flow Classification</h5>
+       <p><strong>Type:</strong> ${flow.flowType || 'UNKNOWN'} - ${this.getFlowTypeDescription(flow.flowType)}</p>
+       <p><strong>Complexity:</strong> ${flow.complexity || 'LOW'} (${upstreamCount + downstreamCount} total dependencies)</p>
+       
+       <h5>Upstream Dependencies</h5>
+       <p>This component depends on ${upstreamCount} upstream components:</p>
+       <ul>
+           <li>Copybooks: ${flow.upstream?.copybooks?.length || 0}</li>
+           <li>Programs: ${flow.upstream?.programs?.length || 0}</li>
+           <li>Files: ${flow.upstream?.files?.length || 0}</li>
+           <li>Databases: ${flow.upstream?.databases?.length || 0}</li>
+       </ul>
+       
+       <h5>Downstream Impact</h5>
+       <p>${downstreamCount} components depend on this one:</p>
+       <ul>
+           <li>Programs: ${flow.downstream?.programs?.length || 0}</li>
+           <li>Jobs: ${flow.downstream?.jobs?.length || 0}</li>
+           <li>Screens: ${flow.downstream?.screens?.length || 0}</li>
+       </ul>
+       
+       <h5>Change Impact Assessment</h5>
+       <p>${downstreamCount > 5 ? 'HIGH IMPACT' : downstreamCount > 2 ? 'MEDIUM IMPACT' : 'LOW IMPACT'} - Changes to this component will affect ${downstreamCount} downstream components.</p>
+   `;
+}
+
+// Helper calculation methods
+calculateValidationDensity(results) {
+   const totalFields = results.fieldAnalysis?.fields?.length || 10;
+   const totalRules = results.fieldAnalysis?.businessLogicSummary?.totalValidationRules || 0;
+   return Math.round((totalRules / totalFields) * 10);
+}
+
+calculateCriticalPaths(results) {
+   // Simple calculation - in reality this would be more complex
+   const missingDeps = results.dependencyAnalysis?.summary?.missingCount || 0;
+   return missingDeps > 2 ? 2 : missingDeps > 0 ? 1 : 0;
+}
+
+calculateDocumentationGap(results) {
+   // Estimate based on field comments and business logic coverage
+   const businessLogicCoverage = this.calculateBusinessLogicCoverage(results);
+   return Math.max(0, 100 - businessLogicCoverage.percentage - 20); // Assume 20% base documentation
+}
+
+calculateApiPotential(results) {
+   const quality = results.qualityScore || 5;
+   const fieldStructure = results.fieldAnalysis?.fields?.length || 0;
+   
+   if (quality >= 8 && fieldStructure > 10) return 'HIGH';
+   if (quality >= 6 && fieldStructure > 5) return 'MEDIUM';
+   return 'LOW';
+}
+
+calculateCloudMigration(results) {
+   const dbDependencies = results.dependencyFlow?.upstream?.databases?.length || 0;
+   const missingDeps = results.dependencyAnalysis?.summary?.missingCount || 0;
+   
+   if (dbDependencies > 3 || missingDeps > 2) return 'COMPLEX';
+   if (dbDependencies > 1 || missingDeps > 0) return 'MEDIUM';
+   return 'READY';
+}
+
+calculateMicroserviceExtraction(results) {
+   const quality = results.qualityScore || 5;
+   const dependencies = Object.values(results.dependencyFlow?.upstream || {}).reduce((sum, arr) => sum + arr.length, 0);
+   
+   let score = quality * 10; // Base on quality
+   if (dependencies < 5) score += 15; // Low coupling bonus
+   if (dependencies > 10) score -= 15; // High coupling penalty
+   
+   return Math.min(Math.max(score, 0), 100);
+}
+
+calculateRefactoringPriority(results) {
+   const quality = results.qualityScore || 5;
+   const missingDeps = results.dependencyAnalysis?.summary?.missingCount || 0;
+   const unusedFields = results.fieldAnalysis?.unusedFields?.length || 0;
+   
+   let priority = 10 - quality; // Lower quality = higher priority
+   priority += missingDeps * 0.5; // Missing deps increase priority
+   priority += unusedFields * 0.1; // Unused fields increase priority
+   
+   return Math.min(Math.max(Math.round(priority * 10) / 10, 1), 10);
+}
+
+estimateDailyUsage(results) {
+   // Rough estimation based on program count and type
+   const programs = results.fieldAnalysis?.programs?.length || 1;
+   const cics = results.lifecycleFlow?.cicsScreens?.length || 0;
+   const batch = results.lifecycleFlow?.batchJobs?.length || 0;
+   
+   // Simple estimation formula
+   return Math.round((programs * 50) + (cics * 100) + (batch * 20));
+}
+
+calculatePeakCapacity(results) {
+   // Estimate based on complexity and usage
+   const complexity = results.dependencyFlow?.complexity || 'LOW';
+   const usage = this.estimateDailyUsage(results);
+   
+   let baseCapacity = 70;
+   if (complexity === 'HIGH') baseCapacity += 15;
+   if (complexity === 'MEDIUM') baseCapacity += 8;
+   if (usage > 1000) baseCapacity += 10;
+   
+   return Math.min(baseCapacity, 95);
+}
+
+calculateResponseImpact(results) {
+   const fieldCount = results.fieldAnalysis?.fields?.length || 10;
+   return Math.max(1, Math.round(fieldCount * 0.1));
+}
+
+calculateMemoryFootprint(results) {
+   const fieldCount = results.fieldAnalysis?.fields?.length || 10;
+   const avgFieldSize = 50; // bytes per field estimate
+   return Math.round((fieldCount * avgFieldSize) / 1024 * 100) / 100;
+}
+
+calculateBusinessCriticality(results) {
+   const programs = results.fieldAnalysis?.programs?.length || 0;
+   const cics = results.lifecycleFlow?.cicsScreens?.length || 0;
+   const batch = results.lifecycleFlow?.batchJobs?.length || 0;
+   
+   const totalIntegration = programs + (cics * 2) + (batch * 1.5); // Weight CICS higher
+   
+   if (totalIntegration > 20) return 'CRITICAL';
+   if (totalIntegration > 10) return 'HIGH';
+   if (totalIntegration > 5) return 'MEDIUM';
+   return 'LOW';
+}
+
+getFlowTypeDescription(flowType) {
+   const descriptions = {
+       'SOURCE': 'This component generates data for downstream systems',
+       'SINK': 'This component consumes data from upstream systems',
+       'TRANSFORMER': 'This component processes data from upstream and provides it to downstream systems',
+       'ISOLATED': 'This component has minimal dependencies and operates independently'
+   };
+   return descriptions[flowType] || 'Flow pattern not yet classified';
+}
+
+// Helper methods for CSS classes
+getProgressClass(percentage) {
+   if (percentage >= 90) return 'progress-excellent';
+   if (percentage >= 70) return 'progress-good';
+   if (percentage >= 50) return 'progress-warning';
+   return 'progress-poor';
+}
+
+getMetricBadgeClass(value) {
+   if (value >= 90 || value >= 8) return 'metric-badge-excellent';
+   if (value >= 70 || value >= 6) return 'metric-badge-good';
+   if (value >= 50 || value >= 4) return 'metric-badge-warning';
+   return 'metric-badge-poor';
+}
+
+getComplexityMetricClass(complexity) {
+   switch(complexity) {
+       case 'LOW': return 'metric-badge-excellent';
+       case 'MEDIUM': return 'metric-badge-warning';
+       case 'HIGH': return 'metric-badge-poor';
+       default: return 'metric-badge-good';
+   }
+}
+
+getApiPotentialClass(potential) {
+   switch(potential) {
+       case 'HIGH': return 'metric-badge-excellent';
+       case 'MEDIUM': return 'metric-badge-good';
+       case 'LOW': return 'metric-badge-warning';
+       default: return 'metric-badge-good';
+   }
+}
+
+getCloudMigrationClass(migration) {
+   switch(migration) {
+       case 'READY': return 'metric-badge-excellent';
+       case 'MEDIUM': return 'metric-badge-good';
+       case 'COMPLEX': return 'metric-badge-warning';
+       default: return 'metric-badge-good';
+   }
+}
+
+getRiskIcon(riskLevel) {
+   switch(riskLevel) {
+       case 'HIGH': return '🔴';
+       case 'MEDIUM': return '🟡';
+       case 'LOW': return '🟢';
+       default: return '📊';
+   }
 }
 
 // Update Summary Section
