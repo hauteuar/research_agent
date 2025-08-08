@@ -1354,6 +1354,227 @@
             background: var(--grey-100);
             color: var(--grey-600);
         }
+        /* Dependency Flow Visualization */
+.flow-container {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+    overflow-x: auto;
+}
+
+.flow-diagram {
+    min-width: 800px;
+    padding: 2rem;
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    border-radius: 8px;
+    position: relative;
+}
+
+.flow-level {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 3rem;
+    position: relative;
+}
+
+.flow-level:last-child {
+    margin-bottom: 0;
+}
+
+.flow-level-title {
+    position: absolute;
+    left: -120px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-weight: 600;
+    color: var(--grey-600);
+    font-size: 0.9rem;
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+}
+
+.flow-nodes {
+    display: flex;
+    gap: 2rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    flex: 1;
+}
+
+.flow-node {
+    background: white;
+    border: 2px solid var(--grey-300);
+    border-radius: 12px;
+    padding: 1rem;
+    min-width: 120px;
+    text-align: center;
+    position: relative;
+    transition: all var(--transition-fast);
+    cursor: pointer;
+}
+
+.flow-node:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+    border-color: var(--primary-blue);
+}
+
+.flow-node.current {
+    border-color: var(--primary-blue);
+    background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%);
+    color: white;
+    box-shadow: var(--shadow-lg);
+}
+
+.flow-node.upstream {
+    border-color: var(--success-green);
+    background: rgba(16, 185, 129, 0.1);
+}
+
+.flow-node.downstream {
+    border-color: var(--warning-yellow);
+    background: rgba(245, 158, 11, 0.1);
+}
+
+.flow-node.missing {
+    border-color: var(--error-red);
+    background: rgba(239, 68, 68, 0.1);
+    border-style: dashed;
+}
+
+.flow-node-icon {
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.flow-node-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 0.25rem;
+}
+
+.flow-node-type {
+    font-size: 0.75rem;
+    opacity: 0.8;
+}
+
+.flow-node-badge {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    background: var(--primary-blue);
+    color: white;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    font-size: 0.7rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+}
+
+/* Flow Arrows */
+.flow-arrow {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: -2rem;
+    color: var(--primary-blue);
+    font-size: 1.5rem;
+    opacity: 0.7;
+}
+
+/* Flow Legend */
+.flow-legend {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-top: 2rem;
+    padding: 1rem;
+    background: white;
+    border-radius: 8px;
+    border: 1px solid var(--grey-200);
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+}
+
+.legend-color {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+}
+
+/* Impact Analysis Grid */
+.impact-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.impact-card {
+    background: white;
+    border: 1px solid var(--grey-200);
+    border-radius: 10px;
+    padding: 1.25rem;
+    transition: all var(--transition-fast);
+}
+
+.impact-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+}
+
+.impact-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.impact-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+}
+
+.impact-high {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--error-red);
+}
+
+.impact-medium {
+    background: rgba(245, 158, 11, 0.1);
+    color: var(--warning-yellow);
+}
+
+.impact-low {
+    background: rgba(16, 185, 129, 0.1);
+    color: var(--success-green);
+}
+
+.impact-title {
+    font-weight: 600;
+    color: var(--grey-800);
+}
+
+.impact-description {
+    font-size: 0.85rem;
+    color: var(--grey-600);
+    line-height: 1.5;
+}
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
 </head>
@@ -1541,6 +1762,10 @@
                     <button class="tab" data-tab="dependencies">
                         <span class="tab-icon">🔗</span>
                         Dependencies
+                    </button>
+                    <button class="tab" data-tab="depflow">
+                        <span class="tab-icon">🗺️</span>
+                        Dependency Flow
                     </button>
                     <button class="tab" data-tab="fileflow">
                         <span class="tab-icon">🌊</span>
@@ -1821,7 +2046,86 @@
                             </div>
                         </div>
                     </div>
+                    <!-- Dependency Flow Tab -->
+<div id="depflow" class="tab-content">
+    <!-- Summary Section -->
+    <div class="summary-section">
+        <div class="summary-header">
+            <div class="summary-icon">🗺️</div>
+            <div class="summary-title">Dependency Flow Summary</div>
+        </div>
+        <div class="summary-content">
+            <div class="summary-item">
+                <div class="summary-label">Flow Type</div>
+                <div class="summary-value" id="flowType">-</div>
+                <div class="summary-description">Dependency pattern</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Upstream</div>
+                <div class="summary-value" id="upstreamCount">0</div>
+                <div class="summary-description">Dependencies</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Downstream</div>
+                <div class="summary-value" id="downstreamCount">0</div>
+                <div class="summary-description">Dependents</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Complexity</div>
+                <div class="summary-value" id="complexityScore">-</div>
+                <div class="summary-description">Flow complexity</div>
+            </div>
+        </div>
+    </div>
 
+    <!-- High-Level Flow Visualization -->
+    <div class="collapsible-section expanded">
+        <div class="collapsible-header" onclick="toggleCollapsible(this)">
+            <div class="collapsible-title">
+                <span class="collapsible-icon">🌐</span>
+                High-Level Dependency Flow
+            </div>
+            <span class="expand-icon">▼</span>
+        </div>
+        <div class="collapsible-content">
+            <div class="collapsible-body" id="dependencyFlowChart">
+                <p>Dependency flow visualization will appear here after component analysis.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Detailed Flow Analysis -->
+    <div class="collapsible-section">
+        <div class="collapsible-header" onclick="toggleCollapsible(this)">
+            <div class="collapsible-title">
+                <span class="collapsible-icon">🔍</span>
+                Detailed Flow Analysis
+            </div>
+            <span class="expand-icon">▼</span>
+        </div>
+        <div class="collapsible-content">
+            <div class="collapsible-body" id="detailedFlowAnalysis">
+                <p>Detailed flow analysis will appear here.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Impact Analysis -->
+    <div class="collapsible-section">
+        <div class="collapsible-header" onclick="toggleCollapsible(this)">
+            <div class="collapsible-title">
+                <span class="collapsible-icon">⚡</span>
+                Impact Analysis
+            </div>
+            <span class="expand-icon">▼</span>
+        </div>
+        <div class="collapsible-content">
+            <div class="collapsible-body" id="impactAnalysis">
+                <p>Impact analysis will appear here.</p>
+            </div>
+        </div>
+    </div>
+</div>
                     <!-- File Lifecycle Tab -->
                     <div id="fileflow" class="tab-content">
                         <!-- Summary Section -->
@@ -3825,7 +4129,11 @@ async runComprehensiveAnalysis(componentName, relevantFiles) {
         this.updateProgress(55);
         
         const lifecycleFlow = await this.extractLifecycleFlow(componentName, relevantFiles, fieldAnalysis);
+        // Stage 4.5: Extract dependency flow
+        this.updateLoadingStatus('🗺️ Stage 4.5: Mapping dependency flow...');
+        this.updateProgress(60);
 
+        const dependencyFlow = await this.extractDependencyFlow(componentName, relevantFiles, this.uploadedFiles);
         // Stage 5: LLM analysis
         this.updateLoadingStatus('🤖 Stage 5: Running LLM analysis...');
         this.updateProgress(70);
@@ -3865,6 +4173,7 @@ async runComprehensiveAnalysis(componentName, relevantFiles) {
             filesAnalyzed: relevantFiles.map(f => f.name),
             componentType: componentType,
             dependencyAnalysis: dependencyAnalysis,
+            dependencyFlow: dependencyFlow,  // Add this line
             fieldAnalysis: fieldAnalysis,
             lifecycleFlow: lifecycleFlow,
             llmAnalysis: llmAnalysis,
@@ -4229,6 +4538,299 @@ async extractDependencies(relevantFiles) {
     
     console.log('Dependency analysis complete:', dependencies.summary);
     return dependencies;
+}
+
+// Enhanced Dependency Flow Analysis
+async extractDependencyFlow(componentName, relevantFiles, allFiles) {
+    console.log('Extracting comprehensive dependency flow for:', componentName);
+    
+    const dependencyFlow = {
+        componentName: componentName,
+        componentType: this.detectComponentType(componentName, relevantFiles),
+        
+        // Upstream dependencies (what this component needs)
+        upstream: {
+            copybooks: [],
+            programs: [],
+            files: [],
+            databases: []
+        },
+        
+        // Downstream dependents (what depends on this component)
+        downstream: {
+            programs: [],
+            jobs: [],
+            screens: [],
+            reports: []
+        },
+        
+        // Flow characteristics
+        flowType: 'UNKNOWN',
+        complexity: 'LOW',
+        criticalPath: [],
+        impactAnalysis: {
+            high: [],
+            medium: [],
+            low: []
+        }
+    };
+    
+    // Analyze upstream dependencies
+    await this.analyzeUpstreamDependencies(componentName, relevantFiles, allFiles, dependencyFlow);
+    
+    // Analyze downstream dependents
+    await this.analyzeDownstreamDependents(componentName, allFiles, dependencyFlow);
+    
+    // Determine flow characteristics
+    this.analyzeDependencyFlowCharacteristics(dependencyFlow);
+    
+    // Perform impact analysis
+    this.performImpactAnalysis(dependencyFlow);
+    
+    return dependencyFlow;
+}
+
+// Analyze Upstream Dependencies
+async analyzeUpstreamDependencies(componentName, relevantFiles, allFiles, dependencyFlow) {
+    const componentUpper = componentName.toUpperCase();
+    
+    relevantFiles.forEach(file => {
+        const lines = file.content.split('\n');
+        
+        lines.forEach((line, lineNum) => {
+            const trimmed = line.trim().toUpperCase();
+            
+            // COPY statements - copybook dependencies
+            const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]+)/);
+            if (copyMatch) {
+                const copybookName = copyMatch[1];
+                const isAvailable = allFiles.some(f => 
+                    f.name.toUpperCase().includes(copybookName) ||
+                    (f.components && f.components.some(c => c.name === copybookName))
+                );
+                
+                dependencyFlow.upstream.copybooks.push({
+                    name: copybookName,
+                    available: isAvailable,
+                    usage: 'INCLUDE',
+                    line: lineNum + 1,
+                    file: file.name
+                });
+            }
+            
+            // CALL statements - program dependencies
+            const callMatch = trimmed.match(/CALL\s+['"]*([A-Z][A-Z0-9\-_]+)['"]*/);
+            if (callMatch) {
+                const programName = callMatch[1];
+                const isAvailable = allFiles.some(f => 
+                    f.components && f.components.some(c => 
+                        c.type === 'PROGRAM' && c.name === programName
+                    )
+                );
+                
+                dependencyFlow.upstream.programs.push({
+                    name: programName,
+                    available: isAvailable,
+                    usage: 'CALL',
+                    line: lineNum + 1,
+                    file: file.name
+                });
+            }
+            
+            // File dependencies
+            const filePatterns = [
+                /SELECT\s+([A-Z][A-Z0-9\-_]+)/,
+                /FD\s+([A-Z][A-Z0-9\-_]+)/,
+                /OPEN\s+(INPUT|OUTPUT|I-O)\s+([A-Z][A-Z0-9\-_]+)/
+            ];
+            
+            filePatterns.forEach(pattern => {
+                const match = trimmed.match(pattern);
+                if (match) {
+                    const fileName = match[match.length - 1]; // Get the last capture group
+                    if (!dependencyFlow.upstream.files.find(f => f.name === fileName)) {
+                        dependencyFlow.upstream.files.push({
+                            name: fileName,
+                            available: false, // File availability would need external checking
+                            usage: 'FILE_ACCESS',
+                            line: lineNum + 1,
+                            file: file.name
+                        });
+                    }
+                }
+            });
+            
+            // Database dependencies (EXEC SQL)
+            if (trimmed.includes('EXEC SQL')) {
+                const tableMatch = trimmed.match(/FROM\s+([A-Z][A-Z0-9\-_]+)/);
+                if (tableMatch) {
+                    const tableName = tableMatch[1];
+                    if (!dependencyFlow.upstream.databases.find(d => d.name === tableName)) {
+                        dependencyFlow.upstream.databases.push({
+                            name: tableName,
+                            available: false,
+                            usage: 'SQL_ACCESS',
+                            line: lineNum + 1,
+                            file: file.name
+                        });
+                    }
+                }
+            }
+        });
+    });
+}
+
+// Analyze Downstream Dependents
+async analyzeDownstreamDependents(componentName, allFiles, dependencyFlow) {
+    const componentUpper = componentName.toUpperCase();
+    const componentBase = componentUpper.replace(/\.(CPY|COPYBOOK|COP)$/, '');
+    
+    allFiles.forEach(file => {
+        const contentUpper = file.content.toUpperCase();
+        const fileName = file.name.toUpperCase();
+        
+        // Programs that use this copybook
+        const copyPatterns = [
+            `COPY ${componentUpper}`,
+            `COPY ${componentBase}`,
+            `COPY "${componentUpper}"`,
+            `COPY "${componentBase}"`,
+            `COPY '${componentUpper}'`,
+            `COPY '${componentBase}'`
+        ];
+        
+        const usesCopybook = copyPatterns.some(pattern => contentUpper.includes(pattern));
+        
+        if (usesCopybook && file.type === 'COBOL Program') {
+            const programName = this.extractProgramName(file);
+            if (programName) {
+                dependencyFlow.downstream.programs.push({
+                    name: programName,
+                    file: file.name,
+                    type: 'COBOL_PROGRAM',
+                    usage: 'INCLUDES_COPYBOOK'
+                });
+            }
+        }
+        
+        // JCL jobs that reference this component
+        if (file.type === 'JCL Job' && (contentUpper.includes(componentUpper) || contentUpper.includes(componentBase))) {
+            const jobName = this.extractJobName(file);
+            if (jobName) {
+                dependencyFlow.downstream.jobs.push({
+                    name: jobName,
+                    file: file.name,
+                    type: 'JCL_JOB',
+                    usage: 'EXECUTES_PROGRAM'
+                });
+            }
+        }
+        
+        // CICS screens (look for CICS operations in programs)
+        if (contentUpper.includes('EXEC CICS') && usesCopybook) {
+            const programName = this.extractProgramName(file);
+            if (programName) {
+                dependencyFlow.downstream.screens.push({
+                    name: programName,
+                    file: file.name,
+                    type: 'CICS_SCREEN',
+                    usage: 'ONLINE_TRANSACTION'
+                });
+            }
+        }
+    });
+}
+
+// Helper Methods
+extractProgramName(file) {
+    const match = file.content.toUpperCase().match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]+)/);
+    return match ? match[1] : null;
+}
+
+extractJobName(file) {
+    const match = file.content.toUpperCase().match(/\/\/([A-Z][A-Z0-9\-_]+)\s+JOB/);
+    return match ? match[1] : null;
+}
+
+// Analyze Flow Characteristics
+analyzeDependencyFlowCharacteristics(dependencyFlow) {
+    const totalUpstream = Object.values(dependencyFlow.upstream).reduce((sum, arr) => sum + arr.length, 0);
+    const totalDownstream = Object.values(dependencyFlow.downstream).reduce((sum, arr) => sum + arr.length, 0);
+    
+    // Determine flow type
+    if (totalUpstream === 0 && totalDownstream > 0) {
+        dependencyFlow.flowType = 'SOURCE';
+    } else if (totalUpstream > 0 && totalDownstream === 0) {
+        dependencyFlow.flowType = 'SINK';
+    } else if (totalUpstream > 0 && totalDownstream > 0) {
+        dependencyFlow.flowType = 'TRANSFORMER';
+    } else {
+        dependencyFlow.flowType = 'ISOLATED';
+    }
+    
+    // Determine complexity
+    const totalDependencies = totalUpstream + totalDownstream;
+    if (totalDependencies <= 3) {
+        dependencyFlow.complexity = 'LOW';
+    } else if (totalDependencies <= 8) {
+        dependencyFlow.complexity = 'MEDIUM';
+    } else {
+        dependencyFlow.complexity = 'HIGH';
+    }
+    
+    // Build critical path
+    dependencyFlow.criticalPath = [
+        ...dependencyFlow.upstream.copybooks.filter(c => c.available),
+        { name: dependencyFlow.componentName, type: 'CURRENT' },
+        ...dependencyFlow.downstream.programs.slice(0, 3)
+    ];
+}
+
+// Perform Impact Analysis
+performImpactAnalysis(dependencyFlow) {
+    const analysis = dependencyFlow.impactAnalysis;
+    
+    // High impact items
+    dependencyFlow.upstream.copybooks.forEach(copybook => {
+        if (!copybook.available) {
+            analysis.high.push({
+                type: 'MISSING_DEPENDENCY',
+                item: copybook.name,
+                description: `Missing copybook ${copybook.name} will prevent compilation`
+            });
+        }
+    });
+    
+    // Count downstream impacts
+    const downstreamCount = Object.values(dependencyFlow.downstream).reduce((sum, arr) => sum + arr.length, 0);
+    if (downstreamCount > 5) {
+        analysis.high.push({
+            type: 'HIGH_DOWNSTREAM_IMPACT',
+            item: dependencyFlow.componentName,
+            description: `Changes to this component will affect ${downstreamCount} downstream components`
+        });
+    } else if (downstreamCount > 2) {
+        analysis.medium.push({
+            type: 'MEDIUM_DOWNSTREAM_IMPACT',
+            item: dependencyFlow.componentName,
+            description: `Changes will affect ${downstreamCount} downstream components`
+        });
+    } else {
+        analysis.low.push({
+            type: 'LOW_DOWNSTREAM_IMPACT',
+            item: dependencyFlow.componentName,
+            description: `Limited downstream impact (${downstreamCount} components)`
+        });
+    }
+    
+    // Database dependencies
+    if (dependencyFlow.upstream.databases.length > 0) {
+        analysis.medium.push({
+            type: 'DATABASE_DEPENDENCY',
+            item: 'Database Access',
+            description: `Component has ${dependencyFlow.upstream.databases.length} database dependencies`
+        });
+    }
 }
 
 // Extract Lifecycle Flow
@@ -4809,6 +5411,9 @@ displayAnalysisResults(componentName, results) {
     // Display dependencies
     this.displayDependencies(displayName, results);
     
+    // Display dependency flow
+    this.displayDependencyFlow(displayName, results); 
+
     // Display file lifecycle
     this.displayFileLifecycle(displayName, results);
     
@@ -5190,7 +5795,468 @@ displayDependencies(displayName, results) {
         missingContainer.innerHTML = missingHtml;
     }
 }
+// Display Dependency Flow
+displayDependencyFlow(displayName, results) {
+    if (!results.dependencyFlow) return;
+    
+    const flow = results.dependencyFlow;
+    
+    // Update summary
+    const flowType = document.getElementById('flowType');
+    const upstreamCount = document.getElementById('upstreamCount');
+    const downstreamCount = document.getElementById('downstreamCount');
+    const complexityScore = document.getElementById('complexityScore');
+    
+    if (flowType) flowType.textContent = flow.flowType;
+    if (upstreamCount) {
+        const total = Object.values(flow.upstream).reduce((sum, arr) => sum + arr.length, 0);
+        upstreamCount.textContent = total;
+    }
+    if (downstreamCount) {
+        const total = Object.values(flow.downstream).reduce((sum, arr) => sum + arr.length, 0);
+        downstreamCount.textContent = total;
+    }
+    if (complexityScore) complexityScore.textContent = flow.complexity;
+    
+    // Display flow chart
+    this.renderDependencyFlowChart(flow);
+    
+    // Display detailed analysis
+    this.renderDetailedFlowAnalysis(flow);
+    
+    // Display impact analysis
+    this.renderImpactAnalysis(flow);
+}
 
+// Render Dependency Flow Chart
+renderDependencyFlowChart(flow) {
+    const container = document.getElementById('dependencyFlowChart');
+    if (!container) return;
+    
+    let html = `
+        <div class="flow-container">
+            <h4>High-Level Dependency Flow for ${flow.componentName}</h4>
+            <div class="flow-diagram">
+    `;
+    
+    // Upstream level
+    if (flow.upstream.copybooks.length > 0 || flow.upstream.programs.length > 0) {
+        html += `
+            <div class="flow-level">
+                <div class="flow-level-title">UPSTREAM DEPENDENCIES</div>
+                <div class="flow-nodes">
+        `;
+        
+        flow.upstream.copybooks.slice(0, 5).forEach(copybook => {
+            html += `
+                <div class="flow-node ${copybook.available ? 'upstream' : 'missing'}" 
+                     title="${copybook.usage} - Line ${copybook.line}">
+                    <div class="flow-node-icon">📚</div>
+                    <div class="flow-node-name">${copybook.name}</div>
+                    <div class="flow-node-type">Copybook</div>
+                    ${!copybook.available ? '<div class="flow-node-badge">!</div>' : ''}
+                </div>
+            `;
+        });
+        
+        flow.upstream.programs.slice(0, 3).forEach(program => {
+            html += `
+                <div class="flow-node ${program.available ? 'upstream' : 'missing'}" 
+                     title="${program.usage} - Line ${program.line}">
+                    <div class="flow-node-icon">💼</div>
+                    <div class="flow-node-name">${program.name}</div>
+                    <div class="flow-node-type">Program</div>
+                    ${!program.available ? '<div class="flow-node-badge">!</div>' : ''}
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+                <div class="flow-arrow">⬇️</div>
+            </div>
+        `;
+    }
+    
+    // Current component level
+    html += `
+        <div class="flow-level">
+            <div class="flow-level-title">CURRENT COMPONENT</div>
+            <div class="flow-nodes">
+                <div class="flow-node current">
+                    <div class="flow-node-icon">${this.getComponentFlowIcon(flow.componentType)}</div>
+                    <div class="flow-node-name">${flow.componentName}</div>
+                    <div class="flow-node-type">${flow.componentType}</div>
+                </div>
+            </div>
+            <div class="flow-arrow">⬇️</div>
+        </div>
+    `;
+    
+    // Downstream level
+    if (flow.downstream.programs.length > 0 || flow.downstream.jobs.length > 0) {
+        html += `
+            <div class="flow-level">
+                <div class="flow-level-title">DOWNSTREAM DEPENDENTS</div>
+                <div class="flow-nodes">
+        `;
+        
+        flow.downstream.programs.slice(0, 5).forEach(program => {
+            html += `
+                <div class="flow-node downstream" title="${program.usage}">
+                    <div class="flow-node-icon">💼</div>
+                    <div class="flow-node-name">${program.name}</div>
+                    <div class="flow-node-type">Program</div>
+                </div>
+            `;
+        });
+        
+        flow.downstream.jobs.slice(0, 3).forEach(job => {
+            html += `
+                <div class="flow-node downstream" title="${job.usage}">
+                    <div class="flow-node-icon">📋</div>
+                    <div class="flow-node-name">${job.name}</div>
+                    <div class="flow-node-type">Job</div>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+    }
+    
+    html += `
+            </div>
+            
+            <!-- Flow Legend -->
+            <div class="flow-legend">
+                <div class="legend-item">
+                    <div class="legend-color" style="background: var(--primary-blue);"></div>
+                    <span>Current Component</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: rgba(16, 185, 129, 0.3); border: 2px solid var(--success-green);"></div>
+                    <span>Upstream Dependencies</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: rgba(245, 158, 11, 0.3); border: 2px solid var(--warning-yellow);"></div>
+                    <span>Downstream Dependents</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: rgba(239, 68, 68, 0.3); border: 2px dashed var(--error-red);"></div>
+                    <span>Missing Dependencies</span>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    container.innerHTML = html;
+}
+
+// Helper method for flow icons
+getComponentFlowIcon(componentType) {
+    const icons = {
+        'Copybook': '📚',
+        'COBOL Program': '💼',
+        'JCL Job': '📋',
+        'Field': '🎯',
+        'File Definition': '📁'
+    };
+    return icons[componentType] || '📋';
+}
+
+// Render Impact Analysis
+renderImpactAnalysis(flow) {
+    const container = document.getElementById('impactAnalysis');
+    if (!container) return;
+    
+    const impact = flow.impactAnalysis;
+    
+    let html = `
+        <h4>Impact Analysis for ${flow.componentName}</h4>
+        <div class="impact-grid">
+    `;
+    
+    // High Impact
+    if (impact.high.length > 0) {
+        html += `
+            <div class="impact-card">
+                <div class="impact-header">
+                    <div class="impact-icon impact-high">⚠️</div>
+                    <div class="impact-title">High Impact (${impact.high.length})</div>
+                </div>
+                <div class="impact-description">
+        `;
+        impact.high.forEach(item => {
+            html += `<p><strong>${item.type}:</strong> ${item.description}</p>`;
+            });
+       html += `
+               </div>
+           </div>
+       `;
+   }
+   
+   // Medium Impact
+   if (impact.medium.length > 0) {
+       html += `
+           <div class="impact-card">
+               <div class="impact-header">
+                   <div class="impact-icon impact-medium">⚡</div>
+                   <div class="impact-title">Medium Impact (${impact.medium.length})</div>
+               </div>
+               <div class="impact-description">
+       `;
+       impact.medium.forEach(item => {
+           html += `<p><strong>${item.type}:</strong> ${item.description}</p>`;
+       });
+       html += `
+               </div>
+           </div>
+       `;
+   }
+   
+   // Low Impact
+   if (impact.low.length > 0) {
+       html += `
+           <div class="impact-card">
+               <div class="impact-header">
+                   <div class="impact-icon impact-low">✅</div>
+                   <div class="impact-title">Low Impact (${impact.low.length})</div>
+               </div>
+               <div class="impact-description">
+       `;
+       impact.low.forEach(item => {
+           html += `<p><strong>${item.type}:</strong> ${item.description}</p>`;
+       });
+       html += `
+               </div>
+           </div>
+       `;
+   }
+   
+   html += `
+       </div>
+       
+       <!-- Flow Characteristics -->
+       <div style="margin-top: 1.5rem;">
+           <h5>Flow Characteristics</h5>
+           <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px;">
+               <p><strong>Flow Type:</strong> <span class="badge badge-primary">${flow.flowType}</span></p>
+               <p><strong>Complexity:</strong> <span class="badge ${this.getComplexityBadgeClass(flow.complexity)}">${flow.complexity}</span></p>
+               <p><strong>Total Dependencies:</strong> ${Object.values(flow.upstream).reduce((sum, arr) => sum + arr.length, 0)} upstream, ${Object.values(flow.downstream).reduce((sum, arr) => sum + arr.length, 0)} downstream</p>
+           </div>
+       </div>
+   `;
+   
+   container.innerHTML = html;
+}
+
+// Render Detailed Flow Analysis
+renderDetailedFlowAnalysis(flow) {
+   const container = document.getElementById('detailedFlowAnalysis');
+   if (!container) return;
+   
+   let html = `
+       <h4>Detailed Dependency Flow Analysis</h4>
+       
+       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+   `;
+   
+   // Upstream Details
+   html += `
+       <div>
+           <h5 style="color: var(--success-green);">🔼 Upstream Dependencies</h5>
+   `;
+   
+   if (flow.upstream.copybooks.length > 0) {
+       html += `
+           <div style="margin-bottom: 1rem;">
+               <h6>📚 Copybooks (${flow.upstream.copybooks.length})</h6>
+               <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px;">
+       `;
+       flow.upstream.copybooks.forEach(copybook => {
+           const statusClass = copybook.available ? 'success' : 'danger';
+           const statusIcon = copybook.available ? '✅' : '❌';
+           html += `
+               <div style="margin-bottom: 0.5rem;">
+                   <span class="badge badge-${statusClass}">${statusIcon} ${copybook.name}</span>
+                   <small style="margin-left: 0.5rem; color: var(--grey-600);">
+                       ${copybook.usage} in ${copybook.file} (line ${copybook.line})
+                   </small>
+               </div>
+           `;
+       });
+       html += `</div></div>`;
+   }
+   
+   if (flow.upstream.programs.length > 0) {
+       html += `
+           <div style="margin-bottom: 1rem;">
+               <h6>💼 Programs (${flow.upstream.programs.length})</h6>
+               <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px;">
+       `;
+       flow.upstream.programs.forEach(program => {
+           const statusClass = program.available ? 'success' : 'danger';
+           const statusIcon = program.available ? '✅' : '❌';
+           html += `
+               <div style="margin-bottom: 0.5rem;">
+                   <span class="badge badge-${statusClass}">${statusIcon} ${program.name}</span>
+                   <small style="margin-left: 0.5rem; color: var(--grey-600);">
+                       ${program.usage} in ${program.file} (line ${program.line})
+                   </small>
+               </div>
+           `;
+       });
+       html += `</div></div>`;
+   }
+   
+   if (flow.upstream.files.length > 0) {
+       html += `
+           <div style="margin-bottom: 1rem;">
+               <h6>📁 Files (${flow.upstream.files.length})</h6>
+               <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px;">
+       `;
+       flow.upstream.files.forEach(file => {
+           html += `
+               <div style="margin-bottom: 0.5rem;">
+                   <span class="badge badge-grey">📁 ${file.name}</span>
+                   <small style="margin-left: 0.5rem; color: var(--grey-600);">
+                       ${file.usage} in ${file.file} (line ${file.line})
+                   </small>
+               </div>
+           `;
+       });
+       html += `</div></div>`;
+   }
+   
+   if (flow.upstream.databases.length > 0) {
+       html += `
+           <div style="margin-bottom: 1rem;">
+               <h6>🗄️ Databases (${flow.upstream.databases.length})</h6>
+               <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px;">
+       `;
+       flow.upstream.databases.forEach(db => {
+           html += `
+               <div style="margin-bottom: 0.5rem;">
+                   <span class="badge badge-info">🗄️ ${db.name}</span>
+                   <small style="margin-left: 0.5rem; color: var(--grey-600);">
+                       ${db.usage} in ${db.file} (line ${db.line})
+                   </small>
+               </div>
+           `;
+       });
+       html += `</div></div>`;
+   }
+   
+   html += `</div>`;
+   
+   // Downstream Details
+   html += `
+       <div>
+           <h5 style="color: var(--warning-yellow);">🔽 Downstream Dependents</h5>
+   `;
+   
+   if (flow.downstream.programs.length > 0) {
+       html += `
+           <div style="margin-bottom: 1rem;">
+               <h6>💼 Programs (${flow.downstream.programs.length})</h6>
+               <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px;">
+       `;
+       flow.downstream.programs.forEach(program => {
+           html += `
+               <div style="margin-bottom: 0.5rem;">
+                   <span class="badge badge-warning">💼 ${program.name}</span>
+                   <small style="margin-left: 0.5rem; color: var(--grey-600);">
+                       ${program.usage} - ${program.type}
+                   </small>
+               </div>
+           `;
+       });
+       html += `</div></div>`;
+   }
+   
+   if (flow.downstream.jobs.length > 0) {
+       html += `
+           <div style="margin-bottom: 1rem;">
+               <h6>📋 Jobs (${flow.downstream.jobs.length})</h6>
+               <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px;">
+       `;
+       flow.downstream.jobs.forEach(job => {
+           html += `
+               <div style="margin-bottom: 0.5rem;">
+                   <span class="badge badge-warning">📋 ${job.name}</span>
+                   <small style="margin-left: 0.5rem; color: var(--grey-600);">
+                       ${job.usage} - ${job.type}
+                   </small>
+               </div>
+           `;
+       });
+       html += `</div></div>`;
+   }
+   
+   if (flow.downstream.screens.length > 0) {
+       html += `
+           <div style="margin-bottom: 1rem;">
+               <h6>🖥️ CICS Screens (${flow.downstream.screens.length})</h6>
+               <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px;">
+       `;
+       flow.downstream.screens.forEach(screen => {
+           html += `
+               <div style="margin-bottom: 0.5rem;">
+                   <span class="badge badge-warning">🖥️ ${screen.name}</span>
+                   <small style="margin-left: 0.5rem; color: var(--grey-600);">
+                       ${screen.usage} - ${screen.type}
+                   </small>
+               </div>
+           `;
+       });
+       html += `</div></div>`;
+   }
+   
+   html += `</div></div>`;
+   
+   // Critical Path Analysis
+   if (flow.criticalPath && flow.criticalPath.length > 0) {
+       html += `
+           <div style="margin-top: 2rem;">
+               <h5>🛤️ Critical Path</h5>
+               <div style="background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%); padding: 1rem; border-radius: 8px; color: white;">
+                   <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+       `;
+       
+       flow.criticalPath.forEach((item, index) => {
+           const isLast = index === flow.criticalPath.length - 1;
+           html += `
+               <div style="display: flex; align-items: center; gap: 0.5rem;">
+                   <div style="background: rgba(255,255,255,0.2); padding: 0.5rem 1rem; border-radius: 6px;">
+                       ${item.name || item}
+                   </div>
+                   ${!isLast ? '<div style="font-size: 1.2rem;">→</div>' : ''}
+               </div>
+           `;
+       });
+       
+       html += `
+                   </div>
+               </div>
+           </div>
+       `;
+   }
+   
+   container.innerHTML = html;
+}
+
+// Helper method for complexity badge class
+getComplexityBadgeClass(complexity) {
+   switch(complexity) {
+       case 'LOW': return 'badge-success';
+       case 'MEDIUM': return 'badge-warning';
+       case 'HIGH': return 'badge-danger';
+       default: return 'badge-grey';
+   }
+}
 // Display File Lifecycle
 displayFileLifecycle(displayName, results) {
     const container = document.getElementById('fileflowContent');
@@ -5936,6 +7002,44 @@ exportAsMarkdown() {
         
         markdown += `---\n\n`;
     }
+    // Dependencies
+if (results.dependencyAnalysis) {
+    markdown += `### Dependencies\n\n`;
+    markdown += `**Found:** ${results.dependencyAnalysis.summary?.foundCount || 0} | `;
+    markdown += `**Missing:** ${results.dependencyAnalysis.summary?.missingCount || 0}\n\n`;
+    
+    if (results.dependencyAnalysis.found?.copybooks?.length > 0) {
+        markdown += `**Found Copybooks:** ${results.dependencyAnalysis.found.copybooks.join(', ')}\n\n`;
+    }
+    if (results.dependencyAnalysis.missing?.copybooks?.length > 0) {
+        markdown += `**Missing Copybooks:** ${results.dependencyAnalysis.missing.copybooks.join(', ')}\n\n`;
+    }
+}
+
+// Dependency Flow Analysis
+if (results.dependencyFlow) {
+    markdown += `### Dependency Flow Analysis\n\n`;
+    markdown += `**Flow Type:** ${results.dependencyFlow.flowType}\n`;
+    markdown += `**Complexity:** ${results.dependencyFlow.complexity}\n\n`;
+    
+    const upstreamTotal = Object.values(results.dependencyFlow.upstream).reduce((sum, arr) => sum + arr.length, 0);
+    const downstreamTotal = Object.values(results.dependencyFlow.downstream).reduce((sum, arr) => sum + arr.length, 0);
+    
+    markdown += `**Upstream Dependencies:** ${upstreamTotal}\n`;
+    markdown += `**Downstream Dependents:** ${downstreamTotal}\n\n`;
+    
+    // Impact Analysis
+    if (results.dependencyFlow.impactAnalysis) {
+        const impact = results.dependencyFlow.impactAnalysis;
+        if (impact.high.length > 0) {
+            markdown += `**High Impact Issues:**\n`;
+            impact.high.forEach(item => {
+                markdown += `- ${item.description}\n`;
+            });
+            markdown += `\n`;
+        }
+    }
+}
     
     // Add chat history if available
     if (this.chatHistory.length > 0) {
