@@ -3023,17 +3023,9 @@ async initializeDatabase() {
             locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
         });
         
-        // Try to load existing database from localStorage
-        const savedDb = localStorage.getItem('mainframe_analyzer_db');
-        if (savedDb) {
-            const uInt8Array = new Uint8Array(JSON.parse(savedDb));
-            this.db = new SQL.Database(uInt8Array);
-        } else {
-            this.db = new SQL.Database();
-        }
+        // Try to load existing database from downloads folder
+        await this.loadDatabaseFromDownloads(SQL);
         
-        // Create tables if they don't exist
-        this.createTables();
         this.dbInitialized = true;
         console.log('✅ SQLite database initialized');
         
@@ -3043,7 +3035,71 @@ async initializeDatabase() {
         this.dbInitialized = false;
     }
 }
+// Load Database from Downloads Folder
+async loadDatabaseFromDownloads(SQL) {
+    try {
+        // Create file input to load existing database
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.db,.sqlite';
+        fileInput.style.display = 'none';
+        
+        // Check if database file exists in downloads (user needs to select it)
+        const dbExists = await this.checkForExistingDatabase();
+        
+        if (dbExists) {
+            const dbFile = await this.promptForDatabaseFile(fileInput);
+            if (dbFile) {
+                const arrayBuffer = await dbFile.arrayBuffer();
+                const uInt8Array = new Uint8Array(arrayBuffer);
+                this.db = new SQL.Database(uInt8Array);
+                console.log('📁 Database loaded from downloads folder');
+            } else {
+                this.db = new SQL.Database();
+            }
+        } else {
+            this.db = new SQL.Database();
+        }
+        
+        // Create tables if they don't exist
+        this.createTables();
+        
+        this.updateDatabaseStatus('connected', 'New database created');
+        
+    } catch (error) {
+        console.error('Failed to load database from downloads:', error);
+        this.db = new SQL.Database();
+        this.createTables();
+        this.updateDatabaseStatus('connected', 'New database created');
+    }
+}
 
+// Prompt for Database File
+async promptForDatabaseFile(fileInput) {
+    return new Promise((resolve) => {
+        fileInput.onchange = (e) => {
+            const file = e.target.files[0];
+            resolve(file);
+        };
+        
+        setTimeout(() => {
+            document.body.appendChild(fileInput);
+            fileInput.click();
+            document.body.removeChild(fileInput);
+        }, 100);
+        
+        // Resolve with null after 10 seconds if no file selected
+        setTimeout(() => resolve(null), 10000);
+    });
+}
+
+// Check for Existing Database
+async checkForExistingDatabase() {
+    return new Promise((resolve) => {
+        const shouldLoad = confirm('Do you have an existing mainframe-analyzer.db file in your downloads folder that you want to load?');
+        resolve(shouldLoad);
+    });
+}
 // Create Database Tables
 createTables() {
     if (!this.db) return;
