@@ -2080,6 +2080,7 @@
                 <div class="panel-content" id="leftPanelContent">
                     <!-- Component Analysis Section -->
                     <div class="form-section">
+
                         <div class="form-section-title">
                             <span style="color: var(--primary-blue);">🎯</span>
                             Component Analysis
@@ -2186,7 +2187,32 @@
                     </div>
 
                     <!-- Quick Actions -->
-                    <div class="form-section">
+                        <!-- Database Management Section -->
+                        <div class="form-section">
+                            <div class="form-section-title">
+                                <span style="color: var(--info-blue);">💾</span>
+                                Database Management
+                            </div>
+
+                            <button id="loadDatabaseBtn" class="btn btn-secondary btn-block" style="margin-bottom: 0.75rem;">
+                                <span>📂</span>
+                                Load Database from Downloads
+                            </button>
+
+                            <button id="saveDatabaseBtn" class="btn btn-primary btn-block" style="margin-bottom: 0.75rem;">
+                                <span>💾</span>
+                                Save Database to Downloads
+                            </button>
+                            
+                            <div id="databaseStatus" class="status-indicator disconnected">
+                                <span class="status-dot"></span>
+                                <span>No database loaded</span>
+                            </div>
+                            
+                            <div style="font-size: 0.75rem; color: var(--grey-500); margin-top: 0.5rem;">
+                                Database files are saved as .db files in your downloads folder
+                            </div>
+                        </div>
                         <div class="form-section-title">
                             <span style="color: var(--warning-yellow);">⚡</span>
                             Quick Actions
@@ -3023,18 +3049,38 @@ async initializeDatabase() {
             locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
         });
         
-        // Try to load existing database from downloads folder
-        await this.loadDatabaseFromDownloads(SQL);
+        // Check if user wants to load existing database
+        const shouldLoad = await this.promptForExistingDatabase();
         
+        if (shouldLoad) {
+            const dbFile = await this.promptForDatabaseFile();
+            if (dbFile) {
+                const arrayBuffer = await dbFile.arrayBuffer();
+                const uInt8Array = new Uint8Array(arrayBuffer);
+                this.db = new SQL.Database(uInt8Array);
+                console.log('📁 Database loaded from downloads folder');
+                this.updateDatabaseStatus('connected', `Loaded: ${dbFile.name}`);
+            } else {
+                this.db = new SQL.Database();
+                this.updateDatabaseStatus('connected', 'New database created');
+            }
+        } else {
+            this.db = new SQL.Database();
+            this.updateDatabaseStatus('connected', 'New database created');
+        }
+        
+        // Create tables if they don't exist
+        this.createTables();
         this.dbInitialized = true;
         console.log('✅ SQLite database initialized');
         
     } catch (error) {
         console.error('Failed to initialize SQLite database:', error);
-        // Fallback to localStorage
         this.dbInitialized = false;
+        this.updateDatabaseStatus('disconnected', 'Database initialization failed');
     }
 }
+
 // Load Database from Downloads Folder
 async loadDatabaseFromDownloads(SQL) {
     try {
@@ -3074,23 +3120,142 @@ async loadDatabaseFromDownloads(SQL) {
     }
 }
 
-// Prompt for Database File
-async promptForDatabaseFile(fileInput) {
+// Prompt for Existing Database
+async promptForExistingDatabase() {
     return new Promise((resolve) => {
+        const shouldLoad = confirm('Do you have an existing mainframe-analyzer.db file in your downloads folder that you want to load?');
+        resolve(shouldLoad);
+    });
+}
+
+// Prompt for Database File
+async promptForDatabaseFile() {
+    return new Promise((resolve) => {
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.db,.sqlite';
+        fileInput.style.display = 'none';
+        
         fileInput.onchange = (e) => {
             const file = e.target.files[0];
             resolve(file);
         };
         
-        setTimeout(() => {
-            document.body.appendChild(fileInput);
-            fileInput.click();
-            document.body.removeChild(fileInput);
-        }, 100);
+        document.body.appendChild(fileInput);
+        fileInput.click();
+        document.body.removeChild(fileInput);
         
         // Resolve with null after 10 seconds if no file selected
         setTimeout(() => resolve(null), 10000);
     });
+}
+
+// Manual Database Loading
+async loadDatabaseManually() {
+    try {
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.db,.sqlite';
+        fileInput.style.display = 'none';
+        
+        fileInput.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            this.showLoading();
+            this.updateLoadingStatus('📂 Loading database from downloads folder...');
+            
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const uInt8Array = new Uint8Array(arrayBuffer);
+                
+                const SQL = await initSqlJs({
+                    locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
+                });
+                
+                this.db = new SQL.Database(uInt8Array);
+                this.dbInitialized = true;
+                
+                // Load data from database
+                await this.loadStoredData();
+                
+                this.updateDatabaseStatus('connected', `Database loaded: ${file.name}`);
+                this.showSuccess(`✅ Database loaded successfully from ${file.name}`);
+                
+                this.hideLoading();
+                
+            } catch (error) {
+                this.hideLoading();
+                this.showError(`Failed to load database: ${error.message}`);
+                this.updateDatabaseStatus('disconnected', 'Database load failed');
+            }
+        };
+        
+        document.body.appendChild(fileInput);
+        fileInput.click();
+        document.body.removeChild(fileInput);
+        
+    } catch (error) {
+        this.showError(`Database loading failed: ${error.message}`);
+    }
+}
+
+// Manual Database Saving
+async saveDatabaseManually() {
+    if (!this.dbInitialized || !this.db) {
+        this.showError('No database available to save');
+        return;
+    }
+    
+    try {
+        this.showLoading();
+        this.updateLoadingStatus('💾 Saving database to downloads folder...');
+        
+        await this.saveDatabaseToDownloads();
+        
+        this.hideLoading();
+        
+    } catch (error) {
+        this.hideLoading();
+        this.showError(`Failed to save database: ${error.message}`);
+    }
+}
+
+// Update Database Status
+updateDatabaseStatus(status, message) {
+    const statusEl = document.getElementById('databaseStatus');
+    if (statusEl) {
+        statusEl.className = `status-indicator ${status}`;
+        statusEl.innerHTML = `
+            <span class="status-dot"></span>
+            <span>${message}</span>
+        `;
+    }
+}
+
+// Save Database to Downloads Folder
+async saveDatabaseToDownloads() {
+    try {
+        const data = this.db.export();
+        const blob = new Blob([data], { type: 'application/octet-stream' });
+        
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
+        const filename = `mainframe-analyzer-${timestamp}.db`;
+        
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+        
+        this.showInfo(`💾 Database saved as ${filename} in your downloads folder`);
+        
+    } catch (error) {
+        console.error('Failed to save database to downloads:', error);
+        this.showError('Failed to save database to downloads folder');
+    }
 }
 
 // Check for Existing Database
@@ -3181,6 +3346,12 @@ createTables() {
                     validateBtn.addEventListener('click', () => this.validateConnection());
                 }
                 
+                                // Database Management
+                const loadDbBtn = document.getElementById('loadDatabaseBtn');
+                const saveDbBtn = document.getElementById('saveDatabaseBtn');
+
+                if (loadDbBtn) loadDbBtn.addEventListener('click', () => this.loadDatabaseManually());
+                if (saveDbBtn) saveDbBtn.addEventListener('click', () => this.saveDatabaseManually());
                 // File Upload
                 const uploadArea = document.getElementById('uploadArea');
                 const fileInput = document.getElementById('fileInput');
@@ -4589,11 +4760,10 @@ async saveToStorage() {
         this.db.run("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", 
                    ['maxTokens', this.maxTokens.toString()]);
         
-        // Save database to localStorage as backup
-        const data = this.db.export();
-        localStorage.setItem('mainframe_analyzer_db', JSON.stringify(Array.from(data)));
-        
-        console.log('✅ Data saved to SQLite database');
+        // Save database to downloads folder
+        await this.saveDatabaseToDownloads();
+
+        console.log('✅ Data saved to downloads folder');
         
     } catch (error) {
         console.error('Failed to save to database:', error);
@@ -9808,7 +9978,7 @@ downloadTextFile(content, filename, mimeType = 'text/plain') {
 
 
 // Clear All Data
-clearAllData() {
+async clearAllData() {
     if (confirm('Are you sure you want to clear all analysis data? This cannot be undone.')) {
         // Clear in-memory data
         this.uploadedFiles = [];
@@ -9817,8 +9987,7 @@ clearAllData() {
         this.currentAnalyzedComponent = null;
         this.currentFriendlyName = null;
         this.chatHistory = [];
-        
-        // Clear SQLite database
+                // Clear SQLite database and save to downloads
         if (this.dbInitialized && this.db) {
             try {
                 this.db.run("DELETE FROM uploaded_files");
@@ -9826,17 +9995,16 @@ clearAllData() {
                 this.db.run("DELETE FROM chat_history");
                 this.db.run("DELETE FROM settings");
                 
-                // Update localStorage backup
-                const data = this.db.export();
-                localStorage.setItem('mainframe_analyzer_db', JSON.stringify(Array.from(data)));
+                // Save cleared database to downloads
+                await this.saveDatabaseToDownloads();
+                this.updateDatabaseStatus('connected', 'Database cleared and saved');
             } catch (error) {
                 console.error('Failed to clear database:', error);
             }
         }
-        
+
         // Clear localStorage fallback
         localStorage.removeItem('enhanced_mainframe_analysis');
-        localStorage.removeItem('mainframe_analyzer_db');
         
         // Reset UI (existing code...)
         this.displayUploadedFiles();
