@@ -4734,13 +4734,22 @@ async runComprehensiveAnalysis(componentName, relevantFiles) {
         
         const dependencyAnalysis = await this.extractDependencies(relevantFiles);
 
-        // Stage 3: Extract fields (for copybooks and programs)
-        this.updateLoadingStatus('📋 Stage 3: Extracting fields...');
+
+        // Stage 3: Extract fields and business logic (for ALL component types)
+        this.updateLoadingStatus('📋 Stage 3: Extracting fields and business logic...');
         this.updateProgress(40);
-        
+
         let fieldAnalysis = null;
         if (componentType === 'Copybook' || componentType === 'Field') {
             fieldAnalysis = await this.analyzeFieldsInComponent(componentName, relevantFiles);
+        } else if (componentType === 'COBOL Program') {
+            // ALWAYS do field analysis for programs too
+            fieldAnalysis = await this.analyzeProgramFields(componentName, relevantFiles);
+        }
+
+        // Even if no specific field analysis, extract basic program structure
+        if (!fieldAnalysis && componentType === 'COBOL Program') {
+            fieldAnalysis = await this.extractBasicProgramStructure(componentName, relevantFiles);
         }
 
         // Stage 4: Extract lifecycle flow
@@ -4943,6 +4952,121 @@ async analyzeFieldsInComponent(componentName, relevantFiles) {
     return fieldUsageAnalysis;
 }
 
+// Extract Basic Program Structure for Programs
+async extractBasicProgramStructure(programName, relevantFiles) {
+    console.log(`Extracting basic structure for program: ${programName}`);
+    
+    const programFile = relevantFiles.find(f => 
+        f.type === 'COBOL Program' && 
+        (f.name.toUpperCase().includes(programName.toUpperCase()) || 
+         f.content.toUpperCase().includes(`PROGRAM-ID. ${programName.toUpperCase()}`))
+    );
+    
+    if (!programFile) return null;
+    
+    const structure = {
+        fields: [],
+        programs: [],
+        inputFields: [],
+        outputFields: [],
+        calculatedFields: [],
+        validatedFields: [],
+        unusedFields: [],
+        fieldUsageDetails: {},
+        businessLogicSummary: {
+            totalFields: 0,
+            totalValidationRules: 0,
+            totalCalculations: 0,
+            fieldsWithBusinessLogic: 0
+        },
+        programStructure: {
+            divisions: [],
+            paragraphs: [],
+            workingStorageFields: 0,
+            linkageFields: 0,
+            fileFields: 0
+        }
+    };
+    
+    const lines = programFile.content.split('\n');
+    let currentSection = 'UNKNOWN';
+    
+    lines.forEach((line, index) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // Track divisions
+        if (trimmed.includes('IDENTIFICATION DIVISION')) {
+            currentSection = 'IDENTIFICATION';
+            structure.programStructure.divisions.push('IDENTIFICATION');
+        } else if (trimmed.includes('ENVIRONMENT DIVISION')) {
+            currentSection = 'ENVIRONMENT';
+            structure.programStructure.divisions.push('ENVIRONMENT');
+        } else if (trimmed.includes('DATA DIVISION')) {
+            currentSection = 'DATA';
+            structure.programStructure.divisions.push('DATA');
+        } else if (trimmed.includes('PROCEDURE DIVISION')) {
+            currentSection = 'PROCEDURE';
+            structure.programStructure.divisions.push('PROCEDURE');
+        }
+        
+        // Track sections within DATA DIVISION
+        if (currentSection === 'DATA') {
+            if (trimmed.includes('WORKING-STORAGE SECTION')) {
+                currentSection = 'WORKING-STORAGE';
+            } else if (trimmed.includes('LINKAGE SECTION')) {
+                currentSection = 'LINKAGE';
+            } else if (trimmed.includes('FILE SECTION')) {
+                currentSection = 'FILE';
+            }
+        }
+        
+        // Extract fields from different sections
+        const fieldMatch = trimmed.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]*)/);
+        if (fieldMatch && currentSection !== 'PROCEDURE') {
+            const level = parseInt(fieldMatch[1]);
+            const fieldName = fieldMatch[2];
+            
+            if (level !== 88 && fieldName) {
+                const picMatch = trimmed.match(/PIC\s+([X9VS\(\)]+)/i);
+                const valueMatch = trimmed.match(/VALUE\s+([^.]+)/i);
+                
+                const field = {
+                    name: fieldName,
+                    level: level,
+                    picture: picMatch ? picMatch[1] : '',
+                    value: valueMatch ? valueMatch[1].trim() : '',
+                    lineNumber: index + 1,
+                    section: currentSection,
+                    isRecordLayout: level === 1,
+                    isElementaryField: !!picMatch
+                };
+                
+                structure.fields.push(field);
+                
+                // Count by section
+                if (currentSection === 'WORKING-STORAGE') {
+                    structure.programStructure.workingStorageFields++;
+                } else if (currentSection === 'LINKAGE') {
+                    structure.programStructure.linkageFields++;
+                } else if (currentSection === 'FILE') {
+                    structure.programStructure.fileFields++;
+                }
+            }
+        }
+        
+        // Extract paragraph names from PROCEDURE DIVISION
+        if (currentSection === 'PROCEDURE' && trimmed.match(/^[A-Z][A-Z0-9\-_]*\.$/)) {
+            const paragraphName = trimmed.replace('.', '');
+            structure.programStructure.paragraphs.push(paragraphName);
+        }
+    });
+    
+    // Update totals
+    structure.businessLogicSummary.totalFields = structure.fields.length;
+    
+    console.log(`Extracted program structure: ${structure.fields.length} fields, ${structure.programStructure.paragraphs.length} paragraphs`);
+    return structure;
+}
 
 // Extract Business Rules and Logic
 extractBusinessLogic(programFile, fieldNames) {
@@ -5237,10 +5361,33 @@ async analyzeUpstreamDependencies(componentName, relevantFiles, allFiles, depend
                 });
             }
             
-            // CALL statements - program dependencies
-            const callMatch = trimmed.match(/CALL\s+['"]*([A-Z][A-Z0-9\-_]+)['"]*/);
+            // CALL statements - program dependencies// CALL statements - program dependencies (Enhanced for Dynamic Calls)
+        const callPatterns = [
+            // Static calls
+            /CALL\s+['"]*([A-Z][A-Z0-9\-_]+)['"]*/,
+            // Dynamic calls with variables
+            /CALL\s+([A-Z][A-Z0-9\-_]*)/
+        ];
+
+        callPatterns.forEach(pattern => {
+            const callMatch = trimmed.match(pattern);
             if (callMatch) {
-                const programName = callMatch[1];
+                let programName = callMatch[1];
+                let isDynamic = false;
+                
+                // Check if it's a dynamic call (variable name)
+                if (programName.includes('-') && programName.length > 8) {
+                    // This looks like a variable, try to find its value
+                    const actualProgram = this.resolveDynamicCallVariable(programName, file);
+                    if (actualProgram) {
+                        isDynamic = true;
+                        programName = actualProgram;
+                    }
+                }
+                
+                // Remove quotes if present
+                programName = programName.replace(/['"]/g, '');
+                
                 const isAvailable = allFiles.some(f => 
                     f.components && f.components.some(c => 
                         c.type === 'PROGRAM' && c.name === programName
@@ -5250,11 +5397,15 @@ async analyzeUpstreamDependencies(componentName, relevantFiles, allFiles, depend
                 dependencyFlow.upstream.programs.push({
                     name: programName,
                     available: isAvailable,
-                    usage: 'CALL',
+                    usage: isDynamic ? 'DYNAMIC_CALL' : 'STATIC_CALL',
                     line: lineNum + 1,
-                    file: file.name
+                    file: file.name,
+                    originalVariable: isDynamic ? callMatch[1] : null
                 });
             }
+        });
+
+
             
             // File dependencies
             const filePatterns = [
@@ -5360,6 +5511,53 @@ async analyzeDownstreamDependents(componentName, allFiles, dependencyFlow) {
     });
 }
 
+// Resolve Dynamic Call Variables
+resolveDynamicCallVariable(variableName, programFile) {
+    const lines = programFile.content.split('\n');
+    const varUpper = variableName.toUpperCase();
+    
+    // Look for MOVE statements that set the variable value
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim().toUpperCase();
+        
+        // Pattern: MOVE 'PROGRAM-NAME' TO WA-VARIABLE
+        const moveMatch = line.match(new RegExp(`MOVE\\s+['"]*([A-Z][A-Z0-9\\-_]+)['\"]*\\s+TO\\s+${varUpper}`));
+        if (moveMatch) {
+            const programName = moveMatch[1].replace(/['"]/g, '');
+            console.log(`Resolved dynamic call: ${variableName} -> ${programName}`);
+            return programName;
+        }
+        
+        // Pattern: MOVE PROGRAM-NAME TO WA-VARIABLE (without quotes)
+        const moveMatch2 = line.match(new RegExp(`MOVE\\s+([A-Z][A-Z0-9\\-_]+)\\s+TO\\s+${varUpper}`));
+        if (moveMatch2) {
+            const programName = moveMatch2[1];
+            console.log(`Resolved dynamic call: ${variableName} -> ${programName}`);
+            return programName;
+        }
+        
+        // Pattern: Initialize with VALUE clause
+        const valueMatch = line.match(new RegExp(`${varUpper}.*VALUE\\s+['"]*([A-Z][A-Z0-9\\-_]+)['\"]*`));
+        if (valueMatch) {
+            const programName = valueMatch[1].replace(/['"]/g, '');
+            console.log(`Resolved dynamic call from VALUE: ${variableName} -> ${programName}`);
+            return programName;
+        }
+    }
+    
+    // If we can't resolve it, extract potential program name from variable name
+    // WA-TMSBTSI6 -> TMSBTSI6
+    const extractedMatch = varUpper.match(/WA-(.+)|(.+)-WA|PGM-(.+)|(.+)-PGM/);
+    if (extractedMatch) {
+        const extracted = extractedMatch[1] || extractedMatch[2] || extractedMatch[3] || extractedMatch[4];
+        if (extracted && extracted.length >= 6) {
+            console.log(`Extracted from variable name: ${variableName} -> ${extracted}`);
+            return extracted;
+        }
+    }
+    
+    return null;
+}
 // Helper Methods
 extractProgramName(file) {
     const match = file.content.toUpperCase().match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]+)/);
@@ -5880,6 +6078,13 @@ LIFECYCLE CONTEXT:
 - Usage Pattern: ${lifecycleFlow.usagePattern}
 - Has CICS Operations: ${lifecycleFlow.cicsScreens.length > 0}
 - Has Batch Operations: ${lifecycleFlow.batchJobs.length > 0}
+- Dynamic Calls Detected: ${dependencies.found.programs.filter(p => p.usage === 'DYNAMIC_CALL').length > 0}
+
+DEPENDENCY ANALYSIS:
+- Static Calls: ${dependencies.found.programs.filter(p => p.usage === 'STATIC_CALL').map(p => p.name).join(', ') || 'None'}
+- Dynamic Calls: ${dependencies.found.programs.filter(p => p.usage === 'DYNAMIC_CALL').map(p => `${p.name} (via ${p.originalVariable})`).join(', ') || 'None'}
+- Missing Static: ${dependencies.missing.programs.filter(p => p.usage !== 'DYNAMIC_CALL').map(p => p.name).join(', ') || 'None'}
+- Missing Dynamic: ${dependencies.missing.programs.filter(p => p.usage === 'DYNAMIC_CALL').map(p => p.name).join(', ') || 'None'}
 
 TASK: Analyze this COBOL program focusing on its structure, business logic, and field operations.
 
@@ -7168,6 +7373,8 @@ determineBusinessMeaning(fieldName, businessLogic) {
 // Display Usage Patterns
 displayUsagePatterns(displayName, results) {
     const container = document.getElementById('usageContent');
+    const distributionContainer = document.getElementById('programDistribution');
+    
     if (!container) return;
     
     if (!results.lifecycleFlow) {
@@ -7234,6 +7441,124 @@ displayUsagePatterns(displayName, results) {
     
     html += '</div>';
     container.innerHTML = html;
+    
+    // Display Program Distribution
+    if (distributionContainer) {
+        distributionContainer.innerHTML = this.renderProgramDistribution(displayName, results);
+    }
+}
+
+// Render Program Distribution
+renderProgramDistribution(displayName, results) {
+    if (!results.fieldAnalysis && !results.lifecycleFlow) {
+        return '<p>No program distribution data available.</p>';
+    }
+    
+    let html = `<h4>Program Usage Distribution for ${displayName}</h4>`;
+    
+    // Collect all programs and their usage types
+    const programStats = new Map();
+    
+    // From lifecycle flow
+    const flow = results.lifecycleFlow || {};
+    
+    // Creation programs
+    if (flow.creationSources) {
+        flow.creationSources.forEach(source => {
+            if (!programStats.has(source.program)) {
+                programStats.set(source.program, { create: 0, read: 0, update: 0, total: 0 });
+            }
+            const stats = programStats.get(source.program);
+            stats.create += source.operations?.length || 1;
+            stats.total += source.operations?.length || 1;
+        });
+    }
+    
+    // Read programs
+    if (flow.readPrograms) {
+        flow.readPrograms.forEach(prog => {
+            if (!programStats.has(prog.program)) {
+                programStats.set(prog.program, { create: 0, read: 0, update: 0, total: 0 });
+            }
+            const stats = programStats.get(prog.program);
+            stats.read += prog.operations?.length || 1;
+            stats.total += prog.operations?.length || 1;
+        });
+    }
+    
+    // Update programs
+    if (flow.updatePrograms) {
+        flow.updatePrograms.forEach(prog => {
+            if (!programStats.has(prog.program)) {
+                programStats.set(prog.program, { create: 0, read: 0, update: 0, total: 0 });
+            }
+            const stats = programStats.get(prog.program);
+            stats.update += prog.operations?.length || 1;
+            stats.total += prog.operations?.length || 1;
+        });
+    }
+    
+    if (programStats.size === 0) {
+        return html + '<p>No program usage distribution data available.</p>';
+    }
+    
+    // Sort programs by total operations
+    const sortedPrograms = Array.from(programStats.entries())
+        .sort((a, b) => b[1].total - a[1].total);
+    
+    // Create distribution chart
+    html += `
+        <div style="background: white; border: 1px solid var(--grey-200); border-radius: 8px; padding: 1rem;">
+            <h5>Operations by Program</h5>
+            <div style="margin-top: 1rem;">
+    `;
+    
+    sortedPrograms.slice(0, 10).forEach(([program, stats]) => {
+        const maxWidth = Math.max(...sortedPrograms.map(([, s]) => s.total));
+        const widthPercent = (stats.total / maxWidth) * 100;
+        
+        html += `
+            <div style="margin-bottom: 1rem;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                    <span style="font-weight: 600; font-size: 0.9rem;">${program}</span>
+                    <span style="font-size: 0.85rem; color: var(--grey-600);">${stats.total} ops</span>
+                </div>
+                <div style="display: flex; height: 20px; border-radius: 10px; overflow: hidden; background: var(--grey-200);">
+                    ${stats.create > 0 ? `<div style="background: var(--success-green); flex: ${stats.create};" title="Create: ${stats.create}"></div>` : ''}
+                    ${stats.read > 0 ? `<div style="background: var(--info-blue); flex: ${stats.read};" title="Read: ${stats.read}"></div>` : ''}
+                    ${stats.update > 0 ? `<div style="background: var(--warning-yellow); flex: ${stats.update};" title="Update: ${stats.update}"></div>` : ''}
+                </div>
+                <div style="display: flex; gap: 1rem; margin-top: 0.25rem; font-size: 0.75rem;">
+                    ${stats.create > 0 ? `<span style="color: var(--success-green);">Create: ${stats.create}</span>` : ''}
+                    ${stats.read > 0 ? `<span style="color: var(--info-blue);">Read: ${stats.read}</span>` : ''}
+                    ${stats.update > 0 ? `<span style="color: var(--warning-yellow);">Update: ${stats.update}</span>` : ''}
+                </div>
+            </div>
+        `;
+    });
+    
+    html += `
+            </div>
+            
+            <!-- Legend -->
+            <div style="display: flex; gap: 1rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--grey-200); font-size: 0.85rem;">
+                <div style="display: flex; align-items: center; gap: 0.25rem;">
+                    <div style="width: 12px; height: 12px; background: var(--success-green); border-radius: 2px;"></div>
+                    <span>Creation Operations</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.25rem;">
+                    <div style="width: 12px; height: 12px; background: var(--info-blue); border-radius: 2px;"></div>
+                    <span>Read Operations</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.25rem;">
+                    <div style="width: 12px; height: 12px; background: var(--warning-yellow); border-radius: 2px;"></div>
+                    <span>Update Operations</span>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    return html;
 }
 
 // Display Dependencies
