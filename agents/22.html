@@ -5998,12 +5998,16 @@ displayDependencies(displayName, results) {
     }
 }
 // Display Dependency Flow
+// COMPLETE ENHANCED DEPENDENCY FLOW RENDERING CODE
+// Add these methods to your EnhancedMainframeAnalyzer class
+
+// Enhanced dependency flow display that shows bidirectional relationships
 displayDependencyFlow(displayName, results) {
     if (!results.dependencyFlow) return;
     
     const flow = results.dependencyFlow;
     
-    // Update summary
+    // Update summary with new metrics
     const flowType = document.getElementById('flowType');
     const upstreamCount = document.getElementById('upstreamCount');
     const downstreamCount = document.getElementById('downstreamCount');
@@ -6015,20 +6019,877 @@ displayDependencyFlow(displayName, results) {
         upstreamCount.textContent = total;
     }
     if (downstreamCount) {
-        const total = Object.values(flow.downstream).reduce((sum, arr) => sum + arr.length, 0);
-        downstreamCount.textContent = total;
+        // Include bidirectional relationships in downstream count
+        const downstream = Object.values(flow.downstream).reduce((sum, arr) => sum + arr.length, 0);
+        const bidirectional = flow.bidirectional ? Object.values(flow.bidirectional).reduce((sum, arr) => sum + arr.length, 0) : 0;
+        downstreamCount.textContent = downstream + bidirectional;
     }
     if (complexityScore) complexityScore.textContent = flow.complexity;
     
-    // Display flow chart
-    this.renderDependencyFlowChart(flow);
+    // Display enhanced flow chart
+    this.renderEnhancedDependencyFlowChart(flow);
     
-    // Display detailed analysis
-    this.renderDetailedFlowAnalysis(flow);
+    // Display detailed analysis with bidirectional info
+    this.renderEnhancedDetailedFlowAnalysis(flow);
     
     // Display impact analysis
     this.renderImpactAnalysis(flow);
 }
+
+// Enhanced flow chart with bidirectional relationships
+renderEnhancedDependencyFlowChart(flow) {
+    const container = document.getElementById('dependencyFlowChart');
+    if (!container) return;
+    
+    let html = `
+        <div class="flow-container">
+            <h4>Enhanced Dependency Flow for ${flow.componentName}</h4>
+            <div class="flow-diagram">
+    `;
+    
+    // For copybooks, show the bidirectional relationships prominently
+    if (flow.componentType === 'Copybook' && flow.bidirectional) {
+        // Data Producers Level
+        if (flow.bidirectional.dataProducers && flow.bidirectional.dataProducers.length > 0) {
+            html += `
+                <div class="flow-level">
+                    <div class="flow-level-title">DATA PRODUCERS</div>
+                    <div class="flow-nodes">
+            `;
+            
+            flow.bidirectional.dataProducers.slice(0, 5).forEach(producer => {
+                const friendlyName = this.getFriendlyName(producer.name) || producer.name;
+                html += `
+                    <div class="flow-node upstream" 
+                         title="${friendlyName} - Creates/Updates ${flow.componentName} records
+Operations: ${producer.operations.length}
+Creates: ${producer.creates}
+Updates: ${producer.updates}">
+                        <div class="flow-node-icon">🏭</div>
+                        <div class="flow-node-name">${friendlyName}</div>
+                        <div class="flow-node-type">Producer</div>
+                        <div class="flow-node-badge">${producer.creates + producer.updates}</div>
+                    </div>
+                `;
+            });
+            
+            html += `
+                    </div>
+                    <div class="flow-arrow">⬇️</div>
+                </div>
+            `;
+        }
+        
+        // Current Component Level
+        html += `
+            <div class="flow-level">
+                <div class="flow-level-title">DATA STRUCTURE</div>
+                <div class="flow-nodes">
+                    <div class="flow-node current">
+                        <div class="flow-node-icon">📚</div>
+                        <div class="flow-node-name">${this.getFriendlyName(flow.componentName) || flow.componentName}</div>
+                        <div class="flow-node-type">${flow.flowType}</div>
+                    </div>
+                </div>
+                <div class="flow-arrow">⬇️</div>
+            </div>
+        `;
+        
+        // Data Consumers Level
+        if (flow.bidirectional.dataConsumers && flow.bidirectional.dataConsumers.length > 0) {
+            html += `
+                <div class="flow-level">
+                    <div class="flow-level-title">DATA CONSUMERS</div>
+                    <div class="flow-nodes">
+            `;
+            
+            flow.bidirectional.dataConsumers.slice(0, 5).forEach(consumer => {
+                const friendlyName = this.getFriendlyName(consumer.name) || consumer.name;
+                html += `
+                    <div class="flow-node downstream" 
+                         title="${friendlyName} - Reads ${flow.componentName} records
+Operations: ${consumer.operations.length}
+Reads: ${consumer.reads}">
+                        <div class="flow-node-icon">📖</div>
+                        <div class="flow-node-name">${friendlyName}</div>
+                        <div class="flow-node-type">Consumer</div>
+                        <div class="flow-node-badge">${consumer.reads}</div>
+                    </div>
+                `;
+            });
+            
+            html += `
+                    </div>
+                    <div class="flow-arrow">⬇️</div>
+                </div>
+            `;
+        }
+        
+        // Data Transformers Level
+        if (flow.bidirectional.dataTransformers && flow.bidirectional.dataTransformers.length > 0) {
+            html += `
+                <div class="flow-level">
+                    <div class="flow-level-title">DATA TRANSFORMERS</div>
+                    <div class="flow-nodes">
+            `;
+            
+            flow.bidirectional.dataTransformers.slice(0, 5).forEach(transformer => {
+                const friendlyName = this.getFriendlyName(transformer.name) || transformer.name;
+                html += `
+                    <div class="flow-node" style="border: 3px solid var(--warning-yellow); background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(16, 185, 129, 0.1) 100%);" 
+                         title="${friendlyName} - Both creates and reads ${flow.componentName} records
+Operations: ${transformer.operations.length}
+Creates: ${transformer.creates}
+Reads: ${transformer.reads}
+Updates: ${transformer.updates}">
+                        <div class="flow-node-icon">🔄</div>
+                        <div class="flow-node-name">${friendlyName}</div>
+                        <div class="flow-node-type">Transformer</div>
+                        <div class="flow-node-badge">↕️</div>
+                    </div>
+                `;
+            });
+            
+            html += `
+                    </div>
+                </div>
+            `;
+        }
+        
+    } else {
+        // Original logic for programs and other components
+        
+        // Upstream level
+        if (flow.upstream.copybooks.length > 0 || flow.upstream.programs.length > 0) {
+            html += `
+                <div class="flow-level">
+                    <div class="flow-level-title">UPSTREAM DEPENDENCIES</div>
+                    <div class="flow-nodes">
+            `;
+            
+            flow.upstream.copybooks.slice(0, 5).forEach(copybook => {
+                const friendlyName = this.getFriendlyName(copybook.name) || copybook.name;
+                html += `
+                    <div class="flow-node ${copybook.available ? 'upstream' : 'missing'}" 
+                         title="${friendlyName} - ${copybook.usage} - Line ${copybook.line}
+File: ${copybook.file}
+Relationship: ${copybook.relationshipType || 'STRUCTURAL'}">
+                        <div class="flow-node-icon">📚</div>
+                        <div class="flow-node-name">${friendlyName}</div>
+                        <div class="flow-node-type">Copybook</div>
+                        ${!copybook.available ? '<div class="flow-node-badge">!</div>' : ''}
+                        ${copybook.relationshipType === 'BIDIRECTIONAL' ? '<div class="flow-node-badge">↕️</div>' : ''}
+                    </div>
+                `;
+            });
+            
+            flow.upstream.programs.slice(0, 3).forEach(program => {
+                const friendlyName = this.getFriendlyName(program.name) || program.name;
+                html += `
+                    <div class="flow-node ${program.available ? 'upstream' : 'missing'}" 
+                         title="${friendlyName} - ${program.usage} - Line ${program.line}
+File: ${program.file}">
+                        <div class="flow-node-icon">💼</div>
+                        <div class="flow-node-name">${friendlyName}</div>
+                        <div class="flow-node-type">Program</div>
+                        ${!program.available ? '<div class="flow-node-badge">!</div>' : ''}
+                    </div>
+                `;
+            });
+            
+            html += `
+                    </div>
+                    <div class="flow-arrow">⬇️</div>
+                </div>
+            `;
+        }
+        
+        // Current component level
+        html += `
+            <div class="flow-level">
+                <div class="flow-level-title">CURRENT COMPONENT</div>
+                <div class="flow-nodes">
+                    <div class="flow-node current">
+                        <div class="flow-node-icon">${this.getComponentFlowIcon(flow.componentType)}</div>
+                        <div class="flow-node-name">${this.getFriendlyName(flow.componentName) || flow.componentName}</div>
+                        <div class="flow-node-type">${flow.componentType}</div>
+                    </div>
+                </div>
+                <div class="flow-arrow">⬇️</div>
+            </div>
+        `;
+        
+        // Downstream level
+        if (flow.downstream.programs.length > 0 || flow.downstream.jobs.length > 0) {
+            html += `
+                <div class="flow-level">
+                    <div class="flow-level-title">DOWNSTREAM DEPENDENTS</div>
+                    <div class="flow-nodes">
+            `;
+            
+            flow.downstream.programs.slice(0, 5).forEach(program => {
+                const friendlyName = this.getFriendlyName(program.name) || program.name;
+                html += `
+                    <div class="flow-node downstream" title="${friendlyName} - ${program.usage}
+Type: ${program.type}
+File: ${program.file}">
+                        <div class="flow-node-icon">💼</div>
+                        <div class="flow-node-name">${friendlyName}</div>
+                        <div class="flow-node-type">Program</div>
+                    </div>
+                `;
+            });
+            
+            flow.downstream.jobs.slice(0, 3).forEach(job => {
+                const friendlyName = this.getFriendlyName(job.name) || job.name;
+                html += `
+                    <div class="flow-node downstream" title="${friendlyName} - ${job.usage}
+Type: ${job.type}
+File: ${job.file}">
+                        <div class="flow-node-icon">📋</div>
+                        <div class="flow-node-name">${friendlyName}</div>
+                        <div class="flow-node-type">Job</div>
+                    </div>
+                `;
+            });
+            
+            flow.downstream.screens.slice(0, 3).forEach(screen => {
+                const friendlyName = this.getFriendlyName(screen.name) || screen.name;
+                html += `
+                    <div class="flow-node downstream" title="${friendlyName} - ${screen.usage}
+Type: ${screen.type}
+File: ${screen.file}">
+                        <div class="flow-node-icon">🖥️</div>
+                        <div class="flow-node-name">${friendlyName}</div>
+                        <div class="flow-node-type">Screen</div>
+                    </div>
+                `;
+            });
+            
+            html += `
+                    </div>
+                </div>
+            `;
+        }
+    }
+    
+    html += `
+            </div>
+            
+            <!-- Enhanced Legend -->
+            <div class="flow-legend">
+                <div class="legend-item">
+                    <div class="legend-color" style="background: var(--primary-blue);"></div>
+                    <span>Current Component</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: rgba(16, 185, 129, 0.3); border: 2px solid var(--success-green);"></div>
+                    <span>Data Producers (Create/Update)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: rgba(59, 130, 246, 0.3); border: 2px solid var(--info-blue);"></div>
+                    <span>Data Consumers (Read Only)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(16, 185, 129, 0.2) 100%); border: 3px solid var(--warning-yellow);"></div>
+                    <span>Data Transformers (Read + Write)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: rgba(239, 68, 68, 0.3); border: 2px dashed var(--error-red);"></div>
+                    <span>Missing Dependencies</span>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    container.innerHTML = html;
+}
+
+// Enhanced detailed flow analysis
+renderEnhancedDetailedFlowAnalysis(flow) {
+    const container = document.getElementById('detailedFlowAnalysis');
+    if (!container) return;
+    
+    let html = `
+        <h4>Enhanced Dependency Flow Analysis</h4>
+        
+        <!-- Flow Type Summary -->
+        <div style="background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%); color: white; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; text-align: center;">
+                <div>
+                    <div style="font-size: 1.25rem; font-weight: bold;">${flow.flowType}</div>
+                    <div style="font-size: 0.85rem; opacity: 0.9;">Flow Type</div>
+                </div>
+                <div>
+                    <div style="font-size: 1.25rem; font-weight: bold;">${flow.complexity}</div>
+                    <div style="font-size: 0.85rem; opacity: 0.9;">Complexity</div>
+                </div>
+                <div>
+                    <div style="font-size: 1.25rem; font-weight: bold;">${Object.values(flow.upstream).reduce((sum, arr) => sum + arr.length, 0)}</div>
+                    <div style="font-size: 0.85rem; opacity: 0.9;">Upstream</div>
+                </div>
+                <div>
+                    <div style="font-size: 1.25rem; font-weight: bold;">${Object.values(flow.downstream).reduce((sum, arr) => sum + arr.length, 0)}</div>
+                    <div style="font-size: 0.85rem; opacity: 0.9;">Downstream</div>
+                </div>
+                ${flow.bidirectional ? `
+                <div>
+                    <div style="font-size: 1.25rem; font-weight: bold;">${Object.values(flow.bidirectional).reduce((sum, arr) => sum + arr.length, 0)}</div>
+                    <div style="font-size: 0.85rem; opacity: 0.9;">Bidirectional</div>
+                </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+    
+    // Bidirectional Relationships Section (for copybooks)
+    if (flow.bidirectional && Object.values(flow.bidirectional).some(arr => arr.length > 0)) {
+        html += `
+            <div style="margin-bottom: 2rem;">
+                <h5 style="color: var(--primary-blue);">🔄 Bidirectional Relationships</h5>
+                <p style="font-size: 0.9rem; color: var(--grey-600); margin-bottom: 1rem;">
+                    Programs that have different types of relationships with the ${flow.componentName} structure:
+                </p>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem;">
+        `;
+        
+        // Data Producers
+        if (flow.bidirectional.dataProducers && flow.bidirectional.dataProducers.length > 0) {
+            html += `
+                <div style="background: rgba(16, 185, 129, 0.1); padding: 1rem; border-radius: 8px; border-left: 4px solid var(--success-green);">
+                    <h6 style="color: var(--success-green); margin-bottom: 0.75rem;">🏭 Data Producers (${flow.bidirectional.dataProducers.length})</h6>
+                    <p style="font-size: 0.85rem; margin-bottom: 1rem; color: var(--grey-600);">Programs that create or update records using this structure</p>
+            `;
+            
+            flow.bidirectional.dataProducers.forEach(producer => {
+                const friendlyName = this.getFriendlyName(producer.name) || producer.name;
+                html += `
+                    <div style="margin-bottom: 0.75rem; padding: 0.75rem; background: white; border-radius: 6px; box-shadow: var(--shadow-sm);">
+                        <div style="font-weight: 600; display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+                            <span style="color: var(--grey-800);">💼 ${friendlyName}</span>
+                            <div style="display: flex; gap: 0.25rem; flex-wrap: wrap;">
+                                ${producer.creates > 0 ? `<span class="badge badge-success">Creates: ${producer.creates}</span>` : ''}
+                                ${producer.updates > 0 ? `<span class="badge badge-warning">Updates: ${producer.updates}</span>` : ''}
+                            </div>
+                        </div>
+                        <div style="font-size: 0.8rem; color: var(--grey-600);">
+                            <div style="margin-bottom: 0.25rem;">📁 File: ${producer.file}</div>
+                            <div>⚙️ Operations: ${producer.operations.length}</div>
+                        </div>
+                        ${producer.operations.length > 0 ? `
+                            <details style="margin-top: 0.5rem;">
+                                <summary style="font-size: 0.75rem; color: var(--primary-blue); cursor: pointer;">Show Operations</summary>
+                                <div style="margin-top: 0.5rem; padding: 0.5rem; background: var(--grey-50); border-radius: 4px; font-size: 0.75rem;">
+                                    ${producer.operations.slice(0, 3).map(op => `
+                                        <div style="margin-bottom: 0.25rem;">
+                                            <strong>${op.type}</strong> (Line ${op.line}): ${op.context.substring(0, 60)}...
+                                        </div>
+                                    `).join('')}
+                                    ${producer.operations.length > 3 ? `<div style="color: var(--grey-500);">...and ${producer.operations.length - 3} more</div>` : ''}
+                                </div>
+                            </details>
+                        ` : ''}
+                    </div>
+                `;
+            });
+            html += `</div>`;
+        }
+        
+        // Data Consumers  
+        if (flow.bidirectional.dataConsumers && flow.bidirectional.dataConsumers.length > 0) {
+            html += `
+                <div style="background: rgba(59, 130, 246, 0.1); padding: 1rem; border-radius: 8px; border-left: 4px solid var(--info-blue);">
+                    <h6 style="color: var(--info-blue); margin-bottom: 0.75rem;">📖 Data Consumers (${flow.bidirectional.dataConsumers.length})</h6>
+                    <p style="font-size: 0.85rem; margin-bottom: 1rem; color: var(--grey-600);">Programs that only read records using this structure</p>
+            `;
+            
+            flow.bidirectional.dataConsumers.forEach(consumer => {
+                const friendlyName = this.getFriendlyName(consumer.name) || consumer.name;
+                html += `
+                    <div style="margin-bottom: 0.75rem; padding: 0.75rem; background: white; border-radius: 6px; box-shadow: var(--shadow-sm);">
+                        <div style="font-weight: 600; display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+                            <span style="color: var(--grey-800);">💼 ${friendlyName}</span>
+                            <span class="badge badge-primary">Reads: ${consumer.reads}</span>
+                        </div>
+                        <div style="font-size: 0.8rem; color: var(--grey-600);">
+                            <div style="margin-bottom: 0.25rem;">📁 File: ${consumer.file}</div>
+                            <div>⚙️ Operations: ${consumer.operations.length}</div>
+                        </div>
+                        ${consumer.operations.length > 0 ? `
+                            <details style="margin-top: 0.5rem;">
+                                <summary style="font-size: 0.75rem; color: var(--primary-blue); cursor: pointer;">Show Operations</summary>
+                                <div style="margin-top: 0.5rem; padding: 0.5rem; background: var(--grey-50); border-radius: 4px; font-size: 0.75rem;">
+                                    ${consumer.operations.slice(0, 3).map(op => `
+                                        <div style="margin-bottom: 0.25rem;">
+                                            <strong>${op.type}</strong> (Line ${op.line}): ${op.context.substring(0, 60)}...
+                                        </div>
+                                    `).join('')}
+                                    ${consumer.operations.length > 3 ? `<div style="color: var(--grey-500);">...and ${consumer.operations.length - 3} more</div>` : ''}
+                                </div>
+                            </details>
+                        ` : ''}
+                    </div>
+                `;
+            });
+            html += `</div>`;
+        }
+        
+        // Data Transformers
+        if (flow.bidirectional.dataTransformers && flow.bidirectional.dataTransformers.length > 0) {
+            html += `
+                <div style="background: rgba(245, 158, 11, 0.1); padding: 1rem; border-radius: 8px; border-left: 4px solid var(--warning-yellow);">
+                    <h6 style="color: var(--warning-yellow); margin-bottom: 0.75rem;">🔄 Data Transformers (${flow.bidirectional.dataTransformers.length})</h6>
+                    <p style="font-size: 0.85rem; margin-bottom: 1rem; color: var(--grey-600);">Programs that both read and write records using this structure</p>
+            `;
+            
+            flow.bidirectional.dataTransformers.forEach(transformer => {
+                const friendlyName = this.getFriendlyName(transformer.name) || transformer.name;
+                html += `
+                    <div style="margin-bottom: 0.75rem; padding: 0.75rem; background: white; border-radius: 6px; box-shadow: var(--shadow-sm);">
+                        <div style="font-weight: 600; display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+                            <span style="color: var(--grey-800);">💼 ${friendlyName}</span>
+                            <div style="display: flex; gap: 0.25rem; flex-wrap: wrap;">
+                                ${transformer.reads > 0 ? `<span class="badge badge-primary">Reads: ${transformer.reads}</span>` : ''}
+                                ${transformer.creates > 0 ? `<span class="badge badge-success">Creates: ${transformer.creates}</span>` : ''}
+                                ${transformer.updates > 0 ? `<span class="badge badge-warning">Updates: ${transformer.updates}</span>` : ''}
+                            </div>
+                        </div>
+                        <div style="font-size: 0.8rem; color: var(--grey-600);">
+                            <div style="margin-bottom: 0.25rem;">📁 File: ${transformer.file}</div>
+                            <div>⚙️ Operations: ${transformer.operations.length}</div>
+                        </div>
+                        ${transformer.operations.length > 0 ? `
+                            <details style="margin-top: 0.5rem;">
+                                <summary style="font-size: 0.75rem; color: var(--primary-blue); cursor: pointer;">Show Operations</summary>
+                                <div style="margin-top: 0.5rem; padding: 0.5rem; background: var(--grey-50); border-radius: 4px; font-size: 0.75rem;">
+                                    ${transformer.operations.slice(0, 5).map(op => `
+                                        <div style="margin-bottom: 0.25rem;">
+                                            <strong>${op.type}</strong> (Line ${op.line}): ${op.context.substring(0, 60)}...
+                                        </div>
+                                    `).join('')}
+                                    ${transformer.operations.length > 5 ? `<div style="color: var(--grey-500);">...and ${transformer.operations.length - 5} more</div>` : ''}
+                                </div>
+                            </details>
+                        ` : ''}
+                    </div>
+                `;
+            });
+            html += `</div>`;
+        }
+        
+        html += `</div></div>`;
+    }
+    
+    // Traditional Upstream/Downstream Analysis
+    html += `
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+    `;
+    
+    // Upstream Details
+    html += `
+        <div>
+            <h5 style="color: var(--success-green);">🔼 Upstream Dependencies</h5>
+            <p style="font-size: 0.85rem; color: var(--grey-600); margin-bottom: 1rem;">Components that this component depends on</p>
+    `;
+    
+    if (flow.upstream.copybooks.length > 0) {
+        html += `
+            <div style="margin-bottom: 1rem;">
+                <h6>📚 Copybooks (${flow.upstream.copybooks.length})</h6>
+                <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px;">
+        `;
+        flow.upstream.copybooks.forEach(copybook => {
+            const statusClass = copybook.available ? 'success' : 'danger';
+            const statusIcon = copybook.available ? '✅' : '❌';
+            const friendlyName = this.getFriendlyName(copybook.name) || copybook.name;
+            html += `
+                <div style="margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+                        <span class="badge badge-${statusClass}">${statusIcon} ${friendlyName}</span>
+                        ${copybook.relationshipType === 'BIDIRECTIONAL' ? '<span class="badge badge-warning">↕️ Bidirectional</span>' : ''}
+                    </div>
+                    <small style="color: var(--grey-600);">
+                        ${copybook.usage} in ${copybook.file} (line ${copybook.line})
+                    </small>
+                </div>
+            `;
+        });
+        html += `</div></div>`;
+    }
+    
+    if (flow.upstream.programs.length > 0) {
+        html += `
+            <div style="margin-bottom: 1rem;">
+                <h6>💼 Programs (${flow.upstream.programs.length})</h6>
+                <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px;">
+        `;
+        flow.upstream.programs.forEach(program => {
+            const statusClass = program.available ? 'success' : 'danger';
+            const statusIcon = program.available ? '✅' : '❌';
+            const friendlyName = this.getFriendlyName(program.name) || program.name;
+            html += `
+                <div style="margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">
+                    <span class="badge badge-${statusClass}">${statusIcon} ${friendlyName}</span>
+                    <br><small style="color: var(--grey-600);">
+                        ${program.usage} in ${program.file} (line ${program.line})
+                    </small>
+                </div>
+            `;
+        });
+        html += `</div></div>`;
+    }
+    
+    if (flow.upstream.files.length > 0) {
+        html += `
+            <div style="margin-bottom: 1rem;">
+                <h6>📁 Files (${flow.upstream.files.length})</h6>
+                <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px;">
+        `;
+        flow.upstream.files.forEach(file => {
+            html += `
+                <div style="margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">
+                    <span class="badge badge-grey">📁 ${file.name}</span>
+                    <br><small style="color: var(--grey-600);">
+                        ${file.usage} in ${file.file} (line ${file.line})
+                    </small>
+                </div>
+            `;
+        });
+        html += `</div></div>`;
+    }
+    
+    if (flow.upstream.databases.length > 0) {
+        html += `
+            <div style="margin-bottom: 1rem;">
+                <h6>🗄️ Databases (${flow.upstream.databases.length})</h6>
+                <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px;">
+        `;
+        flow.upstream.databases.forEach(db => {
+            html += `
+                <div style="margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">
+                    <span class="badge badge-info">🗄️ ${db.name}</span>
+                    <br><small style="color: var(--grey-600);">
+                        ${db.usage} in ${db.file} (line ${db.line})
+                    </small>
+                </div>
+            `;
+        });
+        html += `</div></div>`;
+    }
+    
+    html += `</div>`;
+    
+    // Downstream Details
+    html += `
+        <div>
+            <h5 style="color: var(--warning-yellow);">🔽 Downstream Dependents</h5>
+            <p style="font-size: 0.85rem; color: var(--grey-600); margin-bottom: 1rem;">Components that depend on this component</p>
+    `;
+    
+    if (flow.downstream.programs.length > 0) {
+        html += `
+            <div style="margin-bottom: 1rem;">
+                <h6>💼 Programs (${flow.downstream.programs.length})</h6>
+                <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px;">
+        `;
+        flow.downstream.programs.forEach(program => {
+            const friendlyName = this.getFriendlyName(program.name) || program.name;
+            html += `
+                <div style="margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">
+                    <span class="badge badge-warning">💼 ${friendlyName}</span>
+                    <br><small style="color: var(--grey-600);">
+                        ${program.usage} - ${program.type}
+                    </small>
+                </div>
+            `;
+        });
+        html += `</div></div>`;
+    }
+    
+    if (flow.downstream.jobs.length > 0) {
+        html += `
+            <div style="margin-bottom: 1rem;">
+                <h6>📋 Jobs (${flow.downstream.jobs.length})</h6>
+                <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px;">
+        `;
+        flow.downstream.jobs.forEach(job => {
+            const friendlyName = this.getFriendlyName(job.name) || job.name;
+            html += `
+                <div style="margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">
+                    <span class="badge badge-warning">📋 ${friendlyName}</span>
+                    <br><small style="color: var(--grey-600);">
+                        ${job.usage} - ${job.type}
+                    </small>
+                </div>
+            `;
+        });
+        html += `</div></div>`;
+    }
+    
+    if (flow.downstream.screens.length > 0) {
+        html += `
+            <div style="margin-bottom: 1rem;">
+                <h6>🖥️ CICS Screens (${flow.downstream.screens.length})</h6>
+                <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px;">
+        `;
+        flow.downstream.screens.forEach(screen => {
+            const friendlyName = this.getFriendlyName(screen.name) || screen.name;
+            html += `
+                <div style="margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">
+                    <span class="badge badge-warning">🖥️ ${friendlyName}</span>
+                    <br><small style="color: var(--grey-600);">
+                        ${screen.usage} - ${screen.type}
+                    </small>
+                </div>
+            `;
+        });
+        html += `</div></div>`;
+    }
+    
+    html += `</div></div>`;
+    
+    // Critical Path Analysis
+    if (flow.criticalPath && flow.criticalPath.length > 0) {
+        html += `
+            <div style="margin-top: 2rem;">
+                <h5>🛤️ Critical Path Analysis</h5>
+                <p style="font-size: 0.85rem; color: var(--grey-600); margin-bottom: 1rem;">
+                    Key components in the dependency chain that could impact this component
+                </p>
+                <div style="background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%); padding: 1rem; border-radius: 8px; color: white;">
+                    <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; justify-content: center;">
+        `;
+        
+        flow.criticalPath.forEach((item, index) => {
+            const isLast = index === flow.criticalPath.length - 1;
+            const itemName = item.name || item;
+            const friendlyName = this.getFriendlyName(itemName) || itemName;
+            const itemType = item.type || 'COMPONENT';
+            
+            html += `
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <div style="background: rgba(255,255,255,0.2); padding: 0.5rem 1rem; border-radius: 6px; text-align: center;">
+                        <div style="font-weight: 600; font-size: 0.9rem;">${friendlyName}</div>
+                        <div style="font-size: 0.7rem; opacity: 0.8;">${itemType}</div>
+                    </div>
+                    ${!isLast ? '<div style="font-size: 1.2rem; opacity: 0.8;">→</div>' : ''}
+                </div>
+            `;
+        });
+        
+        html += `
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Relationship Summary Matrix
+    if (flow.bidirectional && Object.values(flow.bidirectional).some(arr => arr.length > 0)) {
+        html += `
+            <div style="margin-top: 2rem;">
+                <h5>📊 Relationship Summary Matrix</h5>
+                <div style="background: white; border: 1px solid var(--grey-200); border-radius: 8px; overflow: hidden;">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Program</th>
+                                <th>Relationship Type</th>
+                                <th>Operations</th>
+                                <th>Impact Level</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        `;
+        
+        // Add data producers
+        flow.bidirectional.dataProducers?.forEach(producer => {
+            const friendlyName = this.getFriendlyName(producer.name) || producer.name;
+            const totalOps = producer.creates + producer.updates;
+            const impactLevel = totalOps > 5 ? 'HIGH' : totalOps > 2 ? 'MEDIUM' : 'LOW';
+            const impactClass = impactLevel === 'HIGH' ? 'badge-danger' : impactLevel === 'MEDIUM' ? 'badge-warning' : 'badge-success';
+            
+            html += `
+                <tr>
+                    <td style="font-weight: 600;">💼 ${friendlyName}</td>
+                    <td><span class="badge badge-success">🏭 Data Producer</span></td>
+                    <td>
+                        ${producer.creates > 0 ? `<span class="badge badge-success">Creates: ${producer.creates}</span> ` : ''}
+                        ${producer.updates > 0 ? `<span class="badge badge-warning">Updates: ${producer.updates}</span>` : ''}
+                    </td>
+                    <td><span class="badge ${impactClass}">${impactLevel}</span></td>
+                </tr>
+            `;
+        });
+        
+        // Add data consumers
+        flow.bidirectional.dataConsumers?.forEach(consumer => {
+            const friendlyName = this.getFriendlyName(consumer.name) || consumer.name;
+            const impactLevel = consumer.reads > 5 ? 'MEDIUM' : 'LOW';
+            const impactClass = impactLevel === 'MEDIUM' ? 'badge-warning' : 'badge-success';
+            
+            html += `
+                <tr>
+                    <td style="font-weight: 600;">💼 ${friendlyName}</td>
+                    <td><span class="badge badge-primary">📖 Data Consumer</span></td>
+                    <td><span class="badge badge-primary">Reads: ${consumer.reads}</span></td>
+                    <td><span class="badge ${impactClass}">${impactLevel}</span></td>
+                </tr>
+            `;
+        });
+        
+        // Add data transformers
+        flow.bidirectional.dataTransformers?.forEach(transformer => {
+            const friendlyName = this.getFriendlyName(transformer.name) || transformer.name;
+            const totalOps = transformer.creates + transformer.reads + transformer.updates;
+            const impactLevel = totalOps > 8 ? 'HIGH' : totalOps > 4 ? 'MEDIUM' : 'LOW';
+            const impactClass = impactLevel === 'HIGH' ? 'badge-danger' : impactLevel === 'MEDIUM' ? 'badge-warning' : 'badge-success';
+            
+            html += `
+                <tr>
+                    <td style="font-weight: 600;">💼 ${friendlyName}</td>
+                    <td><span class="badge badge-warning">🔄 Data Transformer</span></td>
+                    <td>
+                        ${transformer.reads > 0 ? `<span class="badge badge-primary">Reads: ${transformer.reads}</span> ` : ''}
+                        ${transformer.creates > 0 ? `<span class="badge badge-success">Creates: ${transformer.creates}</span> ` : ''}
+                        ${transformer.updates > 0 ? `<span class="badge badge-warning">Updates: ${transformer.updates}</span>` : ''}
+                    </td>
+                    <td><span class="badge ${impactClass}">${impactLevel}</span></td>
+                </tr>
+            `;
+        });
+        
+        html += `
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Flow Recommendations
+    html += `
+        <div style="margin-top: 2rem;">
+            <h5>💡 Flow Analysis Recommendations</h5>
+            <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px;">
+    `;
+    
+    const recommendations = this.generateFlowRecommendations(flow);
+    recommendations.forEach((rec, index) => {
+        html += `
+            <div style="margin-bottom: 0.75rem; padding: 0.75rem; background: white; border-radius: 6px; border-left: 3px solid var(--primary-blue);">
+                <div style="font-weight: 600; color: var(--grey-800); margin-bottom: 0.25rem;">
+                    ${index + 1}. ${rec.title}
+                </div>
+                <div style="font-size: 0.85rem; color: var(--grey-600);">
+                    ${rec.description}
+                </div>
+                ${rec.priority ? `<span class="badge badge-${rec.priority === 'HIGH' ? 'danger' : rec.priority === 'MEDIUM' ? 'warning' : 'success'}" style="margin-top: 0.5rem;">${rec.priority} Priority</span>` : ''}
+            </div>
+        `;
+    });
+    
+    html += `
+            </div>
+        </div>
+    `;
+    
+    container.innerHTML = html;
+}
+
+// Generate flow-specific recommendations
+generateFlowRecommendations(flow) {
+    const recommendations = [];
+    
+    // Missing dependencies
+    const missingUpstream = flow.upstream.copybooks.filter(c => !c.available).length + 
+                           flow.upstream.programs.filter(p => !p.available).length;
+    
+    if (missingUpstream > 0) {
+        recommendations.push({
+            title: "Resolve Missing Dependencies",
+            description: `${missingUpstream} upstream dependencies are missing. Upload or locate these components to complete the analysis and ensure compilation success.`,
+            priority: "HIGH"
+        });
+    }
+    
+    // Bidirectional relationship insights
+    if (flow.bidirectional) {
+        const transformers = flow.bidirectional.dataTransformers?.length || 0;
+        const producers = flow.bidirectional.dataProducers?.length || 0;
+        const consumers = flow.bidirectional.dataConsumers?.length || 0;
+        
+        if (transformers > 3) {
+            recommendations.push({
+                title: "Review Data Transformer Complexity",
+                description: `${transformers} programs both read and write this data structure. Consider if some can be simplified or split into separate read/write operations for better maintainability.`,
+                priority: "MEDIUM"
+            });
+        }
+        
+        if (producers === 0 && consumers > 0) {
+            recommendations.push({
+                title: "Identify Data Source",
+                description: "This structure is consumed but no data producers were found. Verify that data creation programs are included in the analysis.",
+                priority: "MEDIUM"
+            });
+        }
+        
+        if (consumers === 0 && producers > 0) {
+            recommendations.push({
+                title: "Review Data Usage",
+                description: "Data is being created but no consumers found. Consider if this data is actually being used or if consumer programs are missing from analysis.",
+                priority: "LOW"
+            });
+        }
+    }
+    
+    // Complexity recommendations
+    if (flow.complexity === 'HIGH') {
+        recommendations.push({
+            title: "Manage High Complexity",
+            description: "This component has high dependency complexity. Consider creating documentation and implementing change control procedures to manage impacts.",
+            priority: "MEDIUM"
+        });
+    }
+    
+    // Flow type specific recommendations
+    switch (flow.flowType) {
+        case 'DATA_HUB':
+            recommendations.push({
+                title: "Data Hub Governance",
+                description: "This component serves as a data hub. Implement strong governance, versioning, and change management processes.",
+                priority: "HIGH"
+            });
+            break;
+        case 'ISOLATED':
+            recommendations.push({
+                title: "Review Isolated Component",
+                description: "This component appears isolated. Verify if it's actually used or if dependencies are missing from the analysis.",
+                priority: "LOW"
+            });
+            break;
+        case 'DATA_SINK':
+            recommendations.push({
+                title: "Data Sink Analysis",
+                description: "This component only receives data. Ensure proper validation and error handling in producer programs.",
+                priority: "LOW"
+            });
+            break;
+    }
+    
+    // Default recommendation if none generated
+    if (recommendations.length === 0) {
+        recommendations.push({
+            title: "Analysis Complete",
+            description: "Dependency flow analysis shows a well-structured component with clear relationships. Monitor for changes that might affect dependent components.",
+            priority: "LOW"
+        });
+    }
+    
+    return recommendations;
+}
+
 
 // Render Dependency Flow Chart
 renderDependencyFlowChart(flow) {
