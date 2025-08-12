@@ -2899,6 +2899,724 @@ Return only the friendly name, no explanation.`;
     return this.generateFriendlyNameFromPattern(componentName);
 }
 
+// ============================================
+// ENHANCED LLM CHUNKING SYSTEM
+// Proper token management, request chunking, and response assembly
+// ============================================
+
+
+
+// Enhanced Token Management
+estimateTokens(text) {
+    if (!text || typeof text !== 'string') return 0;
+    
+    // More accurate token estimation for mainframe content
+    // COBOL and technical content tends to have more tokens per character
+    const baseEstimate = Math.ceil(text.length / 3.2);
+    
+    // Adjust for technical content density
+    const technicalWords = (text.match(/\b[A-Z][A-Z0-9\-_]{3,}\b/g) || []).length;
+    const codeLines = (text.match(/^\s*\d{2}\s+/gm) || []).length;
+    
+    // Technical content adjustment
+    const adjustment = Math.floor((technicalWords + codeLines) * 0.1);
+    
+    return baseEstimate + adjustment;
+}
+
+validateTokenLimits(prompt, maxResponseTokens = 4000) {
+    const promptTokens = this.estimateTokens(prompt);
+    const safePromptLimit = this.maxTokens - maxResponseTokens - 200; // Safety buffer
+    
+    console.log(`Token validation: ${promptTokens} prompt tokens, limit: ${safePromptLimit}`);
+    
+    if (promptTokens > safePromptLimit) {
+        throw new Error(`Prompt too large: ${promptTokens} tokens exceeds limit of ${safePromptLimit}`);
+    }
+    
+    return {
+        promptTokens,
+        responseTokensAvailable: maxResponseTokens,
+        withinLimits: true
+    };
+}
+
+calculateOptimalChunkSize(totalContent, targetChunks = 3) {
+    const totalTokens = this.estimateTokens(totalContent);
+    const maxChunkTokens = Math.floor((this.maxTokens - 1000) / targetChunks); // Leave room for response
+    
+    return {
+        totalTokens,
+        maxChunkTokens,
+        recommendedChunks: Math.ceil(totalTokens / maxChunkTokens)
+    };
+}
+
+// Enhanced LLM API Call with Chunking Support
+async callLLMAPIChunked(prompt, options = {}) {
+    const {
+        maxResponseTokens = 3000,
+        allowChunking = true,
+        chunkingStrategy = 'auto',
+        retries = 2
+    } = options;
+    
+    try {
+        // First, try to validate if we can send as single request
+        this.validateTokenLimits(prompt, maxResponseTokens);
+        
+        // If validation passes, try single request first
+        return await this.makeSingleLLMRequest(prompt, maxResponseTokens, retries);
+        
+    } catch (tokenError) {
+        if (!allowChunking) {
+            throw new Error(`Prompt too large and chunking disabled: ${tokenError.message}`);
+        }
+        
+        console.log('Prompt too large, switching to chunked analysis:', tokenError.message);
+        return await this.makeChunkedLLMRequest(prompt, options);
+    }
+}
+
+// Single LLM Request (existing logic enhanced)
+async makeSingleLLMRequest(prompt, maxResponseTokens, retries = 2) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            console.log(`LLM API call attempt ${attempt + 1}/${retries + 1}`);
+            
+            const response = await fetch(`${this.vllmEndpoint}/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    prompt: prompt,
+                    max_tokens: maxResponseTokens,
+                    temperature: 0.1,
+                    top_p: 0.9,
+                    stop: [],
+                    stream: false,
+                    frequency_penalty: 0.1,
+                    presence_penalty: 0.0
+                }),
+                signal: AbortSignal.timeout(90000) // 90 second timeout
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            const resultText = this.extractTextFromResponse(data);
+            
+            if (!resultText) {
+                throw new Error('No valid text content in LLM response');
+            }
+
+            // Parse and validate response
+            const parseResult = this.parseJSONResponse(resultText);
+            
+            if (parseResult.success) {
+                console.log('✅ Single LLM request successful');
+                return parseResult.data;
+            } else if (parseResult.fallbackData) {
+                console.warn('⚠️ JSON parsing failed, using fallback data');
+                return parseResult.fallbackData;
+            } else {
+                throw new Error(`JSON parsing failed: ${parseResult.error}`);
+            }
+
+        } catch (error) {
+            console.error(`LLM attempt ${attempt + 1} failed:`, error);
+            
+            if (attempt < retries) {
+                const delay = 2000 * (attempt + 1); // Exponential backoff
+                console.log(`Retrying in ${delay}ms...`);
+                await this.sleep(delay);
+            } else {
+                throw error;
+            }
+        }
+    }
+}
+
+// Chunked LLM Request for Large Content
+async makeChunkedLLMRequest(originalPrompt, options = {}) {
+    const {
+        maxResponseTokens = 3000,
+        chunkingStrategy = 'auto'
+    } = options;
+    
+    console.log('🔄 Starting chunked LLM analysis...');
+    
+    try {
+        // Determine chunking strategy based on prompt content
+        const analysisType = this.detectAnalysisType(originalPrompt);
+        let chunks;
+        
+        switch (analysisType) {
+            case 'FIELD_ANALYSIS':
+                chunks = this.chunkFieldAnalysis(originalPrompt);
+                break;
+            case 'DEPENDENCY_ANALYSIS':
+                chunks = this.chunkDependencyAnalysis(originalPrompt);
+                break;
+            case 'BUSINESS_LOGIC':
+                chunks = this.chunkBusinessLogicAnalysis(originalPrompt);
+                break;
+            default:
+                chunks = this.chunkGenericAnalysis(originalPrompt);
+        }
+        
+        console.log(`📊 Created ${chunks.length} analysis chunks`);
+        
+        // Process chunks sequentially to avoid overwhelming the server
+        const results = [];
+        for (let i = 0; i < chunks.length; i++) {
+            console.log(`Processing chunk ${i + 1}/${chunks.length}: ${chunks[i].type}`);
+            
+            try {
+                const chunkResult = await this.makeSingleLLMRequest(
+                    chunks[i].prompt, 
+                    maxResponseTokens
+                );
+                
+                results.push({
+                    ...chunkResult,
+                    chunkIndex: i,
+                    chunkType: chunks[i].type
+                });
+                
+                // Brief pause between chunks to be server-friendly
+                if (i < chunks.length - 1) {
+                    await this.sleep(1000);
+                }
+                
+            } catch (chunkError) {
+                console.error(`Chunk ${i + 1} failed:`, chunkError);
+                // Add fallback data for failed chunk
+                results.push({
+                    error: true,
+                    message: chunkError.message,
+                    chunkIndex: i,
+                    chunkType: chunks[i].type,
+                    fallbackData: this.createChunkFallback(chunks[i].type)
+                });
+            }
+        }
+        
+        // Combine chunk results
+        console.log('🔧 Combining chunked results...');
+        return this.combineChunkedResults(results, analysisType);
+        
+    } catch (error) {
+        console.error('Chunked analysis failed:', error);
+        throw new Error(`Chunked LLM analysis failed: ${error.message}`);
+    }
+}
+
+// Detect Analysis Type from Prompt
+detectAnalysisType(prompt) {
+    const upperPrompt = prompt.toUpperCase();
+    
+    if (upperPrompt.includes('FIELD ANALYSIS') || upperPrompt.includes('COPYBOOK')) {
+        return 'FIELD_ANALYSIS';
+    } else if (upperPrompt.includes('DEPENDENCY') || upperPrompt.includes('COPY ')) {
+        return 'DEPENDENCY_ANALYSIS';
+    } else if (upperPrompt.includes('BUSINESS LOGIC') || upperPrompt.includes('VALIDATION')) {
+        return 'BUSINESS_LOGIC';
+    } else {
+        return 'GENERAL_ANALYSIS';
+    }
+}
+
+// Field Analysis Chunking
+chunkFieldAnalysis(originalPrompt) {
+    const chunks = [];
+    const lines = originalPrompt.split('\n');
+    
+    // Extract field data from prompt
+    const fieldSectionStart = lines.findIndex(line => 
+        line.includes('FIELD ANALYSIS') || line.includes('COPYBOOK CONTENT')
+    );
+    
+    if (fieldSectionStart === -1) {
+        return this.chunkGenericAnalysis(originalPrompt);
+    }
+    
+    const beforeFields = lines.slice(0, fieldSectionStart).join('\n');
+    const fieldLines = lines.slice(fieldSectionStart);
+    
+    // Extract individual field definitions
+    const fieldBlocks = this.extractFieldBlocks(fieldLines.join('\n'));
+    
+    if (fieldBlocks.length <= 20) {
+        // Small enough for single analysis
+        return [{
+            type: 'FIELD_ANALYSIS_COMPLETE',
+            prompt: originalPrompt
+        }];
+    }
+    
+    // Split into chunks of ~15 fields each
+    const fieldsPerChunk = 15;
+    for (let i = 0; i < fieldBlocks.length; i += fieldsPerChunk) {
+        const chunkFields = fieldBlocks.slice(i, i + fieldsPerChunk);
+        
+        const chunkPrompt = `${beforeFields}
+
+FIELD ANALYSIS CHUNK ${Math.floor(i / fieldsPerChunk) + 1}:
+
+${chunkFields.join('\n\n')}
+
+TASK: Analyze these ${chunkFields.length} fields and provide:
+1. Field business purposes
+2. Usage patterns (INPUT/OUTPUT/REFERENCE)
+3. Validation rules found
+4. Business logic discovered
+
+Return JSON with field analysis for this chunk:
+{
+  "chunkIndex": ${Math.floor(i / fieldsPerChunk)},
+  "fieldsAnalyzed": ${chunkFields.length},
+  "fieldDetails": [
+    {
+      "fieldName": "FIELD-NAME",
+      "businessPurpose": "purpose",
+      "usagePattern": "INPUT|OUTPUT|REFERENCE",
+      "validationRules": ["rule1", "rule2"],
+      "businessLogic": "logic description"
+    }
+  ]
+}`;
+
+        chunks.push({
+            type: 'FIELD_ANALYSIS_CHUNK',
+            prompt: chunkPrompt,
+            fieldCount: chunkFields.length,
+            chunkIndex: Math.floor(i / fieldsPerChunk)
+        });
+    }
+    
+    return chunks;
+}
+
+// Extract Field Blocks from Content
+extractFieldBlocks(content) {
+    const lines = content.split('\n');
+    const fieldBlocks = [];
+    let currentBlock = [];
+    
+    for (const line of lines) {
+        const trimmed = line.trim();
+        
+        // Check if this is a field definition line
+        if (trimmed.match(/^\d{2}\s+[A-Z][A-Z0-9\-_]*/)) {
+            // If we have a current block and this is a new 01-level, save the block
+            if (currentBlock.length > 0 && trimmed.match(/^01\s+/)) {
+                fieldBlocks.push(currentBlock.join('\n'));
+                currentBlock = [line];
+            } else {
+                currentBlock.push(line);
+            }
+        } else if (currentBlock.length > 0) {
+            // Continue the current block
+            currentBlock.push(line);
+        }
+    }
+    
+    // Add the last block
+    if (currentBlock.length > 0) {
+        fieldBlocks.push(currentBlock.join('\n'));
+    }
+    
+    return fieldBlocks;
+}
+
+// Dependency Analysis Chunking
+chunkDependencyAnalysis(originalPrompt) {
+    const chunks = [];
+    const lines = originalPrompt.split('\n');
+    
+    // Split by file content sections
+    const fileSections = this.extractFileSections(originalPrompt);
+    
+    if (fileSections.length <= 2) {
+        return [{
+            type: 'DEPENDENCY_ANALYSIS_COMPLETE',
+            prompt: originalPrompt
+        }];
+    }
+    
+    // Create chunks for different dependency types
+    const copybooks = fileSections.filter(f => f.type === 'Copybook');
+    const programs = fileSections.filter(f => f.type === 'COBOL Program');
+    
+    if (copybooks.length > 0) {
+        chunks.push({
+            type: 'DEPENDENCY_COPYBOOKS',
+            prompt: this.createDependencyChunkPrompt('COPYBOOKS', copybooks, originalPrompt)
+        });
+    }
+    
+    if (programs.length > 0) {
+        chunks.push({
+            type: 'DEPENDENCY_PROGRAMS', 
+            prompt: this.createDependencyChunkPrompt('PROGRAMS', programs, originalPrompt)
+        });
+    }
+    
+    return chunks;
+}
+
+// Business Logic Chunking
+chunkBusinessLogicAnalysis(originalPrompt) {
+    const chunks = [];
+    
+    // Split business logic analysis into logical sections
+    chunks.push({
+        type: 'BUSINESS_RULES',
+        prompt: this.createBusinessLogicChunkPrompt('VALIDATION_RULES', originalPrompt)
+    });
+    
+    chunks.push({
+        type: 'CALCULATIONS',
+        prompt: this.createBusinessLogicChunkPrompt('CALCULATIONS', originalPrompt)
+    });
+    
+    chunks.push({
+        type: 'FIELD_RELATIONSHIPS',
+        prompt: this.createBusinessLogicChunkPrompt('RELATIONSHIPS', originalPrompt)
+    });
+    
+    return chunks;
+}
+
+// Generic Analysis Chunking (fallback)
+chunkGenericAnalysis(originalPrompt) {
+    const maxChunkSize = Math.floor(this.maxTokens * 0.6); // 60% for prompt
+    const promptTokens = this.estimateTokens(originalPrompt);
+    
+    if (promptTokens <= maxChunkSize) {
+        return [{
+            type: 'GENERAL_ANALYSIS',
+            prompt: originalPrompt
+        }];
+    }
+    
+    // Split prompt into logical sections
+    const sections = originalPrompt.split(/\n\n(?=[A-Z][A-Z\s]+:)/);
+    const chunks = [];
+    let currentChunk = '';
+    let chunkIndex = 0;
+    
+    for (const section of sections) {
+        const testChunk = currentChunk + '\n\n' + section;
+        
+        if (this.estimateTokens(testChunk) > maxChunkSize && currentChunk.length > 0) {
+            // Save current chunk and start new one
+            chunks.push({
+                type: 'GENERAL_ANALYSIS_CHUNK',
+                prompt: this.wrapGenericChunk(currentChunk, chunkIndex),
+                chunkIndex: chunkIndex
+            });
+            
+            currentChunk = section;
+            chunkIndex++;
+        } else {
+            currentChunk = testChunk;
+        }
+    }
+    
+    // Add final chunk
+    if (currentChunk.length > 0) {
+        chunks.push({
+            type: 'GENERAL_ANALYSIS_CHUNK',
+            prompt: this.wrapGenericChunk(currentChunk, chunkIndex),
+            chunkIndex: chunkIndex
+        });
+    }
+    
+    return chunks;
+}
+
+// Combine Chunked Results
+combineChunkedResults(results, analysisType) {
+    console.log(`Combining ${results.length} chunk results for ${analysisType}`);
+    
+    switch (analysisType) {
+        case 'FIELD_ANALYSIS':
+            return this.combineFieldAnalysisResults(results);
+        case 'DEPENDENCY_ANALYSIS':
+            return this.combineDependencyResults(results);
+        case 'BUSINESS_LOGIC':
+            return this.combineBusinessLogicResults(results);
+        default:
+            return this.combineGeneralResults(results);
+    }
+}
+
+// Combine Field Analysis Results
+combineFieldAnalysisResults(results) {
+    const combined = {
+        componentName: results[0]?.componentName || 'Unknown',
+        friendlyName: results[0]?.friendlyName || 'Unknown',
+        componentType: 'Copybook',
+        analysisScope: 'CHUNKED_FIELD_ANALYSIS',
+        totalFields: 0,
+        fieldDetails: [],
+        fieldSummary: {
+            primaryFields: [],
+            inputFields: 0,
+            outputFields: 0,
+            unusedFields: 0
+        },
+        businessLogic: {
+            validationRules: [],
+            businessRules: [],
+            dataValidations: [],
+            fieldRelationships: []
+        },
+        qualityScore: 0,
+        chunkedAnalysis: {
+            totalChunks: results.length,
+            successfulChunks: results.filter(r => !r.error).length,
+            failedChunks: results.filter(r => r.error).length
+        }
+    };
+    
+    let totalQuality = 0;
+    let qualityCount = 0;
+    
+    results.forEach((result, index) => {
+        if (result.error) {
+            console.warn(`Skipping failed chunk ${index}:`, result.message);
+            return;
+        }
+        
+        // Combine field details
+        if (result.fieldDetails) {
+            combined.fieldDetails.push(...result.fieldDetails);
+            combined.totalFields += result.fieldsAnalyzed || result.fieldDetails.length;
+        }
+        
+        // Combine business logic
+        if (result.businessLogic) {
+            if (result.businessLogic.validationRules) {
+                combined.businessLogic.validationRules.push(...result.businessLogic.validationRules);
+            }
+            if (result.businessLogic.businessRules) {
+                combined.businessLogic.businessRules.push(...result.businessLogic.businessRules);
+            }
+        }
+        
+        // Accumulate quality scores
+        if (result.qualityScore) {
+            totalQuality += result.qualityScore;
+            qualityCount++;
+        }
+    });
+    
+    // Calculate combined quality score
+    combined.qualityScore = qualityCount > 0 ? Math.round(totalQuality / qualityCount) : 6;
+    
+    // Generate field summary from combined details
+    if (combined.fieldDetails.length > 0) {
+        combined.fieldSummary.primaryFields = combined.fieldDetails
+            .filter(f => f.usagePattern !== 'UNUSED')
+            .slice(0, 10)
+            .map(f => f.fieldName);
+            
+        combined.fieldSummary.inputFields = combined.fieldDetails.filter(f => f.usagePattern === 'INPUT').length;
+        combined.fieldSummary.outputFields = combined.fieldDetails.filter(f => f.usagePattern === 'OUTPUT').length;
+        combined.fieldSummary.unusedFields = combined.fieldDetails.filter(f => f.usagePattern === 'UNUSED').length;
+    }
+    
+    console.log(`✅ Combined field analysis: ${combined.totalFields} fields from ${combined.chunkedAnalysis.successfulChunks} chunks`);
+    
+    return combined;
+}
+
+// Combine Dependency Results
+combineDependencyResults(results) {
+    const combined = {
+        componentName: results[0]?.componentName || 'Unknown',
+        dependencies: {
+            copybooks: { found: [], missing: [] },
+            programs: { found: [], missing: [] },
+            files: { found: [], missing: [] }
+        },
+        dependencyHealth: 100,
+        chunkedAnalysis: {
+            totalChunks: results.length,
+            successfulChunks: results.filter(r => !r.error).length
+        }
+    };
+    
+    results.forEach(result => {
+        if (result.error) return;
+        
+        if (result.dependencies) {
+            // Merge found dependencies
+            if (result.dependencies.found) {
+                combined.dependencies.copybooks.found.push(...(result.dependencies.found.copybooks || []));
+                combined.dependencies.programs.found.push(...(result.dependencies.found.programs || []));
+                combined.dependencies.files.found.push(...(result.dependencies.found.files || []));
+            }
+            
+            // Merge missing dependencies
+            if (result.dependencies.missing) {
+                combined.dependencies.copybooks.missing.push(...(result.dependencies.missing.copybooks || []));
+                combined.dependencies.programs.missing.push(...(result.dependencies.missing.programs || []));
+                combined.dependencies.files.missing.push(...(result.dependencies.missing.files || []));
+            }
+        }
+    });
+    
+    // Remove duplicates
+    Object.keys(combined.dependencies).forEach(type => {
+        combined.dependencies[type].found = [...new Set(combined.dependencies[type].found)];
+        combined.dependencies[type].missing = [...new Set(combined.dependencies[type].missing)];
+    });
+    
+    // Calculate dependency health
+    const totalFound = Object.values(combined.dependencies).reduce((sum, dep) => sum + dep.found.length, 0);
+    const totalMissing = Object.values(combined.dependencies).reduce((sum, dep) => sum + dep.missing.length, 0);
+    const total = totalFound + totalMissing;
+    
+    combined.dependencyHealth = total > 0 ? Math.round((totalFound / total) * 100) : 100;
+    
+    return combined;
+}
+
+// Helper Methods for Chunk Creation
+createBusinessLogicChunkPrompt(analysisType, originalPrompt) {
+    const baseContext = originalPrompt.split('TASK:')[0];
+    
+    const tasks = {
+        'VALIDATION_RULES': 'Focus on validation rules, IF statements, data validation patterns',
+        'CALCULATIONS': 'Focus on COMPUTE, ADD, SUBTRACT, MULTIPLY, DIVIDE operations and calculations', 
+        'RELATIONSHIPS': 'Focus on field relationships, data flow, and business rule connections'
+    };
+    
+    return `${baseContext}
+
+TASK: ${tasks[analysisType]}
+
+Return JSON with business logic analysis:
+{
+  "analysisType": "${analysisType}",
+  "businessLogic": {
+    "validationRules": ["rule1", "rule2"],
+    "calculations": ["calc1", "calc2"],
+    "relationships": ["rel1", "rel2"]
+  }
+}`;
+}
+
+wrapGenericChunk(chunkContent, chunkIndex) {
+    return `MAINFRAME COMPONENT ANALYSIS - CHUNK ${chunkIndex + 1}
+
+${chunkContent}
+
+TASK: Analyze this portion of the component and return relevant insights.
+
+Return JSON format with analysis results for this chunk.`;
+}
+
+// Create Chunk Fallback Data
+createChunkFallback(chunkType) {
+    const fallbacks = {
+        'FIELD_ANALYSIS_CHUNK': {
+            fieldsAnalyzed: 0,
+            fieldDetails: [],
+            businessLogic: { validationRules: [], businessRules: [] }
+        },
+        'DEPENDENCY_COPYBOOKS': {
+            dependencies: { found: { copybooks: [] }, missing: { copybooks: [] } }
+        },
+        'DEPENDENCY_PROGRAMS': {
+            dependencies: { found: { programs: [] }, missing: { programs: [] } }
+        },
+        'BUSINESS_RULES': {
+            businessLogic: { validationRules: [], businessRules: [] }
+        }
+    };
+    
+    return fallbacks[chunkType] || { error: true, message: 'Chunk analysis failed' };
+}
+
+// Combine General Results (fallback)
+combineGeneralResults(results) {
+    const successful = results.filter(r => !r.error);
+    
+    if (successful.length === 0) {
+        return {
+            error: true,
+            message: 'All chunks failed',
+            fallbackData: this.createComponentFallback('Unknown', 'Unknown', null)
+        };
+    }
+    
+    // Take the most complete result and merge others
+    const primary = successful[0];
+    
+    // Merge recommendations from all successful chunks
+    const allRecommendations = successful
+        .flatMap(r => r.recommendations || [])
+        .filter((rec, index, arr) => arr.indexOf(rec) === index); // Remove duplicates
+    
+    return {
+        ...primary,
+        recommendations: allRecommendations.slice(0, 8), // Limit to 8 recommendations
+        qualityScore: Math.round(successful.reduce((sum, r) => sum + (r.qualityScore || 5), 0) / successful.length),
+        chunkedAnalysis: {
+            totalChunks: results.length,
+            successfulChunks: successful.length,
+            combinedResults: true
+        }
+    };
+}
+
+// Extract Text from LLM Response
+extractTextFromResponse(data) {
+    if (typeof data === 'string') return data.trim();
+    if (data.text) return data.text.trim();
+    if (data.choices && data.choices[0]) {
+        if (data.choices[0].text) return data.choices[0].text.trim();
+        if (data.choices[0].message?.content) return data.choices[0].message.content.trim();
+    }
+    if (data.generated_text) return data.generated_text.trim();
+    if (data.response) return data.response.trim();
+    
+    return null;
+}
+
+// Replace the original callLLMAPI method with this enhanced version
+async callLLMAPI(prompt, retries = 0) {
+    console.log('🤖 Enhanced LLM API call initiated');
+    
+    try {
+        return await this.callLLMAPIChunked(prompt, {
+            maxResponseTokens: Math.min(this.maxTokens * 0.7, 4000),
+            allowChunking: true,
+            chunkingStrategy: 'auto',
+            retries: Math.min(retries, 2)
+        });
+        
+    } catch (error) {
+        console.error('Enhanced LLM call failed:', error);
+        
+        // Return fallback data instead of throwing
+        return {
+            error: true,
+            message: error.message,
+            fallbackData: this.createComponentFallback(
+                'Unknown',
+                'Unknown',
+                null
+            )
+        };
+    }
+}
 // Pattern-based friendly name generation
 generateFriendlyNameFromPattern(componentName) {
     const name = componentName.toUpperCase();
