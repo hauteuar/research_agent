@@ -2980,172 +2980,6 @@ cleanup() {
     }
 
     // ============================================
-    // DATA PERSISTENCE AND STORAGE
-    // ============================================
-
-    // Save to Database
-    saveToDatabase() {
-        if (!this.db || !this.dbInitialized) return;
-
-        try {
-            // Save uploaded files
-            this.uploadedFiles.forEach(file => {
-                this.db.run(`
-                    INSERT OR REPLACE INTO uploaded_files 
-                    (file_id, name, content, size, type, upload_date, components, metrics)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                `, [
-                    file.id,
-                    file.name,
-                    file.content,
-                    file.size,
-                    file.type,
-                    file.uploadDate,
-                    JSON.stringify(file.components || []),
-                    JSON.stringify(file.metrics || {})
-                ]);
-            });
-
-            // Save discovered components
-            this.discoveredComponents.forEach((component, name) => {
-                this.db.run(`
-                    INSERT OR REPLACE INTO discovered_components 
-                    (component_name, friendly_name, component_type, business_purpose, 
-                     file_source, line_count, complexity_score, input_files, output_files, 
-                     field_count, analyzed, quality_score)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                `, [
-                    name,
-                    component.friendlyName,
-                    component.type,
-                    component.businessPurpose,
-                    component.fileSource,
-                    component.lineCount,
-                    component.complexityScore,
-                    JSON.stringify(component.inputFiles || []),
-                    JSON.stringify(component.outputFiles || []),
-                    component.fieldCount,
-                    component.analyzed ? 1 : 0,
-                    component.qualityScore
-                ]);
-            });
-
-            // Save analysis results
-            Object.entries(this.analysisResults).forEach(([name, result]) => {
-                this.db.run(`
-                    INSERT OR REPLACE INTO analysis_results 
-                    (component_name, friendly_name, component_type, results_data, 
-                     quality_score, business_context, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                `, [
-                    name,
-                    result.friendlyName,
-                    result.componentType,
-                    JSON.stringify(result),
-                    result.qualityScore,
-                    result.llmAnalysis?.businessPurpose || ''
-                ]);
-            });
-
-            // Save system settings
-            this.db.run(`
-                INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at)
-                VALUES ('vllm_endpoint', ?, CURRENT_TIMESTAMP)
-            `, [this.vllmEndpoint]);
-
-            this.db.run(`
-                INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at)
-                VALUES ('max_tokens', ?, CURRENT_TIMESTAMP)
-            `, [this.maxTokens.toString()]);
-
-            console.log('💾 Data saved to database');
-
-        } catch (error) {
-            console.error('Failed to save to database:', error);
-        }
-    }
-
-    // Load Data from Database
-    async loadDataFromDatabase() {
-        if (!this.db || !this.dbInitialized) return;
-
-        try {
-            // Load uploaded files
-            const filesStmt = this.db.prepare('SELECT * FROM uploaded_files');
-            while (filesStmt.step()) {
-                const row = filesStmt.getAsObject();
-                const file = {
-                    id: row.file_id,
-                    name: row.name,
-                    content: row.content,
-                    size: row.size,
-                    type: row.type,
-                    uploadDate: row.upload_date,
-                    components: JSON.parse(row.components || '[]'),
-                    metrics: JSON.parse(row.metrics || '{}')
-                };
-                this.uploadedFiles.push(file);
-            }
-            filesStmt.free();
-
-            // Load discovered components
-            const componentsStmt = this.db.prepare('SELECT * FROM discovered_components');
-            while (componentsStmt.step()) {
-                const row = componentsStmt.getAsObject();
-                const component = {
-                    name: row.component_name,
-                    friendlyName: row.friendly_name,
-                    type: row.component_type,
-                    businessPurpose: row.business_purpose,
-                    fileSource: row.file_source,
-                    lineCount: row.line_count,
-                    complexityScore: row.complexity_score,
-                    inputFiles: JSON.parse(row.input_files || '[]'),
-                    outputFiles: JSON.parse(row.output_files || '[]'),
-                    fieldCount: row.field_count,
-                    analyzed: row.analyzed === 1,
-                    qualityScore: row.quality_score,
-                    timestamp: row.created_at
-                };
-                this.discoveredComponents.set(row.component_name, component);
-            }
-            componentsStmt.free();
-
-            // Load analysis results
-            const resultsStmt = this.db.prepare('SELECT * FROM analysis_results');
-            while (resultsStmt.step()) {
-                const row = resultsStmt.getAsObject();
-                this.analysisResults[row.component_name] = JSON.parse(row.results_data);
-            }
-            resultsStmt.free();
-
-            // Load system settings
-            const settingsStmt = this.db.prepare('SELECT * FROM system_settings');
-            while (settingsStmt.step()) {
-                const row = settingsStmt.getAsObject();
-                if (row.setting_key === 'vllm_endpoint') {
-                    this.vllmEndpoint = row.setting_value;
-                    document.getElementById('vllmEndpoint').value = row.setting_value;
-                } else if (row.setting_key === 'max_tokens') {
-                    this.maxTokens = parseInt(row.setting_value);
-                    document.getElementById('maxTokens').value = row.setting_value;
-                }
-            }
-            settingsStmt.free();
-
-            // Update UI
-            this.updateDashboardStats();
-            this.displayDiscoveredComponents();
-            this.updateDashboardWithResults();
-
-            console.log('📊 Data loaded from database');
-
-        } catch (error) {
-            console.error('Failed to load from database:', error);
-        }
-    }
-
-    // ============================================
     // EVENT LISTENERS AND UI INTERACTIONS
     // ============================================
 
@@ -5860,6 +5694,174 @@ function toggleCollapsible(header) {
 }
 
 // Add the missing methods to the EnhancedCodeAnalyzer class:
+// --- Persist discovered components (call after discovery/selection) ---
+EnhancedCodeAnalyzer.prototype.saveDiscoveredComponentsToDb = function() {
+    if (!this.db || !this.dbInitialized) return;
+    try {
+        // Create table if missing (non-destructive)
+        this.db.run(`
+            CREATE TABLE IF NOT EXISTS discovered_components (
+                name TEXT PRIMARY KEY,
+                friendly_name TEXT,
+                type TEXT,
+                business_purpose TEXT,
+                file_source TEXT,
+                line_count INTEGER,
+                complexity_score REAL,
+                input_files TEXT,
+                output_files TEXT,
+                field_count INTEGER,
+                analyzed INTEGER DEFAULT 0,
+                quality_score REAL,
+                timestamp TEXT,
+                selected INTEGER DEFAULT 0
+            );
+        `);
+
+        // Upsert all components
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO discovered_components
+            (name, friendly_name, type, business_purpose, file_source, line_count, complexity_score,
+             input_files, output_files, field_count, analyzed, quality_score, timestamp, selected)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        for (const comp of this.discoveredComponents.values()) {
+            stmt.run([
+                comp.name,
+                comp.friendlyName || comp.name,
+                comp.type || '',
+                comp.businessPurpose || '',
+                comp.fileSource || '',
+                comp.lineCount || 0,
+                comp.complexityScore || 0,
+                JSON.stringify(comp.inputFiles || []),
+                JSON.stringify(comp.outputFiles || []),
+                comp.fieldCount || 0,
+                comp.analyzed ? 1 : 0,
+                comp.qualityScore ?? null,
+                comp.timestamp || new Date().toISOString(),
+                comp.selected ? 1 : 0
+            ]);
+        }
+        stmt.free();
+    } catch (e) {
+        console.error('Failed to save discovered components:', e);
+    }
+};
+
+// --- Mark selection in DB when user selects a component ---
+EnhancedCodeAnalyzer.prototype.persistSelection = function(selectedName) {
+    if (!this.db || !this.dbInitialized) return;
+    try {
+        // Clear previous selection flags
+        this.db.run(`UPDATE discovered_components SET selected = 0`);
+        // Set current
+        this.db.run(`UPDATE discovered_components SET selected = 1 WHERE name = ?`, [selectedName]);
+        // Also reflect in memory
+        for (const comp of this.discoveredComponents.values()) {
+            comp.selected = (comp.name === selectedName);
+        }
+    } catch (e) {
+        console.error('Failed to persist selection:', e);
+    }
+};
+
+// --- Update header & dashboard counters everywhere they appear ---
+EnhancedCodeAnalyzer.prototype.updateDashboardStats = function() {
+    // Counts
+    const totalComponents = this.discoveredComponents.size;
+    const totalFiles = this.uploadedFiles.length;
+    const totalFields = Array.from(this.discoveredComponents.values())
+        .reduce((sum, c) => sum + (c.fieldCount || 0), 0);
+
+    const programs = Array.from(this.discoveredComponents.values())
+        .filter(c => (c.type || '').toUpperCase().includes('PROGRAM')).length;
+    const copybooks = Array.from(this.discoveredComponents.values())
+        .filter(c => (c.type || '').toUpperCase().includes('COPY')).length;
+
+    // Quality average (only analyzed comps with numeric score)
+    const scored = Array.from(this.discoveredComponents.values())
+        .map(c => Number(c.qualityScore))
+        .filter(v => Number.isFinite(v));
+    const avgQuality = scored.length ? (scored.reduce((a,b)=>a+b,0) / scored.length).toFixed(1) : '-';
+
+    // Header stats
+    const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = String(val); };
+    setText('headerComponents', totalComponents);
+    setText('headerPrograms', programs);
+    setText('headerCopybooks', copybooks);
+    setText('headerFields', totalFields);
+
+    // Dashboard card stats
+    setText('dashTotalComponents', totalComponents);
+    setText('dashTotalFiles', totalFiles);
+    setText('dashTotalFields', totalFields);
+    setText('dashQualityScore', avgQuality);
+
+    // Left-panel section badges (when present)
+    setText('componentCount', totalComponents);
+    setText('programCount', programs);
+    setText('copybookCount', copybooks);
+    // Files count badge is optional; if you have an element id="fileCount", update it:
+    const fileCountEl = document.getElementById('fileCount');
+    if (fileCountEl) fileCountEl.textContent = String(totalFiles);
+};
+
+// --- (Optional) ensure DB schema for other tables too; call inside createTables() if missing ---
+EnhancedCodeAnalyzer.prototype.createTables = function() {
+    if (!this.db) return;
+    try {
+        this.db.run(`
+            CREATE TABLE IF NOT EXISTS uploaded_files (
+                file_id INTEGER PRIMARY KEY,
+                name TEXT,
+                size INTEGER,
+                type TEXT,
+                content TEXT,
+                metrics_json TEXT,
+                created_at TEXT
+            );
+        `);
+        this.db.run(`
+            CREATE TABLE IF NOT EXISTS analysis_results (
+                component_name TEXT PRIMARY KEY,
+                result_json TEXT,
+                quality_score REAL,
+                updated_at TEXT
+            );
+        `);
+        this.db.run(`
+            CREATE TABLE IF NOT EXISTS business_intelligence (
+                component_name TEXT,
+                topic TEXT,
+                content TEXT,
+                created_at TEXT,
+                PRIMARY KEY (component_name, topic)
+            );
+        `);
+        this.db.run(`
+            CREATE TABLE IF NOT EXISTS chat_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                component_name TEXT,
+                context_type TEXT,
+                sender TEXT,
+                content TEXT,
+                timestamp TEXT
+            );
+        `);
+        // discovered_components table is created in saveDiscoveredComponentsToDb() if not present
+        this.db.run(`
+            CREATE TABLE IF NOT EXISTS system_settings (
+                setting_key TEXT PRIMARY KEY,
+                setting_value TEXT,
+                updated_at TEXT
+            );
+        `);
+    } catch (e) {
+        console.error('Failed to (re)create tables:', e);
+    }
+};
 
 // Basic UI Functions
 EnhancedCodeAnalyzer.prototype.togglePanel = function(side) {
