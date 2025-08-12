@@ -6797,6 +6797,519 @@ renderEnhancedDetailedFlowAnalysis(flow) {
     container.innerHTML = html;
 }
 
+// GENERATE FRIENDLY NAME FUNCTION
+// Add this method to your EnhancedMainframeAnalyzer class
+
+// Generate friendly names using enhanced pattern recognition
+generateFriendlyName(componentName) {
+    if (!componentName || typeof componentName !== 'string') {
+        return componentName;
+    }
+    
+    const upperName = componentName.toUpperCase().trim();
+    
+    // Return cached friendly name if available
+    if (this.friendlyNameCache && this.friendlyNameCache.has(upperName)) {
+        return this.friendlyNameCache.get(upperName);
+    }
+    
+    // Remove common file extensions
+    const cleanName = upperName.replace(/\.(CPY|COPYBOOK|COP|CBL|COB|JCL|PROC)$/, '');
+    
+    // Split on common delimiters
+    const parts = cleanName.split(/[-_\.]+/).filter(part => part.length > 0);
+    
+    if (parts.length === 0) {
+        return componentName;
+    }
+    
+    // Generate friendly name based on patterns
+    let friendlyName = this.generateFriendlyNameFromParts(parts, cleanName);
+    
+    // Cache the generated name for future use
+    if (this.friendlyNameCache) {
+        this.friendlyNameCache.set(upperName, friendlyName);
+    }
+    
+    return friendlyName;
+}
+
+// Generate friendly name from component parts
+generateFriendlyNameFromParts(parts, fullName) {
+    // Business domain mappings
+    const domainMappings = {
+        // Financial/Banking
+        'ACCT': 'Account',
+        'ACCOUNT': 'Account',
+        'BAL': 'Balance',
+        'BALANCE': 'Balance',
+        'LOAN': 'Loan',
+        'CREDIT': 'Credit',
+        'DEBIT': 'Debit',
+        'TRANS': 'Transaction',
+        'TRANSACTION': 'Transaction',
+        'PAYMENT': 'Payment',
+        'PAY': 'Payment',
+        'DEPOSIT': 'Deposit',
+        'WITHDRAW': 'Withdrawal',
+        'INTEREST': 'Interest',
+        'RATE': 'Rate',
+        'FEE': 'Fee',
+        'CHARGE': 'Charge',
+        'STMT': 'Statement',
+        'STATEMENT': 'Statement',
+        
+        // Customer/Person
+        'CUST': 'Customer',
+        'CUSTOMER': 'Customer',
+        'CLIENT': 'Client',
+        'PERSON': 'Person',
+        'PARTY': 'Party',
+        'USER': 'User',
+        'MEMBER': 'Member',
+        'EMPLOYEE': 'Employee',
+        'EMP': 'Employee',
+        'STAFF': 'Staff',
+        
+        // Address/Location
+        'ADDR': 'Address',
+        'ADDRESS': 'Address',
+        'LOCATION': 'Location',
+        'LOC': 'Location',
+        'POSTAL': 'Postal',
+        'ZIP': 'ZIP Code',
+        'CITY': 'City',
+        'STATE': 'State',
+        'COUNTRY': 'Country',
+        'REGION': 'Region',
+        
+        // Product/Service
+        'PROD': 'Product',
+        'PRODUCT': 'Product',
+        'SERVICE': 'Service',
+        'SERV': 'Service',
+        'ITEM': 'Item',
+        'SKU': 'SKU',
+        'CATALOG': 'Catalog',
+        'CAT': 'Catalog',
+        
+        // Order/Invoice
+        'ORDER': 'Order',
+        'ORD': 'Order',
+        'INVOICE': 'Invoice',
+        'INV': 'Invoice',
+        'BILL': 'Bill',
+        'RECEIPT': 'Receipt',
+        'RCPT': 'Receipt',
+        
+        // Status/Code
+        'STATUS': 'Status',
+        'STAT': 'Status',
+        'CODE': 'Code',
+        'CD': 'Code',
+        'TYPE': 'Type',
+        'TYP': 'Type',
+        'FLAG': 'Flag',
+        'IND': 'Indicator',
+        'INDICATOR': 'Indicator',
+        
+        // Date/Time
+        'DATE': 'Date',
+        'DT': 'Date',
+        'TIME': 'Time',
+        'TM': 'Time',
+        'TIMESTAMP': 'Timestamp',
+        'TS': 'Timestamp',
+        'DAY': 'Day',
+        'MONTH': 'Month',
+        'YEAR': 'Year',
+        'YR': 'Year',
+        
+        // Amounts/Numbers
+        'AMT': 'Amount',
+        'AMOUNT': 'Amount',
+        'QTY': 'Quantity',
+        'QUANTITY': 'Quantity',
+        'NUM': 'Number',
+        'NUMBER': 'Number',
+        'CNT': 'Count',
+        'COUNT': 'Count',
+        'TOTAL': 'Total',
+        'TOT': 'Total',
+        'SUM': 'Sum',
+        
+        // Description/Name
+        'DESC': 'Description',
+        'DESCRIPTION': 'Description',
+        'NAME': 'Name',
+        'TITLE': 'Title',
+        'LABEL': 'Label',
+        'TEXT': 'Text',
+        'TXT': 'Text',
+        'COMMENT': 'Comment',
+        'NOTE': 'Note',
+        'NOTES': 'Notes',
+        'MEMO': 'Memo',
+        
+        // Operations/Actions
+        'CREATE': 'Creation',
+        'UPDATE': 'Update',
+        'DELETE': 'Deletion',
+        'ADD': 'Addition',
+        'REMOVE': 'Removal',
+        'VALIDATE': 'Validation',
+        'VERIFY': 'Verification',
+        'PROCESS': 'Processing',
+        'CALC': 'Calculation',
+        'CALCULATE': 'Calculation',
+        'COMPUTE': 'Computation',
+        'EDIT': 'Edit',
+        'MODIFY': 'Modification',
+        'CHANGE': 'Change',
+        
+        // File/Data types
+        'MASTER': 'Master',
+        'DETAIL': 'Detail',
+        'HEADER': 'Header',
+        'TRAILER': 'Trailer',
+        'RECORD': 'Record',
+        'REC': 'Record',
+        'FILE': 'File',
+        'TABLE': 'Table',
+        'TBL': 'Table',
+        'INDEX': 'Index',
+        'IDX': 'Index',
+        'KEY': 'Key',
+        'REF': 'Reference',
+        'REFERENCE': 'Reference',
+        
+        // System/Technical
+        'SYS': 'System',
+        'SYSTEM': 'System',
+        'CONFIG': 'Configuration',
+        'PARAM': 'Parameter',
+        'PARAMETER': 'Parameter',
+        'CONTROL': 'Control',
+        'CTRL': 'Control',
+        'ERROR': 'Error',
+        'ERR': 'Error',
+        'LOG': 'Log',
+        'AUDIT': 'Audit',
+        'TRACE': 'Trace',
+        'DEBUG': 'Debug',
+        'TEST': 'Test',
+        'TEMP': 'Temporary',
+        'TMP': 'Temporary',
+        'WORK': 'Working',
+        'WRK': 'Working',
+        'BACKUP': 'Backup',
+        'BAK': 'Backup',
+        'COPY': 'Copy',
+        'ARCHIVE': 'Archive',
+        'HIST': 'History',
+        'HISTORY': 'History',
+        
+        // Batch/Job related
+        'BATCH': 'Batch',
+        'JOB': 'Job',
+        'STEP': 'Step',
+        'PROC': 'Procedure',
+        'PROCEDURE': 'Procedure',
+        'PROGRAM': 'Program',
+        'PGM': 'Program',
+        'MODULE': 'Module',
+        'MOD': 'Module',
+        'ROUTINE': 'Routine',
+        'RTN': 'Routine',
+        
+        // CICS/Online
+        'CICS': 'CICS',
+        'ONLINE': 'Online',
+        'SCREEN': 'Screen',
+        'MAP': 'Map',
+        'MAPSET': 'Mapset',
+        'TRANS': 'Transaction',
+        'TXN': 'Transaction',
+        
+        // Report related
+        'REPORT': 'Report',
+        'RPT': 'Report',
+        'LIST': 'List',
+        'LISTING': 'Listing',
+        'SUMMARY': 'Summary',
+        'SUMM': 'Summary',
+        'DETAIL': 'Detail',
+        'DTL': 'Detail'
+    };
+    
+    // Convert parts to friendly names
+    const friendlyParts = parts.map(part => {
+        // Check direct mapping first
+        if (domainMappings[part]) {
+            return domainMappings[part];
+        }
+        
+        // Check for partial matches (for compound words)
+        for (const [key, value] of Object.entries(domainMappings)) {
+            if (part.includes(key) && key.length >= 3) {
+                return value;
+            }
+        }
+        
+        // If no mapping found, capitalize the part
+        return this.capitalizeWord(part);
+    });
+    
+    // Apply business context rules
+    let friendlyName = this.applyBusinessContextRules(friendlyParts, fullName);
+    
+    // Ensure reasonable length (max 50 characters)
+    if (friendlyName.length > 50) {
+        friendlyName = this.truncateFriendlyName(friendlyName, friendlyParts);
+    }
+    
+    return friendlyName;
+}
+
+// Apply business context rules to improve naming
+applyBusinessContextRules(parts, fullName) {
+    if (parts.length === 0) return fullName;
+    
+    let result = '';
+    
+    // Special handling for common patterns
+    
+    // Pattern: ENTITY-OPERATION (e.g., CUSTOMER-UPDATE)
+    if (parts.length === 2) {
+        const [entity, operation] = parts;
+        
+        // Check if second part is an operation
+        const operations = ['UPDATE', 'ADD', 'DELETE', 'CREATE', 'MODIFY', 'VALIDATE', 'PROCESS', 'CALC', 'EDIT'];
+        if (operations.includes(operation.toUpperCase())) {
+            result = `${entity} ${operation}`;
+        }
+        // Check if it's ENTITY-RECORD pattern
+        else if (operation.toUpperCase() === 'RECORD' || operation.toUpperCase() === 'REC') {
+            result = `${entity} Master Record`;
+        }
+        // Check if it's ENTITY-FILE pattern
+        else if (operation.toUpperCase() === 'FILE') {
+            result = `${entity} Data File`;
+        }
+        // Check if it's ENTITY-TABLE pattern
+        else if (operation.toUpperCase() === 'TABLE' || operation.toUpperCase() === 'TBL') {
+            result = `${entity} Reference Table`;
+        }
+        else {
+            result = parts.join(' ');
+        }
+    }
+    
+    // Pattern: ENTITY-TYPE-OPERATION (e.g., CUSTOMER-MASTER-UPDATE)
+    else if (parts.length === 3) {
+        const [entity, type, operation] = parts;
+        
+        if (type.toUpperCase() === 'MASTER' || type.toUpperCase() === 'MST') {
+            result = `${entity} Master ${operation}`;
+        }
+        else if (type.toUpperCase() === 'DETAIL' || type.toUpperCase() === 'DTL') {
+            result = `${entity} Detail ${operation}`;
+        }
+        else if (type.toUpperCase() === 'HISTORY' || type.toUpperCase() === 'HIST') {
+            result = `${entity} History ${operation}`;
+        }
+        else {
+            result = parts.join(' ');
+        }
+    }
+    
+    // Pattern: More than 3 parts - intelligent combining
+    else if (parts.length > 3) {
+        // Try to identify the main entity (usually first part)
+        const entity = parts[0];
+        const remaining = parts.slice(1);
+        
+        // Look for key type indicators
+        const typeIndicators = ['MASTER', 'DETAIL', 'HEADER', 'TRAILER', 'WORK', 'TEMP'];
+        const typeIndex = remaining.findIndex(part => typeIndicators.includes(part.toUpperCase()));
+        
+        if (typeIndex >= 0) {
+            const type = remaining[typeIndex];
+            const others = remaining.filter((_, index) => index !== typeIndex);
+            result = `${entity} ${type} ${others.join(' ')}`;
+        } else {
+            // No clear type, just join intelligently
+            result = `${entity} ${remaining.join(' ')}`;
+        }
+    }
+    
+    // Single part
+    else if (parts.length === 1) {
+        const part = parts[0];
+        
+        // Add context based on common suffixes in the original name
+        if (fullName.includes('RECORD') || fullName.includes('REC')) {
+            result = `${part} Record Layout`;
+        }
+        else if (fullName.includes('FILE')) {
+            result = `${part} Data File`;
+        }
+        else if (fullName.includes('TABLE') || fullName.includes('TBL')) {
+            result = `${part} Reference Table`;
+        }
+        else if (fullName.includes('COPY') || fullName.includes('CPY')) {
+            result = `${part} Copybook`;
+        }
+        else {
+            result = part;
+        }
+    }
+    
+    // Clean up the result
+    result = result.trim();
+    
+    // Remove duplicate words
+    const words = result.split(' ');
+    const uniqueWords = [];
+    words.forEach(word => {
+        if (!uniqueWords.includes(word)) {
+            uniqueWords.push(word);
+        }
+    });
+    
+    return uniqueWords.join(' ');
+}
+
+// Capitalize a word properly
+capitalizeWord(word) {
+    if (!word || word.length === 0) return word;
+    
+    // Handle special cases
+    const specialCases = {
+        'ID': 'ID',
+        'XML': 'XML',
+        'API': 'API',
+        'URL': 'URL',
+        'HTTP': 'HTTP',
+        'FTP': 'FTP',
+        'SQL': 'SQL',
+        'DB': 'Database',
+        'UI': 'UI',
+        'GUI': 'GUI',
+        'CLI': 'CLI',
+        'PDF': 'PDF',
+        'CSV': 'CSV',
+        'JSON': 'JSON',
+        'JWT': 'JWT',
+        'UUID': 'UUID'
+    };
+    
+    const upperWord = word.toUpperCase();
+    if (specialCases[upperWord]) {
+        return specialCases[upperWord];
+    }
+    
+    // Standard capitalization
+    return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+}
+
+// Truncate friendly name while preserving meaning
+truncateFriendlyName(friendlyName, parts) {
+    if (friendlyName.length <= 50) return friendlyName;
+    
+    // Strategy 1: Remove less important words
+    const lessImportantWords = ['the', 'and', 'or', 'of', 'for', 'in', 'on', 'at', 'by', 'with'];
+    let words = friendlyName.split(' ');
+    
+    words = words.filter(word => !lessImportantWords.includes(word.toLowerCase()));
+    
+    if (words.join(' ').length <= 50) {
+        return words.join(' ');
+    }
+    
+    // Strategy 2: Abbreviate long words
+    words = words.map(word => {
+        if (word.length > 10) {
+            // Try to find abbreviation
+            const abbreviations = {
+                'Transaction': 'Txn',
+                'Customer': 'Cust',
+                'Account': 'Acct',
+                'Balance': 'Bal',
+                'Description': 'Desc',
+                'Information': 'Info',
+                'Configuration': 'Config',
+                'Parameter': 'Param',
+                'Reference': 'Ref',
+                'Procedure': 'Proc',
+                'Processing': 'Process',
+                'Validation': 'Valid',
+                'Calculation': 'Calc',
+                'Modification': 'Modify'
+            };
+            
+            return abbreviations[word] || word;
+        }
+        return word;
+    });
+    
+    if (words.join(' ').length <= 50) {
+        return words.join(' ');
+    }
+    
+    // Strategy 3: Keep only the most important parts
+    if (parts.length > 2) {
+        return `${parts[0]} ${parts[parts.length - 1]}`;
+    }
+    
+    // Last resort: truncate and add ellipsis
+    return friendlyName.substring(0, 47) + '...';
+}
+
+// Get business context for enhanced naming
+getBusinessContext(componentName) {
+    // Check if any analysis mentioned this component in business context
+    for (const results of Object.values(this.analysisResults || {})) {
+        if (results.llmAnalysis?.businessContext && 
+            (results.componentName === componentName || 
+             results.llmAnalysis.dependencyFriendlyNames?.[componentName.toUpperCase()])) {
+            return results.llmAnalysis.businessContext;
+        }
+    }
+    
+    // Infer business context from component name patterns
+    const upperName = componentName.toUpperCase();
+    
+    if (upperName.includes('CUSTOMER') || upperName.includes('CUST')) {
+        return 'Customer relationship management and data processing';
+    } else if (upperName.includes('ACCOUNT') || upperName.includes('ACCT')) {
+        return 'Account management and financial processing';
+    } else if (upperName.includes('TRANSACTION') || upperName.includes('TRANS')) {
+        return 'Transaction processing and financial operations';
+    } else if (upperName.includes('LOAN') || upperName.includes('CREDIT')) {
+        return 'Lending and credit management operations';
+    } else if (upperName.includes('PAYMENT') || upperName.includes('PAY')) {
+        return 'Payment processing and financial transactions';
+    } else if (upperName.includes('PRODUCT') || upperName.includes('PROD')) {
+        return 'Product catalog and inventory management';
+    } else if (upperName.includes('ORDER') || upperName.includes('ORD')) {
+        return 'Order management and fulfillment processing';
+    } else if (upperName.includes('INVOICE') || upperName.includes('BILL')) {
+        return 'Billing and invoice processing operations';
+    } else if (upperName.includes('EMPLOYEE') || upperName.includes('EMP')) {
+        return 'Human resources and employee management';
+    } else if (upperName.includes('REPORT') || upperName.includes('RPT')) {
+        return 'Reporting and business intelligence operations';
+    } else if (upperName.includes('AUDIT') || upperName.includes('LOG')) {
+        return 'Audit trail and system logging operations';
+    } else if (upperName.includes('BATCH') || upperName.includes('JOB')) {
+        return 'Batch processing and scheduled operations';
+    } else if (upperName.includes('ONLINE') || upperName.includes('CICS')) {
+        return 'Online transaction processing and user interfaces';
+    } else {
+        return 'General business data processing and management';
+    }
+}
 // Generate flow-specific recommendations
 generateFlowRecommendations(flow) {
     const recommendations = [];
