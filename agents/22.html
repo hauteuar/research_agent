@@ -6796,11 +6796,10 @@ renderEnhancedDetailedFlowAnalysis(flow) {
     
     container.innerHTML = html;
 }
-
 // GENERATE FRIENDLY NAME FUNCTION
 // Add this method to your EnhancedMainframeAnalyzer class
 
-// Generate friendly names using enhanced pattern recognition
+// Generate friendly names using 01-level fields and program comments
 generateFriendlyName(componentName) {
     if (!componentName || typeof componentName !== 'string') {
         return componentName;
@@ -6813,18 +6812,20 @@ generateFriendlyName(componentName) {
         return this.friendlyNameCache.get(upperName);
     }
     
-    // Remove common file extensions
-    const cleanName = upperName.replace(/\.(CPY|COPYBOOK|COP|CBL|COB|JCL|PROC)$/, '');
+    // First try to extract friendly name from actual file content
+    let friendlyName = this.extractFriendlyNameFromContent(componentName);
     
-    // Split on common delimiters
-    const parts = cleanName.split(/[-_\.]+/).filter(part => part.length > 0);
-    
-    if (parts.length === 0) {
-        return componentName;
+    // If no friendly name found in content, use pattern recognition as fallback
+    if (!friendlyName) {
+        const cleanName = upperName.replace(/\.(CPY|COPYBOOK|COP|CBL|COB|JCL|PROC)$/, '');
+        const parts = cleanName.split(/[-_\.]+/).filter(part => part.length > 0);
+        
+        if (parts.length > 0) {
+            friendlyName = this.generateFriendlyNameFromParts(parts, cleanName);
+        } else {
+            friendlyName = componentName;
+        }
     }
-    
-    // Generate friendly name based on patterns
-    let friendlyName = this.generateFriendlyNameFromParts(parts, cleanName);
     
     // Cache the generated name for future use
     if (this.friendlyNameCache) {
@@ -6832,6 +6833,393 @@ generateFriendlyName(componentName) {
     }
     
     return friendlyName;
+}
+
+// Extract friendly name from actual file content (01-level or comments)
+extractFriendlyNameFromContent(componentName) {
+    const upperName = componentName.toUpperCase();
+    
+    // Find relevant files for this component
+    const relevantFiles = this.findRelevantFiles(componentName);
+    
+    for (const file of relevantFiles) {
+        const content = file.content;
+        const lines = content.split('\n');
+        
+        // Strategy 1: Extract from copybook 01-level comments
+        if (file.type === 'Copybook' || file.name.toUpperCase().includes('.CPY') || 
+            file.name.toUpperCase().includes('COPYBOOK')) {
+            
+            const copybookFriendlyName = this.extractFromCopybookContent(lines, componentName);
+            if (copybookFriendlyName) {
+                console.log(`Found copybook friendly name for ${componentName}: ${copybookFriendlyName}`);
+                return copybookFriendlyName;
+            }
+        }
+        
+        // Strategy 2: Extract from program comments
+        if (file.type === 'COBOL Program' || content.toUpperCase().includes('PROGRAM-ID')) {
+            const programFriendlyName = this.extractFromProgramContent(lines, componentName);
+            if (programFriendlyName) {
+                console.log(`Found program friendly name for ${componentName}: ${programFriendlyName}`);
+                return programFriendlyName;
+            }
+        }
+        
+        // Strategy 3: Extract from JCL comments
+        if (file.type === 'JCL Job' || content.toUpperCase().includes('//JOB')) {
+            const jclFriendlyName = this.extractFromJCLContent(lines, componentName);
+            if (jclFriendlyName) {
+                console.log(`Found JCL friendly name for ${componentName}: ${jclFriendlyName}`);
+                return jclFriendlyName;
+            }
+        }
+    }
+    
+    return null; // No friendly name found in content
+}
+
+// Extract friendly name from copybook content
+extractFromCopybookContent(lines, componentName) {
+    const upperComponentName = componentName.toUpperCase();
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        const upperLine = line.toUpperCase();
+        
+        // Look for 01-level definition with comments
+        const level01Match = upperLine.match(/^\s*01\s+([A-Z][A-Z0-9\-_]*)/);
+        
+        if (level01Match) {
+            const fieldName = level01Match[1];
+            
+            // Check if this 01-level matches our component (exact or partial match)
+            if (fieldName === upperComponentName || 
+                upperComponentName.includes(fieldName) || 
+                fieldName.includes(upperComponentName.replace(/-(RECORD|REC|COPY|CPY)$/, ''))) {
+                
+                // Strategy 1: Look for comment on the same line
+                const sameLineComment = this.extractCommentFromLine(line);
+                if (sameLineComment) {
+                    return this.cleanupComment(sameLineComment);
+                }
+                
+                // Strategy 2: Look for comment on previous line(s)
+                const previousComment = this.findCommentBeforeLine(lines, i);
+                if (previousComment) {
+                    return this.cleanupComment(previousComment);
+                }
+                
+                // Strategy 3: Look for comment on next line
+                const nextComment = this.findCommentAfterLine(lines, i);
+                if (nextComment) {
+                    return this.cleanupComment(nextComment);
+                }
+                
+                // Strategy 4: Generate from field name structure
+                return this.generateFromFieldName(fieldName);
+            }
+        }
+    }
+    
+    // Strategy 5: Look for file-level comments at the top
+    const fileComment = this.extractFileHeaderComment(lines);
+    if (fileComment) {
+        return this.cleanupComment(fileComment);
+    }
+    
+    return null;
+}
+
+// Extract friendly name from program content
+extractFromProgramContent(lines, componentName) {
+    const upperComponentName = componentName.toUpperCase();
+    
+    // Strategy 1: Look for PROGRAM-ID with comments
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        const upperLine = line.toUpperCase();
+        
+        const programIdMatch = upperLine.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]*)/);
+        if (programIdMatch) {
+            const programName = programIdMatch[1];
+            
+            if (programName === upperComponentName || upperComponentName.includes(programName)) {
+                // Look for comment on same line or surrounding lines
+                const comment = this.extractCommentFromLine(line) ||
+                               this.findCommentBeforeLine(lines, i) ||
+                               this.findCommentAfterLine(lines, i);
+                
+                if (comment) {
+                    return this.cleanupComment(comment);
+                }
+            }
+        }
+    }
+    
+    // Strategy 2: Look for IDENTIFICATION DIVISION comments
+    const identificationComment = this.extractIdentificationDivisionComment(lines);
+    if (identificationComment) {
+        return this.cleanupComment(identificationComment);
+    }
+    
+    // Strategy 3: Look for program purpose in comments
+    const purposeComment = this.extractProgramPurposeComment(lines);
+    if (purposeComment) {
+        return this.cleanupComment(purposeComment);
+    }
+    
+    return null;
+}
+
+// Extract friendly name from JCL content
+extractFromJCLContent(lines, componentName) {
+    const upperComponentName = componentName.toUpperCase();
+    
+    // Strategy 1: Look for JOB statement with comments
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        const upperLine = line.toUpperCase();
+        
+        const jobMatch = upperLine.match(/\/\/([A-Z][A-Z0-9\-_]*)\s+JOB/);
+        if (jobMatch) {
+            const jobName = jobMatch[1];
+            
+            if (jobName === upperComponentName || upperComponentName.includes(jobName)) {
+                // Look for comment parameter in JOB statement
+                const jobComment = this.extractJCLJobComment(line);
+                if (jobComment) {
+                    return this.cleanupComment(jobComment);
+                }
+                
+                // Look for preceding comment lines
+                const precedingComment = this.findCommentBeforeLine(lines, i);
+                if (precedingComment) {
+                    return this.cleanupComment(precedingComment);
+                }
+            }
+        }
+    }
+    
+    // Strategy 2: Look for file header comments
+    const headerComment = this.extractFileHeaderComment(lines);
+    if (headerComment) {
+        return this.cleanupComment(headerComment);
+    }
+    
+    return null;
+}
+
+// Extract comment from a line (handles various comment formats)
+extractCommentFromLine(line) {
+    // COBOL comment format: * comment
+    if (line.trim().startsWith('*')) {
+        return line.trim().substring(1).trim();
+    }
+    
+    // Inline comment format: ... * comment or ... . comment
+    const inlineCommentMatch = line.match(/[.*]\s*\*\s*(.+)$/);
+    if (inlineCommentMatch) {
+        return inlineCommentMatch[1].trim();
+    }
+    
+    // JCL comment format: //* comment
+    if (line.trim().startsWith('//*')) {
+        return line.trim().substring(3).trim();
+    }
+    
+    // End-of-line comment: ... comment after period
+    const endCommentMatch = line.match(/\.\s*([A-Z][^.]*[A-Z])\s*$/);
+    if (endCommentMatch && endCommentMatch[1].length > 10) {
+        return endCommentMatch[1].trim();
+    }
+    
+    return null;
+}
+
+// Find comment in lines before the specified line
+findCommentBeforeLine(lines, lineIndex) {
+    // Look up to 5 lines before
+    for (let i = Math.max(0, lineIndex - 5); i < lineIndex; i++) {
+        const line = lines[i].trim();
+        
+        if (line.startsWith('*') || line.startsWith('//*')) {
+            const comment = this.extractCommentFromLine(line);
+            if (comment && comment.length > 5) {
+                return comment;
+            }
+        }
+    }
+    return null;
+}
+
+// Find comment in lines after the specified line
+findCommentAfterLine(lines, lineIndex) {
+    // Look up to 3 lines after
+    for (let i = lineIndex + 1; i < Math.min(lines.length, lineIndex + 4); i++) {
+        const line = lines[i].trim();
+        
+        if (line.startsWith('*') || line.startsWith('//*')) {
+            const comment = this.extractCommentFromLine(line);
+            if (comment && comment.length > 5) {
+                return comment;
+            }
+        }
+    }
+    return null;
+}
+
+// Extract file header comment (usually at the top of the file)
+extractFileHeaderComment(lines) {
+    let headerComments = [];
+    
+    // Look at first 20 lines for header comments
+    for (let i = 0; i < Math.min(lines.length, 20); i++) {
+        const line = lines[i].trim();
+        
+        if (line.startsWith('*') || line.startsWith('//*')) {
+            const comment = this.extractCommentFromLine(line);
+            if (comment && comment.length > 5) {
+                // Look for meaningful descriptions
+                if (this.isMeaningfulComment(comment)) {
+                    headerComments.push(comment);
+                }
+            }
+        } else if (line.length > 0 && !line.startsWith('*') && !line.startsWith('//*')) {
+            // Hit non-comment content, stop looking
+            break;
+        }
+    }
+    
+    // Return the most meaningful comment
+    if (headerComments.length > 0) {
+        return headerComments.find(comment => 
+            comment.toLowerCase().includes('purpose') ||
+            comment.toLowerCase().includes('description') ||
+            comment.toLowerCase().includes('function')
+        ) || headerComments[0];
+    }
+    
+    return null;
+}
+
+// Extract identification division comment
+extractIdentificationDivisionComment(lines) {
+    let inIdentificationDiv = false;
+    
+    for (const line of lines) {
+        const upperLine = line.toUpperCase();
+        
+        if (upperLine.includes('IDENTIFICATION DIVISION')) {
+            inIdentificationDiv = true;
+            continue;
+        }
+        
+        if (inIdentificationDiv) {
+            if (upperLine.includes('DIVISION')) {
+                break; // Hit next division
+            }
+            
+            // Look for REMARKS or comment lines
+            if (upperLine.includes('REMARKS') || line.trim().startsWith('*')) {
+                const comment = this.extractCommentFromLine(line);
+                if (comment && comment.length > 10) {
+                    return comment;
+                }
+            }
+        }
+    }
+    
+    return null;
+}
+
+// Extract program purpose from comments
+extractProgramPurposeComment(lines) {
+    for (const line of lines) {
+        const lowerLine = line.toLowerCase();
+        
+        // Look for purpose/description keywords in comments
+        if ((line.trim().startsWith('*') || line.trim().startsWith('//*')) &&
+            (lowerLine.includes('purpose') || lowerLine.includes('description') || 
+             lowerLine.includes('function') || lowerLine.includes('does'))) {
+            
+            const comment = this.extractCommentFromLine(line);
+            if (comment && comment.length > 10) {
+                return comment;
+            }
+        }
+    }
+    
+    return null;
+}
+
+// Extract JCL job comment
+extractJCLJobComment(jobLine) {
+    // Look for comment parameter in JOB statement
+    const commentMatch = jobLine.match(/,\s*['"]([^'"]+)['"]/);
+    if (commentMatch && commentMatch[1].length > 5) {
+        return commentMatch[1];
+    }
+    
+    return null;
+}
+
+// Check if comment is meaningful (not just template text)
+isMeaningfulComment(comment) {
+    const lowerComment = comment.toLowerCase();
+    
+    // Filter out common template comments
+    const templatePhrases = [
+        'author:', 'date:', 'modified:', 'version:', 'change:',
+        'copyright', '(c)', 'confidential', 'proprietary',
+        'do not modify', 'generated by', 'template'
+    ];
+    
+    if (templatePhrases.some(phrase => lowerComment.includes(phrase))) {
+        return false;
+    }
+    
+    // Must have reasonable length and content
+    return comment.length >= 10 && comment.length <= 100 && 
+           comment.split(' ').length >= 2;
+}
+
+// Generate friendly name from field name structure
+generateFromFieldName(fieldName) {
+    // Remove common suffixes
+    const cleanField = fieldName.replace(/-(RECORD|REC|AREA|LAYOUT|STRUCT)$/, '');
+    
+    // Split and capitalize
+    const parts = cleanField.split(/[-_]/).filter(part => part.length > 0);
+    const friendlyParts = parts.map(part => this.capitalizeWord(part));
+    
+    return friendlyParts.join(' ') + ' Record';
+}
+
+// Clean up extracted comment
+cleanupComment(comment) {
+    if (!comment) return null;
+    
+    // Remove common prefixes
+    let cleaned = comment.replace(/^(PURPOSE|DESCRIPTION|FUNCTION|PROGRAM|COPYBOOK|FILE):\s*/i, '');
+    
+    // Remove excess whitespace
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+    
+    // Remove quotes
+    cleaned = cleaned.replace(/^['"]|['"]$/g, '');
+    
+    // Capitalize properly
+    if (cleaned.length > 0) {
+        cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+    }
+    
+    // Ensure reasonable length
+    if (cleaned.length > 60) {
+        cleaned = cleaned.substring(0, 57) + '...';
+    }
+    
+    return cleaned.length >= 5 ? cleaned : null;
 }
 
 // Generate friendly name from component parts
@@ -7310,6 +7698,7 @@ getBusinessContext(componentName) {
         return 'General business data processing and management';
     }
 }
+
 // Generate flow-specific recommendations
 generateFlowRecommendations(flow) {
     const recommendations = [];
