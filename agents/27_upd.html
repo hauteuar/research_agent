@@ -1139,7 +1139,29 @@
                     </div>
                 </div>
             </div>
-
+            <div class="form-section">
+                <div class="form-section-title">
+                    <span style="color: var(--info-blue);">💾</span>
+                    Database Management
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem;">
+                    <button class="btn btn-primary" onclick="analyzer.saveToDownloadsWithName()">
+                        <span>💾</span>
+                        Manual Save
+                    </button>
+                    <button class="btn btn-primary" onclick="analyzer.loadFromDownloadsFolder()">
+                        <span>📁</span>
+                        Load Database
+                    </button>
+                </div>
+                
+                <div class="storage-info">
+                    📁 Data auto-saved to Downloads folder every 30 seconds
+                    <br>
+                    💡 Look for "enhanced_code_analyzer_data.db" file
+                </div>
+            </div>
             <!-- Quick Actions -->
             <div class="form-section">
                 <div class="form-section-title">
@@ -2299,31 +2321,52 @@ class EnhancedCodeAnalyzer {
     // DATABASE INITIALIZATION AND MANAGEMENT
     // ============================================
 
-    async initializeDatabase() {
-        try {
-            const SQL = await initSqlJs({
-                locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
-            });
-            
-            // Initialize new database
-            this.db = new SQL.Database();
-            
-            // Create tables
-            this.createTables();
-            this.dbInitialized = true;
-            
-            // Set up periodic saving to Downloads folder
-            this.setupDatabaseSaving();
-            
-            console.log('✅ SQLite database initialized');
-            this.updateDbStatus('initialized', '✅ Database ready (Downloads folder)');
-            
-        } catch (error) {
-            console.error('Failed to initialize SQLite database:', error);
-            this.dbInitialized = false;
-            this.updateDbStatus('error', '❌ Database initialization failed');
-        }
+async initializeDatabase() {
+    try {
+        const SQL = await initSqlJs({
+            locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
+        });
+        
+        // Initialize new database in memory
+        this.db = new SQL.Database();
+        this.dbInitialized = true;
+        
+        // Create tables
+        this.createTables();
+        
+        // Set up periodic saving to Downloads folder
+        this.setupDownloadsFolderStorage();
+        
+        // Check for existing database file and prompt user to load it
+        this.promptForExistingDatabase();
+        
+        console.log('✅ SQLite database initialized');
+        this.updateDbStatus('initialized', '✅ Database ready (Downloads folder storage)');
+        
+    } catch (error) {
+        console.error('Failed to initialize SQLite database:', error);
+        this.dbInitialized = false;
+        this.updateDbStatus('error', '❌ Database initialization failed');
     }
+}
+setupDownloadsFolderStorage() {
+    // Save database every 30 seconds
+    this.saveInterval = setInterval(() => {
+        this.saveToDownloadsFolder();
+    }, 3000000);
+
+    // Save on page unload
+    window.addEventListener('beforeunload', () => {
+        this.saveToDownloadsFolder();
+    });
+
+    // Save on visibility change (when user switches tabs)
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+            this.saveToDownloadsFolder();
+        }
+    });
+}
 
     // Create Database Tables
     createTables() {
@@ -2415,6 +2458,451 @@ class EnhancedCodeAnalyzer {
             )
         `);
     }
+
+    async saveToDownloadsFolder() {
+    if (!this.db || !this.dbInitialized) return;
+
+    try {
+        const data = this.db.export();
+        const blob = new Blob([data], { type: 'application/octet-stream' });
+        
+        // Use consistent filename for automatic loading
+        const filename = 'enhanced_code_analyzer_data.db';
+        
+        // Create download link
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        
+        // Hide the download from user (automatic save)
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+        
+        // Update status indicator
+        const now = new Date().toLocaleTimeString();
+        this.updateDbStatus('initialized', `✅ Auto-saved to Downloads (${now})`);
+        
+        console.log(`💾 Database auto-saved to Downloads folder at ${now}`);
+        
+    } catch (error) {
+        console.error('Failed to save database to Downloads folder:', error);
+        this.updateDbStatus('error', '❌ Failed to save to Downloads');
+    }
+}
+
+// Manual Save with Custom Name
+async saveToDownloadsWithName(customName = null) {
+    if (!this.db || !this.dbInitialized) {
+        this.showError('Database not initialized');
+        return;
+    }
+
+    try {
+        const data = this.db.export();
+        const blob = new Blob([data], { type: 'application/octet-stream' });
+        
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 16);
+        const filename = customName || `enhanced_code_analyzer_backup_${timestamp}.db`;
+        
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+        
+        this.showSuccess(`📁 Database saved: ${filename}`);
+        
+    } catch (error) {
+        console.error('Failed to save database:', error);
+        this.showError('Failed to save database');
+    }
+}
+
+// Prompt User to Load Existing Database
+promptForExistingDatabase() {
+    // Create a subtle notification asking if user wants to load existing data
+    const notification = document.createElement('div');
+    notification.className = 'load-existing-notification';
+    notification.innerHTML = `
+        <div style="
+            position: fixed; 
+            top: 80px; 
+            right: 20px; 
+            background: linear-gradient(135deg, var(--primary-blue) 0%, var(--indigo) 100%); 
+            color: white; 
+            padding: 1rem 1.5rem; 
+            border-radius: 12px; 
+            box-shadow: var(--shadow-xl); 
+            max-width: 400px; 
+            z-index: 10000;
+            animation: slideInRight 0.3s ease;
+        ">
+            <div style="font-weight: 600; margin-bottom: 0.5rem;">📂 Load Previous Data?</div>
+            <div style="font-size: 0.9rem; margin-bottom: 1rem; opacity: 0.9;">
+                Do you have a previous database file in your Downloads folder to load?
+            </div>
+            <div style="display: flex; gap: 0.75rem;">
+                <button onclick="analyzer.loadFromDownloadsFolder()" style="
+                    flex: 1; 
+                    padding: 0.5rem 1rem; 
+                    background: white; 
+                    color: var(--primary-blue); 
+                    border: none; 
+                    border-radius: 6px; 
+                    font-weight: 600; 
+                    cursor: pointer;
+                ">
+                    📁 Load File
+                </button>
+                <button onclick="this.parentElement.parentElement.parentElement.remove()" style="
+                    flex: 1; 
+                    padding: 0.5rem 1rem; 
+                    background: rgba(255,255,255,0.2); 
+                    color: white; 
+                    border: 1px solid rgba(255,255,255,0.3); 
+                    border-radius: 6px; 
+                    font-weight: 600; 
+                    cursor: pointer;
+                ">
+                    Start Fresh
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(notification);
+    
+    // Auto-remove after 10 seconds
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.remove();
+        }
+    }, 10000);
+}
+
+// Load Database from Downloads Folder
+loadFromDownloadsFolder() {
+    // Create file input for user to select database file
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.db';
+    fileInput.style.display = 'none';
+    
+    fileInput.addEventListener('change', async (e) => {
+        if (e.target.files[0]) {
+            await this.loadDatabaseFromFile(e.target.files[0]);
+        }
+    });
+    
+    document.body.appendChild(fileInput);
+    fileInput.click();
+    document.body.removeChild(fileInput);
+    
+    // Remove the notification
+    const notification = document.querySelector('.load-existing-notification');
+    if (notification) {
+        notification.remove();
+    }
+}
+
+// Load Database from File
+async loadDatabaseFromFile(file) {
+    try {
+        this.showLoading();
+        this.updateLoadingStatus('📂 Loading database from file...');
+        
+        const arrayBuffer = await file.arrayBuffer();
+        const uInt8Array = new Uint8Array(arrayBuffer);
+        
+        const SQL = await initSqlJs({
+            locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
+        });
+        
+        // Close existing database
+        if (this.db) {
+            this.db.close();
+        }
+        
+        this.db = new SQL.Database(uInt8Array);
+        this.dbInitialized = true;
+        
+        // Load data from imported database
+        this.updateLoadingStatus('📊 Loading components and analysis data...');
+        await this.loadDataFromDatabase();
+        
+        this.hideLoading();
+        
+        this.showSuccess(`📁 Database loaded from: ${file.name}`);
+        this.updateDbStatus('initialized', '✅ Database loaded from Downloads folder');
+        
+        // Update UI with loaded data
+        this.updateDashboardStats();
+        this.displayDiscoveredComponents();
+        this.updateDashboardWithResults();
+        
+        // Enable chat if we have analysis results
+        if (Object.keys(this.analysisResults).length > 0) {
+            this.enableChat();
+        }
+        
+    } catch (error) {
+        this.hideLoading();
+        console.error('Failed to load database:', error);
+        this.showError(`Failed to load database: ${error.message}`);
+    }
+}
+
+// Enhanced Save to Database with Auto-save
+saveToDatabase() {
+    if (!this.db || !this.dbInitialized) return;
+
+    try {
+        // Save uploaded files
+        this.uploadedFiles.forEach(file => {
+            this.db.run(`
+                INSERT OR REPLACE INTO uploaded_files 
+                (file_id, name, content, size, type, upload_date, components, metrics)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `, [
+                file.id,
+                file.name,
+                file.content,
+                file.size,
+                file.type,
+                file.uploadDate,
+                JSON.stringify(file.components || []),
+                JSON.stringify(file.metrics || {})
+            ]);
+        });
+
+        // Save discovered components
+        this.discoveredComponents.forEach((component, name) => {
+            this.db.run(`
+                INSERT OR REPLACE INTO discovered_components 
+                (component_name, friendly_name, component_type, business_purpose, 
+                 file_source, line_count, complexity_score, input_files, output_files, 
+                 field_count, analyzed, quality_score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `, [
+                name,
+                component.friendlyName,
+                component.type,
+                component.businessPurpose,
+                component.fileSource,
+                component.lineCount,
+                component.complexityScore,
+                JSON.stringify(component.inputFiles || []),
+                JSON.stringify(component.outputFiles || []),
+                component.fieldCount,
+                component.analyzed ? 1 : 0,
+                component.qualityScore
+            ]);
+        });
+
+        // Save analysis results
+        Object.entries(this.analysisResults).forEach(([name, result]) => {
+            this.db.run(`
+                INSERT OR REPLACE INTO analysis_results 
+                (component_name, friendly_name, component_type, results_data, 
+                 quality_score, business_context, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            `, [
+                name,
+                result.friendlyName,
+                result.componentType,
+                JSON.stringify(result),
+                result.qualityScore,
+                result.llmAnalysis?.businessPurpose || ''
+            ]);
+        });
+
+        // Save system settings
+        this.db.run(`
+            INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at)
+            VALUES ('vllm_endpoint', ?, CURRENT_TIMESTAMP)
+        `, [this.vllmEndpoint]);
+
+        this.db.run(`
+            INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at)
+            VALUES ('max_tokens', ?, CURRENT_TIMESTAMP)
+        `, [this.maxTokens.toString()]);
+
+        console.log('💾 Data saved to database');
+
+    } catch (error) {
+        console.error('Failed to save to database:', error);
+    }
+}
+
+// Load Data from Database (same as before)
+async loadDataFromDatabase() {
+    if (!this.db || !this.dbInitialized) return;
+
+    try {
+        // Clear existing data
+        this.uploadedFiles = [];
+        this.discoveredComponents.clear();
+        this.analysisResults = {};
+
+        // Load uploaded files
+        const filesStmt = this.db.prepare('SELECT * FROM uploaded_files ORDER BY created_at DESC');
+        while (filesStmt.step()) {
+            const row = filesStmt.getAsObject();
+            const file = {
+                id: row.file_id,
+                name: row.name,
+                content: row.content,
+                size: row.size,
+                type: row.type,
+                uploadDate: row.upload_date,
+                components: JSON.parse(row.components || '[]'),
+                metrics: JSON.parse(row.metrics || '{}')
+            };
+            this.uploadedFiles.push(file);
+        }
+        filesStmt.free();
+
+        // Load discovered components
+        const componentsStmt = this.db.prepare('SELECT * FROM discovered_components ORDER BY created_at DESC');
+        while (componentsStmt.step()) {
+            const row = componentsStmt.getAsObject();
+            const component = {
+                name: row.component_name,
+                friendlyName: row.friendly_name,
+                type: row.component_type,
+                businessPurpose: row.business_purpose,
+                fileSource: row.file_source,
+                lineCount: row.line_count,
+                complexityScore: row.complexity_score,
+                inputFiles: JSON.parse(row.input_files || '[]'),
+                outputFiles: JSON.parse(row.output_files || '[]'),
+                fieldCount: row.field_count,
+                analyzed: row.analyzed === 1,
+                qualityScore: row.quality_score,
+                timestamp: row.created_at
+            };
+            this.discoveredComponents.set(row.component_name, component);
+        }
+        componentsStmt.free();
+
+        // Load analysis results
+        const resultsStmt = this.db.prepare('SELECT * FROM analysis_results ORDER BY updated_at DESC');
+        while (resultsStmt.step()) {
+            const row = resultsStmt.getAsObject();
+            try {
+                this.analysisResults[row.component_name] = JSON.parse(row.results_data);
+            } catch (error) {
+                console.warn(`Failed to parse analysis result for ${row.component_name}:`, error);
+            }
+        }
+        resultsStmt.free();
+
+        // Load system settings
+        const settingsStmt = this.db.prepare('SELECT * FROM system_settings');
+        while (settingsStmt.step()) {
+            const row = settingsStmt.getAsObject();
+            if (row.setting_key === 'vllm_endpoint') {
+                this.vllmEndpoint = row.setting_value;
+                const endpointInput = document.getElementById('vllmEndpoint');
+                if (endpointInput) endpointInput.value = row.setting_value;
+            } else if (row.setting_key === 'max_tokens') {
+                this.maxTokens = parseInt(row.setting_value);
+                const maxTokensInput = document.getElementById('maxTokens');
+                if (maxTokensInput) maxTokensInput.value = row.setting_value;
+            }
+        }
+        settingsStmt.free();
+
+        console.log(`📊 Data loaded: ${this.uploadedFiles.length} files, ${this.discoveredComponents.size} components, ${Object.keys(this.analysisResults).length} analyses`);
+
+    } catch (error) {
+        console.error('Failed to load from database:', error);
+    }
+}
+
+// Clear All Data
+clearAllData() {
+    if (!confirm('Are you sure you want to clear all data? This action cannot be undone.')) {
+        return;
+    }
+    
+    // Clear in-memory data
+    this.uploadedFiles = [];
+    this.analysisResults = {};
+    this.discoveredComponents.clear();
+    this.currentSelectedComponent = null;
+    this.chatHistory = [];
+    
+    // Clear database
+    if (this.db && this.dbInitialized) {
+        try {
+            this.db.run('DELETE FROM uploaded_files');
+            this.db.run('DELETE FROM discovered_components');
+            this.db.run('DELETE FROM analysis_results');
+            this.db.run('DELETE FROM business_intelligence');
+            this.db.run('DELETE FROM chat_history');
+            this.db.run('DELETE FROM system_settings');
+        } catch (error) {
+            console.error('Failed to clear database:', error);
+        }
+    }
+    
+    // Reset UI
+    this.updateDashboardStats();
+    this.displayDiscoveredComponents();
+    
+    // Clear chat
+    const chatMessages = document.getElementById('chatMessages');
+    if (chatMessages) {
+        chatMessages.innerHTML = `
+            <div class="chat-message assistant">
+                <div class="chat-bubble">
+                    <div class="chat-message-header">Business Intelligence Assistant</div>
+                    <div class="chat-message-content">
+                        👋 <strong>Data cleared successfully!</strong>
+                        <br><br>
+                        Upload your mainframe files to start a new analysis session.
+                    </div>
+                    <div class="chat-message-time">${new Date().toLocaleTimeString()}</div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Disable features
+    const chatInput = document.getElementById('chatInput');
+    const chatSendBtn = document.getElementById('chatSendBtn');
+    const exportJsonBtn = document.getElementById('exportJsonBtn');
+    const exportMdBtn = document.getElementById('exportMdBtn');
+    
+    if (chatInput) chatInput.disabled = true;
+    if (chatSendBtn) chatSendBtn.disabled = true;
+    if (exportJsonBtn) exportJsonBtn.disabled = true;
+    if (exportMdBtn) exportMdBtn.disabled = true;
+    
+    this.showSuccess('🗑️ All data cleared successfully');
+}
+
+// Cleanup on page unload
+cleanup() {
+    if (this.saveInterval) {
+        clearInterval(this.saveInterval);
+    }
+    
+    if (this.db) {
+        // Save one final time before closing
+        this.saveToDownloadsFolder();
+        this.db.close();
+    }
+}
+
+
 
     // Setup Database Saving to Downloads Folder
     setupDatabaseSaving() {
