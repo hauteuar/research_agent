@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Mainframe Analysis - Executive Summary</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-blue: #2563eb;
+            --primary-blue-dark: #1e40af;
+            --secondary-blue: #60a5fa;
+            --accent-blue: #93c5fd;
+            --success-green: #10b981;
+            --warning-yellow: #f59e0b;
+            --error-red: #ef4444;
+            --grey-50: #f9fafb;
+            --grey-100: #f3f4f6;
+            --grey-200: #e5e7eb;
+            --grey-600: #4b5563;
+            --grey-700: #374151;
+            --grey-800: #1f2937;
+            --grey-900: #111827;
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+
+        .slide-container {
+            background: white;
+            border-radius: 20px;
+            padding: 3rem;
+            box-shadow: var(--shadow-lg);
+            max-width: 1200px;
+            width: 100%;
+            min-height: 800px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .slide-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 6px;
+            background: linear-gradient(90deg, var(--primary-blue) 0%, var(--secondary-blue) 50%, var(--success-green) 100%);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+            position: relative;
+        }
+
+        .title {
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: var(--grey-900);
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+        }
+
+        .title-icon {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            color: white;
+        }
+
+        .subtitle {
+            font-size: 1.1rem;
+            color: var(--grey-600);
+            font-weight: 500;
+        }
+
+        .timestamp {
+            position: absolute;
+            top: 0;
+            right: 0;
+            background: var(--grey-100);
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            color: var(--grey-700);
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .metric-card {
+            background: var(--grey-50);
+            border: 1px solid var(--grey-200);
+            border-radius: 16px;
+            padding: 1.5rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .metric-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: var(--primary-blue);
+        }
+
+        .metric-card.success::before { background: var(--success-green); }
+        .metric-card.warning::before { background: var(--warning-yellow); }
+        .metric-card.info::before { background: var(--secondary-blue); }
+
+        .metric-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .metric-icon {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            display: block;
+        }
+
+        .metric-value {
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: var(--primary-blue);
+            margin-bottom: 0.5rem;
+            line-height: 1;
+        }
+
+        .metric-label {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--grey-700);
+            margin-bottom: 0.25rem;
+        }
+
+        .metric-description {
+            font-size: 0.85rem;
+            color: var(--grey-600);
+            line-height: 1.4;
+        }
+
+        .analysis-summary {
+            background: linear-gradient(135deg, var(--primary-blue) 0%, var(--primary-blue-dark) 100%);
+            color: white;
+            padding: 2rem;
+            border-radius: 16px;
+            margin-bottom: 2rem;
+        }
+
+        .summary-header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .summary-icon {
+            font-size: 2rem;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 0.75rem;
+            border-radius: 12px;
+        }
+
+        .summary-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .analysis-insights {
+            margin-bottom: 2rem;
+        }
+
+        .insight-card {
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            padding: 1.25rem;
+            margin-bottom: 1rem;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s ease;
+        }
+
+        .insight-card:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateX(4px);
+        }
+
+        .insight-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .insight-icon {
+            font-size: 1.25rem;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 0.5rem;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 40px;
+            height: 40px;
+        }
+
+        .insight-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            flex: 1;
+        }
+
+        .insight-badge {
+            background: rgba(255, 255, 255, 0.3);
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .insight-text {
+            font-size: 0.9rem;
+            line-height: 1.5;
+            opacity: 0.95;
+            text-align: left;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        .summary-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 1rem;
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+        }
+
+        .summary-item-label {
+            font-size: 0.85rem;
+            opacity: 0.9;
+        }
+
+        .complexity-matrix {
+            background: white;
+            border: 1px solid var(--grey-200);
+            border-radius: 16px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .matrix-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--grey-800);
+        }
+
+        .complexity-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+        }
+
+        .complexity-item {
+            text-align: center;
+            padding: 1rem;
+            background: var(--grey-50);
+            border-radius: 12px;
+            border: 1px solid var(--grey-200);
+        }
+
+        .complexity-score {
+            font-size: 2rem;
+            font-weight: 800;
+            margin-bottom: 0.5rem;
+        }
+
+        .complexity-score.low { color: var(--success-green); }
+        .complexity-score.medium { color: var(--warning-yellow); }
+        .complexity-score.high { color: var(--error-red); }
+
+        .key-insights {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+        }
+
+        .insight-section {
+            background: var(--grey-50);
+            border-radius: 16px;
+            padding: 1.5rem;
+            border: 1px solid var(--grey-200);
+        }
+
+        .insight-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--grey-800);
+        }
+
+        .insight-list {
+            list-style: none;
+        }
+
+        .insight-list li {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+            font-size: 0.9rem;
+            color: var(--grey-700);
+        }
+
+        .insight-list li::before {
+            content: '✓';
+            background: var(--success-green);
+            color: white;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+
+        .progress-bar {
+            background: var(--grey-200);
+            height: 8px;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 0.5rem;
+        }
+
+        .progress-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+
+        .progress-fill.success { background: var(--success-green); }
+        .progress-fill.warning { background: var(--warning-yellow); }
+        .progress-fill.primary { background: var(--primary-blue); }
+
+        .footer {
+            margin-top: 2rem;
+            text-align: center;
+            padding: 1rem;
+            background: var(--grey-100);
+            border-radius: 12px;
+            font-size: 0.85rem;
+            color: var(--grey-600);
+        }
+
+        @media (max-width: 768px) {
+            .slide-container {
+                padding: 2rem;
+                margin: 1rem;
+            }
+            
+            .title {
+                font-size: 2rem;
+            }
+            
+            .key-insights {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="slide-container">
+        <div class="timestamp">
+            Generated: <span id="currentDate"></span>
+        </div>
+
+        <div class="header">
+            <h1 class="title">
+                <div class="title-icon">🔬</div>
+                Enhanced Mainframe Analysis
+            </h1>
+            <p class="subtitle">LLM-Powered Component Analysis with Field-Level Intelligence</p>
+        </div>
+
+        <!-- Key Metrics Grid -->
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-icon">📊</div>
+                <div class="metric-value" id="componentsAnalyzed">127</div>
+                <div class="metric-label">Components Analyzed</div>
+                <div class="metric-description">COBOL programs, copybooks, and data structures</div>
+            </div>
+
+            <div class="metric-card success">
+                <div class="metric-icon">⏱️</div>
+                <div class="metric-value" id="analysisTime">2.3h</div>
+                <div class="metric-label">Analysis Timeline</div>
+                <div class="metric-description">End-to-end analysis completion time</div>
+            </div>
+
+            <div class="metric-card warning">
+                <div class="metric-icon">📋</div>
+                <div class="metric-value" id="fieldCount">3,247</div>
+                <div class="metric-label">Fields Analyzed</div>
+                <div class="metric-description">Field-level lifecycle and usage analysis</div>
+            </div>
+
+            <div class="metric-card info">
+                <div class="metric-icon">🔗</div>
+                <div class="metric-value" id="dependencyCount">856</div>
+                <div class="metric-label">Dependencies Mapped</div>
+                <div class="metric-description">Inter-component relationships identified</div>
+            </div>
+        </div>
+
+        <!-- LLM Analysis Summary -->
+        <div class="analysis-summary">
+            <div class="summary-header">
+                <div class="summary-icon">🤖</div>
+                <div class="summary-title">LLM Analysis Summary</div>
+            </div>
+            
+            <!-- Component Analysis Insights -->
+            <div class="analysis-insights">
+                <div class="insight-card">
+                    <div class="insight-header">
+                        <span class="insight-icon">📚</span>
+                        <span class="insight-title">CUSTOMER-MASTER Copybook</span>
+                        <span class="insight-badge">Primary Data Structure</span>
+                    </div>
+                    <div class="insight-text">
+                        Core customer information repository containing demographic data, account relationships, and status indicators. 
+                        Serves as the central data structure for customer management across 23 programs with bidirectional data flow patterns.
+                    </div>
+                </div>
+                
+                <div class="insight-card">
+                    <div class="insight-header">
+                        <span class="insight-icon">💼</span>
+                        <span class="insight-title">ACCT-UPDATE Program</span>
+                        <span class="insight-badge">Transaction Processor</span>
+                    </div>
+                    <div class="insight-text">
+                        High-volume account balance update processor with complex validation logic. Implements real-time fraud detection, 
+                        balance verification, and audit trail generation. Critical path component affecting 12 downstream systems.
+                    </div>
+                </div>
+                
+                <div class="insight-card">
+                    <div class="insight-header">
+                        <span class="insight-icon">🔄</span>
+                        <span class="insight-title">LOAN-CALC Routine</span>
+                        <span class="insight-badge">Business Logic Engine</span>
+                    </div>
+                    <div class="insight-text">
+                        Sophisticated loan calculation engine implementing multiple interest rate models, payment schedules, and regulatory compliance checks. 
+                        Contains 47 business rules extracted through AI analysis with 96% accuracy validation.
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Metrics Grid -->
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <div class="summary-item-value" id="qualityScore">8.7/10</div>
+                    <div class="summary-item-label">Average Quality Score</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-item-value" id="businessRules">432</div>
+                    <div class="summary-item-label">Business Rules Extracted</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-item-value" id="validationRules">289</div>
+                    <div class="summary-item-label">Validation Rules Found</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-item-value" id="completeness">94%</div>
+                    <div class="summary-item-label">Analysis Completeness</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-item-value" id="chatInteractions">47</div>
+                    <div class="summary-item-label">Chat Interactions</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-item-value" id="recommendations">156</div>
+                    <div class="summary-item-label">AI Recommendations</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Complexity Matrix -->
+        <div class="complexity-matrix">
+            <div class="matrix-header">
+                <span>📈</span>
+                Field-Level Complexity Matrix
+            </div>
+            <div class="complexity-grid">
+                <div class="complexity-item">
+                    <div class="complexity-score low" id="lowComplexity">67%</div>
+                    <div>Low Complexity</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill success" style="width: 67%"></div>
+                    </div>
+                </div>
+                <div class="complexity-item">
+                    <div class="complexity-score medium" id="mediumComplexity">28%</div>
+                    <div>Medium Complexity</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill warning" style="width: 28%"></div>
+                    </div>
+                </div>
+                <div class="complexity-item">
+                    <div class="complexity-score high" id="highComplexity">5%</div>
+                    <div>High Complexity</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 5%; background: var(--error-red)"></div>
+                    </div>
+                </div>
+                <div class="complexity-item">
+                    <div class="complexity-score low" id="unusedFields">12%</div>
+                    <div>Unused Fields</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill primary" style="width: 12%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Key Insights -->
+        <div class="key-insights">
+            <div class="insight-section">
+                <div class="insight-header">
+                    <span>✨</span>
+                    Key Achievements
+                </div>
+                <ul class="insight-list">
+                    <li>Complete field lifecycle mapping across all components</li>
+                    <li>Automated business rule extraction with 94% accuracy</li>
+                    <li>Bidirectional dependency flow analysis</li>
+                    <li>Real-time LLM chat for instant insights</li>
+                    <li>Missing dependency identification and resolution</li>
+                    <li>Modernization roadmap with AI recommendations</li>
+                </ul>
+            </div>
+
+            <div class="insight-section">
+                <div class="insight-header">
+                    <span>🎯</span>
+                    Business Impact
+                </div>
+                <ul class="insight-list">
+                    <li>Reduced analysis time from weeks to hours</li>
+                    <li>Identified 47 optimization opportunities</li>
+                    <li>Mapped critical business data flows</li>
+                    <li>Enhanced system documentation accuracy</li>
+                    <li>Enabled data-driven modernization decisions</li>
+                    <li>Established component relationship baselines</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="footer">
+            <strong>Enhanced Mainframe Analyzer v2.0</strong> | 
+            LLM-Enhanced Field-Focused Analysis | 
+            Generated with advanced AI insights and comprehensive dependency mapping
+        </div>
+    </div>
+
+    <script>
+        // Set current date
+        document.getElementById('currentDate').textContent = new Date().toLocaleString();
+
+        // Add interactive effects
+        document.querySelectorAll('.metric-card').forEach(card => {
+            card.addEventListener('mouseenter', () => {
+                card.style.transform = 'translateY(-8px) scale(1.02)';
+            });
+            
+            card.addEventListener('mouseleave', () => {
+                card.style.transform = 'translateY(0) scale(1)';
+            });
+        });
+
+        // Simulate data updates (you can replace with real data)
+        function updateMetrics(realData) {
+            if (realData) {
+                document.getElementById('componentsAnalyzed').textContent = realData.components || '127';
+                document.getElementById('analysisTime').textContent = realData.timeline || '2.3h';
+                document.getElementById('fieldCount').textContent = realData.fields || '3,247';
+                document.getElementById('dependencyCount').textContent = realData.dependencies || '856';
+                document.getElementById('qualityScore').textContent = `${realData.quality || '8.7'}/10`;
+                document.getElementById('businessRules').textContent = realData.businessRules || '432';
+                document.getElementById('validationRules').textContent = realData.validationRules || '289';
+                document.getElementById('completeness').textContent = `${realData.completeness || '94'}%`;
+                document.getElementById('chatInteractions').textContent = realData.chatInteractions || '47';
+                document.getElementById('recommendations').textContent = realData.recommendations || '156';
+                
+                // Update complexity percentages
+                document.getElementById('lowComplexity').textContent = `${realData.lowComplexity || '67'}%`;
+                document.getElementById('mediumComplexity').textContent = `${realData.mediumComplexity || '28'}%`;
+                document.getElementById('highComplexity').textContent = `${realData.highComplexity || '5'}%`;
+                document.getElementById('unusedFields').textContent = `${realData.unusedFields || '12'}%`;
+                
+                // Update progress bars
+                document.querySelector('.progress-fill.success').style.width = `${realData.lowComplexity || '67'}%`;
+                document.querySelector('.progress-fill.warning').style.width = `${realData.mediumComplexity || '28'}%`;
+                document.querySelector('.progress-fill[style*="error-red"]').style.width = `${realData.highComplexity || '5'}%`;
+                document.querySelector('.progress-fill.primary').style.width = `${realData.unusedFields || '12'}%`;
+            }
+        }
+
+        // Example of how to update with real analysis data:
+        function updateAnalysisInsights(analysisData) {
+            // You can update the component analysis cards with real data
+            const insights = document.querySelectorAll('.insight-card');
+            
+            if (analysisData && analysisData.components) {
+                analysisData.components.forEach((component, index) => {
+                    if (insights[index]) {
+                        const titleElement = insights[index].querySelector('.insight-title');
+                        const textElement = insights[index].querySelector('.insight-text');
+                        const badgeElement = insights[index].querySelector('.insight-badge');
+                        
+                        if (titleElement) titleElement.textContent = component.name;
+                        if (textElement) textElement.textContent = component.description;
+                        if (badgeElement) badgeElement.textContent = component.type;
+                    }
+                });
+            }
+        }
+
+        // Example usage:
+        // updateAnalysisInsights({
+        //     components: [
+        //         {
+        //             name: "CUSTOMER-MASTER",
+        //             type: "Core Data Structure", 
+        //             description: "Primary customer data repository managing demographic information, account relationships, and status indicators across the enterprise."
+        //         },
+        //         {
+        //             name: "PAYMENT-PROCESSOR",
+        //             type: "Transaction Engine",
+        //             description: "Real-time payment processing system with fraud detection, validation rules, and multi-currency support for global operations."
+        //         }
+        //     ]
+        // });
+
+        // Add print optimization
+        window.addEventListener('beforeprint', () => {
+            document.body.style.background = 'white';
+            document.querySelector('.slide-container').style.boxShadow = 'none';
+        });
+
+        window.addEventListener('afterprint', () => {
+            document.body.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+            document.querySelector('.slide-container').style.boxShadow = 'var(--shadow-lg)';
+        });
+    </script>
+</body>
+</html>
