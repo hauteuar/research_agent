@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Enhanced Mainframe Analyzer with Semantic Search</title>
+    <title>Enhanced Mainframe Analyzer with File Flow</title>
     <style>
+        /* Enhanced styles with new Flow Analysis features */
         * {
             margin: 0;
             padding: 0;
@@ -98,210 +99,132 @@
             overflow-y: auto;
         }
 
-        .chat-panel {
-            display: flex;
-            flex-direction: column;
-            max-height: 85vh;
-        }
-
-        /* Section Styles */
-        .component-search-section {
-            margin-bottom: 25px;
-            padding: 24px;
-            background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(16, 185, 129, 0.08) 100%);
-            border-radius: 16px;
-            border: 1px solid rgba(34, 197, 94, 0.3);
-            box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.1);
-        }
-
-        .similarity-search-section {
-            margin-bottom: 25px;
-            padding: 24px;
-            background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(124, 58, 237, 0.08) 100%);
-            border-radius: 16px;
-            border: 1px solid rgba(139, 92, 246, 0.3);
-            box-shadow: 0 4px 6px -1px rgba(139, 92, 246, 0.1);
-        }
-
-        .section-title {
-            color: #06b6d4;
-            font-size: 1.3rem;
-            margin-bottom: 18px;
-            font-weight: 700;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            letter-spacing: -0.01em;
-        }
-
-        .similarity-section-title {
-            color: #8b5cf6;
-            font-size: 1.3rem;
-            margin-bottom: 18px;
-            font-weight: 700;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            letter-spacing: -0.01em;
-        }
-
-        /* Form Elements */
-        .form-group {
-            margin-bottom: 20px;
-        }
-
-        .component-input, .similarity-input {
-            width: 100%;
-            padding: 14px 16px;
-            border-radius: 12px;
-            background: rgba(30, 41, 59, 0.6);
-            color: #f8fafc;
+        .chat-message .content {
             font-size: 14px;
-            margin-bottom: 10px;
+            line-height: 1.6;
+        }
+
+        .chat-message .timestamp {
+            font-size: 10px;
+            opacity: 0.6;
+            margin-top: 8px;
+        }
+
+        .chat-message .export-btn {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(51, 65, 85, 0.7) 100%);
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            border-radius: 8px;
+            padding: 6px 10px;
+            font-size: 10px;
+            color: #f8fafc;
+            cursor: pointer;
+            opacity: 0;
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             font-weight: 500;
         }
 
-        .component-input {
-            border: 2px solid rgba(148, 163, 184, 0.3);
+        .chat-message:hover .export-btn {
+            opacity: 1;
         }
 
-        .similarity-input {
-            border: 2px solid rgba(139, 92, 246, 0.3);
+        .chat-message .export-btn:hover {
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.2) 0%, rgba(59, 130, 246, 0.15) 100%);
+            border-color: #06b6d4;
+            transform: translateY(-1px);
         }
 
-        .component-input:focus {
+        #chatMessages::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        #chatMessages::-webkit-scrollbar-track {
+            background: rgba(30, 41, 59, 0.3);
+            border-radius: 4px;
+        }
+
+        #chatMessages::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, #64748b 0%, #475569 100%);
+            border-radius: 4px;
+        }
+
+        #chatMessages::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+        }
+
+        #chatInput:focus {
             outline: none;
             border-color: #06b6d4;
             background: rgba(30, 41, 59, 0.8);
             box-shadow: 
                 0 0 0 3px rgba(6, 182, 212, 0.1),
                 0 4px 6px -1px rgba(6, 182, 212, 0.1);
-            transform: translateY(-1px);
         }
 
-        .similarity-input:focus {
-            outline: none;
-            border-color: #8b5cf6;
-            background: rgba(30, 41, 59, 0.8);
-            box-shadow: 
-                0 0 0 3px rgba(139, 92, 246, 0.1),
-                0 4px 6px -1px rgba(139, 92, 246, 0.1);
-            transform: translateY(-1px);
-        }
-
-        .component-input::placeholder, .similarity-input::placeholder {
+        #chatInput::placeholder {
             color: rgba(148, 163, 184, 0.7);
         }
 
-        /* Suggestions */
-        .component-suggestions, .similarity-results {
-            background: rgba(15, 23, 42, 0.95);
-            backdrop-filter: blur(20px);
-            border-radius: 12px;
-            max-height: 150px;
-            overflow-y: auto;
-            display: none;
-            border: 1px solid rgba(148, 163, 184, 0.3);
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        #chatSendBtn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(34, 197, 94, 0.4);
         }
 
-        .similarity-results {
-            max-height: 200px;
-            border: 1px solid rgba(139, 92, 246, 0.3);
+        #chatSendBtn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
         }
 
-        .suggestion-item, .similarity-result-item {
-            padding: 12px 16px;
-            cursor: pointer;
-            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            font-size: 13px;
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
         }
 
-        .suggestion-item:hover {
-            background: linear-gradient(135deg, rgba(6, 182, 212, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%);
-            transform: translateX(4px);
-            border-left: 3px solid #06b6d4;
+        /* Export Buttons */
+        .export-section {
+            margin-top: 20px;
+            padding: 20px;
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(217, 119, 6, 0.08) 100%);
+            border-radius: 16px;
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.1);
         }
 
-        .similarity-result-item:hover {
-            background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(124, 58, 237, 0.05) 100%);
-            transform: translateX(4px);
-            border-left: 3px solid #8b5cf6;
+        .export-btn-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 12px;
         }
 
-        .similarity-score {
-            float: right;
-            background: rgba(139, 92, 246, 0.8);
-            color: white;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 10px;
-            font-weight: bold;
-        }
-
-        /* Buttons */
-        .action-btn {
-            width: 100%;
+        .export-btn-small {
+            flex: 1;
+            background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
             color: white;
             border: none;
-            padding: 16px 20px;
-            border-radius: 12px;
+            padding: 12px 16px;
+            border-radius: 10px;
             cursor: pointer;
-            font-size: 15px;
+            font-size: 12px;
             font-weight: 600;
-            margin-bottom: 12px;
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .component-btn {
-            background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
-            box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.25);
-        }
-
-        .component-btn:hover:not(:disabled) {
-            background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
-            box-shadow: 0 10px 15px -3px rgba(34, 197, 94, 0.4);
-            transform: translateY(-2px);
-        }
-
-        .similarity-btn {
-            background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
             box-shadow: 0 4px 6px -1px rgba(139, 92, 246, 0.25);
         }
 
-        .similarity-btn:hover:not(:disabled) {
-            background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%);
+        .export-btn-small:hover:not(:disabled) {
+            transform: translateY(-2px);
             box-shadow: 0 10px 15px -3px rgba(139, 92, 246, 0.4);
-            transform: translateY(-2px);
+            background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%);
         }
 
-        .validate-btn {
-            background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
-            box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.25);
-        }
-
-        .validate-btn:hover:not(:disabled) {
-            background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
-            box-shadow: 0 10px 15px -3px rgba(34, 197, 94, 0.4);
-            transform: translateY(-2px);
-        }
-
-        .secondary-btn {
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-            box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.25);
-        }
-
-        .secondary-btn:hover:not(:disabled) {
-            background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
-            box-shadow: 0 10px 15px -3px rgba(59, 130, 246, 0.4);
-            transform: translateY(-2px);
-        }
-
-        .action-btn:disabled {
+        .export-btn-small:disabled {
             opacity: 0.5;
             cursor: not-allowed;
             transform: none;
@@ -309,26 +232,26 @@
         }
 
         /* Responsive Design */
-        @media (max-width: 1600px) {
-            .main-grid {
-                grid-template-columns: 450px 1fr 350px;
-            }
+        @media (max-width: 1600px) { 
+            .main-grid { 
+                grid-template-columns: 450px 1fr 350px; 
+            } 
         }
 
-        @media (max-width: 1400px) {
-            .main-grid {
-                grid-template-columns: 400px 1fr 300px;
-            }
+        @media (max-width: 1400px) { 
+            .main-grid { 
+                grid-template-columns: 400px 1fr 300px; 
+            } 
         }
 
-        @media (max-width: 1200px) {
-            .main-grid {
-                grid-template-columns: 1fr;
-                gap: 20px;
+        @media (max-width: 1200px) { 
+            .main-grid { 
+                grid-template-columns: 1fr; 
+                gap: 20px; 
             }
-
-            .control-panel,
-            .analysis-workspace,
+            
+            .control-panel, 
+            .analysis-workspace, 
             .chat-panel {
                 max-height: none;
             }
@@ -338,8 +261,8 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🔬 Enhanced Mainframe Analyzer with Semantic Search</h1>
-            <p>Advanced mainframe analysis with LLM-powered field flow tracking, business rules, dependency mapping, and semantic similarity search</p>
+            <h1>🔬 Enhanced Mainframe Analyzer with Flow Analysis</h1>
+            <p>Advanced mainframe analysis with LLM-powered field flow tracking, lifecycle analysis, and dependency mapping</p>
         </div>
 
         <div class="main-grid">
@@ -354,1094 +277,3014 @@
                                placeholder="e.g., CUSTOMER-RECORD, ACCOUNT-COPY, PAYROLL-PROC">
                         <div id="componentSuggestions" class="component-suggestions"></div>
                     </div>
+                    
+                    <!-- Token Usage Display -->
+                    <div id="tokenInfo" class="token-info" style="display: none;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                            <span style="font-weight: bold;">Token Management</span>
+                            <span id="tokenCount">0 / 4000</span>
+                        </div>
+                        <div class="token-bar">
+                            <div id="tokenFill" class="token-fill safe" style="width: 0%"></div>
+                        </div>
+                        <div id="tokenWarning" style="font-size: 11px; margin-top: 5px;"></div>
+                    </div>
+                    
                     <button class="action-btn component-btn" id="analyzeComponentBtn" disabled>
                         🔍 Analyze Component
                     </button>
                 </div>
 
-                <!-- Similarity Search Section -->
-                <div class="similarity-search-section">
-                    <h2 class="similarity-section-title">🔍 Semantic Similarity Search</h2>
+                <!-- vLLM API Setup -->
+                <div style="margin-bottom: 25px; padding: 20px; background: rgba(0, 0, 0, 0.2); border-radius: 15px; border-left: 4px solid #4CAF50;">
+                    <h2 class="section-title">🚀 vLLM Server Setup</h2>
                     <div class="form-group">
-                        <label for="similarityQuery">Search for Similar Fields/Components:</label>
-                        <input type="text" id="similarityQuery" class="similarity-input" 
-                               placeholder="e.g., customer-name, account-number, balance-amount">
-                        <div id="similarityResults" class="similarity-results"></div>
+                        <label for="vllmEndpoint">Server Endpoint:</label>
+                        <input type="text" id="vllmEndpoint" placeholder="http://localhost:8000" value="http://localhost:8000">
                     </div>
                     <div class="form-group">
-                        <label for="similarityThreshold">Similarity Threshold (0.0 - 1.0):</label>
-                        <input type="number" id="similarityThreshold" step="0.1" min="0.0" max="1.0" value="0.6" 
-                               class="similarity-input">
+                        <label for="maxTokens">Max Tokens:</label>
+                        <input type="number" id="maxTokens" value="4000" min="1000" max="8000">
                     </div>
-                    <button class="action-btn similarity-btn" id="findSimilarBtn" disabled>
-                        🔮 Find Similar Components
+                    <button class="action-btn validate-btn" id="validateApiBtn">
+                        🔐 Test Connection
                     </button>
-                    <button class="action-btn similarity-btn" id="generateSimilarityReportBtn" disabled>
-                        📊 Generate Similarity Report
-                    </button>
+                    <div class="api-status disconnected" id="apiStatus">
+                        <span>🔴</span> Enter server details and test connection
+                    </div>
                 </div>
 
-                <!-- Continue in Part 2... -->
+                <!-- File Upload Section -->
+                <div style="margin-bottom: 25px;">
+                    <h2 class="section-title">📁 Upload Mainframe Files</h2>
+                    <div class="upload-area" id="uploadArea">
+                        <div>
+                            <h3 style="margin-bottom: 8px;">📤 Drop files here</h3>
+                            <p style="font-size: 14px;">COBOL (.cbl), Copybooks (.cpy), JCL (.jcl)</p>
+                        </div>
+                        <input type="file" id="fileInput" multiple accept=".cbl,.cob,.cpy,.copybook,.jcl,.txt,.proc" style="display: none;">
+                    </div>
+                    <div id="uploadedFiles" class="file-list"></div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div>
+                    <h3 class="section-title">⚡ Actions</h3>
+                    <button class="action-btn secondary-btn" id="bulkAnalyzeBtn" disabled>
+                        📊 Bulk Analyze
+                    </button>
+                    
+                    <!-- Export Section -->
+                    <div class="export-section">
+                        <h4 style="color: #FFC107; margin-bottom: 10px; font-size: 14px;">📤 Export Options</h4>
+                        <div class="export-btn-group">
+                            <button class="export-btn-small" id="exportJsonBtn" disabled>
+                                📋 JSON Export
+                            </button>
+                            <button class="export-btn-small" id="exportMdBtn" disabled>
+                                📝 Markdown Export
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <button class="action-btn secondary-btn" id="clearBtn">
+                        🗑️ Clear All Data
+                    </button>
+                </div>
             </div>
 
-            <!-- Analysis Workspace - Will be in Part 2 -->
+            <!-- Analysis Workspace -->
             <div class="analysis-workspace">
-                <div id="analysisContent">
-                    <h3>Loading workspace...</h3>
-                    <p>Part 2 will contain the analysis workspace and tabs.</p>
+                <div class="tabs">
+                    <button class="tab active" data-tab="lifecycle">🔄 Analysis Results</button>
+                    <button class="tab" data-tab="fieldmatrix">📋 Field Matrix</button>
+                    <button class="tab" data-tab="fileflow">🌊 File Flow</button>
+                    <button class="tab" data-tab="programflow">🔀 Program Flow</button>
+                    <button class="tab" data-tab="usage">📈 Usage Patterns</button>
+                    <button class="tab" data-tab="dependencies">🔗 Dependencies</button>
+                </div>
+
+                <!-- Tab Contents -->
+                <div id="lifecycle" class="tab-content active">
+                    <div id="lifecycleContent">
+                        <h3>🎯 LLM-Powered Component Analysis with Flow Tracking</h3>
+                        <p style="margin-bottom: 20px; line-height: 1.6;">
+                            Upload files, test your connection, and analyze components for detailed LLM-powered field flows and business rules.
+                        </p>
+                        
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #FFD700;">
+                            <h4 style="color: #FFD700; margin-bottom: 15px;">🤖 Enhanced LLM Features:</h4>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                                <div>
+                                    <strong style="color: #4CAF50;">🧠 LLM Field Analysis:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Smart field lifecycle tracking</li>
+                                        <li>• Context-aware usage patterns</li>
+                                        <li>• Intelligent field categorization</li>
+                                        <li>• Cross-program flow analysis</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <strong style="color: #2196F3;">🌊 File Flow Analysis:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Complete file lifecycle tracking</li>
+                                        <li>• Input → Process → Output flow</li>
+                                        <li>• Field usage across programs</li>
+                                        <li>• Unused field identification</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <strong style="color: #FF9800;">🔀 Program Flow:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Step-by-step program execution</li>
+                                        <li>• Data transformation tracking</li>
+                                        <li>• Business logic flow mapping</li>
+                                        <li>• Decision point analysis</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <strong style="color: #9C27B0;">🎯 Enhanced Chat:</strong>
+                                    <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
+                                        <li>• Flow-aware question answering</li>
+                                        <li>• Lifecycle impact explanations</li>
+                                        <li>• Optimization recommendations</li>
+                                        <li>• Interactive flow exploration</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="fieldmatrix" class="tab-content">
+                    <div id="fieldMatrixContent">
+                        <h3>📋 LLM Field Matrix Analysis</h3>
+                        <p style="margin-bottom: 20px;">Enhanced field-level analysis with LLM-powered categorization will appear here after component analysis.</p>
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                            <p style="text-align: center; opacity: 0.8;">LLM-enhanced field matrix will appear here after analysis.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="fileflow" class="tab-content">
+                    <div id="fileFlowContent">
+                        <h3>🌊 File Flow Lifecycle Analysis</h3>
+                        <p style="margin-bottom: 20px;">Complete file and field lifecycle tracking across all programs.</p>
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                            <p style="text-align: center; opacity: 0.8;">File flow analysis will appear here after component analysis.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="programflow" class="tab-content">
+                    <div id="programFlowContent">
+                        <h3>🔀 Program Flow Analysis</h3>
+                        <p style="margin-bottom: 20px;">Step-by-step program execution flow with data transformation tracking.</p>
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                            <p style="text-align: center; opacity: 0.8;">Program flow analysis will appear here after analysis.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="usage" class="tab-content">
+                    <div id="usageContent">
+                        <h3>📈 Smart Usage Patterns</h3>
+                        <p style="margin-bottom: 20px;">LLM-powered usage pattern analysis will appear here after component analysis.</p>
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                            <p style="text-align: center; opacity: 0.8;">Smart usage patterns will appear here after analysis.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="dependencies" class="tab-content">
+                    <div id="dependenciesContent">
+                        <h3>🔗 Hybrid Dependency Analysis</h3>
+                        <p style="margin-bottom: 20px;">Regex + LLM dependency mapping will appear here after component analysis.</p>
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                            <p style="text-align: center; opacity: 0.8;">Hybrid dependency graph will appear here after analysis.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Loading Indicator -->
+                <div class="loading" id="loadingIndicator">
+                    <div class="spinner"></div>
+                    <h3>🤖 LLM Analyzing Component Flow</h3>
+                    <p id="loadingStatus">Processing component analysis with LLM...</p>
+                    <div id="progressBar" style="background: rgba(255,255,255,0.2); height: 6px; border-radius: 3px; margin: 15px 0; overflow: hidden;">
+                        <div id="progressFill" style="height: 100%; background: #4CAF50; width: 0%; transition: width 0.3s ease;"></div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Chat Panel - Will be in Part 2 -->
+            <!-- Enhanced Chat Panel -->
             <div class="chat-panel">
-                <div id="chatContent">
-                    <h3>Loading chat...</h3>
-                    <p>Part 2 will contain the chat functionality.</p>
+                <div style="background: rgba(76, 175, 80, 0.2); border-radius: 10px; padding: 15px; margin-bottom: 15px; border-left: 4px solid #4CAF50;">
+                    <h3 style="margin-bottom: 8px; color: #FFD700;">💬 LLM Flow Analysis Chat</h3>
+                    <p style="font-size: 12px; opacity: 0.8;">Enhanced interactive chat with flow-aware analysis and export</p>
+                </div>
+                
+                <div style="flex: 1; overflow-y: auto; margin-bottom: 15px; background: rgba(255, 255, 255, 0.02); border-radius: 10px; padding: 15px;" id="chatMessages">
+                    <div class="chat-message assistant">
+                        <div class="sender">LLM Flow Analysis Assistant</div>
+                        <div class="content">
+                            👋 <strong>Welcome to Flow-Enhanced Mainframe Analysis!</strong>
+                            <br><br>
+                            I can now provide detailed flow analysis including:
+                            <br><br>
+                            🌊 <strong>File Lifecycle:</strong> Complete field journey across programs
+                            <br>🔀 <strong>Program Flow:</strong> Step-by-step execution tracking  
+                            <br>📊 <strong>Usage Patterns:</strong> Field utilization analysis
+                            <br>🎯 <strong>Optimization:</strong> Unused field identification
+                            <br><br>
+                            <em>Upload files and analyze a component to unlock comprehensive flow analysis!</em>
+                        </div>
+                        <div class="timestamp">Ready</div>
+                    </div>
+                </div>
+                
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" id="chatInput" placeholder="Ask about field flows, lifecycle, or usage patterns..." 
+                           style="flex: 1; padding: 12px; border: 2px solid rgba(148, 163, 184, 0.3); border-radius: 10px; background: rgba(30, 41, 59, 0.6); color: #f8fafc;" disabled>
+                    <button id="chatSendBtn" class="action-btn validate-btn" style="width: auto; padding: 12px 20px; margin: 0;" disabled>
+                        Send
+                    </button>
                 </div>
             </div>
         </div>
     </div>
 
-    
-<!-- Additional styles for Part 2 -->
-<style>
-/* Token Management */
-.token-info {
-    background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(217, 119, 6, 0.08) 100%);
-    border: 1px solid rgba(245, 158, 11, 0.3);
-    border-radius: 12px;
-    padding: 16px;
-    margin: 12px 0;
-    font-size: 12px;
-    box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.1);
-}
-
-.token-bar {
-    background: rgba(15, 23, 42, 0.6);
-    height: 8px;
-    border-radius: 4px;
-    margin: 10px 0;
-    overflow: hidden;
-    border: 1px solid rgba(148, 163, 184, 0.2);
-}
-
-.token-fill {
-    height: 100%;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    border-radius: 4px;
-    background: linear-gradient(90deg, var(--token-color-start), var(--token-color-end));
-}
-
-.token-fill.safe { 
-    --token-color-start: #22c55e;
-    --token-color-end: #16a34a;
-}
-
-.token-fill.warning { 
-    --token-color-start: #f59e0b;
-    --token-color-end: #d97706;
-}
-
-.token-fill.danger { 
-    --token-color-start: #ef4444;
-    --token-color-end: #dc2626;
-}
-
-/* API Status */
-.api-status {
-    padding: 14px 16px;
-    border-radius: 12px;
-    margin-top: 12px;
-    font-size: 13px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-weight: 500;
-    transition: all 0.3s ease;
-}
-
-.api-status.connected {
-    background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(22, 163, 74, 0.1) 100%);
-    border: 1px solid rgba(34, 197, 94, 0.3);
-    color: #4ade80;
-    box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.1);
-}
-
-.api-status.connecting {
-    background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(217, 119, 6, 0.1) 100%);
-    border: 1px solid rgba(245, 158, 11, 0.3);
-    color: #fbbf24;
-    box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.1);
-}
-
-.api-status.disconnected {
-    background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(220, 38, 38, 0.1) 100%);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    color: #f87171;
-    box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.1);
-}
-
-/* Upload Area */
-.upload-area {
-    border: 2px dashed rgba(148, 163, 184, 0.4);
-    border-radius: 16px;
-    padding: 40px;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    margin-bottom: 20px;
-    background: linear-gradient(135deg, rgba(30, 41, 59, 0.3) 0%, rgba(51, 65, 85, 0.2) 100%);
-}
-
-.upload-area:hover {
-    border-color: #06b6d4;
-    background: linear-gradient(135deg, rgba(6, 182, 212, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%);
-    transform: translateY(-2px);
-    box-shadow: 0 10px 15px -3px rgba(6, 182, 212, 0.1);
-}
-
-.upload-area.drag-over {
-    border-color: #22c55e;
-    background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(16, 185, 129, 0.1) 100%);
-    transform: scale(1.02);
-}
-
-.file-item {
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    padding: 10px;
-    margin-bottom: 8px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.file-info {
-    flex: 1;
-}
-
-.file-name {
-    font-weight: bold;
-    margin-bottom: 2px;
-}
-
-.file-details {
-    font-size: 11px;
-    opacity: 0.8;
-}
-
-.file-remove {
-    background: #f44336;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-size: 10px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-}
-
-.file-remove:hover {
-    background: #d32f2f;
-}
-
-/* Export Section */
-.export-section {
-    margin-top: 20px;
-    padding: 20px;
-    background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(217, 119, 6, 0.08) 100%);
-    border-radius: 16px;
-    border: 1px solid rgba(245, 158, 11, 0.3);
-    box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.1);
-}
-
-.export-btn-group {
-    display: flex;
-    gap: 12px;
-    margin-top: 12px;
-}
-
-.export-btn-small {
-    flex: 1;
-    background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
-    color: white;
-    border: none;
-    padding: 12px 16px;
-    border-radius: 10px;
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 600;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 4px 6px -1px rgba(139, 92, 246, 0.25);
-}
-
-.export-btn-small:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 10px 15px -3px rgba(139, 92, 246, 0.4);
-    background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%);
-}
-
-.export-btn-small:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
-    box-shadow: none;
-}
-
-/* Chat Styles */
-.chat-header {
-    background: rgba(76, 175, 80, 0.2);
-    border-radius: 10px;
-    padding: 15px;
-    margin-bottom: 15px;
-    border-left: 4px solid #4CAF50;
-}
-
-.chat-messages {
-    flex: 1;
-    overflow-y: auto;
-    padding: 10px;
-    background: rgba(255, 255, 255, 0.02);
-    border-radius: 10px;
-    margin-bottom: 15px;
-    min-height: 300px;
-}
-
-.chat-message {
-    margin-bottom: 20px;
-    padding: 20px;
-    border-radius: 16px;
-    max-width: 90%;
-    word-wrap: break-word;
-    line-height: 1.6;
-    animation: fadeInUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-}
-
-.chat-message.user {
-    background: linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(37, 99, 235, 0.15) 100%);
-    border: 1px solid rgba(59, 130, 246, 0.3);
-    margin-left: auto;
-    text-align: right;
-}
-
-.chat-message.assistant {
-    background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(22, 163, 74, 0.1) 100%);
-    border: 1px solid rgba(34, 197, 94, 0.3);
-}
-
-.chat-message .sender {
-    font-weight: bold;
-    font-size: 12px;
-    opacity: 0.8;
-    margin-bottom: 8px;
-}
-
-.chat-message .content {
-    font-size: 14px;
-    line-height: 1.6;
-}
-
-.chat-message .timestamp {
-    font-size: 10px;
-    opacity: 0.6;
-    margin-top: 8px;
-}
-
-.chat-input-area {
-    display: flex;
-    gap: 10px;
-    align-items: flex-end;
-}
-
-.chat-input {
-    flex: 1;
-    padding: 12px 16px;
-    border: 2px solid rgba(148, 163, 184, 0.3);
-    border-radius: 12px;
-    background: rgba(30, 41, 59, 0.6);
-    color: #f8fafc;
-    font-size: 14px;
-    resize: vertical;
-    min-height: 44px;
-    max-height: 120px;
-}
-
-.chat-input:focus {
-    outline: none;
-    border-color: #06b6d4;
-    background: rgba(30, 41, 59, 0.8);
-    box-shadow: 
-        0 0 0 3px rgba(6, 182, 212, 0.1),
-        0 4px 6px -1px rgba(6, 182, 212, 0.1);
-}
-
-.chat-send-btn {
-    background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
-    color: white;
-    border: none;
-    padding: 12px 20px;
-    border-radius: 12px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 600;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.25);
-}
-
-.chat-send-btn:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 10px 15px -3px rgba(34, 197, 94, 0.4);
-    background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
-}
-
-.chat-send-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
-}
-
-@keyframes fadeInUp {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-
-
-/* Additional styles for Part 3 */
-.tabs {
-    display: flex;
-    margin-bottom: 25px;
-    background: rgba(15, 23, 42, 0.6);
-    border-radius: 16px;
-    padding: 6px;
-    border: 1px solid rgba(148, 163, 184, 0.2);
-}
-
-.tab {
-    flex: 1;
-    background: transparent;
-    color: rgba(148, 163, 184, 0.8);
-    border: none;
-    padding: 14px 12px;
-    border-radius: 12px;
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 600;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    letter-spacing: 0.3px;
-}
-
-.tab.active {
-    background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
-    color: #ffffff;
-    box-shadow: 0 4px 6px -1px rgba(6, 182, 212, 0.25);
-}
-
-.tab:hover:not(.active) {
-    background: rgba(148, 163, 184, 0.1);
-    color: #f8fafc;
-    transform: translateY(-1px);
-}
-
-.tab-content {
-    display: none;
-}
-
-.tab-content.active {
-    display: block;
-}
-
-.loading {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.9) 100%);
-    backdrop-filter: blur(20px);
-    display: none;
-    justify-content: center;
-    align-items: center;
-    flex-direction: column;
-    z-index: 9999;
-}
-
-.loading.show {
-    display: flex;
-}
-
-.spinner {
-    width: 80px;
-    height: 80px;
-    border: 4px solid rgba(148, 163, 184, 0.3);
-    border-top: 4px solid #06b6d4;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    margin-bottom: 24px;
-    box-shadow: 0 0 20px rgba(6, 182, 212, 0.3);
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
-.loading h3 {
-    color: #06b6d4;
-    margin-bottom: 12px;
-    font-size: 1.5rem;
-    font-weight: 700;
-}
-
-.loading p {
-    color: rgba(248, 250, 252, 0.8);
-    text-align: center;
-    max-width: 400px;
-    font-size: 1.1rem;
-}
-
-/* Field Flow Visualization Styles */
-.field-flow-container {
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 10px;
-    padding: 20px;
-    margin-bottom: 20px;
-}
-
-.field-flow-path {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    overflow-x: auto;
-    padding: 10px 0;
-    margin-bottom: 10px;
-}
-
-.field-flow-step {
-    background: var(--step-color);
-    color: white;
-    padding: 8px 12px;
-    border-radius: 6px;
-    text-align: center;
-    min-width: 100px;
-    flex-shrink: 0;
-}
-
-.field-flow-arrow {
-    color: #8b5cf6;
-    font-size: 16px;
-    flex-shrink: 0;
-}
-
-.field-lifecycle-info {
-    background: rgba(0, 0, 0, 0.2);
-    padding: 10px;
-    border-radius: 6px;
-    font-size: 11px;
-    margin-top: 8px;
-}
-
-.field-stats-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 10px;
-    margin-bottom: 15px;
-}
-
-.field-stat-item {
-    background: rgba(0, 0, 0, 0.2);
-    padding: 10px;
-    border-radius: 6px;
-    text-align: center;
-}
-
-.program-field-stats {
-    background: rgba(0, 0, 0, 0.2);
-    padding: 8px;
-    border-radius: 4px;
-    margin-top: 8px;
-    font-size: 11px;
-}
-
-.risk-indicator {
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-size: 10px;
-    font-weight: bold;
-    color: white;
-}
-
-.risk-low { background: #22c55e; }
-.risk-medium { background: #f59e0b; }
-.risk-high { background: #ef4444; }
-
-/* Flow type indicators */
-.flow-pipeline { --step-color: #22c55e; }
-.flow-processing { --step-color: #f59e0b; }
-.flow-control { --step-color: #8b5cf6; }
-.flow-distributed { --step-color: #06b6d4; }
-.flow-shared { --step-color: #64748b; }
-.flow-isolated { --step-color: #94a3b8; }
-.flow-unused { --step-color: #ef4444; }
-
-/* Field role colors */
-.role-source { background: #22c55e !important; }
-.role-sink { background: #ef4444 !important; }
-.role-transformer { background: #f59e0b !important; }
-.role-decision { background: #8b5cf6 !important; }
-.role-bridge { background: #06b6d4 !important; }
-.role-reference { background: #64748b !important; }
-</style>
-
-<!-- Analysis Workspace Structure -->
-<div class="analysis-workspace-complete">
-    <div class="tabs">
-        <button class="tab active" data-tab="lifecycle">🔄 Analysis Results</button>
-        <button class="tab" data-tab="fieldmatrix">📋 Field Matrix</button>
-        <button class="tab" data-tab="usage">📈 Usage Patterns</button>
-        <button class="tab" data-tab="dependencies">🔗 Dependencies</button>
-        <button class="tab" data-tab="similarity">🔍 Similarity</button>
-    </div>
-
-    <!-- Tab Contents -->
-    <div id="lifecycle" class="tab-content active">
-        <div id="lifecycleContent">
-            <h3>🎯 LLM-Powered Component Analysis</h3>
-            <p style="margin-bottom: 20px; line-height: 1.6;">
-                Upload files, test your connection, and analyze components for detailed LLM-powered field flows and business rules.
-            </p>
-            
-            <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #FFD700;">
-                <h4 style="color: #FFD700; margin-bottom: 15px;">🤖 LLM-Enhanced Features:</h4>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
-                    <div>
-                        <strong style="color: #4CAF50;">🧠 LLM Field Analysis:</strong>
-                        <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
-                            <li>• Smart field lifecycle tracking</li>
-                            <li>• Context-aware usage patterns</li>
-                            <li>• Intelligent field categorization</li>
-                            <li>• Cross-program flow analysis</li>
-                        </ul>
-                    </div>
-                    <div>
-                        <strong style="color: #2196F3;">⚖️ Smart Business Rules:</strong>
-                        <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
-                            <li>• LLM-extracted validation logic</li>
-                            <li>• Context-aware decision mapping</li>
-                            <li>• Business calculation analysis</li>
-                            <li>• Rule complexity assessment</li>
-                        </ul>
-                    </div>
-                    <div>
-                        <strong style="color: #FF9800;">🔗 Smart Dependencies:</strong>
-                        <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
-                            <li>• Regex + LLM validation</li>
-                            <li>• Smart call chain analysis</li>
-                            <li>• Contextual file references</li>
-                            <li>• Impact assessment</li>
-                        </ul>
-                    </div>
-                    <div>
-                        <strong style="color: #8b5cf6;">🔍 Field Flow Tracking:</strong>
-                        <ul style="list-style: none; margin-left: 10px; line-height: 1.8;">
-                            <li>• Field lifecycle visualization</li>
-                            <li>• Program-to-program field flow</li>
-                            <li>• Field categorization analysis</li>
-                            <li>• Usage pattern identification</li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div id="fieldmatrix" class="tab-content">
-        <div id="fieldMatrixContent">
-            <h3>📋 LLM Field Matrix Analysis</h3>
-            <p style="margin-bottom: 20px;">Enhanced field-level analysis with LLM-powered categorization will appear here after component analysis.</p>
-            <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
-                <p style="text-align: center; opacity: 0.8;">LLM-enhanced field matrix will appear here after analysis.</p>
-            </div>
-        </div>
-    </div>
-
-    <div id="usage" class="tab-content">
-        <div id="usageContent">
-            <h3>📈 Smart Usage Patterns & Program Flow</h3>
-            <p style="margin-bottom: 20px;">LLM-powered usage pattern analysis with program flow visualization and field lifecycle tracking.</p>
-            <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
-                <p style="text-align: center; opacity: 0.8;">Program flow and field usage patterns will appear here after analysis.</p>
-            </div>
-        </div>
-    </div>
-
-    <div id="dependencies" class="tab-content">
-        <div id="dependenciesContent">
-            <h3>🔗 Hybrid Dependency Analysis</h3>
-            <p style="margin-bottom: 20px;">Regex + LLM dependency mapping will appear here after component analysis.</p>
-            <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
-                <p style="text-align: center; opacity: 0.8;">Hybrid dependency graph will appear here after analysis.</p>
-            </div>
-        </div>
-    </div>
-
-    <div id="similarity" class="tab-content">
-        <div id="similarityContent">
-            <h3>🔍 Semantic Similarity Analysis</h3>
-            <p style="margin-bottom: 20px;">LLM-powered semantic field matching and similarity analysis across copybooks.</p>
-            <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
-                <p style="text-align: center; opacity: 0.8;">Semantic similarity results will appear here after similarity search.</p>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Loading Indicator -->
-<div class="loading" id="loadingIndicator">
-    <div class="spinner"></div>
-    <h3>🤖 LLM Analyzing Component</h3>
-    <p id="loadingStatus">Processing component analysis with LLM...</p>
-    <div id="progressBar" style="background: rgba(255,255,255,0.2); height: 6px; border-radius: 3px; margin: 15px 0; overflow: hidden;">
-        <div id="progressFill" style="height: 100%; background: #4CAF50; width: 0%; transition: width 0.3s ease;"></div>
-    </div>
-</div>
-
-<script>
-// Part 3: Core LLM Analysis Engine and Workspace Management - FIXED
-class MainframeAnalyzerPart3Fixed {
-    constructor() {
-        // Extend from Part 2 if available
-        if (window.analyzerPart2) {
-            Object.assign(this, window.analyzerPart2);
-        } else {
-            // Initialize basic properties if Part 2 not available
-            this.uploadedFiles = [];
-            this.analysisResults = {};
-            this.similarityResults = {};
-            this.fieldIndex = [];
-            this.serverValidated = false;
-            this.vllmEndpoint = 'http://localhost:8000';
-            this.maxTokens = 4000;
-            this.chatHistory = [];
-            this.currentAnalyzedComponent = null;
-        }
-        
-        // Additional Part 3 properties
-        this.componentSuggestions = [];
-        this.averageCharsPerToken = 3;
-        this.tokenSafetyMargin = 0.7;
-        this.similarityThreshold = 0.6;
-        
-        // LLM Analysis configuration
-        this.llmConfig = {
-            temperature: 0.1,
-            maxRetries: 3,
-            chunkSize: 2000,
-            analysisTimeout: 120000
-        };
-        
-        this.initializePart3();
-        console.log('Part 3 FIXED loaded: Analysis workspace and LLM functionality');
-    }
-
-    initializePart3() {
-        this.initializeTabNavigation();
-        this.initializeComponentSuggestions();
-        this.overridePlaceholderMethods();
-    }
-
-    initializeTabNavigation() {
-        document.querySelectorAll('.tab').forEach(tab => {
-            tab.addEventListener('click', (e) => this.switchTab(e));
-        });
-    }
-
-    switchTab(e) {
-        const targetTab = e.target?.dataset?.tab || e.dataset?.tab;
-        if (!targetTab) return;
-        
-        document.querySelectorAll('.tab').forEach(tab => {
-            tab.classList.remove('active');
-        });
-        
-        const clickedTab = e.target || e;
-        if (clickedTab.classList) {
-            clickedTab.classList.add('active');
-        }
-        
-        document.querySelectorAll('.tab-content').forEach(content => {
-            content.classList.remove('active');
-        });
-        
-        const targetContent = document.getElementById(targetTab);
-        if (targetContent) {
-            targetContent.classList.add('active');
-        }
-    }
-
-    initializeComponentSuggestions() {
-        this.updateComponentSuggestions();
-    }
-
-    updateComponentSuggestions() {
-        this.componentSuggestions = [];
-        
-        this.uploadedFiles.forEach(file => {
-            const content = file.content.toUpperCase();
-            const lines = content.split('\n');
-            
-            lines.forEach(line => {
-                const trimmed = line.trim();
+    <script>
+        // Enhanced Mainframe Analyzer with File Flow Analysis
+        class EnhancedMainframeAnalyzerWithFlow {
+            constructor() {
+                // Core properties
+                this.uploadedFiles = [];
+                this.analysisResults = {};
+                this.componentSuggestions = [];
+                this.serverValidated = false;
+                this.vllmEndpoint = 'http://localhost:8000';
+                this.maxTokens = 4000;
+                this.storageKey = 'enhanced_mainframe_flow_analysis';
+                this.currentAnalyzedComponent = null;
+                this.chatHistory = [];
                 
-                // Extract COBOL field names
-                const fieldMatch = trimmed.match(/^\s*\d{2}\s+([A-Z][A-Z0-9\-_]{2,})/);
-                if (fieldMatch) {
-                    this.componentSuggestions.push({
-                        name: fieldMatch[1],
-                        type: 'FIELD',
-                        file: file.name
+                // Token management
+                this.averageCharsPerToken = 3;
+                this.tokenSafetyMargin = 0.7;
+                
+                // LLM Analysis configuration
+                this.llmConfig = {
+                    temperature: 0.1,
+                    maxRetries: 3,
+                    chunkSize: 2000,
+                    analysisTimeout: 120000
+                };
+                
+                this.initializeBasicEventListeners();
+                this.loadStoredData();
+                this.initializeTokenManagement();
+                this.initializeChat();
+                
+                console.log('🚀 Enhanced Mainframe Analyzer with File Flow Analysis Initialized');
+            }
+
+            // === BASIC EVENT LISTENERS ===
+            initializeBasicEventListeners() {
+                // API validation
+                document.getElementById('validateApiBtn').addEventListener('click', () => this.validateConnection());
+                document.getElementById('vllmEndpoint').addEventListener('input', () => this.onEndpointChange());
+                document.getElementById('maxTokens').addEventListener('input', () => this.onSettingsChange());
+                
+                // File upload handlers
+                const uploadArea = document.getElementById('uploadArea');
+                const fileInput = document.getElementById('fileInput');
+                
+                uploadArea.addEventListener('click', () => {
+                    if (this.serverValidated) fileInput.click();
+                });
+                uploadArea.addEventListener('drop', (e) => this.handleFileDrop(e));
+                uploadArea.addEventListener('dragover', (e) => this.handleDragOver(e));
+                uploadArea.addEventListener('dragleave', (e) => this.handleDragLeave(e));
+                fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
+
+                // Component analysis
+                document.getElementById('componentName').addEventListener('input', () => this.onComponentInput());
+                document.getElementById('analyzeComponentBtn').addEventListener('click', () => this.analyzeComponent());
+                
+                // Quick actions
+                document.getElementById('bulkAnalyzeBtn').addEventListener('click', () => this.bulkAnalyze());
+                document.getElementById('exportJsonBtn').addEventListener('click', () => this.exportResults('json'));
+                document.getElementById('exportMdBtn').addEventListener('click', () => this.exportResults('markdown'));
+                document.getElementById('clearBtn').addEventListener('click', () => this.clearAllData());
+
+                // Tab navigation
+                document.querySelectorAll('.tab').forEach(tab => {
+                    tab.addEventListener('click', (e) => this.switchTab(e));
+                });
+
+                // Hide suggestions when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (!e.target.closest('.component-search-section')) {
+                        document.getElementById('componentSuggestions').style.display = 'none';
+                    }
+                });
+            }
+
+            initializeTokenManagement() {
+                this.updateTokenDisplay(0);
+                this.showSuccess('🚀 Enhanced Flow Analysis Mainframe Analyzer Ready!');
+            }
+
+            initializeChat() {
+                this.initializeChatEventListeners();
+            }
+
+            initializeChatEventListeners() {
+                const chatSendBtn = document.getElementById('chatSendBtn');
+                const chatInput = document.getElementById('chatInput');
+                
+                if (chatSendBtn && chatInput) {
+                    chatSendBtn.addEventListener('click', () => this.sendChatMessage());
+                    
+                    chatInput.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            this.sendChatMessage();
+                        }
                     });
                 }
+            }
+
+            // === TOKEN MANAGEMENT ===
+            estimateTokenCount(text) {
+                if (!text) return 0;
+                return Math.ceil(text.length / this.averageCharsPerToken);
+            }
+
+            updateTokenDisplay(currentTokens) {
+                const tokenInfo = document.getElementById('tokenInfo');
+                const tokenCount = document.getElementById('tokenCount');
+                const tokenFill = document.getElementById('tokenFill');
+                const tokenWarning = document.getElementById('tokenWarning');
+
+                tokenInfo.style.display = 'block';
+                tokenCount.textContent = `${currentTokens} / ${this.maxTokens}`;
                 
-                // Extract copybook names
-                const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]{2,})/);
-                if (copyMatch) {
-                    this.componentSuggestions.push({
-                        name: copyMatch[1],
-                        type: 'COPYBOOK',
-                        file: file.name
+                const percentage = (currentTokens / this.maxTokens) * 100;
+                tokenFill.style.width = `${Math.min(percentage, 100)}%`;
+                
+                tokenFill.className = 'token-fill';
+                if (percentage <= 50) {
+                    tokenFill.classList.add('safe');
+                    tokenWarning.textContent = '🟢 Optimal token usage - full LLM analysis available';
+                } else if (percentage <= 70) {
+                    tokenFill.classList.add('warning');
+                    tokenWarning.textContent = '🟡 Moderate usage - intelligent LLM chunking active';
+                } else {
+                    tokenFill.classList.add('danger');
+                    tokenWarning.textContent = '🔴 High usage - LLM optimization required';
+                }
+            }
+
+            // === API CONNECTION ===
+            async validateConnection() {
+                const endpoint = document.getElementById('vllmEndpoint').value.trim();
+                if (!endpoint) {
+                    this.showError('Please enter vLLM endpoint');
+                    return;
+                }
+
+                this.updateConnectionStatus('connecting', 'Testing LLM connection...');
+
+                try {
+                    const response = await fetch(`${endpoint}/generate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            prompt: "Test LLM connection. Respond with 'LLM Connected'",
+                            max_tokens: 20,
+                            temperature: 0.1
+                        }),
+                        signal: AbortSignal.timeout(10000)
                     });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.serverValidated = true;
+                        this.vllmEndpoint = endpoint;
+                        this.updateConnectionStatus('connected', `✅ LLM connection verified`);
+                        this.showSuccess('🚀 vLLM server connected successfully!');
+                    } else {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                } catch (error) {
+                    this.serverValidated = false;
+                    this.updateConnectionStatus('disconnected', `❌ LLM connection failed: ${error.message}`);
+                    this.showError(`LLM connection failed: ${error.message}`);
                 }
                 
-                // Extract program names
-                const programMatch = trimmed.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]{2,})/);
-                if (programMatch) {
-                    this.componentSuggestions.push({
-                        name: programMatch[1],
-                        type: 'PROGRAM',
-                        file: file.name
-                    });
+                this.validateForm();
+            }
+
+            updateConnectionStatus(status, message) {
+                const statusElement = document.getElementById('apiStatus');
+                statusElement.className = `api-status ${status}`;
+                statusElement.innerHTML = message;
+            }
+
+            // === FILE UPLOAD ===
+            handleFileDrop(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const uploadArea = document.getElementById('uploadArea');
+                uploadArea.classList.remove('drag-over');
+                
+                if (!this.serverValidated) {
+                    this.showError('Please validate LLM API connection first');
+                    return;
                 }
-            });
-        });
-        
-        // Remove duplicates
-        this.componentSuggestions = this.componentSuggestions.filter((item, index, self) => 
-            index === self.findIndex(t => t.name === item.name && t.type === item.type)
-        );
-    }
+                
+                const files = Array.from(e.dataTransfer.files);
+                this.processFiles(files);
+            }
 
-    // Override placeholder methods from Part 2
-    overridePlaceholderMethods() {
-        this.onComponentInput = this.handleComponentInput.bind(this);
-        this.onSimilarityInput = this.handleSimilarityInput.bind(this);
-        this.analyzeComponent = this.performComponentAnalysis.bind(this);
-        this.findSimilarComponents = this.performSimilaritySearch.bind(this);
-        this.generateSimilarityReport = this.createSimilarityReport.bind(this);
-        this.bulkAnalyze = this.performBulkAnalysis.bind(this);
-        this.exportResults = this.handleExportResults.bind(this);
-        this.clearAllData = this.handleClearAllData.bind(this);
-    }
+            handleDragOver(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                document.getElementById('uploadArea').classList.add('drag-over');
+            }
 
-    handleComponentInput() {
-        const input = document.getElementById('componentName');
-        const value = input?.value.trim().toUpperCase();
-        const suggestions = document.getElementById('componentSuggestions');
-        
-        if (!input || !suggestions) return;
-        
-        if (!value || value.length < 2) {
-            suggestions.style.display = 'none';
-            this.validateForm();
-            return;
-        }
-        
-        const filtered = this.componentSuggestions.filter(item => 
-            item.name.includes(value)
-        ).slice(0, 8);
-        
-        if (filtered.length > 0) {
-            let html = '';
-            filtered.forEach(item => {
-                html += `
-                    <div class="suggestion-item" onclick="analyzer.selectSuggestion('${item.name}')">
-                        <strong>${item.name}</strong> 
-                        <span style="opacity: 0.7;">(${item.type} in ${item.file})</span>
+            handleDragLeave(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                document.getElementById('uploadArea').classList.remove('drag-over');
+            }
+
+            handleFileSelect(e) {
+                if (!this.serverValidated) {
+                    this.showError('Please validate LLM API connection first');
+                    return;
+                }
+                
+                const files = Array.from(e.target.files);
+                this.processFiles(files);
+            }
+
+            async processFiles(files) {
+                for (const file of files) {
+                    try {
+                        const content = await this.readFile(file);
+                        const fileType = this.detectFileType(file.name, content);
+                        
+                        const fileObj = {
+                            name: file.name,
+                            content: content,
+                            size: file.size,
+                            type: fileType,
+                            uploadDate: new Date().toISOString(),
+                            id: Date.now() + Math.random()
+                        };
+                        
+                        this.uploadedFiles.push(fileObj);
+                        this.updateComponentSuggestions();
+                        
+                    } catch (error) {
+                        this.showError(`Failed to read ${file.name}: ${error.message}`);
+                    }
+                }
+                
+                this.displayUploadedFiles();
+                this.validateForm();
+                this.saveToStorage();
+                this.showSuccess(`📁 ${files.length} files uploaded successfully!`);
+            }
+
+            readFile(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = e => resolve(e.target.result);
+                    reader.onerror = e => reject(new Error('File read failed'));
+                    reader.readAsText(file);
+                });
+            }
+
+            detectFileType(fileName, content) {
+                const name = fileName.toLowerCase();
+                const upperContent = content.toUpperCase();
+                
+                if (name.includes('.cpy') || name.includes('copybook')) {
+                    return 'Copybook';
+                } else if (name.includes('.jcl') || upperContent.includes('//JOB ')) {
+                    return 'JCL Job';
+                } else if (name.includes('.cbl') || name.includes('.cob') || 
+                          upperContent.includes('IDENTIFICATION DIVISION') ||
+                          upperContent.includes('PROGRAM-ID')) {
+                    return 'COBOL Program';
+                } else if (name.includes('.proc')) {
+                    return 'JCL Procedure';
+                } else {
+                    return 'Text File';
+                }
+            }
+
+            displayUploadedFiles() {
+                const container = document.getElementById('uploadedFiles');
+                if (this.uploadedFiles.length === 0) {
+                    container.innerHTML = '';
+                    return;
+                }
+                
+                let html = '';
+                this.uploadedFiles.forEach(file => {
+                    html += `
+                        <div class="file-item">
+                            <div class="file-info">
+                                <div class="file-name">${file.name}</div>
+                                <div class="file-details">${file.type} • ${Math.round(file.size/1024)}KB</div>
+                            </div>
+                            <button class="file-remove" onclick="analyzer.removeFile('${file.id}')">🗑️</button>
+                        </div>
+                    `;
+                });
+                
+                container.innerHTML = html;
+            }
+
+            removeFile(fileId) {
+                this.uploadedFiles = this.uploadedFiles.filter(f => f.id != fileId);
+                this.displayUploadedFiles();
+                this.updateComponentSuggestions();
+                this.validateForm();
+                this.saveToStorage();
+            }
+
+            // === ENHANCED COMPONENT SUGGESTIONS ===
+            updateComponentSuggestions() {
+                this.componentSuggestions = [];
+                
+                this.uploadedFiles.forEach(file => {
+                    const content = file.content.toUpperCase();
+                    const lines = content.split('\n');
+                    
+                    lines.forEach(line => {
+                        const trimmed = line.trim();
+                        
+                        // File references
+                    let fileMatch = trimmed.match(/FD\s+([A-Z][A-Z0-9\-_]{1,})/) ||
+                                   trimmed.match(/SELECT\s+([A-Z][A-Z0-9\-_]{1,})\s+ASSIGN/) ||
+                                   trimmed.match(/OPEN\s+(?:INPUT|OUTPUT|I-O)\s+([A-Z][A-Z0-9\-_]{1,})/);
+                    if (fileMatch) {
+                        dependencies.fileReferences.push(fileMatch[1]);
+                    }
+                });
+
+                return dependencies;
+            }
+
+            // === LLM DEPENDENCY VALIDATION ===
+            async validateDependenciesWithLLM(basicDependencies, relevantFiles) {
+                console.log('LLM validating dependencies...');
+                
+                const fileContext = relevantFiles.map(f => 
+                    `FILE: ${f.name} (${f.type})\nCONTENT_SAMPLE: ${f.content.substring(0, 500)}...`
+                ).join('\n\n');
+
+                const llmPrompt = `MAINFRAME DEPENDENCY VALIDATION WITH FLOW CONTEXT
+
+TASK: Validate and enhance the discovered dependencies with flow analysis context.
+
+BASIC DEPENDENCIES FOUND:
+Copy Statements: ${basicDependencies.copyStatements.join(', ')}
+Call Statements: ${basicDependencies.callStatements.join(', ')}
+Exec Statements: ${basicDependencies.execStatements.join(', ')}
+Program IDs: ${basicDependencies.programIds.join(', ')}
+JCL Datasets: ${basicDependencies.jclDatasets.join(', ')}
+SQL Tables: ${basicDependencies.sqlTables.join(', ')}
+File References: ${basicDependencies.fileReferences.join(', ')}
+
+FILE CONTEXT:
+${fileContext}
+
+INSTRUCTIONS:
+1. Validate each dependency against actual file content
+2. Remove false positives and add missed dependencies
+3. Categorize dependencies by flow impact and criticality
+4. Identify dependency chains and data flow relationships
+5. Assess impact and coupling levels with flow context
+
+OUTPUT FORMAT:
+{
+  "validatedDependencies": {
+    "copyStatements": [<validated_copies>],
+    "callStatements": [<validated_calls>],
+    "execStatements": [<validated_execs>],
+    "programIds": [<validated_programs>],
+    "jclDatasets": [<validated_datasets>],
+    "sqlTables": [<validated_tables>],
+    "fileReferences": [<validated_files>]
+  },
+  "dependencyChains": [<dependency_flow_relationships>],
+  "couplingLevel": "<LOW|MEDIUM|HIGH>",
+  "flowImpact": "<LOW|MEDIUM|HIGH>",
+  "impactAssessment": [<flow_impact_descriptions>],
+  "recommendations": [<dependency_flow_recommendations>]
+}
+
+Respond with valid JSON only.`;
+
+                return await this.callLLMAPI(llmPrompt);
+            }
+
+            // === LLM UTILITY METHODS ===
+            prepareContentForLLM(content, type) {
+                const maxChars = this.maxTokens * this.averageCharsPerToken * 0.7;
+                
+                if (content.length <= maxChars) {
+                    return content;
+                }
+                
+                if (type === 'copybook') {
+                    const lines = content.split('\n');
+                    const importantLines = lines.filter(line => {
+                        const trimmed = line.trim().toUpperCase();
+                        return trimmed.match(/^\s*\d{2}\s+/) ||
+                               trimmed.includes('PIC ') ||
+                               trimmed.includes('VALUE ') ||
+                               trimmed.includes('REDEFINES ');
+                    });
+                    
+                    let result = importantLines.join('\n');
+                    if (result.length > maxChars) {
+                        result = result.substring(0, maxChars);
+                    }
+                    return result;
+                    
+                } else if (type === 'program') {
+                    const procedureIndex = content.toUpperCase().indexOf('PROCEDURE DIVISION');
+                    if (procedureIndex > -1) {
+                        const procedureContent = content.substring(procedureIndex);
+                        if (procedureContent.length <= maxChars) {
+                            return procedureContent;
+                        }
+                        return procedureContent.substring(0, maxChars);
+                    }
+                } else if (type === 'flow') {
+                    // For flow analysis, prioritize structure and key statements
+                    const lines = content.split('\n');
+                    const flowLines = lines.filter(line => {
+                        const trimmed = line.trim().toUpperCase();
+                        return trimmed.includes('PERFORM ') ||
+                               trimmed.includes('IF ') ||
+                               trimmed.includes('WHEN ') ||
+                               trimmed.includes('MOVE ') ||
+                               trimmed.includes('COMPUTE ') ||
+                               trimmed.includes('READ ') ||
+                               trimmed.includes('WRITE ') ||
+                               trimmed.includes('OPEN ') ||
+                               trimmed.includes('CLOSE ') ||
+                               trimmed.match(/^\s*\d{2}\s+/) ||
+                               trimmed.includes('CALL ') ||
+                               trimmed.includes('COPY ');
+                    });
+                    
+                    let result = flowLines.join('\n');
+                    if (result.length > maxChars) {
+                        result = result.substring(0, maxChars);
+                    }
+                    return result;
+                }
+                
+                return content.substring(0, maxChars);
+            }
+
+            async callLLMAPI(prompt, retries = 0) {
+                try {
+                    const response = await fetch(`${this.vllmEndpoint}/generate`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            prompt: prompt,
+                            max_tokens: Math.floor(this.maxTokens * 0.8),
+                            temperature: this.llmConfig.temperature,
+                            top_p: 0.95,
+                            stop: ["Human:", "Assistant:", "TASK:", "INSTRUCTIONS:"],
+                            stream: false
+                        }),
+                        signal: AbortSignal.timeout(this.llmConfig.analysisTimeout)
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`LLM API request failed: ${response.status} ${response.statusText}`);
+                    }
+
+                    const data = await response.json();
+                    
+                    let resultText = '';
+                    if (data.text) {
+                        resultText = data.text.trim();
+                    } else if (data.choices && data.choices[0]) {
+                        resultText = data.choices[0].text.trim();
+                    } else {
+                        throw new Error('Invalid LLM API response format');
+                    }
+
+                    try {
+                        return JSON.parse(resultText);
+                    } catch (parseError) {
+                        const jsonMatch = resultText.match(/\{[\s\S]*\}/);
+                        if (jsonMatch) {
+                            try {
+                                return JSON.parse(jsonMatch[0]);
+                            } catch (secondParseError) {
+                                console.warn('Failed to parse LLM JSON response:', resultText);
+                                return {
+                                    error: 'LLM response parsing failed',
+                                    rawResponse: resultText,
+                                    fallbackAnalysis: this.createFallbackAnalysis(resultText)
+                                };
+                            }
+                        } else {
+                            return {
+                                rawAnalysis: resultText,
+                                parsedAnalysis: this.parseRawLLMResponse(resultText)
+                            };
+                        }
+                    }
+
+                } catch (error) {
+                    if (retries < this.llmConfig.maxRetries) {
+                        console.warn(`LLM API call failed, retrying (${retries + 1}/${this.llmConfig.maxRetries}):`, error);
+                        await this.sleep(2000);
+                        return this.callLLMAPI(prompt, retries + 1);
+                    }
+                    throw new Error(`LLM API failed after ${this.llmConfig.maxRetries} retries: ${error.message}`);
+                }
+            }
+
+            createFallbackAnalysis(rawResponse) {
+                return {
+                    analysisType: 'Fallback Analysis',
+                    summary: rawResponse.substring(0, 500),
+                    recommendations: ['Review raw LLM response for detailed analysis'],
+                    qualityScore: 5
+                };
+            }
+
+            parseRawLLMResponse(rawText) {
+                const lines = rawText.split('\n');
+                const analysis = {
+                    fields: [],
+                    recommendations: [],
+                    businessRules: []
+                };
+
+                lines.forEach(line => {
+                    const trimmed = line.trim();
+                    if (trimmed.includes('field') || trimmed.includes('FIELD')) {
+                        analysis.fields.push(trimmed);
+                    } else if (trimmed.includes('recommend') || trimmed.includes('RECOMMEND')) {
+                        analysis.recommendations.push(trimmed);
+                    } else if (trimmed.includes('rule') || trimmed.includes('RULE')) {
+                        analysis.businessRules.push(trimmed);
+                    }
+                });
+
+                return analysis;
+            }
+
+            // === ANALYSIS HELPER METHODS ===
+            findRelevantFiles(componentName) {
+                return this.uploadedFiles.filter(file => 
+                    file.content.toUpperCase().includes(componentName.toUpperCase()) ||
+                    file.name.toUpperCase().includes(componentName.toUpperCase())
+                );
+            }
+
+            detectComponentType(componentName, files) {
+                const copybookFile = files.find(f => f.type === 'Copybook');
+                if (copybookFile) return 'Copybook';
+                
+                const programFile = files.find(f => f.type === 'COBOL Program');
+                if (programFile) return 'COBOL Program';
+                
+                return 'Component';
+            }
+
+            findProgramsUsingCopybook(copybookName) {
+                const usingPrograms = [];
+                
+                this.uploadedFiles.forEach(file => {
+                    if (file.type === 'COBOL Program') {
+                        const content = file.content.toUpperCase();
+                        const copyPattern = new RegExp(`COPY\\s+['"]*${copybookName.toUpperCase()}['"]*`, 'g');
+                        if (copyPattern.test(content)) {
+                            usingPrograms.push(file);
+                        }
+                    }
+                });
+                
+                return usingPrograms;
+            }
+
+            calculateQualityScore(analysisResult) {
+                if (!analysisResult) return 5;
+                
+                if (analysisResult.qualityScore) {
+                    return analysisResult.qualityScore;
+                }
+                
+                let score = 5;
+                
+                if (analysisResult.fieldCategories) score += 2;
+                if (analysisResult.businessLogic) score += 2;
+                if (analysisResult.recommendations) score += 1;
+                
+                return Math.min(Math.max(score, 1), 10);
+            }
+
+            assessCompleteness(analysisResult) {
+                if (!analysisResult) {
+                    return { score: 0, checkpoints: {}, completed: 0, total: 6 };
+                }
+                
+                const checkpoints = {
+                    'LLM Analysis': !!analysisResult,
+                    'Field Analysis': !!(analysisResult.fieldCategories || analysisResult.fieldDetails),
+                    'Business Logic': !!(analysisResult.businessLogic || analysisResult.businessRules),
+                    'Dependencies': !!(analysisResult.dependencies || analysisResult.validatedDependencies),
+                    'Flow Analysis': !!(analysisResult.fileFlowAnalysis || analysisResult.programFlowAnalysis),
+                    'Recommendations': !!(analysisResult.recommendations && analysisResult.recommendations.length > 0)
+                };
+                
+                const completed = Object.values(checkpoints).filter(Boolean).length;
+                const total = Object.keys(checkpoints).length;
+                
+                return {
+                    score: Math.round((completed / total) * 100),
+                    checkpoints: checkpoints,
+                    completed: completed,
+                    total: total
+                };
+            }
+
+            // === ENHANCED DISPLAY METHODS WITH FLOW ANALYSIS ===
+            displayAnalysisResults(componentName, results) {
+                console.log('Displaying LLM flow analysis results for:', componentName);
+                
+                this.displayMainAnalysis(componentName, results);
+                this.displayFieldMatrix(componentName, results);
+                this.displayFileFlow(componentName, results);
+                this.displayProgramFlow(componentName, results);
+                this.displayUsagePatterns(componentName, results);
+                this.displayDependencies(componentName, results);
+                
+                this.switchTab({ target: { dataset: { tab: 'lifecycle' } } });
+            }
+
+            displayMainAnalysis(componentName, results) {
+                const container = document.getElementById('lifecycleContent');
+                
+                let html = `
+                    <h3>🤖 LLM-Enhanced Flow Analysis Results: ${componentName}</h3>
+                    <p style="margin-bottom: 20px;">
+                        Component type: <strong>${results.componentType}</strong> • 
+                        Analysis method: <strong>${results.analysisMethod}</strong> • 
+                        Files analyzed: <strong>${results.filesAnalyzed.length}</strong> • 
+                        Completed: <strong>${new Date(results.timestamp).toLocaleString()}</strong>
+                    </p>
+                    
+                    <!-- Enhanced Quality Metrics with Flow -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px; margin-bottom: 25px;">
+                        <div style="background: rgba(76, 175, 80, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #4CAF50;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${results.qualityScore}/10</div>
+                            <div style="font-size: 11px;">LLM Quality Score</div>
+                        </div>
+                        <div style="background: rgba(33, 150, 243, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #2196F3;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${results.completeness.score}%</div>
+                            <div style="font-size: 11px;">Completeness</div>
+                        </div>
+                        <div style="background: rgba(6, 182, 212, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #06b6d4;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">🌊</div>
+                            <div style="font-size: 11px;">Flow Enhanced</div>
+                        </div>
+                        <div style="background: rgba(156, 39, 176, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #9C27B0;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">LLM</div>
+                            <div style="font-size: 11px;">AI Enhanced</div>
+                        </div>
                     </div>
                 `;
-            });
-            suggestions.innerHTML = html;
-            suggestions.style.display = 'block';
-        } else {
-            suggestions.style.display = 'none';
-        }
-        
-        this.validateForm();
-    }
 
-    selectSuggestion(componentName) {
-        const input = document.getElementById('componentName');
-        const suggestions = document.getElementById('componentSuggestions');
-        
-        if (input) input.value = componentName;
-        if (suggestions) suggestions.style.display = 'none';
-        this.validateForm();
-    }
+                // Display LLM analysis based on component type
+                if (results.componentType === 'Copybook' && results.llmAnalysis) {
+                    html += this.displayLLMCopybookAnalysis(results.llmAnalysis);
+                } else if (results.componentType === 'COBOL Program' && results.llmAnalysis) {
+                    html += this.displayLLMProgramAnalysis(results.llmAnalysis);
+                } else if (results.llmAnalysis) {
+                    html += this.displayLLMGenericAnalysis(results.llmAnalysis);
+                }
 
-    handleSimilarityInput() {
-        const input = document.getElementById('similarityQuery');
-        const value = input?.value.trim();
-        
-        if (!input) return;
-        
-        if (!value || value.length < 2) {
-            this.validateForm();
-            return;
-        }
-        
-        this.validateForm();
-    }
+                // Display Flow Analysis Summary
+                if (results.fileFlowAnalysis || results.programFlowAnalysis) {
+                    html += this.displayFlowAnalysisSummary(results);
+                }
 
-    async performComponentAnalysis() {
-        const componentName = document.getElementById('componentName')?.value.trim();
-        if (!componentName) {
-            this.showError('Please enter a component name');
-            return;
-        }
-
-        if (!this.serverValidated) {
-            this.showError('Please test LLM connection first');
-            return;
-        }
-
-        this.showLoading();
-        this.updateProgress(0);
-
-        try {
-            this.updateLoadingStatus('🧠 Initializing LLM analysis...');
-            
-            // Simulate comprehensive analysis
-            this.updateProgress(25);
-            this.updateLoadingStatus('🔍 Finding relevant files...');
-            await this.sleep(1000);
-            
-            this.updateProgress(50);
-            this.updateLoadingStatus('🤖 LLM analyzing component structure...');
-            await this.sleep(2000);
-            
-            this.updateProgress(75);
-            this.updateLoadingStatus('🔗 Validating dependencies...');
-            await this.sleep(1000);
-            
-            this.updateProgress(100);
-            
-            // Create mock results for demonstration
-            const results = this.createMockAnalysisResults(componentName);
-            
-            this.analysisResults[componentName] = results;
-            this.currentAnalyzedComponent = componentName;
-            
-            this.displayAnalysisResults(componentName, results);
-            this.enableChatAfterAnalysis();
-            
-            this.hideLoading();
-            this.showSuccess(`✅ LLM-enhanced analysis complete for ${componentName}!`);
-            
-        } catch (error) {
-            this.hideLoading();
-            this.showError(`LLM analysis failed: ${error.message}`);
-            console.error('LLM Analysis error:', error);
-        }
-    }
-
-    createMockAnalysisResults(componentName) {
-        // Create realistic mock results based on component type
-        const componentType = this.detectComponentTypeFromName(componentName);
-        
-        return {
-            componentName: componentName,
-            timestamp: new Date().toISOString(),
-            filesAnalyzed: ['CUSTOMER.CPY', 'ACCOUNT.CPY'],
-            componentType: componentType,
-            analysisMethod: 'LLM-Enhanced',
-            qualityScore: Math.floor(Math.random() * 3) + 7, // 7-9
-            completeness: {
-                score: Math.floor(Math.random() * 20) + 80, // 80-99%
-                checkpoints: {
-                    'LLM Analysis': true,
-                    'Field Analysis': true,
-                    'Business Logic': true,
-                    'Dependencies': true,
-                    'Recommendations': true
-                },
-                completed: 5,
-                total: 5
-            },
-            llmAnalysis: this.createMockLLMAnalysis(componentName, componentType),
-            basicDependencies: {
-                copyStatements: ['CUSTOMER-COPY', 'ACCOUNT-COPY'],
-                callStatements: ['VALIDATE-CUSTOMER', 'UPDATE-ACCOUNT'],
-                programIds: ['CUST-MAIN', 'ACCT-PROC'],
-                fileReferences: ['CUSTOMER-FILE', 'ACCOUNT-FILE']
+                // Display LLM recommendations
+                if (results.llmAnalysis && results.llmAnalysis.recommendations) {
+                    html += this.displayLLMRecommendations(results.llmAnalysis.recommendations);
+                }
+                
+                container.innerHTML = html;
             }
-        };
-    }
 
-    detectComponentTypeFromName(componentName) {
-        const name = componentName.toUpperCase();
-        if (name.includes('COPY') || name.includes('REC') || name.includes('RECORD')) {
-            return 'Copybook';
-        } else if (name.includes('PROG') || name.includes('MAIN') || name.includes('PROC')) {
-            return 'COBOL Program';
-        }
-        return 'Component';
-    }
+            displayLLMCopybookAnalysis(llmAnalysis) {
+                if (!llmAnalysis || llmAnalysis.error) {
+                    return `
+                        <div style="background: rgba(244, 67, 54, 0.1); padding: 20px; border-radius: 10px; border-left: 4px solid #f44336;">
+                            <h4 style="color: #f44336; margin-bottom: 15px;">⚠️ LLM Analysis Error</h4>
+                            <p>LLM analysis encountered an issue. Raw response available in export.</p>
+                        </div>
+                    `;
+                }
 
-    createMockLLMAnalysis(componentName, componentType) {
-        if (componentType === 'Copybook') {
-            return {
-                totalFields: 15,
-                fieldCategories: {
-                    INPUT_FIELDS: ['CUSTOMER-ID', 'CUSTOMER-NAME', 'PHONE-NUMBER', 'EMAIL-ADDRESS'],
-                    OUTPUT_FIELDS: ['ACCOUNT-BALANCE', 'INTEREST-EARNED', 'LAST-TRANSACTION'],
-                    DERIVED_FIELDS: ['MONTHLY-PAYMENT', 'CREDIT-SCORE', 'RISK-RATING'],
-                    CONDITION_FIELDS: ['ACCOUNT-STATUS', 'VIP-FLAG'],
-                    STATIC_FIELDS: ['RECORD-TYPE'],
-                    UNUSED_FIELDS: ['LEGACY-FIELD']
-                },
-                fieldDetails: {
-                    'CUSTOMER-ID': {
-                        level: 5,
-                        picture: '9(10)',
-                        category: 'INPUT_FIELDS',
-                        businessRole: 'Unique customer identifier',
-                        usagePattern: 'Primary key field used across multiple programs'
-                    },
-                    'CUSTOMER-NAME': {
-                        level: 5,
-                        picture: 'X(30)',
-                        category: 'INPUT_FIELDS',
-                        businessRole: 'Customer display name',
-                        usagePattern: 'Input field for customer registration and updates'
-                    },
-                    'ACCOUNT-BALANCE': {
-                        level: 5,
-                        picture: '9(10)V99',
-                        category: 'OUTPUT_FIELDS',
-                        businessRole: 'Current account balance',
-                        usagePattern: 'Calculated field displayed in reports and statements'
+                let html = `
+                    <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #FFD700; margin-bottom: 20px;">
+                        <h4 style="color: #FFD700; margin-bottom: 15px;">🤖 LLM Copybook Analysis with Flow Context</h4>
+                `;
+
+                // Display field categories with flow context
+                if (llmAnalysis.fieldCategories) {
+                    const totalFields = llmAnalysis.totalFields || 0;
+                    
+                    html += `
+                        <!-- LLM Field Summary with Flow -->
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                            <div style="text-align: center; background: rgba(76, 175, 80, 0.1); padding: 10px; border-radius: 5px;">
+                                <div style="font-size: 1.2rem; font-weight: bold; color: #4CAF50;">${totalFields}</div>
+                                <div style="font-size: 11px;">Total Fields</div>
+                            </div>
+                    `;
+
+                    Object.entries(llmAnalysis.fieldCategories).forEach(([category, fields]) => {
+                        if (fields && fields.length > 0) {
+                            const color = this.getCategoryColor(category);
+                            html += `
+                                <div style="text-align: center; background: rgba(${this.hexToRgb(color)}, 0.1); padding: 10px; border-radius: 5px;">
+                                    <div style="font-size: 1.2rem; font-weight: bold; color: ${color};">${fields.length}</div>
+                                    <div style="font-size: 11px;">${this.formatCategoryName(category)}</div>
+                                </div>
+                            `;
+                        }
+                    });
+
+                    html += `</div>`;
+
+                    // Display flow analysis metrics if available
+                    if (llmAnalysis.flowAnalysis) {
+                        html += `
+                            <div style="background: rgba(6, 182, 212, 0.1); padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 3px solid #06b6d4;">
+                                <h6 style="color: #06b6d4; margin-bottom: 10px;">🌊 Flow Analysis Metrics:</h6>
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 10px; font-size: 12px;">
+                                    <div><strong>Input Fields:</strong> ${llmAnalysis.flowAnalysis.inputFieldsCount || 0}</div>
+                                    <div><strong>Process Fields:</strong> ${llmAnalysis.flowAnalysis.processFieldsCount || 0}</div>
+                                    <div><strong>Output Fields:</strong> ${llmAnalysis.flowAnalysis.outputFieldsCount || 0}</div>
+                                    <div><strong>Unused Fields:</strong> ${llmAnalysis.flowAnalysis.unusedFieldsCount || 0}</div>
+                                    <div><strong>Flow Complexity:</strong> ${llmAnalysis.flowAnalysis.flowComplexity || 'N/A'}</div>
+                                </div>
+                            </div>
+                        `;
                     }
-                },
-                businessRules: [
-                    'Customer ID must be unique across all records',
-                    'Account balance cannot be negative for regular accounts',
-                    'VIP customers have different interest calculation rules'
-                ],
-                recommendations: [
-                    'Consider consolidating similar customer fields',
-                    'Remove unused legacy fields to improve performance',
-                    'Add validation for email address format'
-                ],
-                qualityScore: 8
-            };
-        } else {
-            return {
-                programStructure: {
-                    divisions: ['IDENTIFICATION', 'DATA', 'PROCEDURE'],
-                    paragraphs: ['MAIN-PROCESS', 'VALIDATE-INPUT', 'UPDATE-RECORDS'],
-                    sections: ['INPUT-SECTION', 'PROCESS-SECTION', 'OUTPUT-SECTION']
-                },
-                businessLogic: {
-                    validationRules: ['Check customer ID exists', 'Validate account status'],
-                    calculations: ['Interest calculation', 'Balance updates'],
-                    decisionPoints: ['IF customer is VIP', 'EVALUATE account type']
-                },
-                complexity: 'MEDIUM',
-                recommendations: [
-                    'Consider breaking down large paragraphs',
-                    'Add error handling for file operations',
-                    'Implement logging for audit trail'
-                ],
-                qualityScore: 7
-            };
-        }
+
+                    // Display detailed field categories
+                    html += `
+                        <div style="margin-bottom: 20px;">
+                            <h5 style="color: #FFD700; margin-bottom: 15px;">🏷️ LLM Field Categorization with Flow Context:</h5>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                    `;
+
+                    Object.entries(llmAnalysis.fieldCategories).forEach(([category, fields]) => {
+                        if (fields && fields.length > 0) {
+                            const color = this.getCategoryColor(category);
+                            const icon = this.getCategoryIcon(category);
+                            
+                            html += `
+                                <div style="background: rgba(255, 255, 255, 0.05); padding: 12px; border-radius: 8px; border-left: 3px solid ${color};">
+                                    <h6 style="color: ${color}; margin-bottom: 8px; font-size: 13px;">${icon} ${this.formatCategoryName(category)} (${fields.length})</h6>
+                                    <div style="max-height: 120px; overflow-y: auto;">
+                                        ${fields.slice(0, 10).map(field => `
+                                            <div style="margin: 3px 0; padding: 3px 6px; background: rgba(0,0,0,0.2); border-radius: 3px; font-family: monospace; font-size: 11px;">
+                                                ${field}
+                                            </div>
+                                        `).join('')}
+                                        ${fields.length > 10 ? `<div style="font-size: 10px; opacity: 0.7; text-align: center; margin-top: 5px;">... and ${fields.length - 10} more</div>` : ''}
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    });
+
+                    html += `</div></div>`;
+                }
+
+                html += '</div>';
+                return html;
+            }
+
+            displayLLMProgramAnalysis(llmAnalysis) {
+                if (!llmAnalysis || llmAnalysis.error) {
+                    return `
+                        <div style="background: rgba(244, 67, 54, 0.1); padding: 20px; border-radius: 10px; border-left: 4px solid #f44336;">
+                            <h4 style="color: #f44336; margin-bottom: 15px;">⚠️ LLM Analysis Error</h4>
+                            <p>LLM analysis encountered an issue. Raw response available in export.</p>
+                        </div>
+                    `;
+                }
+
+                let html = `
+                    <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #2196F3; margin-bottom: 20px;">
+                        <h4 style="color: #2196F3; margin-bottom: 15px;">🤖 LLM Program Analysis with Flow Context</h4>
+                `;
+
+                // Program structure
+                if (llmAnalysis.programStructure) {
+                    const structure = llmAnalysis.programStructure;
+                    html += `
+                        <div style="margin-bottom: 20px;">
+                            <h5 style="color: #2196F3; margin-bottom: 10px;">📋 Program Structure:</h5>
+                            <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px;">
+                    `;
+                    
+                    if (structure.divisions) {
+                        html += `<p><strong>Divisions:</strong> ${structure.divisions.join(', ')}</p>`;
+                    }
+                    if (structure.paragraphs) {
+                        html += `<p><strong>Paragraphs:</strong> ${Array.isArray(structure.paragraphs) ? structure.paragraphs.length : structure.paragraphs} found</p>`;
+                    }
+                    if (structure.sections) {
+                        html += `<p><strong>Sections:</strong> ${structure.sections.join(', ')}</p>`;
+                    }
+                    
+                    html += '</div></div>';
+                }
+
+                // Flow metrics if available
+                if (llmAnalysis.flowMetrics) {
+                    html += `
+                        <div style="background: rgba(6, 182, 212, 0.1); padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 3px solid #06b6d4;">
+                            <h6 style="color: #06b6d4; margin-bottom: 10px;">🌊 Program Flow Metrics:</h6>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; font-size: 12px;">
+                                <div><strong>Total Steps:</strong> ${llmAnalysis.flowMetrics.totalSteps || llmAnalysis.flowMetrics.totalParagraphs || 'N/A'}</div>
+                                <div><strong>Decision Points:</strong> ${llmAnalysis.flowMetrics.decisionPoints || 0}</div>
+                                <div><strong>Transformations:</strong> ${llmAnalysis.flowMetrics.transformations || llmAnalysis.flowMetrics.calculations || 0}</div>
+                                <div><strong>File Operations:</strong> ${llmAnalysis.flowMetrics.fileOperations || 0}</div>
+                                <div><strong>Complexity:</strong> ${llmAnalysis.flowMetrics.complexity || llmAnalysis.complexity || 'N/A'}</div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                // Business logic
+                if (llmAnalysis.businessLogic) {
+                    html += `
+                        <div style="margin-bottom: 20px;">
+                            <h5 style="color: #FF9800; margin-bottom: 10px;">⚖️ Business Logic with Flow:</h5>
+                            <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px;">
+                    `;
+                    
+                    const logic = llmAnalysis.businessLogic;
+                    if (logic.validationRules && logic.validationRules.length > 0) {
+                        html += `<p><strong>Validation Rules:</strong></p><ul>`;
+                        logic.validationRules.slice(0, 5).forEach(rule => {
+                            html += `<li style="margin-bottom: 5px;">${rule}</li>`;
+                        });
+                        if (logic.validationRules.length > 5) {
+                            html += `<li style="opacity: 0.7;">... and ${logic.validationRules.length - 5} more</li>`;
+                        }
+                        html += '</ul>';
+                    }
+                    
+                    if (logic.calculations && logic.calculations.length > 0) {
+                        html += `<p><strong>Calculations:</strong></p><ul>`;
+                        logic.calculations.slice(0, 3).forEach(calc => {
+                            html += `<li style="margin-bottom: 5px;">${calc}</li>`;
+                        });
+                        if (logic.calculations.length > 3) {
+                            html += `<li style="opacity: 0.7;">... and ${logic.calculations.length - 3} more</li>`;
+                        }
+                        html += '</ul>';
+                    }
+                    
+                    html += '</div></div>';
+                }
+
+                // Data flow if available
+                if (llmAnalysis.dataFlow) {
+                    html += `
+                        <div style="margin-bottom: 20px;">
+                            <h5 style="color: #9C27B0; margin-bottom: 10px;">🔄 Data Flow Analysis:</h5>
+                            <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px;">
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; font-size: 12px;">
+                                    ${llmAnalysis.dataFlow.inputFiles ? `<div><strong>Input Files:</strong> ${llmAnalysis.dataFlow.inputFiles.length}</div>` : ''}
+                                    ${llmAnalysis.dataFlow.outputFiles ? `<div><strong>Output Files:</strong> ${llmAnalysis.dataFlow.outputFiles.length}</div>` : ''}
+                                    ${llmAnalysis.dataFlow.workingStorage ? `<div><strong>Working Storage:</strong> ${llmAnalysis.dataFlow.workingStorage.length}</div>` : ''}
+                                    ${llmAnalysis.dataFlow.dataTransformations ? `<div><strong>Transformations:</strong> ${llmAnalysis.dataFlow.dataTransformations.length}</div>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                html += '</div>';
+                return html;
+            }
+
+            displayLLMGenericAnalysis(llmAnalysis) {
+                if (!llmAnalysis) {
+                    return `
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #9C27B0;">
+                            <h4 style="color: #9C27B0; margin-bottom: 15px;">🤖 LLM Component Analysis</h4>
+                            <p style="text-align: center; opacity: 0.8;">
+                                LLM analysis completed. Results available in chat and export.
+                            </p>
+                        </div>
+                    `;
+                }
+
+                return `
+                    <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #9C27B0;">
+                        <h4 style="color: #9C27B0; margin-bottom: 15px;">🤖 LLM Extract COBOL field names
+                        const fieldMatch = trimmed.match(/^\s*\d{2}\s+([A-Z][A-Z0-9\-_]{2,})/);
+                        if (fieldMatch) {
+                            this.componentSuggestions.push({
+                                name: fieldMatch[1],
+                                type: 'FIELD',
+                                file: file.name
+                            });
+                        }
+                        
+                        // Extract copybook names
+                        const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]{2,})/);
+                        if (copyMatch) {
+                            this.componentSuggestions.push({
+                                name: copyMatch[1],
+                                type: 'COPYBOOK',
+                                file: file.name
+                            });
+                        }
+                        
+                        // Extract program names
+                        const programMatch = trimmed.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]{2,})/);
+                        if (programMatch) {
+                            this.componentSuggestions.push({
+                                name: programMatch[1],
+                                type: 'PROGRAM',
+                                file: file.name
+                            });
+                        }
+                    });
+                });
+                
+                // Remove duplicates
+                this.componentSuggestions = this.componentSuggestions.filter((item, index, self) => 
+                    index === self.findIndex(t => t.name === item.name && t.type === item.type)
+                );
+            }
+
+            onComponentInput() {
+                const input = document.getElementById('componentName');
+                const value = input.value.trim().toUpperCase();
+                const suggestions = document.getElementById('componentSuggestions');
+                
+                if (value.length < 2) {
+                    suggestions.style.display = 'none';
+                    this.validateForm();
+                    return;
+                }
+                
+                const filtered = this.componentSuggestions.filter(item => 
+                    item.name.includes(value)
+                ).slice(0, 8);
+                
+                if (filtered.length > 0) {
+                    let html = '';
+                    filtered.forEach(item => {
+                        html += `
+                            <div class="suggestion-item" onclick="analyzer.selectSuggestion('${item.name}')">
+                                <strong>${item.name}</strong> 
+                                <span style="opacity: 0.7;">(${item.type} in ${item.file})</span>
+                            </div>
+                        `;
+                    });
+                    suggestions.innerHTML = html;
+                    suggestions.style.display = 'block';
+                } else {
+                    suggestions.style.display = 'none';
+                }
+                
+                this.validateForm();
+            }
+
+            selectSuggestion(componentName) {
+                document.getElementById('componentName').value = componentName;
+                document.getElementById('componentSuggestions').style.display = 'none';
+                this.validateForm();
+            }
+
+            // === FORM VALIDATION ===
+            validateForm() {
+                const hasFiles = this.uploadedFiles.length > 0;
+                const hasComponent = document.getElementById('componentName').value.trim().length > 0;
+                const hasConnection = this.serverValidated;
+                
+                document.getElementById('analyzeComponentBtn').disabled = !(hasFiles && hasComponent && hasConnection);
+                document.getElementById('bulkAnalyzeBtn').disabled = !(hasFiles && hasConnection);
+                
+                const hasResults = Object.keys(this.analysisResults).length > 0;
+                document.getElementById('exportJsonBtn').disabled = !hasResults;
+                document.getElementById('exportMdBtn').disabled = !hasResults;
+            }
+
+            // === EVENT HANDLERS ===
+            onEndpointChange() {
+                this.serverValidated = false;
+                this.updateConnectionStatus('disconnected', '🔴 LLM connection not validated');
+                this.validateForm();
+            }
+
+            onSettingsChange() {
+                this.maxTokens = parseInt(document.getElementById('maxTokens').value) || 4000;
+                this.saveToStorage();
+            }
+
+            switchTab(e) {
+                const targetTab = e.target?.dataset?.tab || e.dataset?.tab;
+                if (!targetTab) return;
+                
+                document.querySelectorAll('.tab').forEach(tab => {
+                    tab.classList.remove('active');
+                });
+                
+                const clickedTab = e.target || e;
+                if (clickedTab.classList) {
+                    clickedTab.classList.add('active');
+                }
+                
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                
+                const targetContent = document.getElementById(targetTab);
+                if (targetContent) {
+                    targetContent.classList.add('active');
+                }
+            }
+
+            // === ENHANCED LLM ANALYSIS ENGINE WITH FLOW TRACKING ===
+            async analyzeComponent() {
+                const componentName = document.getElementById('componentName').value.trim();
+                if (!componentName) return;
+
+                this.showLoading();
+                this.updateProgress(0);
+
+                try {
+                    this.updateLoadingStatus('🧠 Initializing LLM flow analysis...');
+                    const results = await this.runLLMEnhancedFlowAnalysis(componentName);
+                    
+                    this.analysisResults[componentName] = results;
+                    this.currentAnalyzedComponent = componentName;
+                    
+                    this.displayAnalysisResults(componentName, results);
+                    this.enableChat();
+                    this.saveToStorage();
+                    
+                    this.hideLoading();
+                    this.showSuccess(`✅ LLM-enhanced flow analysis complete for ${componentName}!`);
+                    
+                } catch (error) {
+                    this.hideLoading();
+                    this.showError(`LLM flow analysis failed: ${error.message}`);
+                    console.error('LLM Flow Analysis error:', error);
+                }
+            }
+
+            async runLLMEnhancedFlowAnalysis(componentName) {
+                console.log(`Starting LLM-enhanced flow analysis for: ${componentName}`);
+                
+                // Stage 1: Find relevant files and detect component type
+                this.updateLoadingStatus('🔍 Stage 1: Finding relevant files...');
+                this.updateProgress(10);
+                
+                const relevantFiles = this.findRelevantFiles(componentName);
+                if (relevantFiles.length === 0) {
+                    throw new Error(`Component "${componentName}" not found in uploaded files`);
+                }
+
+                const componentType = this.detectComponentType(componentName, relevantFiles);
+                console.log(`Component type detected: ${componentType}`);
+
+                // Stage 2: Basic dependency extraction
+                this.updateLoadingStatus('🔗 Stage 2: Extracting basic dependencies...');
+                this.updateProgress(20);
+                
+                const basicDependencies = await this.extractBasicDependencies();
+
+                // Stage 3: Enhanced Flow Analysis
+                this.updateLoadingStatus('🌊 Stage 3: LLM analyzing file flows...');
+                this.updateProgress(40);
+                
+                const fileFlowAnalysis = await this.analyzeFileFlowWithLLM(componentName, relevantFiles, basicDependencies);
+
+                // Stage 4: Program Flow Analysis
+                this.updateLoadingStatus('🔀 Stage 4: LLM analyzing program flows...');
+                this.updateProgress(60);
+                
+                const programFlowAnalysis = await this.analyzeProgramFlowWithLLM(componentName, relevantFiles, basicDependencies);
+
+                // Stage 5: LLM Component Analysis
+                this.updateLoadingStatus('🤖 Stage 5: LLM analyzing component structure...');
+                this.updateProgress(75);
+                
+                let llmAnalysis;
+                if (componentType === 'Copybook') {
+                    llmAnalysis = await this.analyzeCopybookWithLLM(componentName, relevantFiles, basicDependencies);
+                } else if (componentType === 'COBOL Program') {
+                    llmAnalysis = await this.analyzeProgramWithLLM(componentName, relevantFiles, basicDependencies);
+                } else {
+                    llmAnalysis = await this.analyzeGenericComponentWithLLM(componentName, relevantFiles, basicDependencies);
+                }
+                
+                // Stage 6: LLM validation of dependencies
+                this.updateLoadingStatus('🔍 Stage 6: LLM validating dependencies...');
+                this.updateProgress(90);
+                
+                const validatedDependencies = await this.validateDependenciesWithLLM(basicDependencies, relevantFiles);
+                
+                this.updateProgress(100);
+                
+                return {
+                    componentName: componentName,
+                    timestamp: new Date().toISOString(),
+                    filesAnalyzed: relevantFiles.map(f => f.name),
+                    componentType: componentType,
+                    basicDependencies: basicDependencies,
+                    validatedDependencies: validatedDependencies,
+                    llmAnalysis: llmAnalysis,
+                    fileFlowAnalysis: fileFlowAnalysis,
+                    programFlowAnalysis: programFlowAnalysis,
+                    qualityScore: this.calculateQualityScore(llmAnalysis),
+                    completeness: this.assessCompleteness(llmAnalysis),
+                    analysisMethod: 'LLM-Enhanced-Flow'
+                };
+            }
+
+            // === NEW FILE FLOW ANALYSIS ===
+            async analyzeFileFlowWithLLM(componentName, relevantFiles, basicDependencies) {
+                console.log(`LLM analyzing file flow for: ${componentName}`);
+                
+                // Prepare comprehensive content for file flow analysis
+                const allFilesContent = relevantFiles.map(f => 
+                    `FILE: ${f.name} (${f.type})\nCONTENT:\n${this.prepareContentForLLM(f.content, 'flow')}`
+                ).join('\n\n' + '='.repeat(50) + '\n\n');
+                
+                const llmPrompt = `MAINFRAME FILE FLOW LIFECYCLE ANALYSIS
+
+TASK: Analyze the complete file and field lifecycle for component "${componentName}" across all programs.
+
+ALL FILES CONTENT:
+${allFilesContent}
+
+DEPENDENCIES CONTEXT:
+Copy Statements: ${basicDependencies.copyStatements.join(', ')}
+Call Statements: ${basicDependencies.callStatements.join(', ')}
+File References: ${basicDependencies.fileReferences.join(', ')}
+Program IDs: ${basicDependencies.programIds.join(', ')}
+
+INSTRUCTIONS:
+Perform comprehensive file flow analysis focusing on:
+
+1. **Field Lifecycle Tracking**: Track each field from creation to final use
+2. **Cross-Program Flow**: How fields move between programs
+3. **Data Transformation**: Where and how fields are modified
+4. **Input/Output Mapping**: Source and destination of each field
+5. **Unused Field Detection**: Fields defined but never used
+6. **Flow Bottlenecks**: Critical processing points
+
+OUTPUT FORMAT:
+{
+  "fileLifecycle": {
+    "componentName": "${componentName}",
+    "flowStages": [
+      {
+        "stage": "INPUT|PROCESS|OUTPUT|UNUSED",
+        "stageDescription": "<detailed_stage_description>",
+        "fields": [
+          {
+            "fieldName": "<field_name>",
+            "action": "CREATE|READ|UPDATE|DERIVE|VALIDATE|OUTPUT|IGNORE",
+            "program": "<program_name>",
+            "location": "<section_or_paragraph>",
+            "businessPurpose": "<business_context>",
+            "dataFlow": "<flow_description>"
+          }
+        ]
+      }
+    ],
+    "crossProgramFlow": [
+      {
+        "fromProgram": "<source_program>",
+        "toProgram": "<target_program>",
+        "fieldsTransferred": ["<field_names>"],
+        "transferMethod": "COPY|CALL|FILE|PARAMETER",
+        "transformations": ["<field_transformations>"]
+      }
+    ],
+    "unusedFields": [
+      {
+        "fieldName": "<field_name>",
+        "definedIn": "<program_or_copybook>",
+        "reason": "<why_unused>",
+        "optimizationOpportunity": "<cleanup_suggestion>"
+      }
+    ],
+    "flowMetrics": {
+      "totalFields": <number>,
+      "activeFields": <number>,
+      "unusedFields": <number>,
+      "transformationPoints": <number>,
+      "flowComplexity": "LOW|MEDIUM|HIGH"
     }
+  },
+  "recommendations": [
+    "<flow_optimization_recommendations>"
+  ]
+}
 
-    displayAnalysisResults(componentName, results) {
-        console.log('Displaying analysis results for:', componentName);
-        
-        // Update main analysis tab
-        this.displayMainAnalysis(componentName, results);
-        
-        // Update field matrix tab  
-        this.displayFieldMatrix(componentName, results);
-        
-        // Update usage patterns tab
-        this.displayUsagePatterns(componentName, results);
-        
-        // Update dependencies tab
-        this.displayDependencies(componentName, results);
-        
-        // Switch to analysis tab
-        this.switchTab({ target: { dataset: { tab: 'lifecycle' } } });
+Respond with valid JSON only. Focus on actual field usage patterns and lifecycle tracking.`;
+
+                return await this.callLLMAPI(llmPrompt);
+            }
+
+            // === NEW PROGRAM FLOW ANALYSIS ===
+            async analyzeProgramFlowWithLLM(componentName, relevantFiles, basicDependencies) {
+                console.log(`LLM analyzing program flow for: ${componentName}`);
+                
+                const programFile = relevantFiles.find(f => 
+                    f.type === 'COBOL Program' && 
+                    (f.name.toUpperCase().includes(componentName.toUpperCase()) || 
+                     f.content.toUpperCase().includes(`PROGRAM-ID. ${componentName.toUpperCase()}`))
+                );
+
+                if (!programFile) {
+                    // Return empty flow analysis for non-programs
+                    return {
+                        programFlow: {
+                            componentName: componentName,
+                            componentType: "Non-Program",
+                            flowSteps: [],
+                            executionPath: [],
+                            decisionPoints: [],
+                            dataTransformations: []
+                        }
+                    };
+                }
+
+                const programContent = this.prepareContentForLLM(programFile.content, 'program');
+
+                const llmPrompt = `MAINFRAME PROGRAM FLOW ANALYSIS
+
+TASK: Analyze the step-by-step execution flow for COBOL program "${componentName}".
+
+PROGRAM CONTENT:
+${programContent}
+
+DEPENDENCIES CONTEXT:
+Copy Statements: ${basicDependencies.copyStatements.join(', ')}
+Call Statements: ${basicDependencies.callStatements.join(', ')}
+File References: ${basicDependencies.fileReferences.join(', ')}
+
+INSTRUCTIONS:
+Perform detailed program flow analysis focusing on:
+
+1. **Execution Sequence**: Step-by-step program flow
+2. **Decision Points**: IF/WHEN/EVALUATE conditions and branches
+3. **Data Transformations**: Where data is modified or calculated
+4. **Loop Structures**: PERFORM loops and iterations
+5. **File Operations**: OPEN/READ/WRITE/CLOSE sequences
+6. **Error Handling**: Exception and error processing paths
+
+OUTPUT FORMAT:
+{
+  "programFlow": {
+    "componentName": "${componentName}",
+    "executionPath": [
+      {
+        "stepNumber": <number>,
+        "operation": "<operation_type>",
+        "location": "<paragraph_or_section>",
+        "description": "<step_description>",
+        "fieldsInvolved": ["<field_names>"],
+        "businessLogic": "<business_purpose>"
+      }
+    ],
+    "decisionPoints": [
+      {
+        "location": "<paragraph_or_section>",
+        "condition": "<if_when_condition>",
+        "truePath": "<action_if_true>",
+        "falsePath": "<action_if_false>",
+        "fieldsUsed": ["<field_names>"],
+        "businessRule": "<business_logic>"
+      }
+    ],
+    "dataTransformations": [
+      {
+        "location": "<paragraph_or_section>",
+        "operation": "COMPUTE|MOVE|ADD|SUBTRACT|MULTIPLY|DIVIDE|STRING",
+        "sourceFields": ["<input_fields>"],
+        "targetFields": ["<output_fields>"],
+        "transformation": "<transformation_description>",
+        "businessPurpose": "<why_transformation>"
+      }
+    ],
+    "fileOperations": [
+      {
+        "operation": "OPEN|READ|WRITE|CLOSE",
+        "fileName": "<file_name>",
+        "location": "<paragraph_or_section>",
+        "fieldsInvolved": ["<field_names>"],
+        "purpose": "<operation_purpose>"
+      }
+    ],
+    "flowMetrics": {
+      "totalSteps": <number>,
+      "decisionPoints": <number>,
+      "transformations": <number>,
+      "fileOperations": <number>,
+      "complexity": "LOW|MEDIUM|HIGH"
     }
+  },
+  "recommendations": [
+    "<program_flow_optimization_recommendations>"
+  ]
+}
 
-    displayMainAnalysis(componentName, results) {
-        const container = document.getElementById('lifecycleContent');
-        if (!container) return;
-        
-        let html = `
-            <h3>🤖 LLM-Enhanced Analysis Results: ${componentName}</h3>
-            <p style="margin-bottom: 20px;">
-                Component type: <strong>${results.componentType}</strong> • 
-                Analysis method: <strong>${results.analysisMethod}</strong> • 
-                Files analyzed: <strong>${results.filesAnalyzed.length}</strong> • 
-                Completed: <strong>${new Date(results.timestamp).toLocaleString()}</strong>
-            </p>
-            
-            <!-- Enhanced Quality Metrics -->
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px; margin-bottom: 25px;">
-                <div style="background: rgba(76, 175, 80, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #4CAF50;">
-                    <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${results.qualityScore}/10</div>
-                    <div style="font-size: 11px;">LLM Quality Score</div>
-                </div>
-                <div style="background: rgba(33, 150, 243, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #2196F3;">
-                    <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${results.completeness.score}%</div>
-                    <div style="font-size: 11px;">Completeness</div>
-                </div>
-                <div style="background: rgba(255, 152, 0, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #FF9800;">
-                    <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">${results.filesAnalyzed.length}</div>
-                    <div style="font-size: 11px;">Files Analyzed</div>
-                </div>
-                <div style="background: rgba(156, 39, 176, 0.1); padding: 15px; border-radius: 8px; text-align: center; border-left: 4px solid #9C27B0;">
-                    <div style="font-size: 1.5rem; font-weight: bold; color: #FFD700;">LLM</div>
-                    <div style="font-size: 11px;">Enhanced Method</div>
-                </div>
-            </div>
-        `;
+Respond with valid JSON only. Focus on actual execution flow and data processing steps.`;
 
-        // Display LLM analysis based on component type
-        if (results.componentType === 'Copybook' && results.llmAnalysis) {
-            html += this.displayLLMCopybookAnalysis(results.llmAnalysis);
-        } else if (results.componentType === 'COBOL Program' && results.llmAnalysis) {
-            html += this.displayLLMProgramAnalysis(results.llmAnalysis);
-        } else {
-            html += this.displayLLMGenericAnalysis(results.llmAnalysis);
+                return await this.callLLMAPI(llmPrompt);
+            }
+
+            // === EXISTING LLM ANALYSIS METHODS (Enhanced for Flow) ===
+            async analyzeCopybookWithLLM(componentName, relevantFiles, basicDependencies) {
+                console.log(`LLM analyzing copybook with flow context: ${componentName}`);
+                
+                const copybookFile = relevantFiles.find(f => 
+                    f.type === 'Copybook' && 
+                    (f.name.toUpperCase().includes(componentName.toUpperCase()) || 
+                     f.content.toUpperCase().includes(componentName.toUpperCase()))
+                );
+
+                if (!copybookFile) {
+                    throw new Error(`Copybook file for ${componentName} not found`);
+                }
+
+                const copybookContent = this.prepareContentForLLM(copybookFile.content, 'copybook');
+                const usingPrograms = this.findProgramsUsingCopybook(componentName);
+                
+                const llmPrompt = `MAINFRAME COPYBOOK FLOW-ENHANCED ANALYSIS
+
+TASK: Analyze the copybook "${componentName}" with focus on field lifecycle and usage patterns.
+
+COPYBOOK CONTENT:
+${copybookContent}
+
+PROGRAMS USING THIS COPYBOOK:
+${usingPrograms.map(p => p.name).join(', ')}
+
+DEPENDENCIES CONTEXT:
+Copy Statements: ${basicDependencies.copyStatements.join(', ')}
+Call Statements: ${basicDependencies.callStatements.join(', ')}
+
+INSTRUCTIONS:
+Perform comprehensive copybook analysis with flow tracking:
+
+1. **Field Categorization**: Classify fields by usage pattern
+2. **Lifecycle Analysis**: Track field usage across programs
+3. **Business Context**: Extract business purpose of each field
+4. **Usage Patterns**: Identify how fields flow through processes
+5. **Optimization**: Find unused or redundant fields
+
+OUTPUT FORMAT:
+{
+  "totalFields": <number>,
+  "fieldCategories": {
+    "INPUT_FIELDS": [<fields_used_for_data_entry>],
+    "OUTPUT_FIELDS": [<fields_used_for_reporting>],
+    "DERIVED_FIELDS": [<fields_calculated_from_others>],
+    "CONDITION_FIELDS": [<fields_used_in_decisions>],
+    "UNUSED_FIELDS": [<fields_never_referenced>],
+    "STATIC_FIELDS": [<fields_with_constant_values>]
+  },
+  "fieldDetails": {
+    "<field_name>": {
+      "level": <number>,
+      "picture": "<pic_clause>",
+      "value": "<value_clause>",
+      "category": "<category>",
+      "usagePattern": "<how_field_is_used>",
+      "businessRole": "<business_purpose>",
+      "flowStage": "INPUT|PROCESS|OUTPUT|UNUSED",
+      "usedInPrograms": ["<program_names>"]
+    }
+  },
+  "flowAnalysis": {
+    "inputFieldsCount": <number>,
+    "outputFieldsCount": <number>,
+    "processFieldsCount": <number>,
+    "unusedFieldsCount": <number>,
+    "flowComplexity": "LOW|MEDIUM|HIGH"
+  },
+  "businessRules": [<extracted_business_rules>],
+  "recommendations": [<flow_optimization_recommendations>],
+  "qualityScore": <1-10>
+}
+
+Respond with valid JSON only.`;
+
+                return await this.callLLMAPI(llmPrompt);
+            }
+
+            async analyzeProgramWithLLM(componentName, relevantFiles, basicDependencies) {
+                console.log(`LLM analyzing program with flow context: ${componentName}`);
+                
+                const programFile = relevantFiles.find(f => 
+                    f.type === 'COBOL Program' && 
+                    (f.name.toUpperCase().includes(componentName.toUpperCase()) || 
+                     f.content.toUpperCase().includes(`PROGRAM-ID. ${componentName.toUpperCase()}`))
+                );
+
+                if (!programFile) {
+                    throw new Error(`Program file for ${componentName} not found`);
+                }
+
+                const programContent = this.prepareContentForLLM(programFile.content, 'program');
+
+                const llmPrompt = `MAINFRAME COBOL PROGRAM FLOW-ENHANCED ANALYSIS
+
+TASK: Analyze the COBOL program "${componentName}" with comprehensive flow and business logic tracking.
+
+PROGRAM CONTENT:
+${programContent}
+
+DEPENDENCIES CONTEXT:
+Copy Statements: ${basicDependencies.copyStatements.join(', ')}
+Call Statements: ${basicDependencies.callStatements.join(', ')}
+File References: ${basicDependencies.fileReferences.join(', ')}
+
+INSTRUCTIONS:
+Perform comprehensive program analysis with flow focus:
+
+1. **Program Structure**: Map divisions, sections, paragraphs
+2. **Business Logic Flow**: Extract validation rules and calculations
+3. **Data Flow**: Track input/output and transformations
+4. **Decision Logic**: Map IF/WHEN/EVALUATE conditions
+5. **File Processing**: Identify file operations and data movement
+
+OUTPUT FORMAT:
+{
+  "programStructure": {
+    "divisions": [<division_names>],
+    "paragraphs": [<paragraph_names>],
+    "sections": [<section_names>]
+  },
+  "businessLogic": {
+    "validationRules": [<validation_rules>],
+    "calculations": [<calculation_logic>],
+    "decisionPoints": [<if_when_conditions>]
+  },
+  "dataFlow": {
+    "inputFiles": [<input_files>],
+    "outputFiles": [<output_files>],
+    "workingStorage": [<key_variables>],
+    "dataTransformations": [<transformation_descriptions>]
+  },
+  "dependencies": {
+    "copybooks": [<used_copybooks>],
+    "calledPrograms": [<called_programs>],
+    "files": [<accessed_files>]
+  },
+  "flowMetrics": {
+    "totalParagraphs": <number>,
+    "decisionPoints": <number>,
+    "fileOperations": <number>,
+    "calculations": <number>
+  },
+  "recommendations": [<modernization_suggestions>],
+  "complexity": "<LOW|MEDIUM|HIGH>",
+  "qualityScore": <1-10>
+}
+
+Respond with valid JSON only.`;
+
+                return await this.callLLMAPI(llmPrompt);
+            }
+
+            async analyzeGenericComponentWithLLM(componentName, relevantFiles, basicDependencies) {
+                console.log(`LLM analyzing generic component with flow context: ${componentName}`);
+                
+                const componentFile = relevantFiles[0];
+                const componentContent = this.prepareContentForLLM(componentFile.content, 'generic');
+
+                const llmPrompt = `MAINFRAME COMPONENT FLOW ANALYSIS
+
+TASK: Analyze the mainframe component "${componentName}" with flow context.
+
+COMPONENT CONTENT:
+${componentContent}
+
+COMPONENT TYPE: ${componentFile.type}
+FILE SIZE: ${componentFile.size} bytes
+
+DEPENDENCIES CONTEXT:
+${Object.keys(basicDependencies).map(key => 
+    `${key}: ${basicDependencies[key].join(', ')}`
+).join('\n')}
+
+INSTRUCTIONS:
+1. Identify the component type and purpose
+2. Extract key elements and flow patterns
+3. Identify any data processing or transformation patterns
+4. Provide flow-aware recommendations
+
+OUTPUT FORMAT:
+{
+  "componentType": "${componentFile.type}",
+  "purpose": "<identified_purpose>",
+  "keyElements": [<important_elements>],
+  "flowPatterns": [<data_flow_patterns>],
+  "recommendations": [<flow_optimization_recommendations>],
+  "qualityScore": <1-10>
+}
+
+Respond with valid JSON only.`;
+
+                return await this.callLLMAPI(llmPrompt);
+            }
+
+            // === BASIC DEPENDENCY EXTRACTION ===
+            async extractBasicDependencies() {
+                console.log('Extracting basic dependencies using regex patterns...');
+                
+                const dependencies = {
+                    copyStatements: new Set(),
+                    callStatements: new Set(),
+                    execStatements: new Set(),
+                    jclDatasets: new Set(),
+                    programIds: new Set(),
+                    sqlTables: new Set(),
+                    fileReferences: new Set()
+                };
+
+                for (const file of this.uploadedFiles) {
+                    const fileDeps = this.extractDependenciesFromFile(file);
+                    
+                    Object.keys(fileDeps).forEach(depType => {
+                        if (dependencies[depType]) {
+                            fileDeps[depType].forEach(dep => dependencies[depType].add(dep));
+                        }
+                    });
+                }
+
+                const cleanDependencies = {};
+                Object.keys(dependencies).forEach(key => {
+                    cleanDependencies[key] = Array.from(dependencies[key])
+                        .filter(dep => dep && dep.length > 1)
+                        .slice(0, 50);
+                });
+
+                console.log('Basic dependencies extracted:', cleanDependencies);
+                return cleanDependencies;
+            }
+
+            extractDependenciesFromFile(file) {
+                const dependencies = {
+                    copyStatements: [],
+                    callStatements: [],
+                    execStatements: [],
+                    jclDatasets: [],
+                    programIds: [],
+                    sqlTables: [],
+                    fileReferences: []
+                };
+
+                const lines = file.content.split('\n');
+                
+                lines.forEach((line, lineNum) => {
+                    const trimmed = line.trim().toUpperCase();
+                    
+                    // COPY statements
+                    let copyMatch = trimmed.match(/COPY\s+(['"]*[A-Z][A-Z0-9\-_]{1,}['"]*)/);
+                    if (copyMatch) {
+                        const copyName = copyMatch[1].replace(/['"]/g, '');
+                        dependencies.copyStatements.push(copyName);
+                    }
+
+                    // CALL statements
+                    let callMatch = trimmed.match(/CALL\s+['"]*([A-Z][A-Z0-9\-_]{1,})['"]*/) ||
+                                   trimmed.match(/LINK\s+['"]*([A-Z][A-Z0-9\-_]{1,})['"]*/) ||
+                                   trimmed.match(/XCTL\s+['"]*([A-Z][A-Z0-9\-_]{1,})['"]*/);
+                    if (callMatch) {
+                        dependencies.callStatements.push(callMatch[1]);
+                    }
+
+                    // JCL EXEC statements
+                    let execMatch = trimmed.match(/EXEC\s+PGM=([A-Z][A-Z0-9\-_]{1,})/) ||
+                                   trimmed.match(/\/\/\w+\s+EXEC\s+([A-Z][A-Z0-9\-_]{1,})/);
+                    if (execMatch) {
+                        dependencies.execStatements.push(execMatch[1]);
+                    }
+
+                    // JCL Dataset references
+                    let datasetMatch = trimmed.match(/DSN=([A-Z][A-Z0-9\.\-_]{3,})/) ||
+                                      trimmed.match(/DSNAME=([A-Z][A-Z0-9\.\-_]{3,})/);
+                    if (datasetMatch) {
+                        dependencies.jclDatasets.push(datasetMatch[1]);
+                    }
+
+                    // PROGRAM-ID
+                    let programMatch = trimmed.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]{1,})/);
+                    if (programMatch) {
+                        dependencies.programIds.push(programMatch[1]);
+                    }
+
+                    // SQL Table references
+                    let tableMatch = trimmed.match(/FROM\s+([A-Z][A-Z0-9_]{1,})/) ||
+                                    trimmed.match(/INTO\s+([A-Z][A-Z0-9_]{1,})/) ||
+                                    trimmed.match(/UPDATE\s+([A-Z][A-Z0-9_]{1,})/) ||
+                                    trimmed.match(/DELETE\s+FROM\s+([A-Z][A-Z0-9_]{1,})/);
+                    if (tableMatch) {
+                        dependencies.sqlTables.push(tableMatch[1]);
+                    }
+
+                    //-panel {
+            display: flex;
+            flex-direction: column;
+            max-height: 85vh;
         }
 
-        // Display LLM recommendations
-        if (results.llmAnalysis && results.llmAnalysis.recommendations) {
-            html += this.displayLLMRecommendations(results.llmAnalysis.recommendations);
+        /* Enhanced tab system for new Flow Analysis */
+        .tabs {
+            display: flex;
+            margin-bottom: 25px;
+            background: rgba(15, 23, 42, 0.6);
+            border-radius: 16px;
+            padding: 6px;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            flex-wrap: wrap;
+            gap: 4px;
         }
-        
-        container.innerHTML = html;
-    }
 
-    displayLLMCopybookAnalysis(llmAnalysis) {
-        let html = `
-            <div style="background: rgba(255, 255, 255, 0.
-    </script>
-</body>
-</html>
+        .tab {
+            flex: 1;
+            min-width: 120px;
+            background: transparent;
+            color: rgba(148, 163, 184, 0.8);
+            border: none;
+            padding: 12px 8px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            letter-spacing: 0.3px;
+            text-align: center;
+        }
+
+        .tab.active {
+            background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+            color: #ffffff;
+            box-shadow: 0 4px 6px -1px rgba(6, 182, 212, 0.25);
+        }
+
+        .tab:hover:not(.active) {
+            background: rgba(148, 163, 184, 0.1);
+            color: #f8fafc;
+            transform: translateY(-1px);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Flow Analysis Styles */
+        .flow-container {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #06b6d4;
+        }
+
+        .flow-stage {
+            background: rgba(15, 23, 42, 0.6);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-left: 3px solid;
+        }
+
+        .flow-stage.input { border-left-color: #22c55e; }
+        .flow-stage.process { border-left-color: #3b82f6; }
+        .flow-stage.output { border-left-color: #f59e0b; }
+        .flow-stage.unused { border-left-color: #ef4444; }
+
+        .flow-field-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .flow-field-item {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 11px;
+            border-left: 2px solid;
+        }
+
+        .flow-field-item.input { border-left-color: #22c55e; }
+        .flow-field-item.derived { border-left-color: #3b82f6; }
+        .flow-field-item.output { border-left-color: #f59e0b; }
+        .flow-field-item.condition { border-left-color: #8b5cf6; }
+        .flow-field-item.unused { border-left-color: #ef4444; }
+        .flow-field-item.static { border-left-color: #64748b; }
+
+        /* Program Flow Chart */
+        .program-flow-chart {
+            background: rgba(15, 23, 42, 0.6);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .flow-step {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            border-left: 4px solid #06b6d4;
+        }
+
+        .flow-step-number {
+            background: #06b6d4;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 15px;
+            font-size: 12px;
+        }
+
+        .flow-step-content {
+            flex: 1;
+        }
+
+        .flow-step-title {
+            font-weight: bold;
+            color: #06b6d4;
+            margin-bottom: 4px;
+        }
+
+        .flow-step-description {
+            font-size: 12px;
+            opacity: 0.8;
+            line-height: 1.4;
+        }
+
+        /* File lifecycle visualization */
+        .lifecycle-timeline {
+            position: relative;
+            padding-left: 30px;
+        }
+
+        .lifecycle-timeline::before {
+            content: '';
+            position: absolute;
+            left: 15px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: linear-gradient(to bottom, #22c55e, #3b82f6, #f59e0b, #ef4444);
+        }
+
+        .lifecycle-event {
+            position: relative;
+            margin-bottom: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 15px;
+            border-radius: 8px;
+            margin-left: 15px;
+        }
+
+        .lifecycle-event::before {
+            content: '';
+            position: absolute;
+            left: -22px;
+            top: 20px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--event-color);
+            border: 2px solid rgba(15, 23, 42, 0.8);
+        }
+
+        .lifecycle-event.create { --event-color: #22c55e; }
+        .lifecycle-event.read { --event-color: #3b82f6; }
+        .lifecycle-event.update { --event-color: #f59e0b; }
+        .lifecycle-event.unused { --event-color: #ef4444; }
+
+        /* Rest of the existing styles... */
+        .component-search-section {
+            margin-bottom: 25px;
+            padding: 24px;
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(16, 185, 129, 0.08) 100%);
+            border-radius: 16px;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.1);
+        }
+
+        .component-input {
+            width: 100%;
+            padding: 14px 16px;
+            border: 2px solid rgba(148, 163, 184, 0.3);
+            border-radius: 12px;
+            background: rgba(30, 41, 59, 0.6);
+            color: #f8fafc;
+            font-size: 14px;
+            margin-bottom: 10px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-weight: 500;
+        }
+
+        .component-input:focus {
+            outline: none;
+            border-color: #06b6d4;
+            background: rgba(30, 41, 59, 0.8);
+            box-shadow: 
+                0 0 0 3px rgba(6, 182, 212, 0.1),
+                0 4px 6px -1px rgba(6, 182, 212, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .component-input::placeholder {
+            color: rgba(148, 163, 184, 0.7);
+        }
+
+        .component-suggestions {
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 12px;
+            max-height: 150px;
+            overflow-y: auto;
+            display: none;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        .suggestion-item {
+            padding: 12px 16px;
+            cursor: pointer;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-size: 13px;
+        }
+
+        .suggestion-item:hover {
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%);
+            transform: translateX(4px);
+            border-left: 3px solid #06b6d4;
+        }
+
+        /* Token Management */
+        .token-info {
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(217, 119, 6, 0.08) 100%);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 16px;
+            margin: 12px 0;
+            font-size: 12px;
+            box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.1);
+        }
+
+        .token-bar {
+            background: rgba(15, 23, 42, 0.6);
+            height: 8px;
+            border-radius: 4px;
+            margin: 10px 0;
+            overflow: hidden;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }
+
+        .token-fill {
+            height: 100%;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 4px;
+            background: linear-gradient(90deg, var(--token-color-start), var(--token-color-end));
+        }
+
+        .token-fill.safe { 
+            --token-color-start: #22c55e;
+            --token-color-end: #16a34a;
+        }
+        .token-fill.warning { 
+            --token-color-start: #f59e0b;
+            --token-color-end: #d97706;
+        }
+        .token-fill.danger { 
+            --token-color-start: #ef4444;
+            --token-color-end: #dc2626;
+        }
+
+        /* General Form Styles */
+        .section-title { 
+            color: #06b6d4; 
+            font-size: 1.3rem; 
+            margin-bottom: 18px; 
+            font-weight: 700; 
+            display: flex; 
+            align-items: center; 
+            gap: 12px;
+            letter-spacing: -0.01em;
+        }
+
+        .form-group { 
+            margin-bottom: 20px; 
+        }
+
+        .form-group input, 
+        .form-group select, 
+        .form-group textarea { 
+            width: 100%; 
+            padding: 14px 16px; 
+            border: 2px solid rgba(148, 163, 184, 0.3); 
+            border-radius: 12px; 
+            background: rgba(30, 41, 59, 0.6); 
+            color: #f8fafc; 
+            font-size: 14px; 
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-weight: 500;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #06b6d4;
+            background: rgba(30, 41, 59, 0.8);
+            box-shadow: 
+                0 0 0 3px rgba(6, 182, 212, 0.1),
+                0 4px 6px -1px rgba(6, 182, 212, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .form-group input::placeholder,
+        .form-group textarea::placeholder {
+            color: rgba(148, 163, 184, 0.7);
+        }
+
+        .action-btn { 
+            width: 100%; 
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); 
+            color: white; 
+            border: none; 
+            padding: 16px 20px; 
+            border-radius: 12px; 
+            cursor: pointer; 
+            font-size: 15px; 
+            font-weight: 600; 
+            margin-bottom: 12px; 
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); 
+            text-transform: uppercase; 
+            letter-spacing: 0.5px;
+            box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.25);
+        }
+
+        .action-btn:hover:not(:disabled) { 
+            transform: translateY(-2px); 
+            box-shadow: 0 10px 15px -3px rgba(239, 68, 68, 0.4);
+            background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
+        }
+
+        .action-btn:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .action-btn:disabled { 
+            opacity: 0.5; 
+            cursor: not-allowed; 
+            transform: none; 
+            box-shadow: none; 
+        }
+
+        .validate-btn { 
+            background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); 
+            box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.25);
+        }
+
+        .validate-btn:hover:not(:disabled) {
+            background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
+            box-shadow: 0 10px 15px -3px rgba(34, 197, 94, 0.4);
+        }
+
+        .component-btn { 
+            background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); 
+            box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.25);
+        }
+
+        .component-btn:hover:not(:disabled) {
+            background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
+            box-shadow: 0 10px 15px -3px rgba(34, 197, 94, 0.4);
+        }
+
+        .secondary-btn { 
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); 
+            box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.25);
+        }
+
+        .secondary-btn:hover:not(:disabled) {
+            background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+            box-shadow: 0 10px 15px -3px rgba(59, 130, 246, 0.4);
+        }
+
+        /* API Status */
+        .api-status {
+            padding: 14px 16px;
+            border-radius: 12px;
+            margin-top: 12px;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .api-status.connected {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(22, 163, 74, 0.1) 100%);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            color: #4ade80;
+            box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.1);
+        }
+
+        .api-status.connecting {
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(217, 119, 6, 0.1) 100%);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            color: #fbbf24;
+            box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.1);
+        }
+
+        .api-status.disconnected {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(220, 38, 38, 0.1) 100%);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #f87171;
+            box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.1);
+        }
+
+        /* Upload Area */
+        .upload-area {
+            border: 2px dashed rgba(148, 163, 184, 0.4);
+            border-radius: 16px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.3) 0%, rgba(51, 65, 85, 0.2) 100%);
+        }
+
+        .upload-area:hover {
+            border-color: #06b6d4;
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(6, 182, 212, 0.1);
+        }
+
+        .upload-area.drag-over {
+            border-color: #22c55e;
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(16, 185, 129, 0.1) 100%);
+            transform: scale(1.02);
+        }
+
+        .file-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .file-item {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .file-info {
+            flex: 1;
+        }
+
+        .file-name {
+            font-weight: bold;
+            margin-bottom: 2px;
+        }
+
+        .file-details {
+            font-size: 11px;
+            opacity: 0.8;
+        }
+
+        .file-remove {
+            background: #f44336;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .file-remove:hover {
+            background: #d32f2f;
+        }
+
+        /* Loading Indicator */
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.9) 100%);
+            backdrop-filter: blur(20px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            z-index: 9999;
+        }
+
+        .loading.show {
+            display: flex;
+        }
+
+        .spinner {
+            width: 80px;
+            height: 80px;
+            border: 4px solid rgba(148, 163, 184, 0.3);
+            border-top: 4px solid #06b6d4;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 24px;
+            box-shadow: 0 0 20px rgba(6, 182, 212, 0.3);
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading h3 {
+            color: #06b6d4;
+            margin-bottom: 12px;
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .loading p {
+            color: rgba(248, 250, 252, 0.8);
+            text-align: center;
+            max-width: 400px;
+            font-size: 1.1rem;
+        }
+
+        /* Message Types */
+        .error, .success, .warning {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            padding: 16px 24px;
+            border-radius: 12px;
+            font-weight: 600;
+            z-index: 10000;
+            animation: slideInRight 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(20px);
+        }
+
+        .error {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.95) 0%, rgba(220, 38, 38, 0.9) 100%);
+            color: #ffffff;
+            border: 1px solid rgba(239, 68, 68, 0.5);
+        }
+
+        .success {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.95) 0%, rgba(22, 163, 74, 0.9) 100%);
+            color: #ffffff;
+            border: 1px solid rgba(34, 197, 94, 0.5);
+        }
+
+        .warning {
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.95) 0%, rgba(217, 119, 6, 0.9) 100%);
+            color: #ffffff;
+            border: 1px solid rgba(245, 158, 11, 0.5);
+        }
+
+        @keyframes slideInRight {
+            from { 
+                transform: translateX(100%); 
+                opacity: 0;
+            }
+            to { 
+                transform: translateX(0); 
+                opacity: 1;
+            }
+        }
+
+        /* Enhanced Chat Styles */
+        .chat-suggestion-btn {
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(51, 65, 85, 0.6) 100%);
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            color: #f8fafc;
+            padding: 8px 14px;
+            border-radius: 20px;
+            font-size: 11px;
+            cursor: pointer;
+            margin: 4px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: inline-block;
+            font-weight: 500;
+        }
+
+        .chat-suggestion-btn:hover {
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.2) 0%, rgba(59, 130, 246, 0.15) 100%);
+            border-color: #06b6d4;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px -1px rgba(6, 182, 212, 0.25);
+        }
+
+        .chat-message {
+            margin-bottom: 20px;
+            padding: 20px;
+            border-radius: 16px;
+            max-width: 90%;
+            word-wrap: break-word;
+            line-height: 1.6;
+            animation: fadeInUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .chat-message.user {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(37, 99, 235, 0.15) 100%);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            margin-left: auto;
+            text-align: right;
+        }
+
+        .chat-message.assistant {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(22, 163, 74, 0.1) 100%);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+
+        .chat-message .sender {
+            font-weight: bold;
+            font-size: 12px;
+            opacity: 0.8;
+            margin-bottom: 8px;
+        }
+
+        .chatreturn `
+                    <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; border-left: 4px solid #9C27B0;">
+                        <h4 style="color: #9C27B0; margin-bottom: 15px;">🤖 LLM Component Analysis with Flow Context</h4>
+                        <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px;">
+                            <p><strong>Component Type:</strong> ${llmAnalysis.componentType || 'Generic'}</p>
+                            ${llmAnalysis.purpose ? `<p><strong>Purpose:</strong> ${llmAnalysis.purpose}</p>` : ''}
+                            ${llmAnalysis.flowPatterns ? `<p><strong>Flow Patterns:</strong> ${llmAnalysis.flowPatterns.length} identified</p>` : ''}
+                            <p style="margin-top: 15px; opacity: 0.8;">
+                                Detailed flow analysis available through chat interface and export functionality.
+                            </p>
+                        </div>
+                    </div>
+                `;
+            }
+
+            displayFlowAnalysisSummary(results) {
+                let html = `
+                    <div style="background: rgba(6, 182, 212, 0.1); padding: 20px; border-radius: 10px; border-left: 4px solid #06b6d4; margin-top: 20px;">
+                        <h4 style="color: #06b6d4; margin-bottom: 15px;">🌊 Flow Analysis Summary</h4>
+                `;
+
+                // File Flow Summary
+                if (results.fileFlowAnalysis && results.fileFlowAnalysis.fileLifecycle) {
+                    const lifecycle = results.fileFlowAnalysis.fileLifecycle;
+                    html += `
+                        <div style="margin-bottom: 15px;">
+                            <h6 style="color: #22c55e; margin-bottom: 8px;">📊 File Lifecycle Metrics:</h6>
+                            <div style="background: rgba(0,0,0,0.2); padding: 12px; border-radius: 6px;">
+                    `;
+                    
+                    if (lifecycle.flowMetrics) {
+                        const metrics = lifecycle.flowMetrics;
+                        html += `
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; font-size: 12px;">
+                                <div><strong>Total Fields:</strong> ${metrics.totalFields || 0}</div>
+                                <div><strong>Active Fields:</strong> ${metrics.activeFields || 0}</div>
+                                <div><strong>Unused Fields:</strong> ${metrics.unusedFields || 0}</div>
+                                <div><strong>Transform Points:</strong> ${metrics.transformationPoints || 0}</div>
+                                <div><strong>Flow Complexity:</strong> ${metrics.flowComplexity || 'N/A'}</div>
+                            </div>
+                        `;
+                    }
+                    
+                    html += '</div></div>';
+                }
+
+                // Program Flow Summary
+                if (results.programFlowAnalysis && results.programFlowAnalysis.programFlow) {
+                    const programFlow = results.programFlowAnalysis.programFlow;
+                    html += `
+                        <div style="margin-bottom: 15px;">
+                            <h6 style="color: #3b82f6; margin-bottom: 8px;">🔀 Program Flow Metrics:</h6>
+                            <div style="background: rgba(0,0,0,0.2); padding: 12px; border-radius: 6px;">
+                    `;
+                    
+                    if (programFlow.flowMetrics) {
+                        const metrics = programFlow.flowMetrics;
+                        html += `
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; font-size: 12px;">
+                                <div><strong>Execution Steps:</strong> ${metrics.totalSteps || 0}</div>
+                                <div><strong>Decision Points:</strong> ${metrics.decisionPoints || 0}</div>
+                                <div><strong>Transformations:</strong> ${metrics.transformations || 0}</div>
+                                <div><strong>File Operations:</strong> ${metrics.fileOperations || 0}</div>
+                                <div><strong>Complexity:</strong> ${metrics.complexity || 'N/A'}</div>
+                            </div>
+                        `;
+                    }
+                    
+                    html += '</div></div>';
+                }
+
+                html += `
+                    <div style="text-align: center; font-size: 12px; opacity: 0.8; margin-top: 10px;">
+                        💡 <strong>Tip:</strong> Use the File Flow and Program Flow tabs for detailed analysis
+                    </div>
+                </div>
+                `;
+
+                return html;
+            }
+
+            displayLLMRecommendations(recommendations) {
+                if (!recommendations || recommendations.length === 0) return '';
+                
+                let html = `
+                    <div style="background: rgba(255, 193, 7, 0.1); padding: 20px; border-radius: 10px; border-left: 4px solid #FFC107; margin-top: 20px;">
+                        <h4 style="color: #FFC107; margin-bottom: 15px;">🤖 LLM Flow-Enhanced Recommendations</h4>
+                `;
+
+                recommendations.forEach((rec, index) => {
+                    html += `
+                        <div style="margin-bottom: 15px; padding: 12px; background: rgba(0,0,0,0.2); border-radius: 8px; border-left: 3px solid #FFC107;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <strong style="color: #FFC107;">💡 Flow Recommendation ${index + 1}</strong>
+                                <span style="font-size: 11px; background: #FFC107; color: #000; padding: 2px 6px; border-radius: 3px; font-weight: bold;">
+                                    FLOW-ENHANCED
+                                </span>
+                            </div>
+                            <div style="line-height: 1.6;">${rec}</div>
+                        </div>
+                    `;
+                });
+
+                html += '</div>';
+                return html;
+            }
+
+            // === NEW FILE FLOW DISPLAY ===
+            displayFileFlow(componentName, results) {
+                const container = document.getElementById('fileFlowContent');
+                
+                let html = `
+                    <h3>🌊 File Flow Lifecycle Analysis: ${componentName}</h3>
+                    <p style="margin-bottom: 20px;">Complete field lifecycle tracking across all programs and data transformations.</p>
+                `;
+
+                if (results.fileFlowAnalysis && results.fileFlowAnalysis.fileLifecycle) {
+                    html += this.displayDetailedFileFlow(results.fileFlowAnalysis.fileLifecycle);
+                } else {
+                    html += `
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; text-align: center;">
+                            <p style="opacity: 0.8;">File flow analysis will appear here after component analysis.</p>
+                            <p style="font-size: 12px; margin-top: 10px; opacity: 0.6;">
+                                Analyze a copybook or program with LLM to see detailed field lifecycle tracking.
+                            </p>
+                        </div>
+                    `;
+                }
+                
+                container.innerHTML = html;
+            }
+
+            displayDetailedFileFlow(fileLifecycle) {
+                let html = `
+                    <div class="flow-container">
+                        <h4 style="color: #06b6d4; margin-bottom: 15px;">🌊 Complete File Lifecycle for ${fileLifecycle.componentName}</h4>
+                `;
+
+                // Flow stages timeline
+                if (fileLifecycle.flowStages && fileLifecycle.flowStages.length > 0) {
+                    html += `
+                        <div class="lifecycle-timeline">
+                            <h5 style="color: #22c55e; margin-bottom: 15px;">📈 Field Lifecycle Stages:</h5>
+                    `;
+
+                    fileLifecycle.flowStages.forEach((stage, index) => {
+                        const stageClass = stage.stage.toLowerCase();
+                        html += `
+                            <div class="lifecycle-event ${stageClass}">
+                                <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 10px;">
+                                    <h6 style="color: var(--event-color); margin: 0;">${stage.stage} Stage</h6>
+                                    <span style="font-size: 11px; opacity: 0.7;">${stage.fields ? stage.fields.length : 0} fields</span>
+                                </div>
+                                <p style="margin-bottom: 10px; font-size: 12px; opacity: 0.9;">${stage.stageDescription}</p>
+                                
+                                ${stage.fields && stage.fields.length > 0 ? `
+                                    <div class="flow-field-grid">
+                                        ${stage.fields.slice(0, 8).map(field => `
+                                            <div class="flow-field-item ${field.action ? field.action.toLowerCase() : stageClass}" title="${field.businessPurpose || field.dataFlow || ''}">
+                                                <div style="font-weight: bold;">${field.fieldName}</div>
+                                                <div style="font-size: 10px; opacity: 0.8;">${field.action || stage.stage} • ${field.program || 'Unknown'}</div>
+                                                ${field.businessPurpose ? `<div style="font-size: 9px; margin-top: 2px; opacity: 0.7;">${field.businessPurpose.substring(0, 50)}...</div>` : ''}
+                                            </div>
+                                        `).join('')}
+                                        ${stage.fields.length > 8 ? `
+                                            <div style="text-align: center; opacity: 0.6; font-size: 11px; padding: 8px;">
+                                                ... and ${stage.fields.length - 8} more fields
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `;
+                    });
+
+                    html += '</div>';
+                }
+
+                // Cross-program flow
+                if (fileLifecycle.crossProgramFlow && fileLifecycle.crossProgramFlow.length > 0) {
+                    html += `
+                        <div style="margin-top: 25px;">
+                            <h5 style="color: #3b82f6; margin-bottom: 15px;">🔄 Cross-Program Data Flow:</h5>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px;">
+                    `;
+
+                    fileLifecycle.crossProgramFlow.forEach(flow => {
+                        html += `
+                            <div style="background: rgba(59, 130, 246, 0.1); padding: 15px; border-radius: 8px; border-left: 3px solid #3b82f6;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <strong style="color: #3b82f6;">${flow.fromProgram} → ${flow.toProgram}</strong>
+                                    <span style="font-size: 10px; background: #3b82f6; color: white; padding: 2px 6px; border-radius: 3px;">
+                                        ${flow.transferMethod}
+                                    </span>
+                                </div>
+                                <div style="font-size: 12px; margin-bottom: 8px;">
+                                    <strong>Fields:</strong> ${flow.fieldsTransferred ? flow.fieldsTransferred.join(', ') : 'N/A'}
+                                </div>
+                                ${flow.transformations && flow.transformations.length > 0 ? `
+                                    <div style="font-size: 11px; opacity: 0.8;">
+                                        <strong>Transformations:</strong> ${flow.transformations.slice(0, 2).join(', ')}
+                                        ${flow.transformations.length > 2 ? ` and ${flow.transformations.length - 2} more` : ''}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `;
+                    });
+
+                    html += '</div></div>';
+                }
+
+                // Unused fields optimization
+                if (fileLifecycle.unusedFields && fileLifecycle.unusedFields.length > 0) {
+                    html += `
+                        <div style="margin-top: 25px;">
+                            <h5 style="color: #ef4444; margin-bottom: 15px;">🚫 Unused Fields Optimization:</h5>
+                            <div style="background: rgba(239, 68, 68, 0.1); padding: 15px; border-radius: 8px; border-left: 3px solid #ef4444;">
+                                <p style="margin-bottom: 10px; font-size: 13px;"><strong>${fileLifecycle.unusedFields.length}</strong> unused fields found - optimization opportunities!</p>
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+                    `;
+
+                    fileLifecycle.unusedFields.slice(0, 6).forEach(field => {
+                        html += `
+                            <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px;">
+                                <div style="font-weight: bold; font-family: monospace;">${field.fieldName}</div>
+                                <div style="font-size: 10px; opacity: 0.8;">Defined in: ${field.definedIn}</div>
+                                <div style="font-size: 9px; margin-top: 2px; opacity: 0.7;">${field.reason}</div>
+                            </div>
+                        `;
+                    });
+
+                    if (fileLifecycle.unusedFields.length > 6) {
+                        html += `
+                            <div style="text-align: center; opacity: 0.6; font-size: 11px; padding: 8px;">
+                                ... and ${fileLifecycle.unusedFields.length - 6} more unused fields
+                            </div>
+                        `;
+                    }
+
+                    html += '</div></div></div>';
+                }
+
+                html += '</div>';
+                return html;
+            }
+
+            // === NEW PROGRAM FLOW DISPLAY ===
+            displayProgramFlow(componentName, results) {
+                const container = document.getElementById('programFlowContent');
+                
+                let html = `
+                    <h3>🔀 Program Flow Analysis: ${componentName}</h3>
+                    <p style="margin-bottom: 20px;">Step-by-step program execution flow with data transformation tracking.</p>
+                `;
+
+                if (results.programFlowAnalysis && results.programFlowAnalysis.programFlow) {
+                    html += this.displayDetailedProgramFlow(results.programFlowAnalysis.programFlow);
+                } else {
+                    html += `
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; text-align: center;">
+                            <p style="opacity: 0.8;">Program flow analysis will appear here after COBOL program analysis.</p>
+                            <p style="font-size: 12px; margin-top: 10px; opacity: 0.6;">
+                                Analyze a COBOL program with LLM to see detailed execution flow tracking.
+                            </p>
+                        </div>
+                    `;
+                }
+                
+                container.innerHTML = html;
+            }
+
+            displayDetailedProgramFlow(programFlow) {
+                let html = `
+                    <div class="program-flow-chart">
+                        <h4 style="color: #3b82f6; margin-bottom: 15px;">🔀 Program Execution Flow for ${programFlow.componentName}</h4>
+                `;
+
+                // Execution path
+                if (programFlow.executionPath && programFlow.executionPath.length > 0) {
+                    html += `
+                        <div style="margin-bottom: 25px;">
+                            <h5 style="color: #22c55e; margin-bottom: 15px;">📊 Execution Steps:</h5>
+                    `;
+
+                    programFlow.executionPath.slice(0, 10).forEach((step, index) => {
+                        html += `
+                            <div class="flow-step">
+                                <div class="flow-step-number">${step.stepNumber || (index + 1)}</div>
+                                <div class="flow-step-content">
+                                    <div class="flow-step-title">${step.operation} ${step.location ? `• ${step.location}` : ''}</div>
+                                    <div class="flow-step-description">${step.description}</div>
+                                    ${step.fieldsInvolved && step.fieldsInvolved.length > 0 ? `
+                                        <div style="margin-top: 5px; font-size: 11px;">
+                                            <strong>Fields:</strong> ${step.fieldsInvolved.slice(0, 3).join(', ')}
+                                            ${step.fieldsInvolved.length > 3 ? ` and ${step.fieldsInvolved.length - 3} more` : ''}
+                                        </div>
+                                    ` : ''}
+                                    ${step.businessLogic ? `
+                                        <div style="margin-top: 3px; font-size: 10px; opacity: 0.8; font-style: italic;">
+                                            ${step.businessLogic}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        `;
+                    });
+
+                    if (programFlow.executionPath.length > 10) {
+                        html += `
+                            <div style="text-align: center; opacity: 0.6; font-size: 12px; padding: 10px;">
+                                ... and ${programFlow.executionPath.length - 10} more execution steps
+                            </div>
+                        `;
+                    }
+
+                    html += '</div>';
+                }
+
+                // Decision points
+                if (programFlow.decisionPoints && programFlow.decisionPoints.length > 0) {
+                    html += `
+                        <div style="margin-bottom: 25px;">
+                            <h5 style="color: #f59e0b; margin-bottom: 15px;">🤔 Decision Points:</h5>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px;">
+                    `;
+
+                    programFlow.decisionPoints.slice(0, 6).forEach(decision => {
+                        html += `
+                            <div style="background: rgba(245, 158, 11, 0.1); padding: 15px; border-radius: 8px; border-left: 3px solid #f59e0b;">
+                                <div style="font-weight: bold; color: #f59e0b; margin-bottom: 8px;">
+                                    ${decision.location || 'Decision Point'}
+                                </div>
+                                <div style="font-size: 12px; margin-bottom: 8px;">
+                                    <strong>Condition:</strong> ${decision.condition}
+                                </div>
+                                <div style="font-size: 11px; margin-bottom: 4px;">
+                                    <strong>True Path:</strong> ${decision.truePath}
+                                </div>
+                                <div style="font-size: 11px; margin-bottom: 8px;">
+                                    <strong>False Path:</strong> ${decision.falsePath}
+                                </div>
+                                ${decision.fieldsUsed && decision.fieldsUsed.length > 0 ? `
+                                    <div style="font-size: 10px; opacity: 0.8;">
+                                        <strong>Fields:</strong> ${decision.fieldsUsed.join(', ')}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `;
+                    });
+
+                    html += '</div></div>';
+                }
+
+                // Data transformations
+                if (programFlow.dataTransformations && programFlow.dataTransformations.length > 0) {
+                    html += `
+                        <div style="margin-bottom: 25px;">
+                            <h5 style="color: #8b5cf6; margin-bottom: 15px;">🔄 Data Transformations:</h5>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                    `;
+
+                    programFlow.dataTransformations.slice(0, 8).forEach(transform => {
+                        html += `
+                            <div style="background: rgba(139, 92, 246, 0.1); padding: 12px; border-radius: 8px; border-left: 3px solid #8b5cf6;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                    <strong style="color: #8b5cf6; font-size: 12px;">${transform.operation}</strong>
+                                    <span style="font-size: 9px; background: #8b5cf6; color: white; padding: 1px 4px; border-radius: 2px;">
+                                        ${transform.location || 'Transform'}
+                                    </span>
+                                </div>
+                                <div style="font-size: 11px; margin-bottom: 4px;">
+                                    <strong>From:</strong> ${transform.sourceFields ? transform.sourceFields.join(', ') : 'N/A'}
+                                </div>
+                                <div style="font-size: 11px; margin-bottom: 6px;">
+                                    <strong>To:</strong> ${transform.targetFields ? transform.targetFields.join(', ') : 'N/A'}
+                                </div>
+                                <div style="font-size: 10px; opacity: 0.8; font-style: italic;">
+                                    ${transform.transformation || transform.businessPurpose || 'Data transformation'}
+                                </div>
+                            </div>
+                        `;
+                    });
+
+                    html += '</div></div>';
+                }
+
+                // File operations
+                if (programFlow.fileOperations && programFlow.fileOperations.length > 0) {
+                    html += `
+                        <div style="margin-bottom: 20px;">
+                            <h5 style="color: #06b6d4; margin-bottom: 15px;">📁 File Operations:</h5>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+                    `;
+
+                    programFlow.fileOperations.forEach(fileOp => {
+                        const opColor = fileOp.operation === 'READ' ? '#22c55e' :
+                                       fileOp.operation === 'WRITE' ? '#f59e0b' :
+                                       fileOp.operation === 'OPEN' ? '#3b82f6' : '#ef4444';
+                        
+                        html += `
+                            <div style="background: rgba(6, 182, 212, 0.1); padding: 10px; border-radius: 6px; border-left: 3px solid ${opColor};">
+                                <div style="font-weight: bold; color: ${opColor}; font-size: 11px;">${fileOp.operation}</div>
+                                <div style="font-size: 10px; margin: 2px 0;">${fileOp.fileName}</div>
+                                <div style="font-size: 9px; opacity: 0.7;">${fileOp.location || fileOp.purpose || ''}</div>
+                            </div>
+                        `;
+                    });
+
+                    html += '</div></div>';
+                }
+
+                html += '</div>';
+                return html;
+            }
+
+            // === ENHANCED DISPLAY METHODS FOR OTHER TABS ===
+            displayFieldMatrix(componentName, results) {
+                const container = document.getElementById('fieldMatrixContent');
+                
+                let html = `
+                    <h3>📋 LLM Field Matrix Analysis: ${componentName}</h3>
+                    <p style="margin-bottom: 20px;">Enhanced field-level analysis with LLM-powered categorization and flow context.</p>
+                `;
+                
+                if (results.componentType === 'Copybook' && results.llmAnalysis && results.llmAnalysis.fieldDetails) {
+                    html += this.displayDetailedLLMFieldMatrix(results.llmAnalysis.fieldDetails);
+                } else {
+                    html += `
+                        <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px; text-align: center;">
+                            <p style="opacity: 0.8;">LLM field matrix analysis is available for copybook components with detailed field analysis.</p>
+                            <p style="font-size: 12px; margin-top: 10px; opacity: 0.6;">
+                                Analyze a copybook with LLM to see detailed field usage patterns and business context.
+                            </p>
+                        </div>
+                    `;
+                }
+                
+                container.innerHTML = html;
+            }
+
+            displayDetailedLLMFieldMatrix(fieldDetails) {
+                let html = `
+                    <div style="background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 10px;">
+                        <h4 style="color: #FFD700; margin-bottom: 15px;">🤖 LLM Field Analysis Matrix with Flow Context</h4>
+                        <div style="overflow-x: auto;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+                                <thead>
+                                    <tr style="background: rgba(0,0,0,0.3);">
+                                        <th style="padding: 8px; text-align: left; border: 1px solid rgba(255,255,255,0.1); color: #FFD700;">Field Name</th>
+                                        <th style="padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); color: #4CAF50;">Level</th>
+                                        <th style="padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); color: #2196F3;">Picture</th>
+                                        <th style="padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); color: #FF9800;">Category</th>
+                                        <th style="padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); color: #06b6d4;">Flow Stage</th>
+                                        <th style="padding: 8px; text-align: left; border: 1px solid rgba(255,255,255,0.1); color: #9C27B0;">Business Role</th>
+                                        <th style="padding: 8px; text-align: left; border: 1px solid rgba(255,255,255,0.1); color: #607D8B;">Usage Pattern</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                `;
+
+                Object.entries(fieldDetails).forEach(([fieldName, details]) => {
+                    const categoryColor = this.getCategoryColor(details.category);
+                    const flowStageColor = details.flowStage === 'INPUT' ? '#22c55e' :
+                                          details.flowStage === 'PROCESS' ? '#3b82f6' :
+                                          details.flowStage === 'OUTPUT' ? '#f59e0b' : '#ef4444';
+                    
+                    html += `
+                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                            <td style="padding: 6px 8px; font-family: monospace; font-weight: bold;">${fieldName}</td>
+                            <td style="padding: 6px 8px; text-align: center;">${details.level || 'N/A'}</td>
+                            <td style="padding: 6px 8px; text-align: center; font-family: monospace; font-size: 9px;">${details.picture || 'N/A'}</td>
+                            <td style="padding: 6px 8px; text-align: center; color: ${categoryColor}; font-weight: bold; font-size: 9px;">${details.category || 'N/A'}</td>
+                            <td style="padding: 6px 8px; text-align: center; color: ${flowStageColor}; font-weight: bold; font-size: 9px;">${details.flowStage || 'N/A'}</td>
+                            <td style="padding: 6px 8px; font-size: 9px; max-width: 150px; word-wrap: break-word;">${details.businessRole || 'N/A'}</td>
+                            <td style="padding: 6px 8px; font-size: 9px; max-width: 150px; word-wrap: break-word;">${details.usagePattern || 'N/A'}</td>
+                        </tr>
+                    `;
+                });
+
+                html += `
+                                </tbody>
+                            </table>
+                        </div>
+                        <div style="margin-top: 15px; font-size: 11px; opacity: 0.8; text-align: center;">
+                            💡 Flow stages: <span style="color: #22c55e;">INPUT</span> • 
+                            <span style="color: #3b82f6;">PROCESS</span> • 
+                            <span style="color: #f59e0b;">OUTPUT</span> • 
+                            <span style="color: #ef4444;">UNUSED</span>
+                        </div>
+                    </div>
+                `;
+
+                return html;
+            }
+
+            displayUsagePatterns(componentName, results) {
+                const container = document.getElementById('usageContent');
+                
+                let html = `
+                    <h3>📈 LLM Usage Patterns Analysis: ${componentName}</h3>
+                    <p style="margin-bottom: 20px;">Advanced usage pattern analysis powered by LLM insights with flow context.</p>
+                `;
+                
+                if (results.llmAnalysis) {
+                    html += this.displayLLMUsagePatterns(results.llmAnalysis, results.componentType);
+                } else {
+                    html += `
+                        <div style="background: rgba(255,
