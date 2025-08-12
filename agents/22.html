@@ -2428,7 +2428,9 @@
     this.loadStoredData();
     this.initializeChat();
     this.addTypingAnimationStyles();
-    
+    this.friendlyNameCache = new Map(); // Cache for LLM-generated friendly names
+    this.businessContextCache = new Map();
+
     console.log('🚀 Enhanced Mainframe Analyzer Initialized');
 }
 
@@ -2514,6 +2516,18 @@ createTables() {
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     `);
+
+    // Friendly Names cache table
+this.db.run(`
+    CREATE TABLE IF NOT EXISTS friendly_names (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tech_name TEXT UNIQUE,
+        friendly_name TEXT,
+        source TEXT DEFAULT 'LLM',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+`);
+
 }
 
             // Initialize Event Listeners
@@ -3629,6 +3643,7 @@ async callLLMAPI(prompt, retries = 0) {
 }
 
 // Parse JSON Response from LLM
+// Parse JSON Response from LLM
 parseJSONResponse(text) {
     if (!text || typeof text !== 'string') {
         return { 
@@ -3639,6 +3654,7 @@ parseJSONResponse(text) {
     }
 
     console.log('Parsing LLM response...');
+    console.log('Raw LLM response:', text.substring(0, 500) + '...');
 
     // Try direct JSON parsing first
     try {
@@ -3648,51 +3664,52 @@ parseJSONResponse(text) {
             return { success: true, data: directParse };
         }
     } catch (e) {
-        console.log('Direct JSON parsing failed, trying extraction methods');
+        console.log('Direct JSON parsing failed:', e.message);
     }
 
-    // Try to extract JSON from text
-    const jsonStart = text.indexOf('{');
-    const jsonEnd = text.lastIndexOf('}');
+    // Try to extract JSON from text with better patterns
+    const jsonPatterns = [
+        // Standard JSON block
+        /\{[\s\S]*\}/,
+        // JSON with markdown code blocks
+        /```(?:json)?\s*(\{[\s\S]*?\})\s*```/,
+        // JSON with backticks
+        /`(\{[\s\S]*?\})`/
+    ];
     
-    if (jsonStart !== -1 && jsonEnd !== -1 && jsonStart < jsonEnd) {
-        const jsonText = text.substring(jsonStart, jsonEnd + 1);
-        
-        try {
-            const parsed = JSON.parse(this.cleanJSONText(jsonText));
-            if (parsed && typeof parsed === 'object') {
-                console.log('✅ Extracted JSON parsing successful!');
-                return { success: true, data: parsed };
+    for (const pattern of jsonPatterns) {
+        const match = text.match(pattern);
+        if (match) {
+            const jsonCandidate = match[1] || match[0];
+            console.log('Found JSON candidate:', jsonCandidate.substring(0, 200) + '...');
+            
+            try {
+                const cleaned = this.cleanJSONText(jsonCandidate);
+                const parsed = JSON.parse(cleaned);
+                if (parsed && typeof parsed === 'object') {
+                    console.log('✅ Pattern-based JSON parsing successful!');
+                    return { success: true, data: parsed };
+                }
+            } catch (e) {
+                console.log('Pattern parsing failed:', e.message);
+                continue;
             }
-        } catch (e) {
-            console.log('Extracted JSON parsing failed');
         }
     }
 
-    // Create structured response from text
-    console.log('Creating structured response from text analysis...');
+    // Enhanced extraction from visible structured data like in your image
+    console.log('Attempting structured data extraction from response...');
     
     const componentName = this.currentAnalyzedComponent || 'Unknown';
     const friendlyName = this.currentFriendlyName || componentName;
     
-    // Extract information from text
-    const structuredResponse = {
-        componentName: componentName,
-        friendlyName: friendlyName,
-        componentType: this.detectComponentTypeFromText(text),
-        analysisScope: 'TEXT_ANALYSIS',
-        status: 'Analysis completed with text parsing',
-        totalFields: this.extractFieldCount(text),
-        primaryFields: this.extractFieldsFromText(text),
-        recommendations: this.extractRecommendationsFromText(text),
-        qualityScore: 6,
-        source: 'TextAnalysis'
-    };
-
+    // Extract structured data from the LLM response
+    const structuredResponse = this.extractStructuredDataFromResponse(text, componentName, friendlyName);
+    
     return { 
         success: true, 
         data: structuredResponse,
-        source: 'StructuredTextAnalysis'
+        source: 'StructuredExtraction'
     };
 }
 
@@ -3966,6 +3983,19 @@ async saveToStorage() {
     } catch (error) {
         console.error('Failed to save to database:', error);
     }
+    try {
+                // Save friendly name cache to database
+        this.db.run("DELETE FROM friendly_names");
+        for (const [techName, friendlyName] of this.friendlyNameCache) {
+            this.db.run(`
+                INSERT INTO friendly_names (tech_name, friendly_name, source, created_at)
+                VALUES (?, ?, ?, ?)
+            `, [techName, friendlyName, 'LLM', new Date().toISOString()]);
+        }
+                console.log('✅ Friendly name cache saved to database');
+            } catch (error) {
+                console.error('Failed to save friendly name cache:', error);
+    }
 }
 
 // Load from SQLite Database
@@ -4043,6 +4073,15 @@ async loadStoredData() {
     } catch (error) {
         console.error('Failed to load from database:', error);
     }
+
+
+    // Load friendly name cache
+        const friendlyNamesQuery = this.db.exec("SELECT tech_name, friendly_name FROM friendly_names");
+        if (friendlyNamesQuery.length > 0) {
+            friendlyNamesQuery[0].values.forEach(row => {
+                this.friendlyNameCache.set(row[0], row[1]);
+            });
+        }
 }
 
 // Update UI from loaded data
@@ -4225,6 +4264,12 @@ async runComprehensiveAnalysis(componentName, relevantFiles) {
             completeness: this.assessCompleteness(llmAnalysis, fieldAnalysis),
             analysisMethod: 'LLM-Enhanced-Field-Focused'
         };
+
+        // Stage 7: Discover friendly names for dependencies
+        this.updateLoadingStatus('🔍 Stage 7: Discovering friendly names...');
+        this.updateProgress(95);
+
+        await this.discoverDependencyFriendlyNames();
 
         this.updateProgress(100);
         return results;
@@ -4629,10 +4674,115 @@ async extractDependencyFlow(componentName, relevantFiles, allFiles) {
     
     // Perform impact analysis
     this.performImpactAnalysis(dependencyFlow);
+
+    // Store friendly names from LLM analysis if available
+    if (results.llmAnalysis?.dependencyFriendlyNames) {
+        Object.entries(results.llmAnalysis.dependencyFriendlyNames).forEach(([techName, friendlyName]) => {
+            this.friendlyNameCache.set(techName.toUpperCase(), friendlyName);
+        });
+    }
+
+    if (results.llmAnalysis?.businessContext) {
+        this.businessContextCache.set(componentName, results.llmAnalysis.businessContext);
+    }
     
     return dependencyFlow;
 }
 
+getFriendlyName(componentName) {
+    const upperName = componentName.toUpperCase();
+    
+    // 1. Check LLM-generated cache first (highest priority)
+    if (this.friendlyNameCache.has(upperName)) {
+        return this.friendlyNameCache.get(upperName);
+    }
+    
+    // 2. Check analyzed results
+    for (const [analyzedName, results] of Object.entries(this.analysisResults)) {
+        if (analyzedName === componentName || results.componentName === componentName) {
+            return results.friendlyName || null;
+        }
+        
+        // Check if this component had dependency friendly names
+        if (results.llmAnalysis?.dependencyFriendlyNames?.[upperName]) {
+            const friendlyName = results.llmAnalysis.dependencyFriendlyNames[upperName];
+            this.friendlyNameCache.set(upperName, friendlyName); // Cache it
+            return friendlyName;
+        }
+    }
+    
+    // 3. Check uploaded files
+    for (const file of this.uploadedFiles) {
+        if (file.components) {
+            for (const component of file.components) {
+                if (component.name === componentName && component.friendlyName) {
+                    return component.friendlyName;
+                }
+            }
+        }
+    }
+    
+    // 4. Generate using enhanced patterns (lowest priority)
+    return this.generateFriendlyName(componentName);
+}
+
+// Discover friendly names for all dependencies across analyses
+async discoverDependencyFriendlyNames() {
+    console.log('🔍 Discovering friendly names for all dependencies...');
+    
+    const allDependencies = new Set();
+    
+    // Collect all dependencies from all analyses
+    Object.values(this.analysisResults).forEach(results => {
+        if (results.dependencyAnalysis) {
+            [...(results.dependencyAnalysis.found.copybooks || []),
+             ...(results.dependencyAnalysis.found.programs || []),
+             ...(results.dependencyAnalysis.missing.copybooks || []),
+             ...(results.dependencyAnalysis.missing.programs || [])]
+            .forEach(dep => allDependencies.add(dep));
+        }
+    });
+    
+    // Filter out ones we already have friendly names for
+    const unknownDeps = Array.from(allDependencies).filter(dep => 
+        !this.friendlyNameCache.has(dep.toUpperCase())
+    );
+    
+    if (unknownDeps.length > 0 && this.serverValidated) {
+        console.log(`📝 Asking LLM for friendly names for ${unknownDeps.length} dependencies...`);
+        
+        const prompt = `GENERATE BUSINESS FRIENDLY NAMES
+
+Given these mainframe component names, suggest business-friendly names based on common patterns:
+
+COMPONENTS: ${unknownDeps.slice(0, 20).join(', ')}
+
+Return JSON with technical name to friendly name mapping:
+{
+  "friendlyNames": {
+    "TECH-NAME": "Business Friendly Name",
+    "ANOTHER-TECH": "Another Business Name"
+  }
+}
+
+Use business context clues from the names. Examples:
+- CUST-MASTER → "Customer Master File"
+- ACCT-VALIDATE → "Account Validation Routine"
+- TRANS-LOG → "Transaction Log Handler"`;
+
+        try {
+            const response = await this.callLLMAPI(prompt);
+            if (response?.friendlyNames) {
+                Object.entries(response.friendlyNames).forEach(([tech, friendly]) => {
+                    this.friendlyNameCache.set(tech.toUpperCase(), friendly);
+                });
+                console.log(`✅ Added ${Object.keys(response.friendlyNames).length} friendly names to cache`);
+            }
+        } catch (error) {
+            console.warn('Failed to get LLM friendly names:', error);
+        }
+    }
+}
 // Analyze Upstream Dependencies
 async analyzeUpstreamDependencies(componentName, relevantFiles, allFiles, dependencyFlow) {
     const componentUpper = componentName.toUpperCase();
@@ -5222,13 +5372,19 @@ DEPENDENCIES:
 - Found Programs: ${dependencies.found.programs.join(', ') || 'None'}
 - Missing Programs: ${dependencies.missing.programs.join(', ') || 'None'}
 
-TASK: Analyze this copybook focusing on field-level details and usage patterns.
+TASK: Analyze this copybook AND suggest business-friendly names for all dependencies.
 
 RETURN JSON FORMAT:
 {
   "componentName": "${copybookName}",
   "friendlyName": "${friendlyName}",
   "componentType": "Copybook",
+  "dependencyFriendlyNames": {
+    "DEPENDENCY-NAME": "Business Friendly Name",
+    "ANOTHER-DEP": "Another Business Name"
+  },
+  "businessContext": "Brief description of business domain",
+  
   "analysisScope": "FIELD_LEVEL_ANALYSIS",
   "totalFields": ${fieldAnalysis?.fields?.length || 0},
   "fieldSummary": {
@@ -5433,7 +5589,7 @@ prepareContentForLLM(content, type) {
 
 // Add these methods to the EnhancedMainframeAnalyzer class
 
-// Display Analysis Results
+
 // Display Analysis Results
 displayAnalysisResults(componentName, results) {
     console.log('Displaying analysis results for:', componentName);
@@ -5997,11 +6153,35 @@ renderDependencyFlowChart(flow) {
             </div>
         </div>
     `;
-    
+    flow.upstream.copybooks.slice(0, 5).forEach(copybook => {
+    const friendlyName = this.getFriendlyName(copybook.name) || copybook.name;
+    const businessContext = this.getBusinessContext(copybook.name);
+    html += `
+        <div class="flow-node ${copybook.available ? 'upstream' : 'missing'}" 
+             title="${friendlyName}${businessContext ? '\n' + businessContext : ''} - ${copybook.usage} - Line ${copybook.line}">
+            <div class="flow-node-icon">📚</div>
+            <div class="flow-node-name">${friendlyName}</div>
+            <div class="flow-node-type">Copybook</div>
+            ${!copybook.available ? '<div class="flow-node-badge">!</div>' : ''}
+        </div>
+    `;
+});
+
     container.innerHTML = html;
 }
 
+
 // Helper method for flow icons
+getBusinessContext(componentName) {
+    // Check if any analysis mentioned this component in business context
+    for (const results of Object.values(this.analysisResults)) {
+        if (results.llmAnalysis?.dependencyFriendlyNames?.[componentName.toUpperCase()]) {
+            return results.llmAnalysis.businessContext;
+        }
+    }
+    return null;
+}
+
 getComponentFlowIcon(componentType) {
     const icons = {
         'Copybook': '📚',
