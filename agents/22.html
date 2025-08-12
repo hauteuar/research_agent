@@ -4264,7 +4264,16 @@ async runComprehensiveAnalysis(componentName, relevantFiles) {
             completeness: this.assessCompleteness(llmAnalysis, fieldAnalysis),
             analysisMethod: 'LLM-Enhanced-Field-Focused'
         };
+        // Store friendly names from LLM analysis if available
+        if (results.llmAnalysis?.dependencyFriendlyNames) {
+            Object.entries(results.llmAnalysis.dependencyFriendlyNames).forEach(([techName, friendlyName]) => {
+                this.friendlyNameCache.set(techName.toUpperCase(), friendlyName);
+            });
+        }
 
+        if (results.llmAnalysis?.businessContext) {
+            this.businessContextCache.set(componentName, results.llmAnalysis.businessContext);
+        }
         // Stage 7: Discover friendly names for dependencies
         this.updateLoadingStatus('🔍 Stage 7: Discovering friendly names...');
         this.updateProgress(95);
@@ -4675,16 +4684,7 @@ async extractDependencyFlow(componentName, relevantFiles, allFiles) {
     // Perform impact analysis
     this.performImpactAnalysis(dependencyFlow);
 
-    // Store friendly names from LLM analysis if available
-    if (results.llmAnalysis?.dependencyFriendlyNames) {
-        Object.entries(results.llmAnalysis.dependencyFriendlyNames).forEach(([techName, friendlyName]) => {
-            this.friendlyNameCache.set(techName.toUpperCase(), friendlyName);
-        });
-    }
-
-    if (results.llmAnalysis?.businessContext) {
-        this.businessContextCache.set(componentName, results.llmAnalysis.businessContext);
-    }
+   
     
     return dependencyFlow;
 }
