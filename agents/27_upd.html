@@ -4202,7 +4202,7 @@ Return only the friendly name, no explanation.`;
     // LLM API Call with Chunking Support
     async callLLMAPIChunked(prompt, options = {}) {
         const {
-            maxResponseTokens = 3000,
+            maxResponseTokens = 5000,
             allowChunking = true,
             retries = 2
         } = options;
@@ -4393,725 +4393,7 @@ Return JSON format:
 
         return await this.callLLMAPI(prompt);
     }
-    // ============================================
-    // AUTO-DISCOVERY AND COMPONENT ANALYSIS
-    // ============================================
-
-    // Auto-Discover Components
-    async autoDiscoverComponents(fileObj) {
-        for (const component of fileObj.components) {
-            if (component.isMainComponent) {
-                const discoveredComponent = {
-                    name: component.name,
-                    friendlyName: await this.generateFriendlyName(component.name),
-                    type: component.type,
-                    businessPurpose: component.businessPurpose,
-                    fileSource: fileObj.name,
-                    lineCount: fileObj.metrics.codeLines,
-                    complexityScore: fileObj.metrics.complexity,
-                    inputFiles: this.extractInputFiles(fileObj.content),
-                    outputFiles: this.extractOutputFiles(fileObj.content),
-                    fieldCount: fileObj.components.filter(c => c.type === 'FIELD' || c.type === 'RECORD_LAYOUT').length,
-                    analyzed: false,
-                    timestamp: new Date().toISOString()
-                };
-                
-                this.discoveredComponents.set(component.name, discoveredComponent);
-            }
-        }
-    }
-
-    // Extract Input/Output Files
-    extractInputFiles(content) {
-        const files = [];
-        const lines = content.split('\n');
-        
-        lines.forEach(line => {
-            const trimmed = line.trim().toUpperCase();
-            
-            // Look for INPUT file patterns
-            const inputPatterns = [
-                /SELECT\s+([A-Z][A-Z0-9\-_]+)\s+ASSIGN/,
-                /OPEN\s+INPUT\s+([A-Z][A-Z0-9\-_]+)/,
-                /READ\s+([A-Z][A-Z0-9\-_]+)/
-            ];
-            
-            for (const pattern of inputPatterns) {
-                const match = trimmed.match(pattern);
-                if (match && !files.includes(match[1])) {
-                    files.push(match[1]);
-                }
-            }
-        });
-        
-        return files.slice(0, 10); // Limit to top 10
-    }
-
-    extractOutputFiles(content) {
-        const files = [];
-        const lines = content.split('\n');
-        
-        lines.forEach(line => {
-            const trimmed = line.trim().toUpperCase();
-            
-            // Look for OUTPUT file patterns
-            const outputPatterns = [
-                /OPEN\s+OUTPUT\s+([A-Z][A-Z0-9\-_]+)/,
-                /WRITE\s+([A-Z][A-Z0-9\-_]+)/,
-                /DISPLAY\s+.*\s+UPON\s+([A-Z][A-Z0-9\-_]+)/
-            ];
-            
-            for (const pattern of outputPatterns) {
-                const match = trimmed.match(pattern);
-                if (match && !files.includes(match[1])) {
-                    files.push(match[1]);
-                }
-            }
-        });
-        
-        return files.slice(0, 10); // Limit to top 10
-    }
-
-    // Generate Friendly Name using LLM or patterns
-    async generateFriendlyName(componentName) {
-        // Check cache first
-        if (this.friendlyNameCache.has(componentName.toUpperCase())) {
-            return this.friendlyNameCache.get(componentName.toUpperCase());
-        }
-        
-        // Try LLM generation if available
-        if (this.serverValidated) {
-            try {
-                const prompt = `Generate a business-friendly name for this mainframe component: "${componentName}"
-
-Examples:
-- CUST-MASTER → "Customer Master File"
-- ACCT-VALIDATE → "Account Validation Program" 
-- TRANS-LOG → "Transaction Log Handler"
-- PAY-PROCESS → "Payment Processing System"
-
-Return only the friendly name, no explanation.`;
-
-                const response = await this.callLLMAPI(prompt);
-                if (response && typeof response === 'string' && response.length < 100) {
-                    this.friendlyNameCache.set(componentName.toUpperCase(), response.trim());
-                    return response.trim();
-                }
-            } catch (error) {
-                console.warn('LLM friendly name generation failed:', error);
-            }
-        }
-        
-        // Fallback to pattern-based generation
-        return this.generateFriendlyNameFromPattern(componentName);
-    }
-
-    // Pattern-based friendly name generation
-    generateFriendlyNameFromPattern(componentName) {
-        const name = componentName.toUpperCase();
-        
-        // Common mainframe patterns to friendly names
-        const patterns = [
-            { pattern: /CUST.*MASTER/, replacement: 'Customer Master File' },
-            { pattern: /CUST.*MAINT/, replacement: 'Customer Maintenance Program' },
-            { pattern: /CUST.*VALID/, replacement: 'Customer Validation Program' },
-            { pattern: /ACCT.*MASTER/, replacement: 'Account Master File' },
-            { pattern: /ACCT.*TRANS/, replacement: 'Account Transaction Program' },
-            { pattern: /ACCT.*BAL/, replacement: 'Account Balance Program' },
-            { pattern: /PAY.*PROC/, replacement: 'Payment Processing System' },
-            { pattern: /TRANS.*LOG/, replacement: 'Transaction Log Handler' },
-            { pattern: /INVOICE.*PROC/, replacement: 'Invoice Processing System' },
-            { pattern: /REPORT.*GEN/, replacement: 'Report Generation Program' },
-            { pattern: /.*MASTER.*/, replacement: `${name.split('-')[0]} Master Data` },
-            { pattern: /.*COPY.*/, replacement: `${name.split('-')[0]} Data Structure` },
-            { pattern: /.*VALID.*/, replacement: `${name.split('-')[0]} Validation Program` },
-            { pattern: /.*PROC.*/, replacement: `${name.split('-')[0]} Processing System` }
-        ];
-        
-        for (const { pattern, replacement } of patterns) {
-            if (pattern.test(name)) {
-                return replacement;
-            }
-        }
-        
-        // Final fallback
-        const parts = name.split('-');
-        if (parts.length > 1) {
-            return `${parts[0]} ${parts[1]} System`;
-        } else {
-            return `${name} Component`;
-        }
-    }
-
-    // Enable Auto Analysis
-    enableAutoAnalysis() {
-        const autoAnalyzeBtn = document.getElementById('autoAnalyzeBtn');
-        if (autoAnalyzeBtn && this.discoveredComponents.size > 0 && this.serverValidated) {
-            autoAnalyzeBtn.disabled = false;
-        }
-    }
-
-    // Start Auto Analysis
-    async startAutoAnalysis() {
-        if (this.autoAnalysisInProgress) {
-            this.showWarning('Auto-analysis already in progress');
-            return;
-        }
-        
-        if (this.discoveredComponents.size === 0) {
-            this.showError('No components discovered for analysis');
-            return;
-        }
-        
-        this.autoAnalysisInProgress = true;
-        this.showLoading();
-        this.updateLoadingStatus('🚀 Starting auto-analysis of discovered components...');
-        
-        try {
-            const components = Array.from(this.discoveredComponents.values())
-                .filter(comp => !comp.analyzed)
-                .slice(0, 8); // Limit to 8 components for performance
-            
-            let completed = 0;
-            
-            for (const component of components) {
-                try {
-                    this.updateLoadingStatus(`Analyzing ${component.friendlyName || component.name} (${completed + 1}/${components.length})...`);
-                    this.updateProgress((completed / components.length) * 100);
-                    
-                    const relevantFiles = this.findRelevantFiles(component.name);
-                    const analysisResult = await this.runComponentAnalysis(component.name, relevantFiles);
-                    
-                    this.analysisResults[component.name] = analysisResult;
-                    component.analyzed = true;
-                    component.qualityScore = analysisResult.qualityScore;
-                    
-                    completed++;
-                    
-                    // Brief pause between analyses
-                    await this.sleep(1000);
-                    
-                } catch (error) {
-                    console.warn(`Failed to analyze ${component.name}:`, error);
-                    component.analyzed = false;
-                }
-            }
-            
-            this.hideLoading();
-            this.updateDashboardWithResults();
-            this.enableChat();
-            this.saveToDatabase();
-            
-            this.showSuccess(`✨ Auto-analysis complete! ${completed}/${components.length} components analyzed`);
-            
-            // Switch to dashboard to show results
-            document.querySelector('.tab[data-tab="dashboard"]').click();
-            
-        } catch (error) {
-            this.hideLoading();
-            this.showError(`Auto-analysis failed: ${error.message}`);
-        } finally {
-            this.autoAnalysisInProgress = false;
-        }
-    }
-
-    // Find Relevant Files for Component
-    findRelevantFiles(componentName) {
-        const componentUpper = componentName.toUpperCase();
-        const componentBase = componentUpper.replace(/\.(CPY|COPYBOOK|COP)$/, '');
-        
-        return this.uploadedFiles.filter(file => {
-            const fileNameUpper = file.name.toUpperCase();
-            const fileNameBase = fileNameUpper.replace(/\.(CPY|COPYBOOK|COP)$/, '');
-            
-            // Direct name match
-            if (fileNameUpper.includes(componentUpper) || 
-                fileNameBase === componentBase ||
-                componentBase === fileNameBase) {
-                return true;
-            }
-            
-            // Content-based matching
-            const contentUpper = file.content.toUpperCase();
-            if (contentUpper.includes(componentUpper) ||
-                contentUpper.includes(componentBase) ||
-                contentUpper.includes(`COPY ${componentBase}`) ||
-                contentUpper.includes(`"${componentBase}"`) ||
-                contentUpper.includes(`'${componentBase}'`)) {
-                return true;
-            }
-            
-            // Component-based matching
-            if (file.components) {
-                return file.components.some(comp => {
-                    const compNameUpper = comp.name.toUpperCase();
-                    const compNameBase = compNameUpper.replace(/\.(CPY|COPYBOOK|COP)$/, '');
-                    return compNameUpper === componentUpper || 
-                           compNameBase === componentBase ||
-                           componentBase === compNameBase;
-                });
-            }
-            
-            return false;
-        });
-    }
-
-    // Run Component Analysis (simplified for auto-analysis)
-    async runComponentAnalysis(componentName, relevantFiles) {
-        console.log(`Running analysis for: ${componentName}`);
-        
-        const component = this.discoveredComponents.get(componentName);
-        const friendlyName = component?.friendlyName || componentName;
-        
-        try {
-            // Stage 1: Basic component analysis
-            const componentType = this.detectComponentType(componentName, relevantFiles);
-            
-            // Stage 2: Extract dependencies
-            const dependencyAnalysis = await this.extractDependencies(relevantFiles);
-            
-            // Stage 3: Field analysis (for copybooks)
-            let fieldAnalysis = null;
-            if (componentType === 'Copybook' || componentType === 'RECORD_LAYOUT') {
-                fieldAnalysis = await this.analyzeFieldsInComponent(componentName, relevantFiles);
-            }
-            
-            // Stage 4: LLM-enhanced analysis
-            let llmAnalysis = null;
-            try {
-                llmAnalysis = await this.getBusinessIntelligenceFromLLM(
-                    componentName, friendlyName, componentType, relevantFiles, dependencyAnalysis, fieldAnalysis
-                );
-            } catch (llmError) {
-                console.warn('LLM analysis failed:', llmError);
-                llmAnalysis = {
-                    error: true,
-                    message: llmError.message,
-                    businessPurpose: component?.businessPurpose || 'Business purpose analysis failed',
-                    recommendations: ['Check LLM server connection', 'Verify component data', 'Try manual analysis']
-                };
-            }
-            
-            const results = {
-                componentName: componentName,
-                friendlyName: friendlyName,
-                timestamp: new Date().toISOString(),
-                filesAnalyzed: relevantFiles.map(f => f.name),
-                componentType: componentType,
-                dependencyAnalysis: dependencyAnalysis,
-                fieldAnalysis: fieldAnalysis,
-                llmAnalysis: llmAnalysis,
-                totalFields: fieldAnalysis?.fields?.length || 0,
-                qualityScore: this.calculateQualityScore(llmAnalysis, fieldAnalysis),
-                analysisMethod: 'Auto-Discovery-Enhanced'
-            };
-            
-            return results;
-            
-        } catch (error) {
-            console.error(`Analysis failed for ${componentName}:`, error);
-            throw new Error(`Analysis failed: ${error.message}`);
-        }
-    }
-
-    // Detect Component Type
-    detectComponentType(componentName, relevantFiles) {
-        const component = this.discoveredComponents.get(componentName);
-        if (component?.type) {
-            return component.type;
-        }
-        
-        // Analyze files to determine type
-        for (const file of relevantFiles) {
-            if (file.type === 'Copybook') return 'Copybook';
-            if (file.type === 'COBOL Program') return 'Program';
-            if (file.type === 'JCL Job') return 'Job';
-        }
-        
-        return 'Unknown';
-    }
-
-    // Extract Dependencies
-    async extractDependencies(relevantFiles) {
-        const dependencies = {
-            found: { copybooks: [], programs: [], files: [] },
-            missing: { copybooks: [], programs: [], files: [] },
-            summary: { foundCount: 0, missingCount: 0 }
-        };
-        
-        for (const file of relevantFiles) {
-            const content = file.content.toUpperCase();
-            const lines = content.split('\n');
-            
-            lines.forEach(line => {
-                const trimmed = line.trim();
-                
-                // Extract COPY statements
-                const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]+)/);
-                if (copyMatch) {
-                    const copybook = copyMatch[1];
-                    if (this.discoveredComponents.has(copybook)) {
-                        if (!dependencies.found.copybooks.includes(copybook)) {
-                            dependencies.found.copybooks.push(copybook);
-                        }
-                    } else {
-                        if (!dependencies.missing.copybooks.includes(copybook)) {
-                            dependencies.missing.copybooks.push(copybook);
-                        }
-                    }
-                }
-                
-                // Extract CALL statements
-                const callMatch = trimmed.match(/CALL\s+['"]([A-Z][A-Z0-9\-_]+)['"]/);
-                if (callMatch) {
-                    const program = callMatch[1];
-                    if (this.discoveredComponents.has(program)) {
-                        if (!dependencies.found.programs.includes(program)) {
-                            dependencies.found.programs.push(program);
-                        }
-                    } else {
-                        if (!dependencies.missing.programs.includes(program)) {
-                            dependencies.missing.programs.push(program);
-                        }
-                    }
-                }
-                
-                // Extract file references
-                const fileMatch = trimmed.match(/SELECT\s+([A-Z][A-Z0-9\-_]+)/);
-                if (fileMatch) {
-                    const fileName = fileMatch[1];
-                    if (this.discoveredComponents.has(fileName)) {
-                        if (!dependencies.found.files.includes(fileName)) {
-                            dependencies.found.files.push(fileName);
-                        }
-                    } else {
-                        if (!dependencies.missing.files.includes(fileName)) {
-                            dependencies.missing.files.push(fileName);
-                        }
-                    }
-                }
-            });
-        }
-        
-        // Calculate summary
-        dependencies.summary.foundCount = 
-            dependencies.found.copybooks.length + 
-            dependencies.found.programs.length + 
-            dependencies.found.files.length;
-            
-        dependencies.summary.missingCount = 
-            dependencies.missing.copybooks.length + 
-            dependencies.missing.programs.length + 
-            dependencies.missing.files.length;
-        
-        return dependencies;
-    }
-
-    // Analyze Fields in Component
-    async analyzeFieldsInComponent(componentName, relevantFiles) {
-        const fieldAnalysis = {
-            fields: [],
-            inputFields: [],
-            outputFields: [],
-            referenceFields: [],
-            unusedFields: [],
-            businessLogicSummary: {
-                totalValidationRules: 0,
-                totalCalculations: 0,
-                fieldsWithBusinessLogic: 0
-            }
-        };
-        
-        for (const file of relevantFiles) {
-            const content = file.content;
-            const lines = content.split('\n');
-            
-            lines.forEach((line, index) => {
-                const trimmed = line.trim().toUpperCase();
-                
-                // Extract field definitions
-                const fieldMatch = trimmed.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]+)(?:\s+PIC\s+([X9VS\(\)]+))?/);
-                if (fieldMatch) {
-                    const level = parseInt(fieldMatch[1]);
-                    const fieldName = fieldMatch[2];
-                    const picture = fieldMatch[3] || '';
-                    
-                    if (level !== 88 && fieldName) {
-                        const field = {
-                            name: fieldName,
-                            level: level,
-                            picture: picture,
-                            lineNumber: index + 1,
-                            fileName: file.name,
-                            businessLogic: {
-                                businessMeaning: this.generateFieldPurpose(fieldName),
-                                validationRules: [],
-                                calculations: []
-                            }
-                        };
-                        
-                        fieldAnalysis.fields.push(field);
-                        
-                        // Determine usage pattern
-                        if (this.isInputField(fieldName, content)) {
-                            fieldAnalysis.inputFields.push(fieldName);
-                        } else if (this.isOutputField(fieldName, content)) {
-                            fieldAnalysis.outputFields.push(fieldName);
-                        } else if (this.isReferenceField(fieldName, content)) {
-                            fieldAnalysis.referenceFields.push(fieldName);
-                        } else {
-                            fieldAnalysis.unusedFields.push(fieldName);
-                        }
-                    }
-                }
-            });
-        }
-        
-        return fieldAnalysis;
-    }
-
-    // Field Usage Detection Methods
-    isInputField(fieldName, content) {
-        const patterns = [
-            new RegExp(`MOVE\\s+\\w+\\s+TO\\s+${fieldName}`, 'i'),
-            new RegExp(`ACCEPT\\s+${fieldName}`, 'i'),
-            new RegExp(`READ\\s+\\w+\\s+INTO\\s+${fieldName}`, 'i')
-        ];
-        
-        return patterns.some(pattern => pattern.test(content));
-    }
-
-    isOutputField(fieldName, content) {
-        const patterns = [
-            new RegExp(`DISPLAY\\s+${fieldName}`, 'i'),
-            new RegExp(`WRITE\\s+${fieldName}`, 'i'),
-            new RegExp(`MOVE\\s+${fieldName}\\s+TO`, 'i')
-        ];
-        
-        return patterns.some(pattern => pattern.test(content));
-    }
-
-    isReferenceField(fieldName, content) {
-        const patterns = [
-            new RegExp(`IF\\s+${fieldName}`, 'i'),
-            new RegExp(`WHEN\\s+${fieldName}`, 'i'),
-            new RegExp(`COMPUTE\\s+\\w+\\s*=.*${fieldName}`, 'i')
-        ];
-        
-        return patterns.some(pattern => pattern.test(content));
-    }
-
-    // Generate Field Purpose
-    generateFieldPurpose(fieldName) {
-        const name = fieldName.toUpperCase();
-        
-        if (name.includes('RECORD') || name.includes('REC')) {
-            return `Main record structure for ${fieldName.toLowerCase().replace(/-/g, ' ')} data`;
-        } else if (name.includes('ID') || name.includes('KEY')) {
-            return `Unique identifier for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
-        } else if (name.includes('DATE') || name.includes('TIME')) {
-            return `Date/time field for ${fieldName.toLowerCase().replace(/-/g, ' ')} tracking`;
-        } else if (name.includes('AMT') || name.includes('AMOUNT')) {
-            return `Monetary amount for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
-        } else if (name.includes('DESC') || name.includes('NAME')) {
-            return `Descriptive text for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
-        } else if (name.includes('FLAG') || name.includes('IND')) {
-            return `Status indicator for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
-        } else if (name.includes('CODE') || name.includes('CD')) {
-            return `Coded value for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
-        } else if (name.includes('COUNT') || name.includes('CNT')) {
-            return `Counter/number field for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
-        } else {
-            return `Business data field for ${fieldName.toLowerCase().replace(/-/g, ' ')} processing`;
-        }
-    }
-
-    // Calculate Quality Score
-    calculateQualityScore(llmAnalysis, fieldAnalysis) {
-        let score = 5; // Base score
-        
-        // LLM analysis quality factors
-        if (llmAnalysis && !llmAnalysis.error) {
-            score += 2;
-            
-            if (llmAnalysis.businessPurpose && llmAnalysis.businessPurpose.length > 50) {
-                score += 1;
-            }
-            
-            if (llmAnalysis.recommendations && llmAnalysis.recommendations.length > 0) {
-                score += 1;
-            }
-        }
-        
-        // Field analysis quality factors
-        if (fieldAnalysis) {
-            if (fieldAnalysis.fields && fieldAnalysis.fields.length > 0) {
-                score += 1;
-            }
-            
-            if (fieldAnalysis.inputFields && fieldAnalysis.inputFields.length > 0) {
-                score += 0.5;
-            }
-            
-            if (fieldAnalysis.outputFields && fieldAnalysis.outputFields.length > 0) {
-                score += 0.5;
-            }
-        }
-        
-        return Math.min(Math.round(score), 10);
-    }
-
-    // ============================================
-    // LLM API INTEGRATION
-    // ============================================
-
-    // Enhanced LLM API Call
-    async callLLMAPI(prompt, retries = 0) {
-        console.log('🤖 Enhanced LLM API call initiated');
-        
-        try {
-            return await this.callLLMAPIChunked(prompt, {
-                maxResponseTokens: Math.min(this.maxTokens * 0.7, 4000),
-                allowChunking: true,
-                chunkingStrategy: 'auto',
-                retries: Math.min(retries, 2)
-            });
-            
-        } catch (error) {
-            console.error('Enhanced LLM call failed:', error);
-            
-            // Return fallback data instead of throwing
-            return {
-                error: true,
-                message: error.message,
-                fallbackData: this.createComponentFallback(
-                    'Unknown',
-                    'Unknown',
-                    null
-                )
-            };
-        }
-    }
-
-    // Enhanced Token Management
-    estimateTokens(text) {
-        if (!text || typeof text !== 'string') return 0;
-        
-        // More accurate token estimation for mainframe content
-        // COBOL and technical content tends to have more tokens per character
-        const baseEstimate = Math.ceil(text.length / 3.2);
-        
-        // Adjust for technical content density
-        const technicalWords = (text.match(/\b[A-Z][A-Z0-9\-_]{3,}\b/g) || []).length;
-        const codeLines = (text.match(/^\s*\d{2}\s+/gm) || []).length;
-        
-        // Technical content adjustment
-        const adjustment = Math.floor((technicalWords + codeLines) * 0.1);
-        
-        return baseEstimate + adjustment;
-    }
-
-    validateTokenLimits(prompt, maxResponseTokens = 4000) {
-        const promptTokens = this.estimateTokens(prompt);
-        const safePromptLimit = this.maxTokens - maxResponseTokens - 200; // Safety buffer
-        
-        console.log(`Token validation: ${promptTokens} prompt tokens, limit: ${safePromptLimit}`);
-        
-        if (promptTokens > safePromptLimit) {
-            throw new Error(`Prompt too large: ${promptTokens} tokens exceeds limit of ${safePromptLimit}`);
-        }
-        
-        return {
-            promptTokens,
-            responseTokensAvailable: maxResponseTokens,
-            withinLimits: true
-        };
-    }
-
-    // LLM API Call with Chunking Support
-    async callLLMAPIChunked(prompt, options = {}) {
-        const {
-            maxResponseTokens = 3000,
-            allowChunking = true,
-            retries = 2
-        } = options;
-        
-        try {
-            // First, try to validate if we can send as single request
-            this.validateTokenLimits(prompt, maxResponseTokens);
-            
-            // If validation passes, try single request first
-            return await this.makeSingleLLMRequest(prompt, maxResponseTokens, retries);
-            
-        } catch (tokenError) {
-            if (!allowChunking) {
-                throw new Error(`Prompt too large and chunking disabled: ${tokenError.message}`);
-            }
-            
-            console.log('Prompt too large, switching to chunked analysis:', tokenError.message);
-            return await this.makeChunkedLLMRequest(prompt, options);
-        }
-    }
-
-    // Single LLM Request
-    async makeSingleLLMRequest(prompt, maxResponseTokens, retries = 2) {
-        for (let attempt = 0; attempt <= retries; attempt++) {
-            try {
-                console.log(`LLM API call attempt ${attempt + 1}/${retries + 1}`);
-                
-                const response = await fetch(`${this.vllmEndpoint}/generate`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        prompt: prompt,
-                        max_tokens: maxResponseTokens,
-                        temperature: 0.1,
-                        top_p: 0.9,
-                        stop: [],
-                        stream: false,
-                        frequency_penalty: 0.1,
-                        presence_penalty: 0.0
-                    }),
-                    signal: AbortSignal.timeout(90000) // 90 second timeout
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-
-                const data = await response.json();
-                const resultText = this.extractTextFromResponse(data);
-                
-                if (!resultText) {
-                    throw new Error('No valid text content in LLM response');
-                }
-
-                // Parse and validate response
-                const parseResult = this.parseJSONResponse(resultText);
-                
-                if (parseResult.success) {
-                    console.log('✅ Single LLM request successful');
-                    return parseResult.data;
-                } else if (parseResult.fallbackData) {
-                    console.warn('⚠️ JSON parsing failed, using fallback data');
-                    return parseResult.fallbackData;
-                } else {
-                    throw new Error(`JSON parsing failed: ${parseResult.error}`);
-                }
-
-            } catch (error) {
-                console.error(`LLM attempt ${attempt + 1} failed:`, error);
-                
-                if (attempt < retries) {
-                    const delay = 2000 * (attempt + 1); // Exponential backoff
-                    console.log(`Retrying in ${delay}ms...`);
-                    await this.sleep(delay);
-                } else {
-                    throw error;
-                }
-            }
-        }
-    }
+    
 
     // Chunked LLM Request (simplified for this part)
     // Helper: split text by lines into ~targetTokens chunks
@@ -5865,6 +5147,197 @@ function toggleCollapsible(header) {
         window.analyzer.toggleCollapsible(header);
     }
 }
+
+/**
+ * Render discovered components into the UI.
+ * @param {Object} opts
+ * @param {string} [opts.containerSelector="#discoveredComponents"] - CSS selector for the container.
+ * @param {string} [opts.filter] - Optional text filter; if omitted, attempts to read #componentSearch value.
+ * @param {"name"|"type"|"fields"|"complexity"} [opts.sortBy="name"] - Sort key.
+ * @param {"asc"|"desc"} [opts.order="asc"] - Sort order.
+ */
+EnhancedCodeAnalyzer.prototype.displayDiscoveredComponents = function(opts = {}) {
+  try {
+    const {
+      containerSelector = "#discoveredComponents",
+      sortBy = "name",
+      order = "asc",
+    } = opts;
+
+    const container = document.querySelector(containerSelector);
+    if (!container) {
+      console.warn("displayDiscoveredComponents: container not found:", containerSelector);
+      return;
+    }
+
+    // Resolve filter text (opts.filter > #componentSearch.value)
+    let filterText = (opts.filter || "").trim().toLowerCase();
+    if (!filterText) {
+      const searchEl = document.getElementById("componentSearch");
+      if (searchEl && typeof searchEl.value === "string") {
+        filterText = searchEl.value.trim().toLowerCase();
+      }
+    }
+
+    // Normalize data from Map -> Array
+    const items = Array.from(this.discoveredComponents?.values?.() || []).map(c => ({
+      name: c.name || "",
+      friendlyName: c.friendlyName || c.name || "",
+      type: (c.type || "").toUpperCase(),
+      businessPurpose: c.businessPurpose || "",
+      fileSource: c.fileSource || "",
+      fieldCount: Number.isFinite(c.fieldCount) ? c.fieldCount : 0,
+      lineCount: Number.isFinite(c.lineCount) ? c.lineCount : 0,
+      complexityScore: Number.isFinite(c.complexityScore) ? c.complexityScore : 0,
+      selected: !!c.selected
+    }));
+
+    // Filter
+    const filtered = items.filter(it => {
+      if (!filterText) return true;
+      const hay = [
+        it.name, it.friendlyName, it.type,
+        it.businessPurpose, it.fileSource
+      ].join(" ").toLowerCase();
+      return hay.includes(filterText);
+    });
+
+    // Sort
+    const dir = order === "desc" ? -1 : 1;
+    const by = (a, b, key) => (a[key] > b[key] ? 1 : a[key] < b[key] ? -1 : 0) * dir;
+
+    filtered.sort((a, b) => {
+      switch (sortBy) {
+        case "type": return by(a, b, "type");
+        case "fields": return by(a, b, "fieldCount");
+        case "complexity": return by(a, b, "complexityScore");
+        default: return by(a, b, "friendlyName"); // name
+      }
+    });
+
+    // Empty state
+    if (!filtered.length) {
+      container.innerHTML = `
+        <div class="text-sm text-slate-400 p-3 rounded-lg border border-slate-200 bg-slate-50">
+          No components ${filterText ? `matching "<b>${filterText}</b>"` : "found"} yet.
+          ${!this.discoveredComponents || this.discoveredComponents.size === 0
+            ? "Try running Auto-Discover or upload more files."
+            : ""}
+        </div>`;
+      // Update counts & bail
+      this._updateComponentBadges(items);
+      this.updateDashboardStats && this.updateDashboardStats();
+      this._ensureComponentClickHandler(containerSelector);
+      return;
+    }
+
+    // Build rows
+    const rows = filtered.map(it => {
+      const badgeType =
+        it.type.includes("PROGRAM") ? "PROGRAM" :
+        it.type.includes("COPY")    ? "COPYBOOK" :
+        it.type || "COMPONENT";
+
+      const selectedCls = it.selected ? "ring-2 ring-emerald-500 bg-emerald-50" : "hover:bg-slate-50";
+      const title = it.friendlyName || it.name;
+
+      return `
+        <div class="component-row ${selectedCls}"
+             data-name="${this._escapeAttr(it.name)}"
+             style="cursor:pointer; border:1px solid #e5e7eb; border-radius:10px; padding:10px; margin-bottom:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+            <div style="min-width:0;">
+              <div style="font-weight:600; color:#0f172a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                ${this._escapeHtml(title)}
+              </div>
+              <div style="font-size:12px; color:#475569; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                ${this._escapeHtml(it.businessPurpose || it.fileSource || "")}
+              </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+              <span class="badge"
+                    style="font-size:10px; border:1px solid #cbd5e1; padding:2px 6px; border-radius:9999px;">
+                ${this._escapeHtml(badgeType)}
+              </span>
+              <span title="Fields" style="font-size:12px; color:#334155;">🔢 ${it.fieldCount}</span>
+              <span title="Complexity" style="font-size:12px; color:#334155;">📈 ${it.complexityScore}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    container.innerHTML = rows;
+
+    // Update counts, stats, and (re)attach click handler
+    this._updateComponentBadges(items);
+    this.updateDashboardStats && this.updateDashboardStats();
+    this._ensureComponentClickHandler(containerSelector);
+
+  } catch (err) {
+    console.error("displayDiscoveredComponents error:", err);
+  }
+};
+
+/** Private: update sidebar badges if present */
+EnhancedCodeAnalyzer.prototype._updateComponentBadges = function(items) {
+  const total = items.length;
+  const programs = items.filter(i => i.type.includes("PROGRAM")).length;
+  const copybooks = items.filter(i => i.type.includes("COPY")).length;
+
+  const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = String(val); };
+  setText("componentCount", total);
+  setText("programCount", programs);
+  setText("copybookCount", copybooks);
+};
+
+/** Private: attach one delegated click handler per container */
+EnhancedCodeAnalyzer.prototype._ensureComponentClickHandler = function(containerSelector) {
+  if (!this._componentClickHandlers) this._componentClickHandlers = new Set();
+  if (this._componentClickHandlers.has(containerSelector)) return;
+
+  const container = document.querySelector(containerSelector);
+  if (!container) return;
+
+  container.addEventListener("click", (e) => {
+    const row = e.target.closest(".component-row");
+    if (!row) return;
+    const name = row.getAttribute("data-name");
+    if (!name) return;
+
+    // Call your existing selector; also persist selection & refresh UI
+    try {
+      this.selectComponent && this.selectComponent(name);
+      this.persistSelection && this.persistSelection(name);
+      // Visually toggle selection without a full re-render
+      container.querySelectorAll(".component-row").forEach(el => {
+        el.classList.remove("ring-2","ring-emerald-500","bg-emerald-50");
+        el.classList.add("hover:bg-slate-50");
+      });
+      row.classList.add("ring-2","ring-emerald-500","bg-emerald-50");
+      row.classList.remove("hover:bg-slate-50");
+
+      this.updateDashboardStats && this.updateDashboardStats();
+    } catch (err) {
+      console.error("selectComponent/persistSelection failed:", err);
+    }
+  });
+
+  this._componentClickHandlers.add(containerSelector);
+};
+
+/** Private: basic HTML escaping helpers */
+EnhancedCodeAnalyzer.prototype._escapeHtml = function(s) {
+  return String(s)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#039;");
+};
+EnhancedCodeAnalyzer.prototype._escapeAttr = function(s) {
+  return this._escapeHtml(s).replace(/"/g, "&quot;");
+};
 
 // Add the missing methods to the EnhancedCodeAnalyzer class:
 // --- Persist discovered components (call after discovery/selection) ---
