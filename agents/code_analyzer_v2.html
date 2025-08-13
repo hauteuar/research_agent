@@ -1,0 +1,4466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Code Analyzer - Part 2</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+    <style>
+        /* Continue from Part 1 CSS */
+        .typing-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 1rem;
+            background: var(--grey-100);
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            opacity: 0.8;
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 0.25rem;
+        }
+
+        .typing-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--grey-500);
+            border-radius: 50%;
+            animation: typingBounce 1.4s infinite ease-in-out;
+        }
+
+        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+        .typing-dot:nth-child(3) { animation-delay: 0s; }
+
+        @keyframes typingBounce {
+            0%, 80%, 100% {
+                transform: scale(0.8);
+                opacity: 0.5;
+            }
+            40% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .chat-suggestions {
+            padding: 0.75rem;
+            background: var(--grey-50);
+            border-radius: 8px;
+            margin-bottom: 0.75rem;
+            border: 1px solid var(--grey-200);
+        }
+
+        .chat-suggestions-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--grey-700);
+            margin-bottom: 0.5rem;
+        }
+
+        .chat-suggestion-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.25rem;
+        }
+
+        .chat-suggestion-btn {
+            padding: 0.375rem 0.75rem;
+            background: white;
+            border: 1px solid var(--grey-300);
+            border-radius: 20px;
+            font-size: 0.7rem;
+            color: var(--grey-700);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+
+        .chat-suggestion-btn:hover {
+            background: var(--primary-blue);
+            color: white;
+            border-color: var(--primary-blue);
+            transform: translateY(-1px);
+        }
+
+        /* Dependency Flow Diagram Styles */
+        .dependency-flow-container {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--grey-200);
+            min-width: 800px;
+            overflow-x: auto;
+        }
+
+        .flow-node {
+            background: white;
+            border: 2px solid var(--grey-300);
+            border-radius: 12px;
+            padding: 1rem;
+            min-width: 200px;
+            max-width: 250px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            text-align: center;
+        }
+
+        .flow-node:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+
+        .flow-node.current {
+            border-color: var(--primary-blue);
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.05) 0%, rgba(99, 102, 241, 0.05) 100%);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3);
+        }
+
+        .flow-node.upstream {
+            border-color: var(--info-blue);
+            background: rgba(59, 130, 246, 0.05);
+        }
+
+        .flow-node.downstream {
+            border-color: var(--success-green);
+            background: rgba(16, 185, 129, 0.05);
+        }
+
+        .flow-node.missing {
+            border-color: var(--error-red);
+            border-style: dashed;
+            background: rgba(239, 68, 68, 0.05);
+        }
+
+        .flow-node-icon {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .flow-node-name {
+            font-weight: 600;
+            color: var(--grey-800);
+            margin-bottom: 0.25rem;
+        }
+
+        .flow-node-friendly {
+            font-size: 0.8rem;
+            color: var(--primary-blue);
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+
+        .flow-node-purpose {
+            font-size: 0.75rem;
+            color: var(--grey-600);
+            line-height: 1.3;
+        }
+
+        .flow-connection {
+            width: 2px;
+            background: var(--grey-400);
+            position: relative;
+        }
+
+        .flow-connection.upstream {
+            background: var(--info-blue);
+        }
+
+        .flow-connection.downstream {
+            background: var(--success-green);
+        }
+
+        .flow-arrow {
+            font-size: 1.5rem;
+            color: var(--grey-600);
+            margin: 0.5rem 0;
+        }
+
+        .flow-arrow.upstream {
+            color: var(--info-blue);
+        }
+
+        .flow-arrow.downstream {
+            color: var(--success-green);
+        }
+
+        .flow-legend {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0.75rem;
+            font-size: 0.8rem;
+            padding: 1rem;
+            background: var(--grey-50);
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+        }
+
+        /* Field Matrix Styles */
+        .field-row {
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .field-row:hover {
+            background-color: var(--grey-50);
+            transform: translateX(4px);
+        }
+
+        .field-row:hover td {
+            color: var(--primary-blue);
+        }
+
+        /* Scrollbar Styles */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--grey-100);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--grey-400);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--grey-500);
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1200px) {
+            .panel.left {
+                width: 350px;
+            }
+            .panel.right {
+                width: 400px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .content-wrapper {
+                flex-direction: column;
+            }
+            
+            .panel {
+                width: 100% !important;
+                min-height: 200px;
+            }
+            
+            .panel.left.collapsed,
+            .panel.right.collapsed {
+                min-height: 60px;
+            }
+            
+            .header-stats {
+                display: none;
+            }
+
+            .header h1 {
+                font-size: 1.5rem;
+            }
+
+            .header-subtitle {
+                margin-left: 0;
+                margin-top: 0.5rem;
+            }
+        }
+
+        /* Utility Classes */
+        .text-center { text-align: center; }
+        .text-left { text-align: left; }
+        .text-right { text-align: right; }
+        .font-mono { font-family: 'Courier New', monospace; }
+        .font-bold { font-weight: bold; }
+        .opacity-50 { opacity: 0.5; }
+        .opacity-75 { opacity: 0.75; }
+
+        /* Animation for pulse effect on current component */
+        @keyframes pulse-ring {
+            0%, 100% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 0.2; transform: scale(1.05); }
+        }
+
+        .pulse-ring {
+            animation: pulse-ring 2s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <!-- Enhanced Header -->
+        <div class="header">
+            <div class="header-content">
+                <div>
+                    <h1>
+                        <div class="header-icon">🔍</div>
+                        Enhanced Code Analyzer
+                    </h1>
+                    <div class="header-subtitle">Powered by Opulence - Complete Mainframe Analysis & Business Intelligence</div>
+                </div>
+                <div class="header-stats">
+                    <div class="header-stat">
+                        <span class="header-stat-value" id="headerComponents">0</span>
+                        <span class="header-stat-label">Components</span>
+                    </div>
+                    <div class="header-stat">
+                        <span class="header-stat-value" id="headerPrograms">0</span>
+                        <span class="header-stat-label">Programs</span>
+                    </div>
+                    <div class="header-stat">
+                        <span class="header-stat-value" id="headerCopybooks">0</span>
+                        <span class="header-stat-label">Copybooks</span>
+                    </div>
+                    <div class="header-stat">
+                        <span class="header-stat-value" id="headerFields">0</span>
+                        <span class="header-stat-label">Fields</span>
+                    </div>
+                    <div class="header-stat">
+                        <span class="header-stat-value" id="headerLinesOfCode">0</span>
+                        <span class="header-stat-label">Lines of Code</span>
+                    </div>
+                    <div class="header-stat">
+                        <span class="header-stat-value" id="headerFileSize">0 KB</span>
+                        <span class="header-stat-label">Total Size</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Wrapper -->
+        <div class="content-wrapper" id="contentWrapper">
+            <!-- Left Panel - Component Dashboard -->
+            <div class="panel left" id="leftPanel">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <div class="panel-icon">📊</div>
+                        <span>Component Dashboard</span>
+                    </div>
+                    <button class="collapse-btn" onclick="togglePanel('left')">
+                        ◀
+                    </button>
+                </div>
+                <div class="panel-content" id="leftPanelContent">
+                    <!-- LLM Server Setup -->
+                    <div class="form-section">
+                        <div class="form-section-title">
+                            <span style="color: var(--success-green);">🚀</span>
+                            LLM Server Setup
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">Server Endpoint</label>
+                            <input type="text" 
+                                   id="vllmEndpoint" 
+                                   class="form-input" 
+                                   placeholder="http://localhost:8000" 
+                                   value="http://localhost:8000">
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">Max Tokens</label>
+                            <input type="number" 
+                                   id="maxTokens" 
+                                   class="form-input" 
+                                   value="6000" 
+                                   min="1000" 
+                                   max="8000">
+                        </div>
+
+                        <button id="validateApiBtn" class="btn btn-success btn-block">
+                            <span>🔐</span>
+                            Test Connection
+                        </button>
+
+                        <div id="apiStatus" class="status-indicator disconnected">
+                            <span class="status-dot"></span>
+                            <span>Enter server details and test connection</span>
+                        </div>
+                    </div>
+
+                    <!-- File Upload Section -->
+                    <div class="form-section">
+                        <div class="form-section-title">
+                            <span style="color: var(--info-blue);">📁</span>
+                            Upload & Auto-Analyze
+                        </div>
+
+                        <div class="upload-area" id="uploadArea">
+                            <div class="upload-icon">📤</div>
+                            <div class="upload-text">Drop files here or click to browse</div>
+                            <div class="upload-subtext">COBOL (.cbl), Copybooks (.cpy), JCL (.jcl) - Auto-analysis starts immediately</div>
+                            <input type="file" 
+                                   id="fileInput" 
+                                   multiple 
+                                   accept=".cbl,.cob,.cpy,.copybook,.jcl,.txt,.proc" 
+                                   style="display: none;">
+                        </div>
+
+                        <button id="autoAnalyzeBtn" class="btn btn-primary btn-block" disabled>
+                            <span>🤖</span>
+                            Start Auto-Analysis
+                        </button>
+                    </div>
+
+                    <!-- Discovered Components -->
+                    <div class="collapsible-section expanded" id="discoveredComponents">
+                        <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                            <div class="collapsible-title">
+                                <span class="collapsible-icon">🎯</span>
+                                Discovered Components (<span id="componentCount">0</span>)
+                            </div>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="collapsible-content">
+                            <div class="collapsible-body" id="componentsList">
+                                <p style="color: var(--grey-500); text-align: center; padding: 2rem;">
+                                    Upload files to auto-discover components
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Database Management -->
+                    <div class="form-section">
+                        <div class="form-section-title">
+                            <span style="color: var(--info-blue);">💾</span>
+                            Database Management
+                        </div>
+                        
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem;">
+                            <button class="btn btn-primary" onclick="analyzer.saveToDownloadsWithName()">
+                                <span>💾</span>
+                                Manual Save
+                            </button>
+                            <button class="btn btn-primary" onclick="analyzer.loadFromDownloadsFolder()">
+                                <span>📁</span>
+                                Load Database
+                            </button>
+                        </div>
+                        
+                        <div class="storage-info" style="font-size: 0.75rem; color: var(--grey-500); padding: 0.5rem; background: var(--grey-50); border-radius: 6px; text-align: center;">
+                            📁 Data auto-saved to Downloads folder every 30 seconds
+                            <br>
+                            💡 Look for "enhanced_code_analyzer_data.db" file
+                        </div>
+                    </div>
+
+                    <!-- Quick Actions -->
+                    <div class="form-section">
+                        <div class="form-section-title">
+                            <span style="color: var(--warning-yellow);">⚡</span>
+                            Actions
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem;">
+                            <button id="exportJsonBtn" class="btn btn-primary" disabled>
+                                <span>📋</span>
+                                Export JSON
+                            </button>
+                            <button id="exportMdBtn" class="btn btn-primary" disabled>
+                                <span>📝</span>
+                                Export MD
+                            </button>
+                        </div>
+
+                        <button id="clearBtn" class="btn btn-danger btn-block">
+                            <span>🗑️</span>
+                            Clear All Data
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Content Area -->
+            <div class="main-content">
+                <!-- Enhanced Tabs -->
+                <div class="tabs-container">
+                    <button class="tab active" data-tab="dashboard">
+                        <span class="tab-icon">📊</span>
+                        Dashboard Overview
+                    </button>
+                    <button class="tab" data-tab="dependencies">
+                        <span class="tab-icon">🔗</span>
+                        Dependencies Flow
+                    </button>
+                    <button class="tab" data-tab="fieldmatrix">
+                        <span class="tab-icon">📋</span>
+                        Field Matrix
+                    </button>
+                </div>
+
+                <!-- Tab Content -->
+                <div class="tab-content-container">
+                    <!-- Dashboard Overview Tab -->
+                    <div id="dashboard" class="tab-content active">
+                        <div id="dashboardContent">
+                            <p style="color: var(--grey-500); text-align: center; padding: 2rem;">
+                                Upload your mainframe files to start analysis
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Dependencies Flow Tab -->
+                    <div id="dependencies" class="tab-content">
+                        <div id="dependenciesContent">
+                            <p style="color: var(--grey-500); text-align: center; padding: 2rem;">
+                                Dependencies will appear after analysis
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Field Matrix Tab -->
+                    <div id="fieldmatrix" class="tab-content">
+                        <div id="fieldMatrixContent">
+                            <p style="color: var(--grey-500); text-align: center; padding: 2rem;">
+                                Select a component to view field matrix
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel - Enhanced Chat -->
+            <div class="panel right" id="rightPanel">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <div class="panel-icon">💬</div>
+                        <span>Business Intelligence Chat</span>
+                    </div>
+                    <button class="collapse-btn" onclick="togglePanel('right')">
+                        ▶
+                    </button>
+                </div>
+                <div class="panel-content" id="rightPanelContent">
+                    <div id="chatContainer">
+                        <p style="color: var(--grey-500); text-align: center; padding: 2rem;">
+                            Chat system will initialize after analysis
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Overlay -->
+        <div class="loading-overlay" id="loadingIndicator">
+            <div class="loading-content">
+                <div class="loading-spinner"></div>
+                <div class="loading-title">🤖 Processing Analysis</div>
+                <div class="loading-status" id="loadingStatus">Initializing system...</div>
+                <div class="loading-progress">
+                    <div class="loading-progress-fill" id="progressFill" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Continue with JavaScript in Part 3 -->
+    <script>
+        // ============================================
+// ENHANCED CODE ANALYZER - PART 3
+// Core JavaScript Classes and Database Management
+// ============================================
+
+class EnhancedCodeAnalyzer {
+    constructor() {
+        // Core properties
+        this.uploadedFiles = [];
+        this.analysisResults = {};
+        this.discoveredComponents = new Map();
+        this.serverValidated = false;
+        this.vllmEndpoint = 'http://localhost:8000';
+        this.maxTokens = 6000;
+        this.currentSelectedComponent = null;
+        this.chatHistory = [];
+        this.chatContext = 'general';
+        
+        // Business intelligence properties
+        this.friendlyNameCache = new Map();
+        this.businessContextCache = new Map();
+        this.componentMetrics = new Map();
+        
+        // SQLite Database (stored in Downloads folder)
+        this.db = null;
+        this.dbInitialized = false;
+        this.dbPath = null;
+        
+        // Auto-analysis state
+        this.autoAnalysisInProgress = false;
+        this.analysisQueue = [];
+        
+        // Initialize
+        this.initializeDatabase();
+        this.initializeEventListeners();
+        this.setupDownloadsFolderStorage();
+        
+        console.log('🚀 Enhanced Code Analyzer - Core Classes Initialized');
+    }
+
+    // ============================================
+    // DATABASE INITIALIZATION AND MANAGEMENT
+    // ============================================
+
+    async initializeDatabase() {
+        try {
+            const SQL = await initSqlJs({
+                locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
+            });
+            
+            // Initialize new database in memory
+            this.db = new SQL.Database();
+            this.dbInitialized = true;
+            
+            // Create tables
+            this.createTables();
+            
+            console.log('✅ SQLite database initialized');
+            this.updateDbStatus('initialized', '✅ Database ready (Downloads folder storage)');
+            
+            // Check for existing database and prompt user
+            this.promptForExistingDatabase();
+            
+        } catch (error) {
+            console.error('Failed to initialize SQLite database:', error);
+            this.dbInitialized = false;
+            this.updateDbStatus('error', '❌ Database initialization failed');
+        }
+    }
+
+    createTables() {
+        if (!this.db) return;
+        
+        try {
+            // Uploaded Files table
+            this.db.run(`
+                CREATE TABLE IF NOT EXISTS uploaded_files (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_id TEXT UNIQUE,
+                    name TEXT,
+                    content TEXT,
+                    size INTEGER,
+                    type TEXT,
+                    upload_date TEXT,
+                    components TEXT,
+                    metrics TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+            
+            // Discovered Components table
+            this.db.run(`
+                CREATE TABLE IF NOT EXISTS discovered_components (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    component_name TEXT UNIQUE,
+                    friendly_name TEXT,
+                    component_type TEXT,
+                    business_purpose TEXT,
+                    file_source TEXT,
+                    line_count INTEGER,
+                    complexity_score INTEGER,
+                    input_files TEXT,
+                    output_files TEXT,
+                    field_count INTEGER,
+                    analyzed BOOLEAN DEFAULT 0,
+                    quality_score INTEGER,
+                    selected BOOLEAN DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+            
+            // Analysis Results table
+            this.db.run(`
+                CREATE TABLE IF NOT EXISTS analysis_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    component_name TEXT UNIQUE,
+                    friendly_name TEXT,
+                    component_type TEXT,
+                    results_data TEXT,
+                    quality_score INTEGER,
+                    business_context TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+            
+            // Chat History table
+            this.db.run(`
+                CREATE TABLE IF NOT EXISTS chat_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    component_name TEXT,
+                    context_type TEXT,
+                    sender TEXT,
+                    content TEXT,
+                    timestamp TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+
+            // System Settings table
+            this.db.run(`
+                CREATE TABLE IF NOT EXISTS system_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    setting_key TEXT UNIQUE,
+                    setting_value TEXT,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+
+            console.log('✅ Database tables created successfully');
+        } catch (error) {
+            console.error('Failed to create database tables:', error);
+        }
+    }
+
+    setupDownloadsFolderStorage() {
+        // Save database every 30 seconds
+        this.saveInterval = setInterval(() => {
+            this.saveToDownloadsFolder();
+        }, 30000);
+
+        // Save on page unload
+        window.addEventListener('beforeunload', () => {
+            this.saveToDownloadsFolder();
+        });
+
+        // Save on visibility change (when user switches tabs)
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+                this.saveToDownloadsFolder();
+            }
+        });
+    }
+
+    async saveToDownloadsFolder() {
+        if (!this.db || !this.dbInitialized) return;
+
+        try {
+            const data = this.db.export();
+            const blob = new Blob([data], { type: 'application/octet-stream' });
+            
+            // Use consistent filename for automatic loading
+            const filename = 'enhanced_code_analyzer_data.db';
+            
+            // Create download link
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            
+            // Hide the download from user (automatic save)
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+            
+            // Update status indicator
+            const now = new Date().toLocaleTimeString();
+            this.updateDbStatus('initialized', `✅ Auto-saved to Downloads (${now})`);
+            
+            console.log(`💾 Database auto-saved to Downloads folder at ${now}`);
+            
+        } catch (error) {
+            console.error('Failed to save database to Downloads folder:', error);
+            this.updateDbStatus('error', '❌ Failed to save to Downloads');
+        }
+    }
+
+    // Manual Save with Custom Name
+    async saveToDownloadsWithName(customName = null) {
+        if (!this.db || !this.dbInitialized) {
+            this.showError('Database not initialized');
+            return;
+        }
+
+        try {
+            const data = this.db.export();
+            const blob = new Blob([data], { type: 'application/octet-stream' });
+            
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 16);
+            const filename = customName || `enhanced_code_analyzer_backup_${timestamp}.db`;
+            
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+            
+            this.showSuccess(`📁 Database saved: ${filename}`);
+            
+        } catch (error) {
+            console.error('Failed to save database:', error);
+            this.showError('Failed to save database');
+        }
+    }
+
+    // Prompt User to Load Existing Database
+    promptForExistingDatabase() {
+        // Create a subtle notification asking if user wants to load existing data
+        const notification = document.createElement('div');
+        notification.className = 'load-existing-notification';
+        notification.innerHTML = `
+            <div style="
+                position: fixed; 
+                top: 80px; 
+                right: 20px; 
+                background: linear-gradient(135deg, var(--primary-blue) 0%, var(--indigo) 100%); 
+                color: white; 
+                padding: 1rem 1.5rem; 
+                border-radius: 12px; 
+                box-shadow: var(--shadow-xl); 
+                max-width: 400px; 
+                z-index: 10000;
+                animation: slideInRight 0.3s ease;
+            ">
+                <div style="font-weight: 600; margin-bottom: 0.5rem;">📂 Load Previous Data?</div>
+                <div style="font-size: 0.9rem; margin-bottom: 1rem; opacity: 0.9;">
+                    Do you have a previous database file in your Downloads folder to load?
+                </div>
+                <div style="display: flex; gap: 0.75rem;">
+                    <button onclick="analyzer.loadFromDownloadsFolder()" style="
+                        flex: 1; 
+                        padding: 0.5rem 1rem; 
+                        background: white; 
+                        color: var(--primary-blue); 
+                        border: none;
+                        // ============================================
+// ENHANCED CODE ANALYZER - PART 4
+// Database Management & Event Handlers (Continued)
+// ============================================
+
+// Continuing from Part 3...
+
+                        border-radius: 6px; 
+                        font-weight: 600; 
+                        cursor: pointer;
+                    ">
+                        📁 Load File
+                    </button>
+                    <button onclick="this.parentElement.parentElement.parentElement.remove()" style="
+                        flex: 1; 
+                        padding: 0.5rem 1rem; 
+                        background: rgba(255,255,255,0.2); 
+                        color: white; 
+                        border: 1px solid rgba(255,255,255,0.3); 
+                        border-radius: 6px; 
+                        font-weight: 600; 
+                        cursor: pointer;
+                    ">
+                        Start Fresh
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(notification);
+        
+        // Auto-remove after 10 seconds
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.remove();
+            }
+        }, 10000);
+    }
+
+    // Load Database from Downloads Folder
+    loadFromDownloadsFolder() {
+        // Create file input for user to select database file
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.db';
+        fileInput.style.display = 'none';
+        
+        fileInput.addEventListener('change', async (e) => {
+            if (e.target.files[0]) {
+                await this.loadDatabaseFromFile(e.target.files[0]);
+            }
+        });
+        
+        document.body.appendChild(fileInput);
+        fileInput.click();
+        document.body.removeChild(fileInput);
+        
+        // Remove the notification
+        const notification = document.querySelector('.load-existing-notification');
+        if (notification) {
+            notification.remove();
+        }
+    }
+
+    // Load Database from File
+    async loadDatabaseFromFile(file) {
+        try {
+            this.showLoading();
+            this.updateLoadingStatus('📂 Loading database from file...');
+            
+            const arrayBuffer = await file.arrayBuffer();
+            const uInt8Array = new Uint8Array(arrayBuffer);
+            
+            const SQL = await initSqlJs({
+                locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
+            });
+            
+            // Close existing database
+            if (this.db) {
+                this.db.close();
+            }
+            
+            this.db = new SQL.Database(uInt8Array);
+            this.dbInitialized = true;
+            
+            // Load data from imported database
+            this.updateLoadingStatus('📊 Loading components and analysis data...');
+            await this.loadDataFromDatabase();
+            
+            this.hideLoading();
+            
+            this.showSuccess(`📁 Database loaded from: ${file.name}`);
+            this.updateDbStatus('initialized', '✅ Database loaded from Downloads folder');
+            
+            // Update UI with loaded data
+            this.updateDashboardStats();
+            this.displayDiscoveredComponents();
+            this.updateDashboardWithResults();
+            
+            // Enable chat if we have analysis results
+            if (Object.keys(this.analysisResults).length > 0) {
+                this.enableChat();
+            }
+            
+        } catch (error) {
+            this.hideLoading();
+            console.error('Failed to load database:', error);
+            this.showError(`Failed to load database: ${error.message}`);
+        }
+    }
+
+    // Save to Database with Auto-save
+    saveToDatabase() {
+        if (!this.db || !this.dbInitialized) return;
+
+        try {
+            // Save uploaded files
+            this.uploadedFiles.forEach(file => {
+                this.db.run(`
+                    INSERT OR REPLACE INTO uploaded_files 
+                    (file_id, name, content, size, type, upload_date, components, metrics)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                `, [
+                    file.id || '',
+                    file.name || '',
+                    file.content || '',
+                    file.size || 0,
+                    file.type || '',
+                    file.uploadDate || new Date().toISOString(),
+                    JSON.stringify(file.components || []),
+                    JSON.stringify(file.metrics || {})
+                ]);
+            });
+
+            // Save discovered components with null checks
+            this.discoveredComponents.forEach((component, name) => {
+                this.db.run(`
+                    INSERT OR REPLACE INTO discovered_components 
+                    (component_name, friendly_name, component_type, business_purpose, 
+                     file_source, line_count, complexity_score, input_files, output_files, 
+                     field_count, analyzed, quality_score, selected)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `, [
+                    name || '',
+                    component.friendlyName || '',
+                    component.type || '',
+                    component.businessPurpose || '',
+                    component.fileSource || '',
+                    component.lineCount || 0,
+                    component.complexityScore || 0,
+                    JSON.stringify(component.inputFiles || []),
+                    JSON.stringify(component.outputFiles || []),
+                    component.fieldCount || 0,
+                    component.analyzed ? 1 : 0,
+                    component.qualityScore || null,
+                    component.selected ? 1 : 0
+                ]);
+            });
+
+            // Save analysis results with null checks
+            Object.entries(this.analysisResults).forEach(([name, result]) => {
+                this.db.run(`
+                    INSERT OR REPLACE INTO analysis_results 
+                    (component_name, friendly_name, component_type, results_data, 
+                     quality_score, business_context, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                `, [
+                    name || '',
+                    result.friendlyName || '',
+                    result.componentType || '',
+                    JSON.stringify(result),
+                    result.qualityScore || null,
+                    (result.llmAnalysis && result.llmAnalysis.businessPurpose) || ''
+                ]);
+            });
+
+            // Save system settings
+            this.db.run(`
+                INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at)
+                VALUES ('vllm_endpoint', ?, CURRENT_TIMESTAMP)
+            `, [this.vllmEndpoint || 'http://localhost:8000']);
+
+            this.db.run(`
+                INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at)
+                VALUES ('max_tokens', ?, CURRENT_TIMESTAMP)
+            `, [this.maxTokens ? this.maxTokens.toString() : '6000']);
+
+            console.log('💾 Data saved to database');
+
+        } catch (error) {
+            console.error('Failed to save to database:', error);
+        }
+    }
+
+    // Load Data from Database
+    async loadDataFromDatabase() {
+        if (!this.db || !this.dbInitialized) return;
+
+        try {
+            // Clear existing data
+            this.uploadedFiles = [];
+            this.discoveredComponents.clear();
+            this.analysisResults = {};
+
+            // Load uploaded files
+            const filesStmt = this.db.prepare('SELECT * FROM uploaded_files ORDER BY created_at DESC');
+            while (filesStmt.step()) {
+                const row = filesStmt.getAsObject();
+                const file = {
+                    id: row.file_id,
+                    name: row.name,
+                    content: row.content,
+                    size: row.size,
+                    type: row.type,
+                    uploadDate: row.upload_date,
+                    components: JSON.parse(row.components || '[]'),
+                    metrics: JSON.parse(row.metrics || '{}')
+                };
+                this.uploadedFiles.push(file);
+            }
+            filesStmt.free();
+
+            // Load discovered components
+            const componentsStmt = this.db.prepare('SELECT * FROM discovered_components ORDER BY created_at DESC');
+            while (componentsStmt.step()) {
+                const row = componentsStmt.getAsObject();
+                const component = {
+                    name: row.component_name,
+                    friendlyName: row.friendly_name,
+                    type: row.component_type,
+                    businessPurpose: row.business_purpose,
+                    fileSource: row.file_source,
+                    lineCount: row.line_count,
+                    complexityScore: row.complexity_score,
+                    inputFiles: JSON.parse(row.input_files || '[]'),
+                    outputFiles: JSON.parse(row.output_files || '[]'),
+                    fieldCount: row.field_count,
+                    analyzed: row.analyzed === 1,
+                    qualityScore: row.quality_score,
+                    selected: row.selected === 1,
+                    timestamp: row.created_at
+                };
+                this.discoveredComponents.set(row.component_name, component);
+            }
+            componentsStmt.free();
+
+            // Load analysis results
+            const resultsStmt = this.db.prepare('SELECT * FROM analysis_results ORDER BY updated_at DESC');
+            while (resultsStmt.step()) {
+                const row = resultsStmt.getAsObject();
+                try {
+                    this.analysisResults[row.component_name] = JSON.parse(row.results_data);
+                } catch (error) {
+                    console.warn(`Failed to parse analysis result for ${row.component_name}:`, error);
+                }
+            }
+            resultsStmt.free();
+
+            // Load system settings
+            const settingsStmt = this.db.prepare('SELECT * FROM system_settings');
+            while (settingsStmt.step()) {
+                const row = settingsStmt.getAsObject();
+                if (row.setting_key === 'vllm_endpoint') {
+                    this.vllmEndpoint = row.setting_value;
+                    const endpointInput = document.getElementById('vllmEndpoint');
+                    if (endpointInput) endpointInput.value = row.setting_value;
+                } else if (row.setting_key === 'max_tokens') {
+                    this.maxTokens = parseInt(row.setting_value);
+                    const maxTokensInput = document.getElementById('maxTokens');
+                    if (maxTokensInput) maxTokensInput.value = row.setting_value;
+                }
+            }
+            settingsStmt.free();
+
+            console.log(`📊 Data loaded: ${this.uploadedFiles.length} files, ${this.discoveredComponents.size} components, ${Object.keys(this.analysisResults).length} analyses`);
+
+        } catch (error) {
+            console.error('Failed to load from database:', error);
+        }
+    }
+
+    // Update Database Status Indicator
+    updateDbStatus(status, message) {
+        // Create status indicator if it doesn't exist
+        let indicator = document.getElementById('dbStatusIndicator');
+        if (!indicator) {
+            indicator = document.createElement('div');
+            indicator.id = 'dbStatusIndicator';
+            indicator.className = `status-indicator ${status}`;
+            indicator.innerHTML = `
+                <span class="status-dot"></span>
+                <span>${message}</span>
+            `;
+            
+            // Find a good place to insert it
+            const leftPanel = document.getElementById('leftPanelContent');
+            if (leftPanel) {
+                leftPanel.insertBefore(indicator, leftPanel.firstChild);
+            }
+        } else {
+            indicator.className = `status-indicator ${status}`;
+            indicator.innerHTML = `
+                <span class="status-dot"></span>
+                <span>${message}</span>
+            `;
+        }
+    }
+
+    // ============================================
+    // EVENT LISTENERS AND UI INTERACTIONS
+    // ============================================
+
+    initializeEventListeners() {
+        // API Validation
+        const validateBtn = document.getElementById('validateApiBtn');
+        if (validateBtn) {
+            validateBtn.addEventListener('click', () => this.validateConnection());
+        }
+        
+        // File Upload
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        
+        if (uploadArea && fileInput) {
+            uploadArea.addEventListener('click', () => {
+                if (this.serverValidated) fileInput.click();
+            });
+            uploadArea.addEventListener('drop', (e) => this.handleFileDrop(e));
+            uploadArea.addEventListener('dragover', (e) => this.handleDragOver(e));
+            uploadArea.addEventListener('dragleave', (e) => this.handleDragLeave(e));
+            fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
+        }
+        
+        // Auto Analysis
+        const autoAnalyzeBtn = document.getElementById('autoAnalyzeBtn');
+        if (autoAnalyzeBtn) {
+            autoAnalyzeBtn.addEventListener('click', () => this.startAutoAnalysis());
+        }
+        
+        // Export buttons
+        const exportJsonBtn = document.getElementById('exportJsonBtn');
+        const exportMdBtn = document.getElementById('exportMdBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        
+        if (exportJsonBtn) exportJsonBtn.addEventListener('click', () => this.exportResults('json'));
+        if (exportMdBtn) exportMdBtn.addEventListener('click', () => this.exportResults('markdown'));
+        if (clearBtn) clearBtn.addEventListener('click', () => this.clearAllData());
+        
+        // Settings
+        const endpointInput = document.getElementById('vllmEndpoint');
+        const maxTokensInput = document.getElementById('maxTokens');
+        
+        if (endpointInput) {
+            endpointInput.addEventListener('input', () => this.onEndpointChange());
+        }
+        
+        if (maxTokensInput) {
+            maxTokensInput.addEventListener('input', () => this.onSettingsChange());
+        }
+
+        // Initialize tabs
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                // Remove active from all tabs
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                
+                // Add active to clicked tab
+                this.classList.add('active');
+                const tabId = this.getAttribute('data-tab');
+                const tabContent = document.getElementById(tabId);
+                if (tabContent) {
+                    tabContent.classList.add('active');
+                }
+            });
+        });
+    }
+
+    // ============================================
+    // UI HELPER FUNCTIONS
+    // ============================================
+
+    // Basic UI Functions
+    togglePanel(side) {
+        const panel = document.getElementById(side + 'Panel');
+        if (!panel) return;
+        
+        panel.classList.toggle('collapsed');
+        
+        // Update button icon
+        const btn = panel.querySelector('.collapse-btn');
+        if (btn) {
+            if (side === 'left') {
+                btn.textContent = panel.classList.contains('collapsed') ? '▶' : '◀';
+            } else {
+                btn.textContent = panel.classList.contains('collapsed') ? '◀' : '▶';
+            }
+        }
+        
+        // Save state to database
+        if (this.db && this.dbInitialized) {
+            try {
+                this.db.run(`
+                    INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                `, [`${side}_panel_collapsed`, panel.classList.contains('collapsed') ? '1' : '0']);
+            } catch (error) {
+                console.warn('Could not save panel state:', error);
+            }
+        }
+    }
+
+    toggleCollapsible(header) {
+        if (!header || !header.parentElement) return;
+        
+        const section = header.parentElement;
+        section.classList.toggle('expanded');
+        
+        // Update expand icon rotation
+        const expandIcon = header.querySelector('.expand-icon');
+        if (expandIcon) {
+            if (section.classList.contains('expanded')) {
+                expandIcon.style.transform = 'rotate(180deg)';
+            } else {
+                expandIcon.style.transform = 'rotate(0deg)';
+            }
+        }
+    }
+
+    // Show/Hide Loading
+    showLoading() {
+        const loading = document.getElementById('loadingIndicator');
+        if (loading) loading.classList.add('show');
+    }
+
+    hideLoading() {
+        const loading = document.getElementById('loadingIndicator');
+        if (loading) loading.classList.remove('show');
+    }
+
+    updateLoadingStatus(status) {
+        const statusEl = document.getElementById('loadingStatus');
+        if (statusEl) statusEl.textContent = status;
+    }
+
+    updateProgress(percentage) {
+        const progressFill = document.getElementById('progressFill');
+        if (progressFill) progressFill.style.width = `${percentage}%`;
+    }
+
+    // Alert Messages
+    showMessage(type, message, duration = 3000) {
+        const alert = document.createElement('div');
+        alert.className = `alert alert-${type}`;
+        alert.innerHTML = `
+            <span class="alert-icon">${type === 'success' ? '✅' : type === 'error' ? '❌' : type === 'warning' ? '⚠️' : 'ℹ️'}</span>
+            <span class="alert-message">${message}</span>
+        `;
+        document.body.appendChild(alert);
+        
+        setTimeout(() => {
+            if (alert.parentNode) {
+                alert.style.animation = 'slideInRight 0.3s ease reverse';
+                setTimeout(() => alert.remove(), 300);
+            }
+        }, duration);
+    }
+
+    showSuccess(message) { this.showMessage('success', message); }
+    showError(message) { this.showMessage('error', message, 5000); }
+    showWarning(message) { this.showMessage('warning', message, 4000); }
+    showInfo(message) { this.showMessage('info', message); }
+
+    // ============================================
+    // LLM CONNECTION AND VALIDATION
+    // ============================================
+
+    // Validate LLM Connection
+    async validateConnection() {
+        const endpoint = document.getElementById('vllmEndpoint').value.trim();
+        if (!endpoint) {
+            this.showError('Please enter vLLM endpoint');
+            return;
+        }
+
+        this.updateConnectionStatus('connecting', 'Testing LLM connection...');
+
+        try {
+            const response = await fetch(`${endpoint}/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    prompt: "Test connection. Respond with 'Connected'",
+                    max_tokens: 10,
+                    temperature: 0.1
+                }),
+                signal: AbortSignal.timeout(10000)
+            });
+
+            if (response.ok) {
+                this.serverValidated = true;
+                this.vllmEndpoint = endpoint;
+                this.updateConnectionStatus('connected', `✅ LLM connection verified`);
+                this.showSuccess('🚀 vLLM server connected successfully!');
+                
+                // Enable file upload and auto-analysis
+                this.enableFileUpload();
+                
+                // Save to database
+                this.saveToDatabase();
+            } else {
+                throw new Error(`HTTP ${response.status}`);
+            }
+        } catch (error) {
+            this.serverValidated = false;
+            this.updateConnectionStatus('disconnected', `❌ Connection failed: ${error.message}`);
+            this.showError(`LLM connection failed: ${error.message}`);
+        }
+    }
+
+    // Enable File Upload
+    enableFileUpload() {
+        const uploadArea = document.getElementById('uploadArea');
+        const autoAnalyzeBtn = document.getElementById('autoAnalyzeBtn');
+        
+        if (uploadArea) {
+            uploadArea.style.opacity = '1';
+            uploadArea.style.cursor = 'pointer';
+        }
+        
+        // Enable auto-analysis if files are already uploaded
+        if (this.uploadedFiles.length > 0 && autoAnalyzeBtn) {
+            autoAnalyzeBtn.disabled = false;
+        }
+    }
+
+    // Update Connection Status
+    updateConnectionStatus(status, message) {
+        const statusEl = document.getElementById('apiStatus');
+        if (statusEl) {
+            statusEl.className = `status-indicator ${status}`;
+            statusEl.innerHTML = `
+                <span class="status-dot"></span>
+                <span>${message}</span>
+            `;
+        }
+    }
+
+    // Settings Change Handlers
+    onEndpointChange() {
+        this.serverValidated = false;
+        this.updateConnectionStatus('disconnected', 'Connection not validated');
+    }
+
+    onSettingsChange() {
+        const maxTokensInput = document.getElementById('maxTokens');
+        if (maxTokensInput) {
+            this.maxTokens = parseInt(maxTokensInput.value) || 6000;
+            this.saveToDatabase();
+        }
+    }
+
+    // ============================================
+    // UTILITY FUNCTIONS
+    // ============================================
+
+    // Utility function
+    sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // Clear All Data
+    clearAllData() {
+        if (!confirm('Are you sure you want to clear all data? This action cannot be undone.')) {
+            return;
+        }
+        
+        // Clear in-memory data
+        this.uploadedFiles = [];
+        this.analysisResults = {};
+        this.discoveredComponents.clear();
+        this.currentSelectedComponent = null;
+        this.chatHistory = [];
+        
+        // Clear database
+        if (this.db && this.dbInitialized) {
+            try {
+                this.db.run('DELETE FROM uploaded_files');
+                this.db.run('DELETE FROM discovered_components');
+                this.db.run('DELETE FROM analysis_results');
+                this.db.run('DELETE FROM chat_history');
+            } catch (error) {
+                console.error('Failed to clear database:', error);
+            }
+        }
+        
+        // Reset UI
+        this.updateDashboardStats();
+        this.displayDiscoveredComponents();
+        
+        // Disable features
+        const chatInput = document.getElementById('chatInput');
+        const chatSendBtn = document.getElementById('chatSendBtn');
+        const exportJsonBtn = document.getElementById('exportJsonBtn');
+        const exportMdBtn = document.getElementById('exportMdBtn');
+        
+        if (chatInput) chatInput.disabled = true;
+        if (chatSendBtn) chatSendBtn.disabled = true;
+        if (exportJsonBtn) exportJsonBtn.disabled = true;
+        if (exportMdBtn) exportMdBtn.disabled = true;
+        
+        this.showSuccess('🗑️ All data cleared successfully');
+    }
+
+    // Cleanup on page unload
+    cleanup() {
+        if (this.saveInterval) {
+            clearInterval(this.saveInterval);
+        }
+        
+        if (this.db) {
+            // Save one final time before closing
+            this.saveToDownloadsFolder();
+            this.db.close();
+        }
+    }
+}
+
+// Make sure global functions are available
+window.togglePanel = function(side) {
+    if (window.analyzer) {
+        window.analyzer.togglePanel(side);
+    }
+};
+
+window.toggleCollapsible = function(header) {
+    if (window.analyzer) {
+        window.analyzer.toggleCollapsible(header);
+    }
+};
+
+console.log('Part 4 loaded - Database management and event handlers complete');
+console.log('Ready for Part 5 - File Processing & Component Discovery');
+// ============================================
+// ENHANCED CODE ANALYZER - PART 5
+// File Processing and Component Discovery
+// ============================================
+
+// Extend the EnhancedCodeAnalyzer class with file processing methods
+Object.assign(EnhancedCodeAnalyzer.prototype, {
+
+    // ============================================
+    // FILE HANDLING AND PROCESSING
+    // ============================================
+
+    // File Upload Handling
+    async handleFileDrop(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const uploadArea = document.getElementById('uploadArea');
+        uploadArea.classList.remove('drag-over');
+        
+        if (!this.serverValidated) {
+            this.showError('Please validate LLM API connection first');
+            return;
+        }
+        
+        const files = Array.from(e.dataTransfer.files);
+        await this.processFiles(files);
+    },
+
+    async handleFileSelect(e) {
+        if (!this.serverValidated) {
+            this.showError('Please validate LLM API connection first');
+            return;
+        }
+        
+        const files = Array.from(e.target.files);
+        await this.processFiles(files);
+    },
+
+    handleDragOver(e) {
+        e.preventDefault();
+        const uploadArea = document.getElementById('uploadArea');
+        if (uploadArea) uploadArea.classList.add('drag-over');
+    },
+
+    handleDragLeave(e) {
+        e.preventDefault();
+        const uploadArea = document.getElementById('uploadArea');
+        if (uploadArea) uploadArea.classList.remove('drag-over');
+    },
+
+    // Process Files with Auto-Discovery
+    async processFiles(files) {
+        this.showLoading();
+        this.updateLoadingStatus('📁 Processing uploaded files...');
+        
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            this.updateProgress((i / files.length) * 50); // First 50% for file processing
+            
+            try {
+                const content = await this.readFile(file);
+                const fileType = this.detectFileType(file.name, content);
+                
+                const fileObj = {
+                    name: file.name,
+                    content: content,
+                    size: file.size,
+                    type: fileType,
+                    uploadDate: new Date().toISOString(),
+                    id: Date.now() + Math.random(),
+                    components: this.extractComponentsFromFile(content, fileType),
+                    metrics: this.calculateFileMetrics(content, fileType)
+                };
+                
+                this.uploadedFiles.push(fileObj);
+                
+                // Auto-discover components
+                this.updateLoadingStatus(`🔍 Auto-discovering components in ${file.name}...`);
+                await this.autoDiscoverComponents(fileObj);
+                
+            } catch (error) {
+                this.showError(`Failed to read ${file.name}: ${error.message}`);
+            }
+        }
+        
+        this.updateProgress(100);
+        this.hideLoading();
+        
+        this.updateDashboardStats();
+        this.displayDiscoveredComponents();
+        this.enableAutoAnalysis();
+        this.saveToDatabase();
+        
+        this.showSuccess(`📁 ${files.length} files uploaded and ${this.discoveredComponents.size} components auto-discovered!`);
+    },
+
+    // Read File
+    readFile(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = e => resolve(e.target.result);
+            reader.onerror = e => reject(new Error('File read failed'));
+            reader.readAsText(file);
+        });
+    },
+
+    // Detect File Type
+    detectFileType(fileName, content) {
+        const name = fileName.toLowerCase();
+        const upperContent = content.toUpperCase();
+        
+        if (name.includes('.cpy') || name.includes('copybook')) {
+            return 'Copybook';
+        } else if (name.includes('.jcl') || upperContent.includes('//JOB ')) {
+            return 'JCL Job';
+        } else if (name.includes('.cbl') || name.includes('.cob') || 
+                  upperContent.includes('IDENTIFICATION DIVISION') ||
+                  upperContent.includes('PROGRAM-ID')) {
+            return 'COBOL Program';
+        } else if (name.includes('.proc')) {
+            return 'JCL Procedure';
+        } else {
+            return 'Text File';
+        }
+    },
+
+    // Calculate File Metrics
+    calculateFileMetrics(content, fileType) {
+        const lines = content.split('\n');
+        const totalLines = lines.length;
+        const codeLines = lines.filter(line => {
+            const trimmed = line.trim();
+            return trimmed.length > 0 && !trimmed.startsWith('*') && !trimmed.startsWith('//');
+        }).length;
+        
+        const complexity = this.calculateComplexity(content, fileType);
+        
+        return {
+            totalLines,
+            codeLines,
+            commentLines: totalLines - codeLines,
+            complexity,
+            fileSize: content.length
+        };
+    },
+
+    // Calculate Complexity Score
+    calculateComplexity(content, fileType) {
+        const upperContent = content.toUpperCase();
+        let complexity = 1;
+        
+        if (fileType === 'COBOL Program') {
+            // Count decision points
+            const ifCount = (upperContent.match(/\bIF\b/g) || []).length;
+            const performCount = (upperContent.match(/\bPERFORM\b/g) || []).length;
+            const evaluateCount = (upperContent.match(/\bEVALUATE\b/g) || []).length;
+            
+            complexity = 1 + ifCount + performCount + evaluateCount;
+        } else if (fileType === 'Copybook') {
+            // Count field definitions
+            const fieldCount = (upperContent.match(/^\s*\d{2}\s+/gm) || []).length;
+            complexity = Math.ceil(fieldCount / 10);
+        }
+        
+        return Math.min(complexity, 10);
+    },
+
+    // ============================================
+    // COMPONENT EXTRACTION AND DISCOVERY
+    // ============================================
+
+    // Extract Components from Files
+    extractComponentsFromFile(content, fileType) {
+        const components = [];
+        const lines = content.split('\n');
+
+        lines.forEach((line, index) => {
+            const trimmed = line.trim().toUpperCase();
+            
+            // Extract COBOL 01-level fields (main focus for copybooks)
+            const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]{2,})/);
+            if (field01Match) {
+                components.push({
+                    name: field01Match[1],
+                    type: 'RECORD_LAYOUT',
+                    level: '01',
+                    lineNumber: index + 1,
+                    fileType: fileType,
+                    isMainComponent: true,
+                    businessPurpose: this.generateBusinessPurpose(field01Match[1])
+                });
+            }
+            
+            // Extract ALL field levels for complete analysis
+            const fieldMatch = trimmed.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]*)/);
+            if (fieldMatch) {
+                // ============================================
+// ENHANCED CODE ANALYZER - PART 6
+// Component Discovery & Analysis Engine (Continued)
+// ============================================
+
+// Continuing from Part 5...
+
+                const level = parseInt(fieldMatch[1]);
+                const fieldName = fieldMatch[2];
+                
+                if (level !== 88 && fieldName && level <= 49) {
+                    components.push({
+                        name: fieldName,
+                        type: level === 1 ? 'RECORD_LAYOUT' : 'FIELD',
+                        level: level,
+                        lineNumber: index + 1,
+                        fileType: fileType,
+                        isMainComponent: level === 1,
+                        businessPurpose: this.generateBusinessPurpose(fieldName)
+                    });
+                }
+            }
+            
+            // Extract copybook names
+            const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]{2,})/);
+            if (copyMatch) {
+                components.push({
+                    name: copyMatch[1],
+                    type: 'COPYBOOK',
+                    lineNumber: index + 1,
+                    fileType: fileType,
+                    isMainComponent: false,
+                    businessPurpose: this.generateBusinessPurpose(copyMatch[1])
+                });
+            }
+            
+            // Extract program names
+            const programMatch = trimmed.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]{2,})/);
+            if (programMatch) {
+                components.push({
+                    name: programMatch[1],
+                    type: 'PROGRAM',
+                    lineNumber: index + 1,
+                    fileType: fileType,
+                    isMainComponent: true,
+                    businessPurpose: this.generateBusinessPurpose(programMatch[1])
+                });
+            }
+
+            // Extract file names from FD statements
+            const fileMatch = trimmed.match(/FD\s+([A-Z][A-Z0-9\-_]{2,})/);
+            if (fileMatch) {
+                components.push({
+                    name: fileMatch[1],
+                    type: 'FILE',
+                    lineNumber: index + 1,
+                    fileType: fileType,
+                    isMainComponent: false,
+                    businessPurpose: this.generateBusinessPurpose(fileMatch[1])
+                });
+            }
+        });
+        
+        return components;
+    },
+
+    // Generate Business Purpose based on naming patterns
+    generateBusinessPurpose(componentName) {
+        const name = componentName.toUpperCase();
+        
+        // Customer-related
+        if (name.includes('CUST') || name.includes('CUSTOMER')) {
+            if (name.includes('MASTER') || name.includes('MAST')) {
+                return 'Customer Master Data Management';
+            } else if (name.includes('TRANS') || name.includes('TXN')) {
+                return 'Customer Transaction Processing';
+            } else if (name.includes('VALID') || name.includes('CHECK')) {
+                return 'Customer Data Validation';
+            } else {
+                return 'Customer Information Processing';
+            }
+        }
+        
+        // Account-related
+        else if (name.includes('ACCT') || name.includes('ACCOUNT')) {
+            if (name.includes('BAL') || name.includes('BALANCE')) {
+                return 'Account Balance Management';
+            } else if (name.includes('TRANS') || name.includes('TXN')) {
+                return 'Account Transaction Processing';
+            } else if (name.includes('MAINT') || name.includes('UPD')) {
+                return 'Account Maintenance Operations';
+            } else {
+                return 'Account Management System';
+            }
+        }
+        
+        // Financial/Payment
+        else if (name.includes('PAY') || name.includes('PAYMENT')) {
+            return 'Payment Processing System';
+        } else if (name.includes('INVOICE') || name.includes('INV')) {
+            return 'Invoice Management System';
+        } else if (name.includes('BILLING') || name.includes('BILL')) {
+            return 'Billing Operations System';
+        }
+        
+        // Transaction-related
+        else if (name.includes('TRANS') || name.includes('TXN')) {
+            if (name.includes('LOG') || name.includes('HIST')) {
+                return 'Transaction History & Logging';
+            } else if (name.includes('PROC') || name.includes('PROCESS')) {
+                return 'Transaction Processing Engine';
+            } else {
+                return 'Transaction Management System';
+            }
+        }
+        
+        // Data management
+        else if (name.includes('MASTER') || name.includes('MAST')) {
+            return 'Master Data Management';
+        } else if (name.includes('COPY') || name.includes('CPY')) {
+            return 'Data Structure Definition';
+        } else if (name.includes('VALID') || name.includes('CHECK')) {
+            return 'Data Validation & Quality Control';
+        }
+        
+        // Reports
+        else if (name.includes('REPORT') || name.includes('RPT')) {
+            return 'Report Generation System';
+        } else if (name.includes('EXTRACT') || name.includes('EXT')) {
+            return 'Data Extraction & ETL';
+        }
+        
+        // Maintenance
+        else if (name.includes('MAINT') || name.includes('UPD')) {
+            return 'Data Maintenance Operations';
+        } else if (name.includes('DELETE') || name.includes('DEL')) {
+            return 'Data Deletion & Cleanup';
+        }
+        
+        // Generic based on type indicators
+        else if (name.includes('PROC') || name.includes('PROCESS')) {
+            return 'Business Process Automation';
+        } else if (name.includes('UTIL') || name.includes('UTILITY')) {
+            return 'System Utility Functions';
+        } else if (name.includes('BATCH') || name.includes('JOB')) {
+            return 'Batch Processing System';
+        } else if (name.includes('ONLINE') || name.includes('CICS')) {
+            return 'Online Transaction Processing';
+        }
+        
+        // Fallback based on common patterns
+        else if (name.endsWith('-RECORD') || name.endsWith('-REC')) {
+            return 'Data Record Structure';
+        } else if (name.endsWith('-FILE') || name.endsWith('-FL')) {
+            return 'File Management System';
+        } else if (name.endsWith('-PROG') || name.endsWith('-PGM')) {
+            return 'Business Logic Program';
+        } else {
+            return 'Mainframe Business Component';
+        }
+    },
+
+    // ============================================
+    // AUTO-DISCOVERY AND COMPONENT ANALYSIS
+    // ============================================
+
+    // Auto-Discover Components
+    async autoDiscoverComponents(fileObj) {
+        for (const component of fileObj.components) {
+            if (component.isMainComponent) {
+                const existingComponent = this.discoveredComponents.get(component.name);
+                
+                if (existingComponent) {
+                    // UPDATE EXISTING COMPONENT - merge new information
+                    existingComponent.inputFiles = this.mergeUniqueArrays(
+                        existingComponent.inputFiles || [], 
+                        this.extractInputFiles(fileObj.content)
+                    );
+                    existingComponent.outputFiles = this.mergeUniqueArrays(
+                        existingComponent.outputFiles || [], 
+                        this.extractOutputFiles(fileObj.content)
+                    );
+                    existingComponent.fieldCount = Math.max(
+                        existingComponent.fieldCount || 0,
+                        fileObj.components.filter(c => c.type === 'FIELD' || c.type === 'RECORD_LAYOUT').length
+                    );
+                    
+                    // Update other metrics if they're better
+                    if (fileObj.metrics.codeLines > (existingComponent.lineCount || 0)) {
+                        existingComponent.lineCount = fileObj.metrics.codeLines;
+                        existingComponent.complexityScore = fileObj.metrics.complexity;
+                        existingComponent.fileSource = fileObj.name; // Update to latest file
+                    }
+                    
+                    // MARK FOR RE-ANALYSIS - this is key for dependency refresh
+                    existingComponent.analyzed = false;
+                    existingComponent.needsReanalysis = true;
+                    
+                    console.log(`🔄 Updated existing component: ${component.name}`);
+                } else {
+                    // CREATE NEW COMPONENT
+                    const discoveredComponent = {
+                        name: component.name,
+                        friendlyName: await this.generateFriendlyName(component.name),
+                        type: component.type,
+                        businessPurpose: component.businessPurpose,
+                        fileSource: fileObj.name,
+                        lineCount: fileObj.metrics.codeLines,
+                        complexityScore: fileObj.metrics.complexity,
+                        inputFiles: this.extractInputFiles(fileObj.content),
+                        outputFiles: this.extractOutputFiles(fileObj.content),
+                        fieldCount: fileObj.components.filter(c => c.type === 'FIELD' || c.type === 'RECORD_LAYOUT').length,
+                        analyzed: false,
+                        selected: false,
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    this.discoveredComponents.set(component.name, discoveredComponent);
+                    console.log(`✨ Created new component: ${component.name}`);
+                }
+            }
+        }
+        
+        // INVALIDATE EXISTING ANALYSES that might have missing dependencies now resolved
+        this.invalidateAnalysesWithMissingDependencies();
+    },
+
+    // NEW METHOD: Merge Unique Arrays
+    mergeUniqueArrays(arr1, arr2) {
+        const combined = [...(arr1 || []), ...(arr2 || [])];
+        return [...new Set(combined)]; // Remove duplicates
+    },
+
+    // NEW METHOD: Invalidate Analyses with Missing Dependencies
+    invalidateAnalysesWithMissingDependencies() {
+        const newlyAvailableComponents = Array.from(this.discoveredComponents.keys());
+        
+        Object.entries(this.analysisResults).forEach(([componentName, result]) => {
+            if (result.dependencyAnalysis && result.dependencyAnalysis.missing) {
+                // Check if any previously missing dependencies are now available
+                const stillMissing = {
+                    copybooks: result.dependencyAnalysis.missing.copybooks.filter(name => 
+                        !newlyAvailableComponents.includes(name)
+                    ),
+                    programs: result.dependencyAnalysis.missing.programs.filter(name => 
+                        !newlyAvailableComponents.includes(name)
+                    ),
+                    files: result.dependencyAnalysis.missing.files.filter(name => 
+                        !newlyAvailableComponents.includes(name)
+                    )
+                };
+                
+                const originalMissingCount = 
+                    result.dependencyAnalysis.missing.copybooks.length + 
+                    result.dependencyAnalysis.missing.programs.length + 
+                    result.dependencyAnalysis.missing.files.length;
+                    
+                const currentMissingCount = 
+                    stillMissing.copybooks.length + 
+                    stillMissing.programs.length + 
+                    stillMissing.files.length;
+                
+                // If missing count changed, mark for re-analysis
+                if (currentMissingCount !== originalMissingCount) {
+                    const component = this.discoveredComponents.get(componentName);
+                    if (component) {
+                        component.analyzed = false;
+                        component.needsReanalysis = true;
+                    }
+                    console.log(`🔄 Marked ${componentName} for re-analysis - dependencies changed`);
+                }
+            }
+        });
+    },
+
+    // Extract Input/Output Files
+    extractInputFiles(content) {
+        const files = [];
+        const lines = content.split('\n');
+        
+        lines.forEach(line => {
+            const trimmed = line.trim().toUpperCase();
+            
+            // Look for INPUT file patterns
+            const inputPatterns = [
+                /SELECT\s+([A-Z][A-Z0-9\-_]+)\s+ASSIGN/,
+                /OPEN\s+INPUT\s+([A-Z][A-Z0-9\-_]+)/,
+                /READ\s+([A-Z][A-Z0-9\-_]+)/
+            ];
+            
+            for (const pattern of inputPatterns) {
+                const match = trimmed.match(pattern);
+                if (match && !files.includes(match[1])) {
+                    files.push(match[1]);
+                }
+            }
+        });
+        
+        return files.slice(0, 10); // Limit to top 10
+    },
+
+    extractOutputFiles(content) {
+        const files = [];
+        const lines = content.split('\n');
+        
+        lines.forEach(line => {
+            const trimmed = line.trim().toUpperCase();
+            
+            // Look for OUTPUT file patterns
+            const outputPatterns = [
+                /OPEN\s+OUTPUT\s+([A-Z][A-Z0-9\-_]+)/,
+                /WRITE\s+([A-Z][A-Z0-9\-_]+)/,
+                /DISPLAY\s+.*\s+UPON\s+([A-Z][A-Z0-9\-_]+)/
+            ];
+            
+            for (const pattern of outputPatterns) {
+                const match = trimmed.match(pattern);
+                if (match && !files.includes(match[1])) {
+                    files.push(match[1]);
+                }
+            }
+        });
+        
+        return files.slice(0, 10); // Limit to top 10
+    },
+
+    // Generate Friendly Name using patterns
+    async generateFriendlyName(componentName) {
+        // Check cache first
+        if (this.friendlyNameCache.has(componentName.toUpperCase())) {
+            return this.friendlyNameCache.get(componentName.toUpperCase());
+        }
+        
+        // Try LLM generation if available and validated
+        if (this.serverValidated) {
+            try {
+                const llmName = await this.getLLMBusinessName(componentName);
+                if (llmName && llmName.length > 0 && llmName.length < 100) {
+                    this.friendlyNameCache.set(componentName.toUpperCase(), llmName);
+                    return llmName;
+                }
+            } catch (error) {
+                console.warn('LLM business name generation failed:', error);
+            }
+        }
+        
+        // Fallback to pattern-based generation
+        const patternName = this.generateFriendlyNameFromPattern(componentName);
+        this.friendlyNameCache.set(componentName.toUpperCase(), patternName);
+        return patternName;
+    },
+
+    // NEW METHOD: Get LLM Business Name
+    async getLLMBusinessName(componentName) {
+        const prompt = `Generate a business-friendly name for this mainframe component: "${componentName}"
+
+Context: This is a mainframe component name that needs a clear business description.
+
+Examples:
+- CUST-MASTER → "Customer Master File"
+- ACCT-VALIDATE → "Account Validation Program" 
+- TRANS-LOG → "Transaction Log Handler"
+- PAY-PROCESS → "Payment Processing System"
+- INV-REPORT → "Invoice Report Generator"
+
+Rules:
+- Return ONLY the business-friendly name
+- Maximum 50 characters
+- No technical jargon
+- Focus on business purpose
+- Use proper capitalization
+
+Business Name:`;
+
+        try {
+            const response = await this.callLLMAPI(prompt);
+            
+            // Handle different response formats
+            let businessName = '';
+            if (typeof response === 'string') {
+                businessName = response.trim();
+            } else if (response && response.businessPurpose) {
+                businessName = response.businessPurpose.trim();
+            } else if (response && response.rawResponse) {
+                businessName = response.rawResponse.trim();
+            }
+            
+            // Clean up the response
+            businessName = businessName.replace(/^["']|["']$/g, ''); // Remove quotes
+            businessName = businessName.split('\n')[0]; // Take first line only
+            
+            return businessName.length > 0 && businessName.length < 100 ? businessName : null;
+            
+        } catch (error) {
+            console.warn('LLM business name failed:', error);
+            return null;
+        }
+    },
+
+    // Pattern-based friendly name generation
+    generateFriendlyNameFromPattern(componentName) {
+        const name = componentName.toUpperCase();
+        
+        // Common mainframe patterns to friendly names
+        const patterns = [
+            { pattern: /CUST.*MASTER/, replacement: 'Customer Master File' },
+            { pattern: /CUST.*MAINT/, replacement: 'Customer Maintenance Program' },
+            { pattern: /CUST.*VALID/, replacement: 'Customer Validation Program' },
+            { pattern: /ACCT.*MASTER/, replacement: 'Account Master File' },
+            { pattern: /ACCT.*TRANS/, replacement: 'Account Transaction Program' },
+            { pattern: /ACCT.*BAL/, replacement: 'Account Balance Program' },
+            { pattern: /PAY.*PROC/, replacement: 'Payment Processing System' },
+            { pattern: /TRANS.*LOG/, replacement: 'Transaction Log Handler' },
+            { pattern: /INVOICE.*PROC/, replacement: 'Invoice Processing System' },
+            { pattern: /REPORT.*GEN/, replacement: 'Report Generation Program' },
+            { pattern: /.*MASTER.*/, replacement: `${name.split('-')[0]} Master Data` },
+            { pattern: /.*COPY.*/, replacement: `${name.split('-')[0]} Data Structure` },
+            { pattern: /.*VALID.*/, replacement: `${name.split('-')[0]} Validation Program` },
+            { pattern: /.*PROC.*/, replacement: `${name.split('-')[0]} Processing System` }
+        ];
+        
+        for (const { pattern, replacement } of patterns) {
+            if (pattern.test(name)) {
+                return replacement;
+            }
+        }
+        
+        // Final fallback
+        const parts = name.split('-');
+        if (parts.length > 1) {
+            return `${parts[0]} ${parts[1]} System`;
+        } else {
+            return `${name} Component`;
+        }
+    },
+
+    // Enable Auto Analysis
+    enableAutoAnalysis() {
+        const autoAnalyzeBtn = document.getElementById('autoAnalyzeBtn');
+        if (autoAnalyzeBtn && this.discoveredComponents.size > 0 && this.serverValidated) {
+            autoAnalyzeBtn.disabled = false;
+        }
+    },
+
+    // ============================================
+    // DISPLAY AND UI UPDATE METHODS
+    // ============================================
+
+    // Display Discovered Components
+    displayDiscoveredComponents() {
+        const container = document.getElementById('componentsList');
+        if (!container) return;
+
+        const components = Array.from(this.discoveredComponents.values());
+        
+        if (components.length === 0) {
+            container.innerHTML = `
+                <p style="color: var(--grey-500); text-align: center; padding: 2rem;">
+                    Upload files to auto-discover components
+                </p>
+            `;
+            return;
+        }
+
+        // Sort components by type and name
+        components.sort((a, b) => {
+            if (a.type !== b.type) {
+                const typeOrder = { 'PROGRAM': 1, 'RECORD_LAYOUT': 2, 'COPYBOOK': 3, 'FILE': 4 };
+                return (typeOrder[a.type] || 5) - (typeOrder[b.type] || 5);
+            }
+            return a.friendlyName.localeCompare(b.friendlyName);
+        });
+
+        let html = '';
+        
+        components.forEach(component => {
+            const iconClass = this.getComponentIconClass(component.type);
+            const analysisStatus = component.analyzed ? 
+                '<span class="badge badge-success">Analyzed</span>' : 
+                '<span class="badge badge-warning">Pending</span>';
+            
+            const selectedClass = component.selected ? 'selected' : '';
+            
+            html += `
+                <div class="component-card ${selectedClass}" onclick="analyzer.selectComponent('${component.name}')" data-component="${component.name}">
+                    <div class="component-card-header">
+                        <div class="component-card-icon ${iconClass}">
+                            ${this.getComponentIcon(component.type)}
+                        </div>
+                        <div class="component-card-info">
+                            <div class="component-card-name">${component.name}</div>
+                            <div class="component-card-friendly">${component.friendlyName}</div>
+                            <div class="component-card-description">${component.businessPurpose}</div>
+                        </div>
+                    </div>
+                    <div class="component-card-metrics">
+                        <div class="component-metric">
+                            <span class="component-metric-icon">📁</span>
+                            <span>${component.fileSource}</span>
+                        </div>
+                        <div class="component-metric">
+                            <span class="component-metric-icon">📋</span>
+                            <span>${component.fieldCount} fields</span>
+                        </div>
+                        <div class="component-metric">
+                            <span class="component-metric-icon">📊</span>
+                            <span>Complexity: ${component.complexityScore}</span>
+                        </div>
+                        <div class="component-metric">
+                            ${analysisStatus}
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        container.innerHTML = html;
+        
+        // Update count
+        const countElement = document.getElementById('componentCount');
+        if (countElement) {
+            countElement.textContent = components.length;
+        }
+    },
+
+    // Get Component Icon Class
+    getComponentIconClass(type) {
+        switch(type) {
+            case 'PROGRAM': return 'program';
+            case 'COPYBOOK': 
+            case 'RECORD_LAYOUT': return 'copybook';
+            case 'FILE': return 'file';
+            default: return 'file';
+        }
+    },
+
+    // Get Component Icon
+    getComponentIcon(type) {
+        switch(type) {
+            case 'PROGRAM': return '💼';
+            case 'COPYBOOK': 
+            case 'RECORD_LAYOUT': return '📚';
+            case 'FILE': return '📄';
+            default: return '📋';
+        }
+    },
+
+    // Update Dashboard Stats
+    updateDashboardStats() {
+        // Counts
+        const totalComponents = this.discoveredComponents.size;
+        const totalFiles = this.uploadedFiles.length;
+        const totalFields = Array.from(this.discoveredComponents.values())
+            .reduce((sum, c) => sum + (c.fieldCount || 0), 0);
+
+        // NEW: Code Metrics
+        const totalLinesOfCode = this.uploadedFiles.reduce((sum, file) => sum + (file.metrics?.codeLines || 0), 0);
+        const totalFileSize = this.uploadedFiles.reduce((sum, file) => sum + (file.size || 0), 0);
+        const avgComplexity = Array.from(this.discoveredComponents.values())
+            .reduce((sum, c) => sum + (c.complexityScore || 0), 0) / Math.max(totalComponents, 1);
+
+        const programs = Array.from(this.discoveredComponents.values())
+            .filter(c => (c.type || '').toUpperCase().includes('PROGRAM')).length;
+        const copybooks = Array.from(this.discoveredComponents.values())
+            .filter(c => (c.type || '').toUpperCase().includes('COPY') || (c.type || '').toUpperCase().includes('RECORD')).length;
+
+        // Quality average (only analyzed comps with numeric score)
+        const scored = Array.from(this.discoveredComponents.values())
+            .map(c => Number(c.qualityScore))
+            .filter(v => Number.isFinite(v));
+        const avgQuality = scored.length ? (scored.reduce((a,b)=>a+b,0) / scored.length).toFixed(1) : '-';
+
+        // Header stats
+        const setText = (id, val) => { 
+            const el = document.getElementById(id); 
+            if (el) el.textContent = String(val); 
+        };
+        
+        setText('headerComponents', totalComponents);
+        setText('headerPrograms', programs);
+        setText('headerCopybooks', copybooks);
+        setText('headerFields', totalFields);
+        setText('headerLinesOfCode', totalLinesOfCode.toLocaleString());
+        setText('headerFileSize', this.formatFileSize(totalFileSize));
+
+        // Component count in left panel
+        setText('componentCount', totalComponents);
+
+        // Update dashboard cards with enhanced metrics
+        this.updateDashboardMetricsCards(totalComponents, totalFiles, totalFields, totalLinesOfCode, avgComplexity, avgQuality);
+    },
+
+    // NEW METHOD: Update Dashboard Metrics Cards
+    updateDashboardMetricsCards(totalComponents, totalFiles, totalFields, totalLinesOfCode, avgComplexity, avgQuality) {
+        const dashboardContent = document.getElementById('dashboardContent');
+        if (!dashboardContent) return;
+
+        dashboardContent.innerHTML = `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 1.5rem;">
+                <div style="background: white; border-radius: 12px; padding: 1.5rem; border: 1px solid var(--grey-200); box-shadow: var(--shadow-sm);">
+                    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+                        <div style="width: 50px; height: 50px; background: linear-gradient(135deg, var(--primary-blue) 0%, var(--indigo) 100%); border-radius: 12px; display: flex; align-items: center; justify-content: center; color: white; font-size: 1.5rem;">📊</div>
+                        <div>
+                            <div style="font-size: 1.1rem; font-weight: 600; color: var(--grey-800);">System Overview</div>
+                            <div style="font-size: 0.85rem; color: var(--grey-600);">Complete mainframe analysis</div>
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem;">
+                        <div style="text-align: center; padding: 1rem; background: var(--grey-50); border-radius: 8px;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--primary-blue);">${totalComponents}</div>
+                            <div style="font-size: 0.8rem; color: var(--grey-600);">Components</div>
+                        </div>
+                        <div style="text-align: center; padding: 1rem; background: var(--grey-50); border-radius: 8px;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--success-green);">${totalFiles}</div>
+                            <div style="font-size: 0.8rem; color: var(--grey-600);">Files</div>
+                        </div>
+                        <div style="text-align: center; padding: 1rem; background: var(--grey-50); border-radius: 8px;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--warning-yellow);">${totalFields}</div>
+                            <div style="font-size: 0.8rem; color: var(--grey-600);">Fields</div>
+                        </div>
+                        <div style="text-align: center; padding: 1rem; background: var(--grey-50); border-radius: 8px;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--info-blue);">${avgQuality}</div>
+                            <div style="font-size: 0.8rem; color: var(--grey-600);">Avg Quality</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="background: white; border-radius: 12px; padding: 1.5rem; border: 1px solid var(--grey-200); box-shadow: var(--shadow-sm);">
+                    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+                        <div style="width: 50px; height: 50px; background: linear-gradient(135deg, var(--success-green) 0%, #059669 100%); border-radius: 12px; display: flex; align-items: center; justify-content: center; color: white; font-size: 1.5rem;">💻</div>
+                        <div>
+                            <div style="font-size: 1.1rem; font-weight: 600; color: var(--grey-800);">Code Metrics</div>
+                            <div style="font-size: 0.85rem; color: var(--grey-600);">Lines of code and complexity</div>
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem;">
+                        <div style="text-align: center; padding: 1rem; background: var(--grey-50); border-radius: 8px;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--primary-blue);">${totalLinesOfCode.toLocaleString()}</div>
+                            <div style="font-size: 0.8rem; color: var(--grey-600);">Lines of Code</div>
+                        </div>
+                        <div style="text-align: center; padding: 1rem; background: var(--grey-50); border-radius: 8px;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--warning-yellow);">${avgComplexity.toFixed(1)}</div>
+                            <div style="font-size: 0.8rem; color: var(--grey-600);">Avg Complexity</div>
+                        </div>
+                        <div style="text-align: center; padding: 1rem; background: var(--grey-50); border-radius: 8px;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--success-green);">${this.getAnalyzedComponentsCount()}</div>
+                            <div style="font-size: 0.8rem; color: var(--grey-600);">Analyzed</div>
+                        </div>
+                        <div style="text-align: center; padding: 1rem; background: var(--grey-50); border-radius: 8px;">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--info-blue);">${this.formatFileSize(this.uploadedFiles.reduce((sum, file) => sum + (file.size || 0), 0))}</div>
+                            <div style="font-size: 0.8rem; color: var(--grey-600);">Total Size</div>
+                        </div>
+                    </div>
+                </div>
+                // ============================================
+// ENHANCED CODE ANALYZER - PART 7
+// LLM Integration & Analysis Engine (Continued)
+// ============================================
+
+// Continuing from Part 6...
+
+            </div>
+        `;
+    },
+
+    // NEW HELPER METHODS
+    formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    },
+
+    getAnalyzedComponentsCount() {
+        return Object.keys(this.analysisResults).length;
+    },
+
+    // ============================================
+    // AUTO-ANALYSIS ORCHESTRATION
+    // ============================================
+
+    // Start Auto Analysis
+    async startAutoAnalysis() {
+        if (this.autoAnalysisInProgress) {
+            this.showWarning('Auto-analysis already in progress');
+            return;
+        }
+        
+        if (this.discoveredComponents.size === 0) {
+            this.showError('No components discovered for analysis');
+            return;
+        }
+        
+        this.autoAnalysisInProgress = true;
+        this.showLoading();
+        this.updateLoadingStatus('🚀 Starting auto-analysis of discovered components...');
+        
+        try {
+            // INCLUDE COMPONENTS THAT NEED RE-ANALYSIS
+            const components = Array.from(this.discoveredComponents.values())
+                .filter(comp => !comp.analyzed || comp.needsReanalysis)
+                .slice(0, 15); // Increased limit to handle re-analysis
+            
+            if (components.length === 0) {
+                this.hideLoading();
+                this.showInfo('All components are already analyzed. Upload new files or clear data to re-analyze.');
+                return;
+            }
+            
+            let completed = 0;
+            const reanalysisCount = components.filter(c => c.needsReanalysis).length;
+            
+            if (reanalysisCount > 0) {
+                this.showInfo(`🔄 Re-analyzing ${reanalysisCount} components with updated dependencies...`);
+            }
+            
+            for (const component of components) {
+                try {
+                    this.updateLoadingStatus(`Analyzing ${component.friendlyName || component.name} (${completed + 1}/${components.length})...`);
+                    this.updateProgress((completed / components.length) * 100);
+                    
+                    const relevantFiles = this.findRelevantFiles(component.name);
+                    const analysisResult = await this.runComponentAnalysis(component.name, relevantFiles);
+                    
+                    this.analysisResults[component.name] = analysisResult;
+                    component.analyzed = true;
+                    component.needsReanalysis = false; // Clear re-analysis flag
+                    component.qualityScore = analysisResult.qualityScore;
+                    
+                    completed++;
+                    
+                    // Brief pause between analyses
+                    await this.sleep(1000);
+                    
+                } catch (error) {
+                    console.warn(`Failed to analyze ${component.name}:`, error);
+                    component.analyzed = false;
+                }
+            }
+            
+            this.hideLoading();
+            this.updateDashboardWithResults();
+            this.enableExportButtons();
+            this.enableChat();
+            this.saveToDatabase();
+            
+            // REFRESH CURRENT COMPONENT VIEW if one is selected
+            if (this.currentSelectedComponent) {
+                this.syncAllTabsForComponent(this.currentSelectedComponent);
+            }
+            
+            this.showSuccess(`✨ Auto-analysis complete! ${completed}/${components.length} components analyzed (${reanalysisCount} re-analyzed)`);
+            
+            // Switch to dashboard to show results
+            document.querySelector('.tab[data-tab="dashboard"]').click();
+            
+        } catch (error) {
+            this.hideLoading();
+            this.showError(`Auto-analysis failed: ${error.message}`);
+        } finally {
+            this.autoAnalysisInProgress = false;
+        }
+    },
+
+    // Find Relevant Files for Component
+    findRelevantFiles(componentName) {
+        const componentUpper = componentName.toUpperCase();
+        const componentBase = componentUpper.replace(/\.(CPY|COPYBOOK|COP)$/, '');
+        
+        return this.uploadedFiles.filter(file => {
+            const fileNameUpper = file.name.toUpperCase();
+            const fileNameBase = fileNameUpper.replace(/\.(CPY|COPYBOOK|COP)$/, '');
+            
+            // Direct name match
+            if (fileNameUpper.includes(componentUpper) || 
+                fileNameBase === componentBase ||
+                componentBase === fileNameBase) {
+                return true;
+            }
+            
+            // Content-based matching
+            const contentUpper = file.content.toUpperCase();
+            if (contentUpper.includes(componentUpper) ||
+                contentUpper.includes(componentBase) ||
+                contentUpper.includes(`COPY ${componentBase}`) ||
+                contentUpper.includes(`"${componentBase}"`) ||
+                contentUpper.includes(`'${componentBase}'`)) {
+                return true;
+            }
+            
+            // Component-based matching
+            if (file.components) {
+                return file.components.some(comp => {
+                    const compNameUpper = comp.name.toUpperCase();
+                    const compNameBase = compNameUpper.replace(/\.(CPY|COPYBOOK|COP)$/, '');
+                    return compNameUpper === componentUpper || 
+                           compNameBase === componentBase ||
+                           componentBase === compNameBase;
+                });
+            }
+            
+            return false;
+        });
+    },
+
+    // Run Component Analysis
+    async runComponentAnalysis(componentName, relevantFiles) {
+        console.log(`Running analysis for: ${componentName}`);
+        
+        const component = this.discoveredComponents.get(componentName);
+        const friendlyName = component?.friendlyName || componentName;
+        
+        try {
+            // Stage 1: Basic component analysis
+            const componentType = this.detectComponentType(componentName, relevantFiles);
+            
+            // Stage 2: Extract dependencies
+            const dependencyAnalysis = await this.extractDependencies(relevantFiles);
+            
+            // Stage 3: Field analysis (for copybooks)
+            let fieldAnalysis = null;
+            if (componentType === 'Copybook' || componentType === 'RECORD_LAYOUT') {
+                fieldAnalysis = await this.analyzeFieldsInComponent(componentName, relevantFiles);
+            }
+            
+            // Stage 4: LLM-enhanced analysis
+            let llmAnalysis = null;
+            try {
+                llmAnalysis = await this.getBusinessIntelligenceFromLLM(
+                    componentName, friendlyName, componentType, relevantFiles, dependencyAnalysis, fieldAnalysis
+                );
+            } catch (llmError) {
+                console.warn('LLM analysis failed:', llmError);
+                llmAnalysis = {
+                    error: true,
+                    message: llmError.message,
+                    businessPurpose: component?.businessPurpose || 'Business purpose analysis failed',
+                    recommendations: ['Check LLM server connection', 'Verify component data', 'Try manual analysis'],
+                    fallbackUsed: true
+                };
+            }
+            
+            const results = {
+                componentName: componentName,
+                friendlyName: friendlyName,
+                timestamp: new Date().toISOString(),
+                filesAnalyzed: relevantFiles.map(f => f.name),
+                componentType: componentType,
+                dependencyAnalysis: dependencyAnalysis,
+                fieldAnalysis: fieldAnalysis,
+                llmAnalysis: llmAnalysis,
+                totalFields: fieldAnalysis?.fields?.length || 0,
+                qualityScore: this.calculateQualityScore(llmAnalysis, fieldAnalysis),
+                analysisMethod: 'Auto-Discovery-Enhanced'
+            };
+            
+            return results;
+            
+        } catch (error) {
+            console.error(`Analysis failed for ${componentName}:`, error);
+            throw new Error(`Analysis failed: ${error.message}`);
+        }
+    },
+
+    // Detect Component Type
+    detectComponentType(componentName, relevantFiles) {
+        const component = this.discoveredComponents.get(componentName);
+        if (component?.type) {
+            return component.type;
+        }
+        
+        // Analyze files to determine type
+        for (const file of relevantFiles) {
+            if (file.type === 'Copybook') return 'Copybook';
+            if (file.type === 'COBOL Program') return 'Program';
+            if (file.type === 'JCL Job') return 'Job';
+        }
+        
+        return 'Unknown';
+    },
+
+    // Extract Dependencies
+    async extractDependencies(relevantFiles) {
+        const dependencies = {
+            found: { copybooks: [], programs: [], files: [] },
+            missing: { copybooks: [], programs: [], files: [] },
+            summary: { foundCount: 0, missingCount: 0 }
+        };
+        
+        for (const file of relevantFiles) {
+            const content = file.content.toUpperCase();
+            const lines = content.split('\n');
+            
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                
+                // Extract COPY statements
+                const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]+)/);
+                if (copyMatch) {
+                    const copybook = copyMatch[1];
+                    if (this.discoveredComponents.has(copybook)) {
+                        if (!dependencies.found.copybooks.includes(copybook)) {
+                            dependencies.found.copybooks.push(copybook);
+                        }
+                    } else {
+                        if (!dependencies.missing.copybooks.includes(copybook)) {
+                            dependencies.missing.copybooks.push(copybook);
+                        }
+                    }
+                }
+                
+                // Extract CALL statements
+                const callMatch = trimmed.match(/CALL\s+['"]([A-Z][A-Z0-9\-_]+)['"]/);
+                if (callMatch) {
+                    const program = callMatch[1];
+                    if (this.discoveredComponents.has(program)) {
+                        if (!dependencies.found.programs.includes(program)) {
+                            dependencies.found.programs.push(program);
+                        }
+                    } else {
+                        if (!dependencies.missing.programs.includes(program)) {
+                            dependencies.missing.programs.push(program);
+                        }
+                    }
+                }
+                
+                // Extract file references
+                const fileMatch = trimmed.match(/SELECT\s+([A-Z][A-Z0-9\-_]+)/);
+                if (fileMatch) {
+                    const fileName = fileMatch[1];
+                    if (this.discoveredComponents.has(fileName)) {
+                        if (!dependencies.found.files.includes(fileName)) {
+                            dependencies.found.files.push(fileName);
+                        }
+                    } else {
+                        if (!dependencies.missing.files.includes(fileName)) {
+                            dependencies.missing.files.push(fileName);
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Calculate summary
+        dependencies.summary.foundCount = 
+            dependencies.found.copybooks.length + 
+            dependencies.found.programs.length + 
+            dependencies.found.files.length;
+            
+        dependencies.summary.missingCount = 
+            dependencies.missing.copybooks.length + 
+            dependencies.missing.programs.length + 
+            dependencies.missing.files.length;
+        
+        return dependencies;
+    },
+
+    // Analyze Fields in Component
+    async analyzeFieldsInComponent(componentName, relevantFiles) {
+        const fieldAnalysis = {
+            fields: [],
+            inputFields: [],
+            outputFields: [],
+            referenceFields: [],
+            unusedFields: [],
+            businessLogicSummary: {
+                totalValidationRules: 0,
+                totalCalculations: 0,
+                fieldsWithBusinessLogic: 0
+            }
+        };
+        
+        for (const file of relevantFiles) {
+            const content = file.content;
+            const lines = content.split('\n');
+            
+            lines.forEach((line, index) => {
+                const trimmed = line.trim().toUpperCase();
+                
+                // Extract field definitions
+                const fieldMatch = trimmed.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]+)(?:\s+PIC\s+([X9VS\(\)]+))?/);
+                if (fieldMatch) {
+                    const level = parseInt(fieldMatch[1]);
+                    const fieldName = fieldMatch[2];
+                    const picture = fieldMatch[3] || '';
+                    
+                    if (level !== 88 && fieldName && level <= 49) {
+                        const field = {
+                            name: fieldName,
+                            level: level,
+                            picture: picture,
+                            lineNumber: index + 1,
+                            fileName: file.name,
+                            businessLogic: {
+                                businessMeaning: this.generateFieldPurpose(fieldName),
+                                validationRules: [],
+                                calculations: []
+                            }
+                        };
+                        
+                        fieldAnalysis.fields.push(field);
+                        
+                        // Determine usage pattern
+                        if (this.isInputField(fieldName, content)) {
+                            fieldAnalysis.inputFields.push(fieldName);
+                        } else if (this.isOutputField(fieldName, content)) {
+                            fieldAnalysis.outputFields.push(fieldName);
+                        } else if (this.isReferenceField(fieldName, content)) {
+                            fieldAnalysis.referenceFields.push(fieldName);
+                        } else {
+                            fieldAnalysis.unusedFields.push(fieldName);
+                        }
+                    }
+                }
+            });
+        }
+        
+        return fieldAnalysis;
+    },
+
+    // Field Usage Detection Methods
+    isInputField(fieldName, content) {
+        const patterns = [
+            new RegExp(`MOVE\\s+\\w+\\s+TO\\s+${fieldName}`, 'i'),
+            new RegExp(`ACCEPT\\s+${fieldName}`, 'i'),
+            new RegExp(`READ\\s+\\w+\\s+INTO\\s+${fieldName}`, 'i')
+        ];
+        
+        return patterns.some(pattern => pattern.test(content));
+    },
+
+    isOutputField(fieldName, content) {
+        const patterns = [
+            new RegExp(`DISPLAY\\s+${fieldName}`, 'i'),
+            new RegExp(`WRITE\\s+${fieldName}`, 'i'),
+            new RegExp(`MOVE\\s+${fieldName}\\s+TO`, 'i')
+        ];
+        
+        return patterns.some(pattern => pattern.test(content));
+    },
+
+    isReferenceField(fieldName, content) {
+        const patterns = [
+            new RegExp(`IF\\s+${fieldName}`, 'i'),
+            new RegExp(`WHEN\\s+${fieldName}`, 'i'),
+            new RegExp(`COMPUTE\\s+\\w+\\s*=.*${fieldName}`, 'i')
+        ];
+        
+        return patterns.some(pattern => pattern.test(content));
+    },
+
+    // Generate Field Purpose
+    generateFieldPurpose(fieldName) {
+        const name = fieldName.toUpperCase();
+        
+        if (name.includes('RECORD') || name.includes('REC')) {
+            return `Main record structure for ${fieldName.toLowerCase().replace(/-/g, ' ')} data`;
+        } else if (name.includes('ID') || name.includes('KEY')) {
+            return `Unique identifier for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
+        } else if (name.includes('DATE') || name.includes('TIME')) {
+            return `Date/time field for ${fieldName.toLowerCase().replace(/-/g, ' ')} tracking`;
+        } else if (name.includes('AMT') || name.includes('AMOUNT')) {
+            return `Monetary amount for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
+        } else if (name.includes('DESC') || name.includes('NAME')) {
+            return `Descriptive text for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
+        } else if (name.includes('FLAG') || name.includes('IND')) {
+            return `Status indicator for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
+        } else if (name.includes('CODE') || name.includes('CD')) {
+            return `Coded value for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
+        } else if (name.includes('COUNT') || name.includes('CNT')) {
+            return `Counter/number field for ${fieldName.toLowerCase().replace(/-/g, ' ')}`;
+        } else {
+            return `Business data field for ${fieldName.toLowerCase().replace(/-/g, ' ')} processing`;
+        }
+    },
+
+    // Calculate Quality Score
+    calculateQualityScore(llmAnalysis, fieldAnalysis) {
+        let score = 5; // Base score
+        
+        // LLM analysis quality factors
+        if (llmAnalysis && !llmAnalysis.error) {
+            score += 2;
+            
+            if (llmAnalysis.businessPurpose && llmAnalysis.businessPurpose.length > 50) {
+                score += 1;
+            }
+            
+            if (llmAnalysis.recommendations && llmAnalysis.recommendations.length > 0) {
+                score += 1;
+            }
+        }
+        
+        // Field analysis quality factors
+        if (fieldAnalysis) {
+            if (fieldAnalysis.fields && fieldAnalysis.fields.length > 0) {
+                score += 1;
+            }
+            
+            if (fieldAnalysis.inputFields && fieldAnalysis.inputFields.length > 0) {
+                score += 0.5;
+            }
+            
+            if (fieldAnalysis.outputFields && fieldAnalysis.outputFields.length > 0) {
+                score += 0.5;
+            }
+        }
+        
+        return Math.min(Math.round(score), 10);
+    },
+
+    // ============================================
+    // LLM API INTEGRATION WITH FALLBACK
+    // ============================================
+
+    // Enhanced LLM API Call with 6000 token limit
+    async callLLMAPI(prompt, retries = 2) {
+        console.log('🤖 Enhanced LLM API call initiated');
+        
+        try {
+            // Validate token limits (6000 max)
+            const promptTokens = this.estimateTokens(prompt);
+            const maxPromptTokens = this.maxTokens - 1500; // Reserve 1500 for response
+            
+            if (promptTokens > maxPromptTokens) {
+                console.warn(`Prompt too large (${promptTokens} tokens), truncating...`);
+                prompt = this.truncatePrompt(prompt, maxPromptTokens);
+            }
+            
+            return await this.makeSingleLLMRequest(prompt, 1500, retries);
+            
+        } catch (error) {
+            console.error('Enhanced LLM call failed:', error);
+            
+            // Return structured fallback response instead of throwing
+            return {
+                error: true,
+                message: error.message,
+                businessPurpose: 'LLM analysis failed - manual review recommended',
+                recommendations: ['Check LLM connection', 'Verify component data', 'Try manual analysis'],
+                qualityScore: 3,
+                fallbackUsed: true
+            };
+        }
+    },
+
+    // Estimate Tokens
+    estimateTokens(text) {
+        if (!text || typeof text !== 'string') return 0;
+        
+        // More accurate token estimation for mainframe content
+        // COBOL and technical content tends to have more tokens per character
+        const baseEstimate = Math.ceil(text.length / 3.2);
+        
+        // Adjust for technical content density
+        const technicalWords = (text.match(/\b[A-Z][A-Z0-9\-_]{3,}\b/g) || []).length;
+        const codeLines = (text.match(/^\s*\d{2}\s+/gm) || []).length;
+        
+        // Technical content adjustment
+        const adjustment = Math.floor((technicalWords + codeLines) * 0.1);
+        
+        return baseEstimate + adjustment;
+    },
+
+    // Truncate Prompt to Fit Token Limit
+    truncatePrompt(prompt, maxTokens) {
+        const lines = prompt.split('\n');
+        let truncated = '';
+        let tokenCount = 0;
+        
+        // Keep the header and instructions
+        const headerEndIndex = lines.findIndex(line => line.includes('FILE CONTENTS:'));
+        if (headerEndIndex !== -1) {
+            const header = lines.slice(0, headerEndIndex + 1).join('\n');
+            truncated = header + '\n';
+            tokenCount = this.estimateTokens(truncated);
+        }
+        
+        // Add content until we reach the limit
+        for (let i = headerEndIndex + 1; i < lines.length; i++) {
+            const line = lines[i] + '\n';
+            const lineTokens = this.estimateTokens(line);
+            
+            if (tokenCount + lineTokens > maxTokens - 100) { // Leave buffer
+                truncated += '\n[Content truncated to fit token limit]';
+                break;
+            }
+            
+            truncated += line;
+            tokenCount += lineTokens;
+        }
+        
+        return truncated;
+    },
+
+    // Single LLM Request
+    async makeSingleLLMRequest(prompt, maxResponseTokens, retries = 2) {
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+                console.log(`LLM API call attempt ${attempt + 1}/${retries + 1}`);
+                
+                const response = await fetch(`${this.vllmEndpoint}/generate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        max_tokens: maxResponseTokens,
+                        temperature: 0.1,
+                        top_p: 0.9,
+                        stop: [],
+                        stream: false,
+                        frequency_penalty: 0.1,
+                        presence_penalty: 0.0
+                    }),
+                    signal: AbortSignal.timeout(90000) // 90 second timeout
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                const resultText = this.extractTextFromResponse(data);
+                
+                if (!resultText) {
+                    throw new Error('No valid text content in LLM response');
+                }
+
+                // Try to parse as JSON, fallback to plain text
+                const parseResult = this.parseJSONResponse(resultText);
+                
+                if (parseResult.success) {
+                    console.log('✅ LLM request successful with JSON response');
+                    return parseResult.data;
+                } else {
+                    console.log('⚠️ JSON parsing failed, using fallback structure');
+                    return {
+                        businessPurpose: resultText.substring(0, 500),
+                        recommendations: ['Manual review recommended'],
+                        qualityScore: 5,
+                        rawResponse: resultText,
+                        fallbackUsed: true
+                    };
+                }
+
+            } catch (error) {
+                console.error(`LLM attempt ${attempt + 1} failed:`, error);
+                
+                if (attempt < retries) {
+                    const delay = 2000 * (attempt + 1); // Exponential backoff
+                    console.log(`Retrying in ${delay}ms...`);
+                    await this.sleep(delay);
+                } else {
+                    throw error;
+                }
+            }
+        }
+    },
+
+    // Extract Text from LLM Response
+    extractTextFromResponse(data) {
+        if (typeof data === 'string') return data.trim();
+        if (data.text) return data.text.trim();
+        if (data.choices && data.choices[0]) {
+            if (data.choices[0].text) return data.choices[0].text.trim();
+            if (data.choices[0].message?.content) return data.choices[0].message.content.trim();
+        }
+        if (data.generated_text) return data.generated_text.trim();
+        if (data.response) return data.response.trim();
+        
+        return null;
+    },
+
+    // Parse JSON Response with Fallback
+    parseJSONResponse(text) {
+        // First, try to parse as JSON
+        try {
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                const parsed = JSON.parse(jsonMatch[0]);
+                return { success: true, data: parsed };
+            }
+        } catch (error) {
+            console.warn('JSON parsing failed:', error);
+        }
+        
+        // If JSON parsing fails, extract structured information from text
+        return {
+            success: false,
+            error: 'Using text parsing fallback',
+            data: this.parseTextResponse(text)
+        };
+    },
+
+    // NEW METHOD: Parse Text Response
+    parseTextResponse(text) {
+        // Extract business purpose
+        const businessPurpose = this.extractBusinessPurpose(text);
+        const recommendations = this.extractRecommendations(text);
+        const riskAssessment = this.extractRiskAssessment(text);
+        const businessRules = this.extractBusinessRules(text);
+        
+        return {
+            businessPurpose: businessPurpose,
+            businessLogic: {
+                validationRules: this.extractValidationRules(text),
+                businessRules: businessRules,
+                dataProcessing: this.extractDataProcessing(text)
+            },
+            recommendations: recommendations,
+            modernizationSuggestions: this.extractModernizationSuggestions(text),
+            riskAssessment: riskAssessment,
+            qualityScore: this.extractQualityScore(text),
+            rawResponse: text,
+            fallbackUsed: true
+        };
+    },
+
+    // Extract helper methods for text parsing
+    extractBusinessPurpose(text) {
+        const patterns = [
+            /business purpose[:\s]+([^\.!?]*[\.!?])/i,
+            /purpose[:\s]+([^\.!?]*[\.!?])/i,
+            /this component[:\s]+([^\.!?]*[\.!?])/i,
+            /system[:\s]+([^\.!?]*[\.!?])/i
+        ];
+        
+        for (const pattern of patterns) {
+            const match = text.match(pattern);
+            if (match && match[1]) {
+                return match[1].trim();
+            }
+        }
+        
+        // Fallback: take first meaningful sentence
+        const sentences = text.split(/[\.!?]+/);
+        for (const sentence of sentences) {
+            if (sentence.trim().length > 20) {
+                return sentence.trim() + '.';
+            }
+        }
+        
+        return 'Business purpose analysis available in full response';
+    },
+
+    extractRecommendations(text) {
+        const recommendations = [];
+        const patterns = [
+            /recommend[a-z]*[:\s]+([^\.!?]*[\.!?])/gi,
+            /suggest[a-z]*[:\s]+([^\.!?]*[\.!?])/gi,
+            /should[:\s]+([^\.!?]*[\.!?])/gi,
+            /consider[:\s]+([^\.!?]*[\.!?])/gi
+        ];
+        
+        patterns.forEach(pattern => {
+            const matches = text.matchAll(pattern);
+            for (const match of matches) {
+                if (match[1] && match[1].trim().length > 10) {
+                    recommendations.push(match[1].trim());
+                }
+            }
+        });
+        
+        return recommendations.slice(0, 5); // Limit to 5 recommendations
+    },
+
+    extractRiskAssessment(text) {
+        const riskPatterns = [
+            /high.{0,20}risk/i,
+            /medium.{0,20}risk/i,
+            /low.{0,20}risk/i,
+            /risk.{0,20}high/i,
+            /risk.{0,20}medium/i,
+            /risk.{0,20}low/i
+        ];
+        
+        for (const pattern of riskPatterns) {
+            const match = text.match(pattern);
+            if (match) {
+                if (match[0].toLowerCase().includes('high')) return 'high';
+                if (match[0].toLowerCase().includes('medium')) return 'medium';
+                if (match[0].toLowerCase().includes('low')) return 'low';
+            }
+        }
+        
+        return 'medium'; // Default risk level
+    },
+
+    extractValidationRules(text) {
+        const rules = [];
+        const patterns = [
+            /validat[a-z]*[:\s]+([^\.!?]*[\.!?])/gi,
+            /check[a-z]*[:\s]+([^\.!?]*[\.!?])/gi,
+            /verif[a-z]*[:\s]+([^\.!?]*[\.!?])/gi
+        ];
+        
+        patterns.forEach(pattern => {
+            const matches = text.matchAll(pattern);
+            for (const match of matches) {
+                if (match[1] && match[1].trim().length > 10) {
+                    rules.push(match[1].trim());
+                }
+            }
+        });
+        
+        return rules.slice(0, 3);
+    },
+
+    extractBusinessRules(text) {
+        const rules = [];
+        const patterns = [
+            /business rule[:\s]+([^\.!?]*[\.!?])/gi,
+            /rule[:\s]+([^\.!?]*[\.!?])/gi,
+            /logic[:\s]+([^\.!?]*[\.!?])/gi
+        ];
+        
+        patterns.forEach(pattern => {
+            const matches = text.matchAll(pattern);
+            for (const match of matches) {
+                if (match[1] && match[1].trim().length > 10) {
+                    rules.push(match[1].trim());
+                }
+            }
+        });
+        
+        return rules.slice(0, 3);
+    },
+
+    extractDataProcessing(text) {
+        const patterns = [
+            /process[a-z]*[:\s]+([^\.!?]*[\.!?])/i,
+            /data[:\s]+([^\.!?]*[\.!?])/i,
+            /transform[a-z]*[:\s]+([^\.!?]*[\.!?])/i
+        ];
+        
+        for (const pattern of patterns) {
+            const match = text.match(pattern);
+            if (match && match[1] && match[1].trim().length > 20) {
+                return match[1].trim();
+            }
+        }
+        
+        return 'Data processing logic analysis available in full response';
+    },
+
+    extractModernizationSuggestions(text) {
+        const suggestions = [];
+        const patterns = [
+            /modern[a-z]*[:\s]+([^\.!?]*[\.!?])/gi,
+            /upgrad[a-z]*[:\s]+([^\.!?]*[\.!?])/gi,
+            /improv[a-z]*[:\s]+([^\.!?]*[\.!?])/gi,
+            // ============================================
+// ENHANCED CODE ANALYZER - PART 8
+// Dependency Flow Diagram & Display Functions (Continued)
+// ============================================
+
+// Continuing from Part 7...
+
+            /optim[a-z]*[:\s]+([^\.!?]*[\.!?])/gi
+        ];
+        
+        patterns.forEach(pattern => {
+            const matches = text.matchAll(pattern);
+            for (const match of matches) {
+                if (match[1] && match[1].trim().length > 10) {
+                    suggestions.push(match[1].trim());
+                }
+            }
+        });
+        
+        return suggestions.slice(0, 3);
+    },
+
+    extractQualityScore(text) {
+        const scorePatterns = [
+            /quality[:\s]+(\d+)/i,
+            /score[:\s]+(\d+)/i,
+            /rating[:\s]+(\d+)/i,
+            /(\d+)\/10/,
+            /(\d+)\s*out\s*of\s*10/i
+        ];
+        
+        for (const pattern of scorePatterns) {
+            const match = text.match(pattern);
+            if (match && match[1]) {
+                const score = parseInt(match[1]);
+                if (score >= 1 && score <= 10) {
+                    return score;
+                }
+            }
+        }
+        
+        return 6; // Default quality score
+    },
+
+    // Get Business Intelligence from LLM
+    async getBusinessIntelligenceFromLLM(componentName, friendlyName, componentType, relevantFiles, dependencyAnalysis, fieldAnalysis) {
+        const fileContents = relevantFiles.map(f => `=== ${f.name} (${f.type}) ===\n${f.content}`).join('\n\n');
+        
+        // Truncate file contents if too long
+        const maxFileContentLength = 4000;
+        const truncatedContents = fileContents.length > maxFileContentLength ? 
+            fileContents.substring(0, maxFileContentLength) + '\n[Content truncated...]' : 
+            fileContents;
+        
+        const prompt = `MAINFRAME COMPONENT BUSINESS INTELLIGENCE ANALYSIS
+
+Component: ${componentName}
+Friendly Name: ${friendlyName}
+Type: ${componentType}
+
+FILE CONTENTS:
+${truncatedContents}
+
+DEPENDENCY ANALYSIS:
+Found Dependencies: ${JSON.stringify(dependencyAnalysis.found)}
+Missing Dependencies: ${JSON.stringify(dependencyAnalysis.missing)}
+
+${fieldAnalysis ? `FIELD ANALYSIS:
+Total Fields: ${fieldAnalysis.fields.length}
+Input Fields: ${fieldAnalysis.inputFields.length}
+Output Fields: ${fieldAnalysis.outputFields.length}
+Unused Fields: ${fieldAnalysis.unusedFields.length}` : ''}
+
+TASK: Provide comprehensive business intelligence analysis for this mainframe component.
+
+Return ONLY a JSON object with this exact structure:
+{
+  "componentName": "${componentName}",
+  "friendlyName": "${friendlyName}",
+  "businessPurpose": "detailed business purpose and role in the system",
+  "businessLogic": {
+    "validationRules": ["rule1", "rule2"],
+    "businessRules": ["rule1", "rule2"],
+    "dataProcessing": "description of data processing logic"
+  },
+  "qualityScore": 8,
+  "recommendations": ["rec1", "rec2", "rec3"],
+  "modernizationSuggestions": ["suggestion1", "suggestion2"],
+  "riskAssessment": "low/medium/high risk assessment with reasoning"
+}`;
+
+        return await this.callLLMAPI(prompt);
+    },
+
+    // ============================================
+    // COMPONENT SELECTION AND TAB MANAGEMENT
+    // ============================================
+
+    // Select Component - FIXED VERSION with proper tab sync
+    selectComponent(componentName) {
+        console.log(`Selecting component: ${componentName}`);
+        
+        // Clear previous selections
+        Array.from(this.discoveredComponents.values()).forEach(comp => {
+            comp.selected = false;
+        });
+        
+        // Set new selection
+        const component = this.discoveredComponents.get(componentName);
+        if (component) {
+            component.selected = true;
+            this.currentSelectedComponent = componentName;
+        }
+        
+        // Update UI
+        this.displayDiscoveredComponents();
+        this.persistSelection(componentName);
+        this.updateDashboardStats();
+        
+        // **SYNC ALL TABS** - This is the key fix
+        this.syncAllTabsForComponent(componentName);
+        
+        // Update chat context
+        this.updateChatContext('component', componentName);
+        
+        this.showInfo(`Selected component: ${component ? component.friendlyName : componentName}`);
+    },
+
+    // **FIXED METHOD: Sync All Tabs for Component**
+    syncAllTabsForComponent(componentName) {
+        const result = this.analysisResults[componentName];
+        const component = this.discoveredComponents.get(componentName);
+        
+        if (!result) {
+            // Component not analyzed yet - show pending analysis message
+            this.showPendingAnalysisMessage(componentName);
+            return;
+        }
+        
+        // Update Dependencies Tab - MAIN FIX HERE
+        this.displayDependencyFlow(componentName, result);
+        
+        // Update Field Matrix Tab
+        if (result.fieldAnalysis && result.fieldAnalysis.fields && result.fieldAnalysis.fields.length > 0) {
+            this.displayFieldMatrix(componentName, result);
+        } else {
+            this.showNoFieldsMessage(componentName);
+        }
+        
+        // Update Dashboard with component focus
+        this.updateDashboardWithComponentFocus(componentName, result);
+        
+        console.log(`✅ All tabs synchronized for component: ${componentName}`);
+    },
+
+    // **CRITICAL FIX: Display Dependency Flow - Complete Implementation**
+    displayDependencyFlow(componentName, result) {
+        const container = document.getElementById('dependenciesContent');
+        if (!container) {
+            console.error('Dependencies container not found');
+            return;
+        }
+
+        const component = this.discoveredComponents.get(componentName);
+        const displayName = component?.friendlyName || componentName;
+
+        // Generate the complete dependency flow diagram
+        const html = `
+            <!-- Component Header -->
+            <div style="background: linear-gradient(135deg, var(--primary-blue) 0%, var(--indigo) 100%); color: white; padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem;">
+                <h3 style="margin: 0 0 0.5rem 0; color: white;">🔗 Dependency Flow Analysis</h3>
+                <div style="font-size: 1.1rem; font-weight: 500; margin-bottom: 0.5rem;">${displayName}</div>
+                <div style="font-size: 0.9rem; opacity: 0.9;">${component?.businessPurpose || 'Complete dependency mapping and flow analysis'}</div>
+            </div>
+
+            <!-- Visual Flow Diagram -->
+            ${this.generateCompleteFlowDiagram(componentName, result.dependencyAnalysis)}
+
+            <!-- Dependency Analysis Summary -->
+            ${this.generateDependencyAnalysisSummary(result.dependencyAnalysis)}
+        `;
+
+        container.innerHTML = html;
+        console.log(`✅ Dependency flow displayed for ${componentName}`);
+    },
+
+    // **NEW METHOD: Generate Complete Flow Diagram**
+    generateCompleteFlowDiagram(componentName, dependencyAnalysis) {
+        return `
+            <div class="dependency-flow-container">
+                <div style="text-align: center; margin-bottom: 2rem;">
+                    <h4 style="margin: 0 0 1rem 0; color: var(--grey-800);">🗺️ Visual Dependency Flow</h4>
+                    <p style="margin: 0; color: var(--grey-600); font-size: 0.9rem;">
+                        Comprehensive view of upstream and downstream dependencies
+                    </p>
+                </div>
+
+                ${this.generateVisualFlowChart(componentName, dependencyAnalysis)}
+            </div>
+        `;
+    },
+
+    // **NEW METHOD: Generate Visual Flow Chart**
+    generateVisualFlowChart(componentName, dependencyAnalysis) {
+        const component = this.discoveredComponents.get(componentName);
+        const flowData = this.buildFlowData(componentName, dependencyAnalysis);
+        
+        return `
+            <div style="display: flex; flex-direction: column; gap: 2rem; min-width: 800px; align-items: center;">
+                
+                <!-- UPSTREAM DEPENDENCIES -->
+                ${flowData.upstream.length > 0 ? `
+                    <div style="text-align: center;">
+                        <h5 style="color: var(--info-blue); margin-bottom: 1rem;">⬆️ UPSTREAM DEPENDENCIES</h5>
+                        <div style="font-size: 0.8rem; color: var(--grey-600); margin-bottom: 1rem;">
+                            Components that ${component?.friendlyName || componentName} depends on
+                        </div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; margin-bottom: 2rem;">
+                            ${flowData.upstream.map(dep => this.createFlowNode(dep, 'upstream')).join('')}
+                        </div>
+                        <!-- Connection lines -->
+                        <div style="display: flex; justify-content: center; margin-bottom: 1rem;">
+                            ${flowData.upstream.map(() => '<div style="width: 2px; height: 30px; background: var(--info-blue); margin: 0 2rem;"></div>').join('')}
+                        </div>
+                        <!-- Arrow down -->
+                        <div style="text-align: center; margin-bottom: 1rem;">
+                            <div style="font-size: 1.5rem; color: var(--info-blue);">⬇️</div>
+                            <div style="font-size: 0.8rem; color: var(--grey-600);">feeds into</div>
+                        </div>
+                    </div>
+                ` : ''}
+
+                <!-- CURRENT COMPONENT (Center) -->
+                <div style="text-align: center; margin: 2rem 0;">
+                    <div style="position: relative;">
+                        ${this.createCenterComponentNode(componentName, component)}
+                    </div>
+                </div>
+
+                <!-- DOWNSTREAM DEPENDENCIES -->
+                ${flowData.downstream.length > 0 ? `
+                    <div style="text-align: center;">
+                        <!-- Arrow down -->
+                        <div style="text-align: center; margin-bottom: 1rem;">
+                            <div style="font-size: 1.5rem; color: var(--success-green);">⬇️</div>
+                            <div style="font-size: 0.8rem; color: var(--grey-600);">flows to</div>
+                        </div>
+                        <!-- Connection lines -->
+                        <div style="display: flex; justify-content: center; margin-bottom: 1rem;">
+                            ${flowData.downstream.map(() => '<div style="width: 2px; height: 30px; background: var(--success-green); margin: 0 2rem;"></div>').join('')}
+                        </div>
+                        <h5 style="color: var(--success-green); margin-bottom: 1rem;">⬇️ DOWNSTREAM DEPENDENCIES</h5>
+                        <div style="font-size: 0.8rem; color: var(--grey-600); margin-bottom: 1rem;">
+                            Components that depend on ${component?.friendlyName || componentName}
+                        </div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center;">
+                            ${flowData.downstream.map(dep => this.createFlowNode(dep, 'downstream')).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+
+                <!-- MISSING DEPENDENCIES -->
+                ${flowData.missing.length > 0 ? `
+                    <div style="text-align: center; margin-top: 2rem; padding: 1rem; background: rgba(239, 68, 68, 0.1); border-radius: 8px; border: 2px dashed var(--error-red);">
+                        <h5 style="color: var(--error-red); margin-bottom: 1rem;">⚠️ MISSING DEPENDENCIES</h5>
+                        <div style="font-size: 0.8rem; color: var(--grey-600); margin-bottom: 1rem;">
+                            Components referenced but not available
+                        </div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center;">
+                            ${flowData.missing.map(dep => this.createFlowNode(dep, 'missing')).join('')}
+                        </div>
+                        <div style="margin-top: 1rem; padding: 0.75rem; background: white; border-radius: 6px;">
+                            <strong style="color: var(--error-red);">⚠️ Business Impact:</strong>
+                            <span style="color: var(--grey-700);">These missing components may cause compilation errors or runtime failures. Upload the missing files or remove unused references.</span>
+                        </div>
+                    </div>
+                ` : ''}
+
+                <!-- FLOW LEGEND -->
+                <div class="flow-legend">
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: var(--info-blue);"></div>
+                        <span>Upstream: Dependencies required</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: var(--primary-blue);"></div>
+                        <span>Current: Selected component</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: var(--success-green);"></div>
+                        <span>Downstream: Dependent components</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: var(--error-red); border: 2px dashed white;"></div>
+                        <span>Missing: Unavailable dependencies</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    },
+
+    // **NEW METHOD: Build Flow Data**
+    buildFlowData(currentComponent, dependencyAnalysis) {
+        const flowData = {
+            upstream: [],
+            downstream: [],
+            missing: []
+        };
+
+        // UPSTREAM: Components that the current component depends on
+        if (dependencyAnalysis.found) {
+            [...dependencyAnalysis.found.copybooks, ...dependencyAnalysis.found.programs, ...dependencyAnalysis.found.files]
+                .forEach(depName => {
+                    const depComponent = this.discoveredComponents.get(depName);
+                    const depResult = this.analysisResults[depName];
+                    flowData.upstream.push({
+                        name: depName,
+                        component: depComponent,
+                        result: depResult,
+                        type: this.getComponentTypeFromName(depName),
+                        status: 'found'
+                    });
+                });
+        }
+
+        // MISSING: Components that are referenced but not available
+        if (dependencyAnalysis.missing) {
+            [...dependencyAnalysis.missing.copybooks, ...dependencyAnalysis.missing.programs, ...dependencyAnalysis.missing.files]
+                .forEach(depName => {
+                    flowData.missing.push({
+                        name: depName,
+                        component: null,
+                        result: null,
+                        type: this.getComponentTypeFromName(depName),
+                        status: 'missing'
+                    });
+                });
+        }
+
+        // DOWNSTREAM: Components that depend on the current component
+        Object.entries(this.analysisResults).forEach(([compName, result]) => {
+            if (compName === currentComponent) return; // Skip self
+            
+            if (result.dependencyAnalysis && result.dependencyAnalysis.found) {
+                const isDependent = [
+                    ...result.dependencyAnalysis.found.copybooks,
+                    ...result.dependencyAnalysis.found.programs,
+                    ...result.dependencyAnalysis.found.files
+                ].includes(currentComponent);
+                
+                if (isDependent) {
+                    const depComponent = this.discoveredComponents.get(compName);
+                    flowData.downstream.push({
+                        name: compName,
+                        component: depComponent,
+                        result: result,
+                        type: depComponent?.type || 'Unknown',
+                        status: 'found'
+                    });
+                }
+            }
+        });
+
+        return flowData;
+    },
+
+    // **NEW METHOD: Get Component Type from Name**
+    getComponentTypeFromName(name) {
+        // Try to determine type from naming patterns
+        const upperName = name.toUpperCase();
+        
+        if (upperName.includes('COPY') || upperName.endsWith('CPY') || upperName.includes('MASTER')) {
+            return 'Copybook';
+        } else if (upperName.includes('PROG') || upperName.includes('PGM') || upperName.includes('PROC')) {
+            return 'Program';
+        } else if (upperName.includes('FILE') || upperName.includes('FIL')) {
+            return 'File';
+        } else {
+            return 'Component';
+        }
+    },
+
+    // **NEW METHOD: Create Center Component Node**
+    createCenterComponentNode(componentName, component) {
+        const result = this.analysisResults[componentName];
+        const displayName = component?.friendlyName || componentName;
+        const businessPurpose = component?.businessPurpose || 'Business purpose pending analysis';
+        
+        return `
+            <div class="flow-node current" style="min-width: 320px; max-width: 400px;">
+                <!-- Pulse animation ring -->
+                <div class="pulse-ring" style="
+                    position: absolute;
+                    top: -8px; left: -8px; right: -8px; bottom: -8px;
+                    border: 2px solid var(--primary-blue);
+                    border-radius: 20px;
+                    opacity: 0.6;
+                "></div>
+                
+                <div style="text-align: center;">
+                    <div class="flow-node-icon">🎯</div>
+                    <div class="flow-node-name">${displayName}</div>
+                    <div style="font-size: 0.8rem; opacity: 0.9; margin-bottom: 1rem; font-family: monospace;">${componentName}</div>
+                    
+                    <div style="background: rgba(255, 255, 255, 0.2); padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+                        <div class="flow-node-purpose">
+                            ${businessPurpose.length > 100 ? businessPurpose.substring(0, 100) + '...' : businessPurpose}
+                        </div>
+                        <div style="display: flex; justify-content: space-around; font-size: 0.75rem; margin-top: 0.75rem;">
+                            <div>
+                                <div style="font-weight: bold;">${component?.type || 'Unknown'}</div>
+                                <div style="opacity: 0.8;">Type</div>
+                            </div>
+                            <div>
+                                <div style="font-weight: bold;">${component?.fieldCount || 0}</div>
+                                <div style="opacity: 0.8;">Fields</div>
+                            </div>
+                            <div>
+                                <div style="font-weight: bold;">${result?.qualityScore || 'N/A'}</div>
+                                <div style="opacity: 0.8;">Quality</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div style="font-size: 0.75rem; opacity: 0.8;">🔍 CURRENT COMPONENT</div>
+                </div>
+            </div>
+        `;
+    },
+
+    // **NEW METHOD: Create Flow Node**
+    createFlowNode(dependency, flowType) {
+        const { name, component, result, type, status } = dependency;
+        const displayName = component?.friendlyName || this.generateFriendlyNameFromPattern(name);
+        const businessPurpose = component?.businessPurpose || this.generateBusinessPurpose(name);
+        
+        // Determine colors and styles based on flow type and status
+        let nodeClass, statusIcon, connectionColor;
+        
+        switch (flowType) {
+            case 'upstream':
+                nodeClass = status === 'found' ? 'flow-node upstream' : 'flow-node missing';
+                statusIcon = status === 'found' ? '✅' : '❌';
+                connectionColor = 'var(--info-blue)';
+                break;
+            case 'downstream':
+                nodeClass = 'flow-node downstream';
+                statusIcon = '✅';
+                connectionColor = 'var(--success-green)';
+                break;
+            case 'missing':
+                nodeClass = 'flow-node missing';
+                statusIcon = '❌';
+                connectionColor = 'var(--error-red)';
+                break;
+            default:
+                nodeClass = 'flow-node';
+                statusIcon = '❓';
+                connectionColor = 'var(--grey-400)';
+        }
+        
+        const typeIcon = type === 'Copybook' ? '📚' : type === 'Program' ? '💼' : '📄';
+        const isClickable = status === 'found';
+        
+        return `
+            <div class="${nodeClass}" ${isClickable ? `onclick="analyzer.selectComponent('${name}')"` : ''}>
+                <!-- Status indicator -->
+                <div style="
+                    position: absolute;
+                    top: -8px;
+                    right: -8px;
+                    background: ${connectionColor};
+                    color: white;
+                    border-radius: 50%;
+                    width: 24px;
+                    height: 24px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 0.7rem;
+                    border: 2px solid white;
+                ">${statusIcon}</div>
+                
+                <!-- Component info -->
+                <div style="text-align: center;">
+                    <div class="flow-node-icon">${typeIcon}</div>
+                    <div class="flow-node-name">${name}</div>
+                    <div class="flow-node-friendly">${displayName}</div>
+                    <div class="flow-node-purpose">
+                        ${businessPurpose.substring(0, 80)}${businessPurpose.length > 80 ? '...' : ''}
+                    </div>
+                    
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.7rem; margin-top: 0.75rem;">
+                        <span class="badge badge-grey">${type}</span>
+                        ${result ? `<span class="badge badge-info">Q: ${result.qualityScore}/10</span>` : ''}
+                        ${status === 'missing' ? '<span class="badge badge-danger">MISSING</span>' : ''}
+                    </div>
+                    
+                    ${isClickable ? `
+                        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--grey-200);">
+                            <div style="color: ${connectionColor}; font-size: 0.7rem;">
+                                🔍 Click to analyze
+                            </div>
+                        </div>
+                    ` : status === 'missing' ? `
+                        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--grey-200);">
+                            <div style="color: var(--error-red); font-size: 0.7rem;">
+                                📁 Upload required
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    },
+
+    // **NEW METHOD: Generate Dependency Analysis Summary**
+    generateDependencyAnalysisSummary(dependencyAnalysis) {
+        const upstreamCount = (dependencyAnalysis.found?.copybooks?.length || 0) + 
+                             (dependencyAnalysis.found?.programs?.length || 0) + 
+                             (dependencyAnalysis.found?.files?.length || 0);
+        
+        const missingCount = (dependencyAnalysis.missing?.copybooks?.length || 0) + 
+                            (dependencyAnalysis.missing?.programs?.length || 0) + 
+                            (dependencyAnalysis.missing?.files?.length || 0);
+        
+        // Calculate downstream dependencies
+        const currentComponent = this.currentSelectedComponent;
+        const downstreamCount = Object.values(this.analysisResults).filter(result => {
+            if (!result.dependencyAnalysis || !result.dependencyAnalysis.found) return false;
+            return [...result.dependencyAnalysis.found.copybooks,
+                    ...result.dependencyAnalysis.found.programs,
+                    ...result.dependencyAnalysis.found.files].includes(currentComponent);
+        }).length;
+        
+        const totalDependencies = upstreamCount + missingCount;
+        const healthPercentage = totalDependencies > 0 ? Math.round((upstreamCount / totalDependencies) * 100) : 100;
+        
+        return `
+            <div style="background: white; border-radius: 12px; padding: 1.5rem; margin-top: 1.5rem; border: 1px solid var(--grey-200);">
+                <h4 style="margin: 0 0 1rem 0; color: var(--grey-800);">📊 Dependency Analysis Summary</h4>
+                
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+                    <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px; text-align: center; border-left: 4px solid var(--info-blue);">
+                        <div style="font-size: 1.5rem; font-weight: bold; color: var(--info-blue);">${upstreamCount}</div>
+                        <div style="font-size: 0.8rem; color: var(--grey-600);">Upstream Dependencies</div>
+                        <div style="font-size: 0.7rem; color: var(--grey-500); margin-top: 0.25rem;">Components this depends on</div>
+                    </div>
+                    
+                    <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px; text-align: center; border-left: 4px solid var(--success-green);">
+                        <div style="font-size: 1.5rem; font-weight: bold; color: var(--success-green);">${downstreamCount}</div>
+                        <div style="font-size: 0.8rem; color: var(--grey-600);">Downstream Dependencies</div>
+                        <div style="font-size: 0.7rem; color: var(--grey-500); margin-top: 0.25rem;">Components that depend on this</div>
+                    </div>
+                    
+                    <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px; text-align: center; border-left: 4px solid var(--error-red);">
+                        <div style="font-size: 1.5rem; font-weight: bold; color: var(--error-red);">${missingCount}</div>
+                        <div style="font-size: 0.8rem; color: var(--grey-600);">Missing Dependencies</div>
+                        <div style="font-size: 0.7rem; color: var(--grey-500); margin-top: 0.25rem;">Broken connections</div>
+                    </div>
+                    
+                    <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px; text-align: center; border-left: 4px solid var(--primary-blue);">
+                        <div style="font-size: 1.5rem; font-weight: bold; color: var(--primary-blue);">${healthPercentage}%</div>
+                        <div style="font-size: 0.8rem; color: var(--grey-600);">Health Score</div>
+                        <div style="font-size: 0.7rem; color: var(--grey-500); margin-top: 0.25rem;">Dependency completeness</div>
+                    </div>
+                </div>
+                
+                <div style="background: ${healthPercentage >= 80 ? 'rgba(16, 185, 129, 0.1)' : healthPercentage >= 50 ? 'rgba(245, 158, 11, 0.1)' : 'rgba(239, 68, 68, 0.1)'}; padding: 1rem; border-radius: 6px;">
+                    <strong style="color: ${healthPercentage >= 80 ? 'var(--success-green)' : healthPercentage >= 50 ? 'var(--warning-yellow)' : 'var(--error-red)'};">
+                        ${healthPercentage >= 80 ? '✅ HEALTHY FLOW:' : healthPercentage >= 50 ? '⚠️ MODERATE ISSUES:' : '🔴 CRITICAL ISSUES:'}
+                    </strong>
+                    <span style="color: var(--grey-700); margin-left: 0.5rem;">
+                        ${healthPercentage >= 80 ? 
+                            'This component has excellent dependency health and should function reliably in the business process flow.' :
+                            healthPercentage >= 50 ?
+                            'Some missing dependencies may cause intermittent issues in business operations. Consider resolving missing components.' :
+                            'Multiple missing dependencies will likely disrupt business processes. Immediate attention required to restore functionality.'
+                        }
+                    </span>
+                </div>
+                
+                ${missingCount > 0 ? `
+                    <div style="margin-top: 1rem; padding: 1rem; background: rgba(239, 68, 68, 0.1); border-radius: 6px; border-left: 4px solid var(--error-red);">
+                        <strong style="color: var(--error-red);">⚡ Action Required:</strong>
+                        <ul style="margin: 0.5rem 0 0 1rem; color: var(--grey-700); font-size: 0.9rem;">
+                            <li>Upload the ${missingCount} missing component${missingCount > 1 ? 's' : ''} listed above</li>
+                            <li>Remove unused references if components are no longer needed</li>
+                            <li>Update dependency mappings after resolving missing items</li>
+                            <li>Re-run analysis to verify dependency health</li>
+                        </ul>
+                    </div>
+                ` : `
+                    <div style="margin-top: 1rem; padding: 1rem; background: rgba(16, 185, 129, 0.1); border-radius: 6px; border-left: 4px solid var(--success-
+                    // ============================================
+// ENHANCED CODE ANALYZER - PART 9
+// Final Integration & Initialization (Continued)
+// ============================================
+
+// Continuing from Part 8...
+
+                        <strong style="color: var(--success-green);">✅ All Dependencies Resolved:</strong>
+                        <span style="color: var(--grey-700); margin-left: 0.5rem;">
+                            This component has all required dependencies available and should function without issues.
+                        </span>
+                    </div>
+                `}
+            </div>
+        `;
+    },
+
+    // **NEW METHOD: Show Pending Analysis Message**
+    showPendingAnalysisMessage(componentName) {
+        const component = this.discoveredComponents.get(componentName);
+        const displayName = component?.friendlyName || componentName;
+        const isAnalyzed = component?.analyzed;
+        
+        // Dependencies tab
+        const dependenciesContainer = document.getElementById('dependenciesContent');
+        if (dependenciesContainer) {
+            dependenciesContainer.innerHTML = `
+                <div style="text-align: center; padding: 3rem; background: var(--grey-50); border-radius: 12px;">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;">${isAnalyzed ? '🔄' : '⏳'}</div>
+                    <h3 style="color: var(--grey-700); margin-bottom: 1rem;">
+                        ${isAnalyzed ? 'Re-analysis Available' : 'Analysis Pending'}
+                    </h3>
+                    <p style="color: var(--grey-600); margin-bottom: 2rem;">
+                        ${isAnalyzed ? 
+                            `Component "${displayName}" can be re-analyzed to refresh dependency information with newly uploaded files.` :
+                            `Component "${displayName}" needs to be analyzed to view dependency information.`
+                        }
+                    </p>
+                    <div style="display: flex; gap: 1rem; justify-content: center;">
+                        <button class="btn btn-primary" onclick="analyzer.analyzeSpecificComponent('${componentName}')">
+                            <span>🤖</span>
+                            ${isAnalyzed ? 'Re-analyze Component' : 'Analyze Component'}
+                        </button>
+                        ${isAnalyzed ? `
+                            <button class="btn btn-success" onclick="analyzer.refreshDependencies('${componentName}')">
+                                <span>🔄</span>
+                                Quick Refresh Dependencies
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Field Matrix tab
+        const fieldMatrixContainer = document.getElementById('fieldMatrixContent');
+        if (fieldMatrixContainer) {
+            fieldMatrixContainer.innerHTML = `
+                <div style="text-align: center; padding: 3rem; background: var(--grey-50); border-radius: 12px;">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;">📋</div>
+                    <h3 style="color: var(--grey-700); margin-bottom: 1rem;">
+                        ${isAnalyzed ? 'Re-analysis Available' : 'Field Analysis Pending'}
+                    </h3>
+                    <p style="color: var(--grey-600); margin-bottom: 2rem;">
+                        ${isAnalyzed ? 
+                            `Component "${displayName}" can be re-analyzed to refresh field information.` :
+                            `Component "${displayName}" needs to be analyzed to view field matrix information.`
+                        }
+                    </p>
+                    <button class="btn btn-primary" onclick="analyzer.analyzeSpecificComponent('${componentName}')">
+                        <span>🤖</span>
+                        ${isAnalyzed ? 'Re-analyze for Latest Fields' : 'Analyze This Component'}
+                    </button>
+                </div>
+            `;
+        }
+    },
+
+    // **NEW METHOD: Analyze Specific Component**
+    async analyzeSpecificComponent(componentName) {
+        if (this.autoAnalysisInProgress) {
+            this.showWarning('Analysis already in progress');
+            return;
+        }
+        
+        const component = this.discoveredComponents.get(componentName);
+        if (!component) {
+            this.showError('Component not found');
+            return;
+        }
+        
+        this.showLoading();
+        this.updateLoadingStatus(`🔍 Analyzing ${component.friendlyName || componentName}...`);
+        
+        try {
+            const relevantFiles = this.findRelevantFiles(componentName);
+            const analysisResult = await this.runComponentAnalysis(componentName, relevantFiles);
+            
+            this.analysisResults[componentName] = analysisResult;
+            component.analyzed = true;
+            component.qualityScore = analysisResult.qualityScore;
+            
+            // Sync all tabs with new analysis
+            this.syncAllTabsForComponent(componentName);
+            
+            // Save to database
+            this.saveToDatabase();
+            
+            this.hideLoading();
+            this.showSuccess(`✨ Analysis complete for ${component.friendlyName || componentName}`);
+            
+            // Switch to dependencies tab to show results
+            const dependenciesTab = document.querySelector('.tab[data-tab="dependencies"]');
+            if (dependenciesTab) dependenciesTab.click();
+            
+        } catch (error) {
+            this.hideLoading();
+            this.showError(`Analysis failed: ${error.message}`);
+            console.error('Component analysis failed:', error);
+        }
+    },
+
+    // **NEW METHOD: Quick Refresh Dependencies**
+    async refreshDependencies(componentName) {
+        const component = this.discoveredComponents.get(componentName);
+        if (!component) {
+            this.showError('Component not found');
+            return;
+        }
+        
+        this.showLoading();
+        this.updateLoadingStatus(`🔄 Refreshing dependencies for ${component.friendlyName || componentName}...`);
+        
+        try {
+            const relevantFiles = this.findRelevantFiles(componentName);
+            
+            // Quick dependency extraction without full LLM analysis
+            const dependencyAnalysis = await this.extractDependencies(relevantFiles);
+            
+            // Update existing analysis result
+            if (this.analysisResults[componentName]) {
+                this.analysisResults[componentName].dependencyAnalysis = dependencyAnalysis;
+                this.analysisResults[componentName].timestamp = new Date().toISOString();
+            }
+            
+            // Refresh the dependency flow display
+            this.displayDependencyFlow(componentName, this.analysisResults[componentName]);
+            
+            // Save to database
+            this.saveToDatabase();
+            
+            this.hideLoading();
+            this.showSuccess(`🔄 Dependencies refreshed for ${component.friendlyName || componentName}`);
+            
+            // Switch to dependencies tab to show results
+            const dependenciesTab = document.querySelector('.tab[data-tab="dependencies"]');
+            if (dependenciesTab) dependenciesTab.click();
+            
+        } catch (error) {
+            this.hideLoading();
+            this.showError(`Dependency refresh failed: ${error.message}`);
+            console.error('Dependency refresh failed:', error);
+        }
+    },
+
+    // Persist Selection in Database
+    persistSelection(selectedName) {
+        if (!this.db || !this.dbInitialized) return;
+        try {
+            // Clear previous selection flags
+            this.db.run(`UPDATE discovered_components SET selected = 0`);
+            // Set current
+            this.db.run(`UPDATE discovered_components SET selected = 1 WHERE component_name = ?`, [selectedName]);
+        } catch (e) {
+            console.error('Failed to persist selection:', e);
+        }
+    },
+
+    // Update Chat Context
+    updateChatContext(contextType, selectedItem) {
+        const chatContext = document.getElementById('chatContext');
+        const chatSelectedItem = document.getElementById('chatSelectedItem');
+        
+        if (chatContext) chatContext.value = contextType;
+        if (chatSelectedItem) chatSelectedItem.value = selectedItem || '';
+        
+        this.chatContext = contextType;
+        this.currentSelectedComponent = contextType === 'component' ? selectedItem : null;
+    },
+
+    // ============================================
+    // FIELD MATRIX DISPLAY
+    // ============================================
+
+    // Display Field Matrix
+    displayFieldMatrix(componentName, result) {
+        const container = document.getElementById('fieldMatrixContent');
+        if (!container) return;
+
+        const component = this.discoveredComponents.get(componentName);
+        const displayName = component?.friendlyName || componentName;
+        const fieldAnalysis = result?.fieldAnalysis;
+
+        if (!fieldAnalysis || !fieldAnalysis.fields || fieldAnalysis.fields.length === 0) {
+            this.showNoFieldsMessage(componentName);
+            return;
+        }
+
+        let html = `
+            <!-- Component Header -->
+            <div style="background: linear-gradient(135deg, var(--primary-blue) 0%, var(--indigo) 100%); color: white; padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem;">
+                <h3 style="margin: 0 0 0.5rem 0; color: white;">📋 Field Matrix Analysis</h3>
+                <div style="font-size: 1.1rem; font-weight: 500; margin-bottom: 0.5rem;">${displayName}</div>
+                <div style="font-size: 0.9rem; opacity: 0.9;">${component?.businessPurpose || 'Field-level business intelligence analysis'}</div>
+            </div>
+            
+            <!-- Field Overview Metrics -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+                <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid var(--grey-200);">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: var(--primary-blue);">${fieldAnalysis.fields.length}</div>
+                    <div style="font-size: 0.8rem; color: var(--grey-600);">Total Fields</div>
+                </div>
+                <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid var(--grey-200);">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: var(--success-green);">${fieldAnalysis.inputFields?.length || 0}</div>
+                    <div style="font-size: 0.8rem; color: var(--grey-600);">Input Fields</div>
+                </div>
+                <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid var(--grey-200);">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: var(--info-blue);">${fieldAnalysis.outputFields?.length || 0}</div>
+                    <div style="font-size: 0.8rem; color: var(--grey-600);">Output Fields</div>
+                </div>
+                <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid var(--grey-200);">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: var(--warning-yellow);">${fieldAnalysis.unusedFields?.length || 0}</div>
+                    <div style="font-size: 0.8rem; color: var(--grey-600);">Unused Fields</div>
+                </div>
+            </div>
+
+            <!-- Field Details Table -->
+            <div style="background: white; border-radius: 12px; overflow: hidden; border: 1px solid var(--grey-200);">
+                <div style="background: var(--grey-50); padding: 1rem; border-bottom: 1px solid var(--grey-200);">
+                    <h4 style="margin: 0; color: var(--grey-800);">📊 Detailed Field Analysis</h4>
+                    <p style="margin: 0.5rem 0 0 0; color: var(--grey-600); font-size: 0.9rem;">Click on any field to get business intelligence insights</p>
+                </div>
+                <div class="data-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Field Name</th>
+                                <th>Level</th>
+                                <th>Picture Clause</th>
+                                <th>Usage Pattern</th>
+                                <th>Business Purpose</th>
+                                <th>Data Type</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        `;
+        
+        fieldAnalysis.fields.slice(0, 100).forEach((field, index) => {
+            const usage = this.determineFieldUsage(field, fieldAnalysis);
+            const badgeClass = this.getUsageBadgeClass(usage);
+            const businessPurpose = field.businessLogic?.businessMeaning || this.generateFieldPurpose(field.name);
+            const dataType = this.determineDataType(field.picture);
+            
+            html += `
+                <tr class="field-row" data-field="${field.name}" style="cursor: pointer;">
+                    <td style="font-family: monospace; font-weight: 600;">${field.name}</td>
+                    <td>
+                        <span class="badge badge-grey">${field.level}</span>
+                        ${field.level === 1 ? '<span class="badge badge-primary" style="margin-left: 0.25rem; font-size: 0.7rem;">MAIN</span>' : ''}
+                    </td>
+                    <td style="font-family: monospace; font-size: 0.85rem;">${field.picture || '-'}</td>
+                    <td><span class="badge ${badgeClass}">${usage}</span></td>
+                    <td style="font-size: 0.85rem; max-width: 250px; line-height: 1.4;">${businessPurpose}</td>
+                    <td><span class="badge badge-info">${dataType}</span></td>
+                    <td>
+                        <button class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.7rem;" onclick="analyzer.analyzeField('${componentName}', '${field.name}')">
+                            💡 Analyze
+                        </button>
+                    </td>
+                </tr>
+            `;
+        });
+        
+        html += `
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        
+        if (fieldAnalysis.fields.length > 100) {
+            html += `
+                <div style="margin-top: 1rem; padding: 1rem; background: var(--grey-50); border-radius: 8px; text-align: center;">
+                    <p style="margin: 0; color: var(--grey-600);">
+                        Showing 100 of ${fieldAnalysis.fields.length} fields. 
+                        <button class="btn btn-primary" style="margin-left: 0.5rem; padding: 0.25rem 0.75rem; font-size: 0.8rem;" onclick="analyzer.showAllFields('${componentName}')">
+                            Show All Fields
+                        </button>
+                    </p>
+                </div>
+            `;
+        }
+
+        container.innerHTML = html;
+
+        // Add click handlers for field rows
+        setTimeout(() => {
+            document.querySelectorAll('.field-row').forEach(row => {
+                row.addEventListener('click', (e) => {
+                    if (e.target.tagName !== 'BUTTON') {
+                        const fieldName = row.getAttribute('data-field');
+                        this.updateChatContext('field', fieldName);
+                        this.showFieldDetails(componentName, fieldName);
+                    }
+                });
+            });
+        }, 100);
+    },
+
+    // **NEW METHOD: Show No Fields Message**
+    showNoFieldsMessage(componentName) {
+        const component = this.discoveredComponents.get(componentName);
+        const displayName = component?.friendlyName || componentName;
+        
+        const fieldMatrixContainer = document.getElementById('fieldMatrixContent');
+        if (fieldMatrixContainer) {
+            fieldMatrixContainer.innerHTML = `
+                <div style="text-align: center; padding: 3rem; background: var(--grey-50); border-radius: 12px;">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;">📄</div>
+                    <h3 style="color: var(--grey-700); margin-bottom: 1rem;">No Field Data Available</h3>
+                    <p style="color: var(--grey-600); margin-bottom: 1rem;">
+                        Component "${displayName}" doesn't contain field definitions or is not a copybook/record layout.
+                    </p>
+                    <div style="background: white; padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+                        <strong>Component Type:</strong> ${component?.type || 'Unknown'}<br>
+                        <strong>Business Purpose:</strong> ${component?.businessPurpose || 'Not defined'}
+                    </div>
+                </div>
+            `;
+        }
+    },
+
+    // Field utility methods
+    determineFieldUsage(field, fieldAnalysis) {
+        const fieldName = field.name;
+        
+        if (fieldAnalysis.inputFields && fieldAnalysis.inputFields.includes(fieldName)) return 'INPUT';
+        if (fieldAnalysis.outputFields && fieldAnalysis.outputFields.includes(fieldName)) return 'OUTPUT';
+        if (fieldAnalysis.referenceFields && fieldAnalysis.referenceFields.includes(fieldName)) return 'REFERENCE';
+        if (fieldAnalysis.unusedFields && fieldAnalysis.unusedFields.includes(fieldName)) return 'UNUSED';
+        
+        return 'UNKNOWN';
+    },
+
+    getUsageBadgeClass(usage) {
+        switch(usage) {
+            case 'INPUT': return 'badge-success';
+            case 'OUTPUT': return 'badge-primary';
+            case 'REFERENCE': return 'badge-warning';
+            case 'UNUSED': return 'badge-danger';
+            default: return 'badge-grey';
+        }
+    },
+
+    determineDataType(picture) {
+        if (!picture) return 'Unknown';
+        
+        const pic = picture.toUpperCase();
+        
+        if (pic.includes('9')) {
+            if (pic.includes('V') || pic.includes('.')) {
+                return 'Decimal';
+            } else if (pic.includes('COMP') || pic.includes('BINARY')) {
+                return 'Binary';
+            } else {
+                return 'Numeric';
+            }
+        } else if (pic.includes('X')) {
+            return 'Alphanumeric';
+        } else if (pic.includes('A')) {
+            return 'Alphabetic';
+        } else {
+            return 'Other';
+        }
+    },
+
+    // ============================================
+    // DASHBOARD RESULTS DISPLAY
+    // ============================================
+
+    // Update Dashboard with Results
+    updateDashboardWithResults() {
+        const dashboardContent = document.getElementById('dashboardContent');
+        if (!dashboardContent) return;
+
+        const analyzedComponents = Object.keys(this.analysisResults);
+        
+        if (analyzedComponents.length === 0) {
+            dashboardContent.innerHTML = `
+                <p style="color: var(--grey-500); text-align: center; padding: 2rem;">
+                    Run auto-analysis to see detailed component insights
+                </p>
+            `;
+            return;
+        }
+
+        // Show results overview
+        this.updateDashboardMetricsCards(
+            this.discoveredComponents.size,
+            this.uploadedFiles.length, 
+            Array.from(this.discoveredComponents.values()).reduce((sum, c) => sum + (c.fieldCount || 0), 0),
+            this.uploadedFiles.reduce((sum, file) => sum + (file.metrics?.codeLines || 0), 0),
+            Array.from(this.discoveredComponents.values()).reduce((sum, c) => sum + (c.complexityScore || 0), 0) / Math.max(this.discoveredComponents.size, 1),
+            Object.values(this.analysisResults).map(r => r.qualityScore).filter(s => s).reduce((a,b,_,arr) => a + b/arr.length, 0) || 0
+        );
+    },
+
+    // ============================================
+    // EXPORT AND UTILITY FUNCTIONS
+    // ============================================
+
+    // Enable Export Buttons
+    enableExportButtons() {
+        const exportJsonBtn = document.getElementById('exportJsonBtn');
+        const exportMdBtn = document.getElementById('exportMdBtn');
+        
+        if (exportJsonBtn) exportJsonBtn.disabled = false;
+        if (exportMdBtn) exportMdBtn.disabled = false;
+    },
+
+    // Export Results
+    exportResults(format) {
+        const data = {
+            timestamp: new Date().toISOString(),
+            summary: {
+                totalComponents: this.discoveredComponents.size,
+                totalFiles: this.uploadedFiles.length,
+                analyzedComponents: Object.keys(this.analysisResults).length
+            },
+            components: Array.from(this.discoveredComponents.entries()).map(([name, comp]) => ({
+                name,
+                friendlyName: comp.friendlyName,
+                type: comp.type,
+                businessPurpose: comp.businessPurpose,
+                analyzed: comp.analyzed,
+                analysis: this.analysisResults[name] || null
+            }))
+        };
+
+        if (format === 'json') {
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            this.downloadFile(blob, 'mainframe_analysis_results.json');
+        } else if (format === 'markdown') {
+            const markdown = this.generateMarkdownReport(data);
+            const blob = new Blob([markdown], { type: 'text/markdown' });
+            this.downloadFile(blob, 'mainframe_analysis_report.md');
+        }
+        
+        this.showSuccess(`📄 Results exported as ${format.toUpperCase()}`);
+    },
+
+    // Generate Markdown Report
+    generateMarkdownReport(data) {
+        let markdown = `# Mainframe Analysis Report
+
+Generated: ${new Date(data.timestamp).toLocaleString()}
+
+## Summary
+
+- **Total Components:** ${data.summary.totalComponents}
+- **Total Files:** ${data.summary.totalFiles}
+- **Analyzed Components:** ${data.summary.analyzedComponents}
+
+## Components
+
+`;
+
+        data.components.forEach(comp => {
+            markdown += `### ${comp.friendlyName} (${comp.name})
+
+- **Type:** ${comp.type}
+- **Business Purpose:** ${comp.businessPurpose}
+- **Status:** ${comp.analyzed ? '✅ Analyzed' : '⏳ Pending Analysis'}
+
+`;
+            
+            if (comp.analysis && comp.analysis.llmAnalysis) {
+                markdown += `**Analysis:**
+${comp.analysis.llmAnalysis.businessPurpose || 'No detailed analysis available'}
+
+`;
+            }
+        });
+
+        return markdown;
+    },
+
+    // Download File Helper
+    downloadFile(blob, filename) {
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+    },
+
+    // ============================================
+    // CHAT SYSTEM INITIALIZATION
+    // ============================================
+
+    // Enable Chat
+    enableChat() {
+        const chatInput = document.getElementById('chatInput');
+        const chatSendBtn = document.getElementById('chatSendBtn');
+        
+        if (chatInput) chatInput.disabled = false;
+        if (chatSendBtn) chatSendBtn.disabled = false;
+        
+        // Initialize simple chat if not already done
+        if (!this.chatInitialized) {
+            this.initializeSimpleChat();
+            this.chatInitialized = true;
+        }
+        
+        console.log('✅ Chat system enabled');
+    },
+
+    // Initialize Simple Chat
+    initializeSimpleChat() {
+        const chatContainer = document.getElementById('chatContainer');
+        if (!chatContainer) return;
+
+        chatContainer.innerHTML = `
+            <div style="padding: 1rem; background: linear-gradient(135deg, var(--primary-blue) 0%, var(--indigo) 100%); color: white; border-radius: 12px; margin-bottom: 1rem;">
+                <h3 style="font-size: 1rem; margin-bottom: 0.5rem;">🧠 Business Intelligence Chat</h3>
+                <p style="font-size: 0.8rem; opacity: 0.9;">Ask about components, dependencies, and business logic</p>
+            </div>
+
+            <div class="chat-messages" id="chatMessages" style="height: 300px;">
+                <div class="chat-message assistant">
+                    <div class="chat-bubble">
+                        <div class="chat-message-content">👋 **Chat Ready!**
+
+I can help you analyze your ${this.discoveredComponents.size} discovered components:
+
+🎯 **Ask about business purpose**
+🔗 **Explore dependencies** 
+📋 **Analyze field details**
+🚀 **Get modernization insights**
+
+Try: "What's the business purpose of [component name]?" or "Show me missing dependencies"</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chat-input-section">
+                <div class="chat-input-group">
+                    <textarea id="chatInput" 
+                              class="chat-input" 
+                              placeholder="Ask about components, dependencies, or business logic..." 
+                              rows="2"></textarea>
+                    <button id="chatSendBtn" class="chat-send-btn">
+                        <span>Send</span>
+                    </button>
+                </div>
+            </div>
+        `;
+
+        // Add simple event listeners
+        const chatInput = document.getElementById('chatInput');
+        const chatSendBtn = document.getElementById('chatSendBtn');
+
+        if (chatInput && chatSendBtn) {
+            chatInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    this.sendSimpleChatMessage();
+                }
+            });
+            
+            chatSendBtn.addEventListener('click', () => this.sendSimpleChatMessage());
+        }
+    },
+
+    // Send Simple Chat Message
+    async sendSimpleChatMessage() {
+        const chatInput = document.getElementById('chatInput');
+        const message = chatInput.value.trim();
+        
+        if (!message) return;
+        
+        // Add user message
+        this.addChatMessage('user', message);
+        chatInput.value = '';
+        
+        // Generate simple response
+        const response = this.generateSimpleResponse(message);
+        this.addChatMessage('assistant', response);
+    },
+
+    // Add Chat Message
+    addChatMessage(sender, content) {
+        const chatMessages = document.getElementById('chatMessages');
+        if (!chatMessages) return;
+        
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `chat-message ${sender}`;
+        
+        const bubble = document.createElement('div');
+        bubble.className = 'chat-bubble';
+        bubble.innerHTML = `<div class="chat-message-content">${content}</div>`;
+        
+        messageDiv.appendChild(bubble);
+        chatMessages.appendChild(messageDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    },
+
+    // Generate Simple Response
+    generateSimpleResponse(message) {
+        const lowerMessage = message.toLowerCase();
+        
+        if (lowerMessage.includes('business purpose')) {
+            const components = Array.from(this.discoveredComponents.values()).slice(0, 3);
+            return `📊 **Business Purpose Overview:**
+
+${components.map(comp => `• **${comp.friendlyName}**: ${comp.businessPurpose}`).join('\n')}
+
+*Select a specific component for detailed analysis.*`;
+        }
+        
+        if (lowerMessage.includes('dependencies') || lowerMessage.includes('missing')) {
+            const totalMissing = Object.values(this.analysisResults).reduce((sum, result) => 
+                sum + (result.dependencyAnalysis?.summary?.missingCount || 0), 0);
+            
+            return `🔗 **Dependency Status:**
+
+• **Missing Dependencies**: ${totalMissing}
+• **System Health**: ${totalMissing > 10 ? 'Needs Attention' : 'Good'}
+
+*Use the Dependencies tab to see visual flow diagrams.*`;
+        }
+        
+        if (lowerMessage.includes('component') && this.currentSelectedComponent) {
+            const comp = this.discoveredComponents.get(this.currentSelectedComponent);
+            const result = this.analysisResults[this.currentSelectedComponent];
+            
+            return `🎯 **${comp?.friendlyName || this.currentSelectedComponent}:**
+
+**Purpose**: ${comp?.businessPurpose || 'Business purpose analysis pending'}
+
+**Status**: ${comp?.analyzed ? '✅ Analyzed' : '⏳ Pending Analysis'}
+
+**Quality**: ${result?.qualityScore || 'TBD'}/10
+
+*Switch to Dependencies or Field Matrix tabs for detailed views.*`;
+        }
+        
+        return `🤖 **I can help with:**
+
+• Business purpose analysis
+• Dependency mapping 
+• Component quality assessment
+• Field matrix analysis
+• Modernization recommendations
+
+**Try asking:**
+• "What's the business purpose of [component]?"
+• "Show me missing dependencies"
+• "Which components need attention?"
+
+*Select any component from the dashboard for focused analysis.*`;
+    }
+});
+
+// ============================================
+// GLOBAL INITIALIZATION
+// ============================================
+
+// Initialize analyzer on page load
+let analyzer;
+document.addEventListener('DOMContentLoaded', function() {
+    try {
+        analyzer = new EnhancedCodeAnalyzer();
+        window.analyzer = analyzer; // Make globally accessible
+        
+        console.log('✅ Enhanced Code Analyzer - Complete System Ready!');
+        console.log('🎯 Features: File Upload, Auto-Discovery, LLM Analysis, Dependency Flow, Field Matrix, Chat');
+    } catch (error) {
+        console.error('Failed to initialize Enhanced Code Analyzer:', error);
+        document.body.innerHTML = `
+            <div style="display: flex; align-items: center; justify-content: center; height: 100vh; background: #f9fafb;">
+                <div style="text-align: center; padding: 2rem; background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                    <h2 style="color: #ef4444; margin-bottom: 1rem;">❌ Initialization Failed</h2>
+                    <p style="color: #6b7280; margin-bottom: 1rem;">Enhanced Code Analyzer failed to initialize properly.</p>
+                    <p style="color: #374151; font-size: 0.9rem;">Error: ${error.message}</p>
+                    <button onclick="location.reload()" style="margin-top: 1rem; padding: 0.5rem 1rem; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                            🔄  
+                        Retry   
+                    </button>
+                </div>  
+            </div>
+        `;
+    }
+});
+    
+      
+      
+      
+      
+                    // Global functions for HTML onclick handlers - Available immediately
+        function togglePanel(side) {
+            if (window.analyzer) {
+                window.analyzer.togglePanel(side);
+            }
+        }
+
+        function toggleCollapsible(header) {
+            if (window.analyzer) {
+                window.analyzer.toggleCollapsible(header);
+            }
+        }
+
+        // Make functions globally accessible
+        window.togglePanel = togglePanel;
+        window.toggleCollapsible = toggleCollapsible;
+        
+        console.log('Part 2 loaded - HTML structure and CSS complete');
+        console.log('Ready for Part 3 - JavaScript Core Classes');
+    </script>
+</body>
+</html>
