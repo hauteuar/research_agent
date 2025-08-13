@@ -2825,8 +2825,39 @@ Object.assign(EnhancedCodeAnalyzer.prototype, {
 
     // Auto-Discover Components
     async autoDiscoverComponents(fileObj) {
-        for (const component of fileObj.components) {
-            if (component.isMainComponent) {
+    for (const component of fileObj.components) {
+        if (component.isMainComponent) {
+            const existingComponent = this.discoveredComponents.get(component.name);
+            
+            if (existingComponent) {
+                // **UPDATE EXISTING COMPONENT** - merge new information
+                existingComponent.inputFiles = this.mergeUniqueArrays(
+                    existingComponent.inputFiles || [], 
+                    this.extractInputFiles(fileObj.content)
+                );
+                existingComponent.outputFiles = this.mergeUniqueArrays(
+                    existingComponent.outputFiles || [], 
+                    this.extractOutputFiles(fileObj.content)
+                );
+                existingComponent.fieldCount = Math.max(
+                    existingComponent.fieldCount || 0,
+                    fileObj.components.filter(c => c.type === 'FIELD' || c.type === 'RECORD_LAYOUT').length
+                );
+                
+                // Update other metrics if they're better
+                if (fileObj.metrics.codeLines > (existingComponent.lineCount || 0)) {
+                    existingComponent.lineCount = fileObj.metrics.codeLines;
+                    existingComponent.complexityScore = fileObj.metrics.complexity;
+                    existingComponent.fileSource = fileObj.name; // Update to latest file
+                }
+                
+                // **MARK FOR RE-ANALYSIS** - this is key for dependency refresh
+                existingComponent.analyzed = false;
+                existingComponent.needsReanalysis = true;
+                
+                console.log(`🔄 Updated existing component: ${component.name}`);
+            } else {
+                // **CREATE NEW COMPONENT**
                 const discoveredComponent = {
                     name: component.name,
                     friendlyName: await this.generateFriendlyName(component.name),
@@ -2844,9 +2875,62 @@ Object.assign(EnhancedCodeAnalyzer.prototype, {
                 };
                 
                 this.discoveredComponents.set(component.name, discoveredComponent);
+                console.log(`✨ Created new component: ${component.name}`);
             }
         }
-    },
+    }
+    
+    // **INVALIDATE EXISTING ANALYSES** that might have missing dependencies now resolved
+    this.invalidateAnalysesWithMissingDependencies();
+},
+
+// **NEW METHOD: Merge Unique Arrays**
+mergeUniqueArrays(arr1, arr2) {
+    const combined = [...(arr1 || []), ...(arr2 || [])];
+    return [...new Set(combined)]; // Remove duplicates
+},
+
+// **NEW METHOD: Invalidate Analyses with Missing Dependencies**
+invalidateAnalysesWithMissingDependencies() {
+    const newlyAvailableComponents = Array.from(this.discoveredComponents.keys());
+    
+    Object.entries(this.analysisResults).forEach(([componentName, result]) => {
+        if (result.dependencyAnalysis && result.dependencyAnalysis.missing) {
+            // Check if any previously missing dependencies are now available
+            const stillMissing = {
+                copybooks: result.dependencyAnalysis.missing.copybooks.filter(name => 
+                    !newlyAvailableComponents.includes(name)
+                ),
+                programs: result.dependencyAnalysis.missing.programs.filter(name => 
+                    !newlyAvailableComponents.includes(name)
+                ),
+                files: result.dependencyAnalysis.missing.files.filter(name => 
+                    !newlyAvailableComponents.includes(name)
+                )
+            };
+            
+            const originalMissingCount = 
+                result.dependencyAnalysis.missing.copybooks.length + 
+                result.dependencyAnalysis.missing.programs.length + 
+                result.dependencyAnalysis.missing.files.length;
+                
+            const currentMissingCount = 
+                stillMissing.copybooks.length + 
+                stillMissing.programs.length + 
+                stillMissing.files.length;
+            
+            // If missing count changed, mark for re-analysis
+            if (currentMissingCount !== originalMissingCount) {
+                const component = this.discoveredComponents.get(componentName);
+                if (component) {
+                    component.analyzed = false;
+                    component.needsReanalysis = true;
+                }
+                console.log(`🔄 Marked ${componentName} for re-analysis - dependencies changed`);
+            }
+        }
+    });
+},
 
     // Extract Input/Output Files
     extractInputFiles(content) {
@@ -3312,21 +3396,35 @@ syncAllTabsForComponent(componentName) {
 showPendingAnalysisMessage(componentName) {
     const component = this.discoveredComponents.get(componentName);
     const displayName = component?.friendlyName || componentName;
+    const isAnalyzed = component?.analyzed;
     
     // Dependencies tab
     const dependenciesContainer = document.getElementById('dependenciesContent');
     if (dependenciesContainer) {
         dependenciesContainer.innerHTML = `
             <div style="text-align: center; padding: 3rem; background: var(--grey-50); border-radius: 12px;">
-                <div style="font-size: 3rem; margin-bottom: 1rem;">⏳</div>
-                <h3 style="color: var(--grey-700); margin-bottom: 1rem;">Analysis Pending</h3>
+                <div style="font-size: 3rem; margin-bottom: 1rem;">${isAnalyzed ? '🔄' : '⏳'}</div>
+                <h3 style="color: var(--grey-700); margin-bottom: 1rem;">
+                    ${isAnalyzed ? 'Re-analysis Available' : 'Analysis Pending'}
+                </h3>
                 <p style="color: var(--grey-600); margin-bottom: 2rem;">
-                    Component "${displayName}" needs to be analyzed to view dependency information.
+                    ${isAnalyzed ? 
+                        `Component "${displayName}" can be re-analyzed to refresh dependency information with newly uploaded files.` :
+                        `Component "${displayName}" needs to be analyzed to view dependency information.`
+                    }
                 </p>
-                <button class="btn btn-primary" onclick="analyzer.analyzeSpecificComponent('${componentName}')">
-                    <span>🤖</span>
-                    Analyze This Component
-                </button>
+                <div style="display: flex; gap: 1rem; justify-content: center;">
+                    <button class="btn btn-primary" onclick="analyzer.analyzeSpecificComponent('${componentName}')">
+                        <span>🤖</span>
+                        ${isAnalyzed ? 'Re-analyze Component' : 'Analyze Component'}
+                    </button>
+                    ${isAnalyzed ? `
+                        <button class="btn btn-success" onclick="analyzer.refreshDependencies('${componentName}')">
+                            <span>🔄</span>
+                            Quick Refresh Dependencies
+                        </button>
+                    ` : ''}
+                </div>
             </div>
         `;
     }
@@ -3337,16 +3435,344 @@ showPendingAnalysisMessage(componentName) {
         fieldMatrixContainer.innerHTML = `
             <div style="text-align: center; padding: 3rem; background: var(--grey-50); border-radius: 12px;">
                 <div style="font-size: 3rem; margin-bottom: 1rem;">📋</div>
-                <h3 style="color: var(--grey-700); margin-bottom: 1rem;">Field Analysis Pending</h3>
+                <h3 style="color: var(--grey-700); margin-bottom: 1rem;">
+                    ${isAnalyzed ? 'Re-analysis Available' : 'Field Analysis Pending'}
+                </h3>
                 <p style="color: var(--grey-600); margin-bottom: 2rem;">
-                    Component "${displayName}" needs to be analyzed to view field matrix information.
+                    ${isAnalyzed ? 
+                        `Component "${displayName}" can be re-analyzed to refresh field information.` :
+                        `Component "${displayName}" needs to be analyzed to view field matrix information.`
+                    }
                 </p>
                 <button class="btn btn-primary" onclick="analyzer.analyzeSpecificComponent('${componentName}')">
                     <span>🤖</span>
-                    Analyze This Component
+                    ${isAnalyzed ? 'Re-analyze for Latest Fields' : 'Analyze This Component'}
                 </button>
             </div>
         `;
+    }
+},
+updateDashboardWithComponentFocus(componentName, result) {
+    const dashboardContent = document.getElementById('dashboardContent');
+    if (!dashboardContent) return;
+
+    const component = this.discoveredComponents.get(componentName);
+    const displayName = component?.friendlyName || componentName;
+    
+    // Create focused dashboard view
+    let html = `
+        <!-- Focused Component Overview -->
+        <div class="collapsible-section expanded">
+            <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                <div class="collapsible-title">
+                    <span class="collapsible-icon">🎯</span>
+                    Component Focus: ${displayName}
+                </div>
+                <span class="expand-icon">▼</span>
+            </div>
+            <div class="collapsible-content">
+                <div class="collapsible-body">
+                    ${this.generateComponentFocusView(componentName, result, component)}
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions for Component -->
+        <div class="collapsible-section expanded">
+            <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                <div class="collapsible-title">
+                    <span class="collapsible-icon">⚡</span>
+                    Quick Actions
+                </div>
+                <span class="expand-icon">▼</span>
+            </div>
+            <div class="collapsible-content">
+                <div class="collapsible-body">
+                    ${this.generateQuickActions(componentName, component)}
+                </div>
+            </div>
+        </div>
+
+        <!-- Related Components -->
+        <div class="collapsible-section">
+            <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                <div class="collapsible-title">
+                    <span class="collapsible-icon">🔗</span>
+                    Related Components
+                </div>
+                <span class="expand-icon">▼</span>
+            </div>
+            <div class="collapsible-content">
+                <div class="collapsible-body">
+                    ${this.generateRelatedComponents(componentName, result)}
+                </div>
+            </div>
+        </div>
+    `;
+
+    dashboardContent.innerHTML = html;
+},
+
+// **NEW METHOD: Generate Component Focus View**
+generateComponentFocusView(componentName, result, component) {
+    const qualityColor = result ? this.getQualityColor(result.qualityScore) : 'var(--grey-400)';
+    const riskColor = result ? this.getRiskColor(result.llmAnalysis?.riskAssessment) : 'var(--grey-400)';
+    
+    return `
+        <div style="background: linear-gradient(135deg, var(--primary-blue) 0%, var(--indigo) 100%); color: white; padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: start;">
+                <div>
+                    <h3 style="margin: 0 0 0.5rem 0; color: white;">${component?.friendlyName || componentName}</h3>
+                    <div style="font-size: 0.9rem; opacity: 0.9; margin-bottom: 1rem;">
+                        ${component?.businessPurpose || 'Business purpose pending analysis'}
+                    </div>
+                    <div style="display: flex; gap: 1rem;">
+                        <span class="badge" style="background: rgba(255,255,255,0.2); color: white;">
+                            ${component?.type || 'Unknown Type'}
+                        </span>
+                        <span class="badge" style="background: rgba(255,255,255,0.2); color: white;">
+                            📁 ${component?.fileSource || 'Unknown Source'}
+                        </span>
+                    </div>
+                </div>
+                <div style="text-align: right;">
+                    ${result ? `
+                        <div style="margin-bottom: 0.5rem;">
+                            <span class="badge" style="background: ${qualityColor}; color: white;">
+                                Quality: ${result.qualityScore}/10
+                            </span>
+                        </div>
+                        <div>
+                            <span class="badge" style="background: ${riskColor}; color: white;">
+                                ${(result.llmAnalysis?.riskAssessment || 'Unknown').toUpperCase()} Risk
+                            </span>
+                        </div>
+                    ` : `
+                        <span class="badge" style="background: rgba(245, 158, 11, 0.8); color: white;">
+                            Analysis Pending
+                        </span>
+                    `}
+                </div>
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+            <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid var(--grey-200);">
+                <div style="font-size: 1.25rem; font-weight: bold; color: var(--primary-blue);">${component?.lineCount || 0}</div>
+                <div style="font-size: 0.8rem; color: var(--grey-600);">Lines of Code</div>
+            </div>
+            <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid var(--grey-200);">
+                <div style="font-size: 1.25rem; font-weight: bold; color: var(--success-green);">${component?.fieldCount || 0}</div>
+                <div style="font-size: 0.8rem; color: var(--grey-600);">Fields</div>
+            </div>
+            <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid var(--grey-200);">
+                <div style="font-size: 1.25rem; font-weight: bold; color: var(--warning-yellow);">${component?.complexityScore || 0}</div>
+                <div style="font-size: 0.8rem; color: var(--grey-600);">Complexity</div>
+            </div>
+            <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid var(--grey-200);">
+                <div style="font-size: 1.25rem; font-weight: bold; color: var(--info-blue);">
+                    ${result ? (result.dependencyAnalysis?.summary?.foundCount + result.dependencyAnalysis?.summary?.missingCount || 0) : 0}
+                </div>
+                <div style="font-size: 0.8rem; color: var(--grey-600);">Dependencies</div>
+            </div>
+        </div>
+
+        ${result && result.llmAnalysis ? `
+            <div style="margin-top: 1rem; padding: 1rem; background: var(--grey-50); border-radius: 8px;">
+                <h5 style="margin: 0 0 0.5rem 0; color: var(--grey-800);">🧠 Business Intelligence Summary</h5>
+                <p style="margin: 0; color: var(--grey-700); font-size: 0.9rem; line-height: 1.5;">
+                    ${result.llmAnalysis.businessPurpose?.substring(0, 300)}${result.llmAnalysis.businessPurpose?.length > 300 ? '...' : ''}
+                </p>
+                ${result.llmAnalysis.recommendations && result.llmAnalysis.recommendations.length > 0 ? `
+                    <div style="margin-top: 0.75rem;">
+                        <strong>Top Recommendations:</strong>
+                        <ul style="margin: 0.25rem 0 0 1rem; font-size: 0.85rem;">
+                            ${result.llmAnalysis.recommendations.slice(0, 3).map(rec => `<li>${rec}</li>`).join('')}
+                        </ul>
+                    </div>
+                ` : ''}
+            </div>
+        ` : ''}
+    `;
+},
+
+// **NEW METHOD: Generate Quick Actions**
+generateQuickActions(componentName, component) {
+    const isAnalyzed = component?.analyzed;
+    
+    return `
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+            <button class="btn btn-primary btn-block" onclick="analyzer.analyzeSpecificComponent('${componentName}')">
+                <span>🤖</span>
+                ${isAnalyzed ? 'Re-analyze Component' : 'Analyze Component'}
+            </button>
+            
+            ${isAnalyzed ? `
+                <button class="btn btn-success btn-block" onclick="analyzer.refreshDependencies('${componentName}')">
+                    <span>🔄</span>
+                    Refresh Dependencies
+                </button>
+            ` : ''}
+            
+            <button class="btn btn-info btn-block" onclick="document.querySelector('.tab[data-tab=\\"dependencies\\"]').click()">
+                <span>🔗</span>
+                View Dependencies
+            </button>
+            
+            <button class="btn btn-info btn-block" onclick="document.querySelector('.tab[data-tab=\\"fieldmatrix\\"]').click()">
+                <span>📋</span>
+                View Field Matrix
+            </button>
+            
+            <button class="btn btn-primary btn-block" onclick="analyzer.startComponentChat('${componentName}')">
+                <span>💬</span>
+                Ask AI About This
+            </button>
+            
+            <button class="btn btn-warning btn-block" onclick="analyzer.exportComponentReport('${componentName}')">
+                <span>📄</span>
+                Export Report
+            </button>
+        </div>
+    `;
+},
+
+// **NEW METHOD: Generate Related Components**
+generateRelatedComponents(componentName, result) {
+    if (!result || !result.dependencyAnalysis) {
+        return '<p style="color: var(--grey-500); text-align: center;">No dependency information available</p>';
+    }
+    
+    const related = [
+        ...result.dependencyAnalysis.found.copybooks,
+        ...result.dependencyAnalysis.found.programs,
+        ...result.dependencyAnalysis.found.files
+    ];
+    
+    if (related.length === 0) {
+        return '<p style="color: var(--grey-500); text-align: center;">No related components found</p>';
+    }
+    
+    return `
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem;">
+            ${related.slice(0, 6).map(name => {
+                const relatedComponent = this.discoveredComponents.get(name);
+                return `
+                    <div style="background: white; border: 1px solid var(--grey-200); border-radius: 8px; padding: 1rem; cursor: pointer;" onclick="analyzer.selectComponent('${name}')">
+                        <div style="font-weight: 600; color: var(--grey-800); margin-bottom: 0.25rem;">${relatedComponent?.friendlyName || name}</div>
+                        <div style="font-size: 0.8rem; color: var(--grey-500); margin-bottom: 0.5rem;">${name}</div>
+                        <div style="font-size: 0.8rem; color: var(--grey-600);">
+                            ${relatedComponent?.businessPurpose?.substring(0, 80) || 'Click to analyze'}...
+                        </div>
+                        <div style="margin-top: 0.5rem;">
+                            <span class="badge badge-primary">${relatedComponent?.type || 'Unknown'}</span>
+                            ${relatedComponent?.analyzed ? '<span class="badge badge-success" style="margin-left: 0.25rem;">Analyzed</span>' : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+        
+        ${related.length > 6 ? `
+            <div style="text-align: center; margin-top: 1rem;">
+                <span style="color: var(--grey-500);">+${related.length - 6} more components</span>
+            </div>
+        ` : ''}
+    `;
+},
+
+// **NEW METHOD: Start Component Chat**
+startComponentChat(componentName) {
+    const component = this.discoveredComponents.get(componentName);
+    const chatInput = document.getElementById('chatInput');
+    
+    if (chatInput) {
+        chatInput.value = `Tell me about the business purpose and functionality of ${component?.friendlyName || componentName}. What does this component do in the system?`;
+        this.updateChatContext('component', componentName);
+        
+        // Switch to chat panel if collapsed
+        const rightPanel = document.getElementById('rightPanel');
+        if (rightPanel && rightPanel.classList.contains('collapsed')) {
+            this.togglePanel('right');
+        }
+        
+        // Send the message
+        this.sendChatMessage();
+    }
+},
+
+// **NEW METHOD: Export Component Report**
+exportComponentReport(componentName) {
+    const component = this.discoveredComponents.get(componentName);
+    const result = this.analysisResults[componentName];
+    
+    if (!component) {
+        this.showError('Component not found');
+        return;
+    }
+    
+    const reportData = {
+        componentName: componentName,
+        friendlyName: component.friendlyName,
+        businessPurpose: component.businessPurpose,
+        type: component.type,
+        fileSource: component.fileSource,
+        metrics: {
+            lineCount: component.lineCount,
+            complexityScore: component.complexityScore,
+            fieldCount: component.fieldCount,
+            qualityScore: result?.qualityScore
+        },
+        analysis: result || null,
+        exportedAt: new Date().toISOString()
+    };
+    
+    const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
+    this.downloadFile(blob, `${componentName}_report.json`);
+    
+    this.showSuccess(`📄 Component report exported for ${component.friendlyName || componentName}`);
+},
+
+// **NEW METHOD: Quick Refresh Dependencies**
+async refreshDependencies(componentName) {
+    const component = this.discoveredComponents.get(componentName);
+    if (!component) {
+        this.showError('Component not found');
+        return;
+    }
+    
+    this.showLoading();
+    this.updateLoadingStatus(`🔄 Refreshing dependencies for ${component.friendlyName || componentName}...`);
+    
+    try {
+        const relevantFiles = this.findRelevantFiles(componentName);
+        
+        // Quick dependency extraction without full LLM analysis
+        const dependencyAnalysis = await this.extractDependencies(relevantFiles);
+        
+        // Update existing analysis result
+        if (this.analysisResults[componentName]) {
+            this.analysisResults[componentName].dependencyAnalysis = dependencyAnalysis;
+            this.analysisResults[componentName].timestamp = new Date().toISOString();
+        }
+        
+        // Refresh the dependency flow display
+        this.displayDependencyFlow(componentName, this.analysisResults[componentName]);
+        
+        // Save to database
+        this.saveToDatabase();
+        
+        this.hideLoading();
+        this.showSuccess(`🔄 Dependencies refreshed for ${component.friendlyName || componentName}`);
+        
+        // Switch to dependencies tab to show results
+        const dependenciesTab = document.querySelector('.tab[data-tab="dependencies"]');
+        if (dependenciesTab) dependenciesTab.click();
+        
+    } catch (error) {
+        this.hideLoading();
+        this.showError(`Dependency refresh failed: ${error.message}`);
+        console.error('Dependency refresh failed:', error);
     }
 },
 
@@ -3529,68 +3955,86 @@ Object.assign(EnhancedCodeAnalyzer.prototype, {
 
     // Start Auto Analysis
     async startAutoAnalysis() {
-        if (this.autoAnalysisInProgress) {
-            this.showWarning('Auto-analysis already in progress');
+    if (this.autoAnalysisInProgress) {
+        this.showWarning('Auto-analysis already in progress');
+        return;
+    }
+    
+    if (this.discoveredComponents.size === 0) {
+        this.showError('No components discovered for analysis');
+        return;
+    }
+    
+    this.autoAnalysisInProgress = true;
+    this.showLoading();
+    this.updateLoadingStatus('🚀 Starting auto-analysis of discovered components...');
+    
+    try {
+        // **INCLUDE COMPONENTS THAT NEED RE-ANALYSIS**
+        const components = Array.from(this.discoveredComponents.values())
+            .filter(comp => !comp.analyzed || comp.needsReanalysis)
+            .slice(0, 15); // Increased limit to handle re-analysis
+        
+        if (components.length === 0) {
+            this.hideLoading();
+            this.showInfo('All components are already analyzed. Upload new files or clear data to re-analyze.');
             return;
         }
         
-        if (this.discoveredComponents.size === 0) {
-            this.showError('No components discovered for analysis');
-            return;
+        let completed = 0;
+        const reanalysisCount = components.filter(c => c.needsReanalysis).length;
+        
+        if (reanalysisCount > 0) {
+            this.showInfo(`🔄 Re-analyzing ${reanalysisCount} components with updated dependencies...`);
         }
         
-        this.autoAnalysisInProgress = true;
-        this.showLoading();
-        this.updateLoadingStatus('🚀 Starting auto-analysis of discovered components...');
-        
-        try {
-            const components = Array.from(this.discoveredComponents.values())
-                .filter(comp => !comp.analyzed)
-                .slice(0, 10); // Limit to 10 components for performance
-            
-            let completed = 0;
-            
-            for (const component of components) {
-                try {
-                    this.updateLoadingStatus(`Analyzing ${component.friendlyName || component.name} (${completed + 1}/${components.length})...`);
-                    this.updateProgress((completed / components.length) * 100);
-                    
-                    const relevantFiles = this.findRelevantFiles(component.name);
-                    const analysisResult = await this.runComponentAnalysis(component.name, relevantFiles);
-                    
-                    this.analysisResults[component.name] = analysisResult;
-                    component.analyzed = true;
-                    component.qualityScore = analysisResult.qualityScore;
-                    
-                    completed++;
-                    
-                    // Brief pause between analyses
-                    await this.sleep(1000);
-                    
-                } catch (error) {
-                    console.warn(`Failed to analyze ${component.name}:`, error);
-                    component.analyzed = false;
-                }
+        for (const component of components) {
+            try {
+                this.updateLoadingStatus(`Analyzing ${component.friendlyName || component.name} (${completed + 1}/${components.length})...`);
+                this.updateProgress((completed / components.length) * 100);
+                
+                const relevantFiles = this.findRelevantFiles(component.name);
+                const analysisResult = await this.runComponentAnalysis(component.name, relevantFiles);
+                
+                this.analysisResults[component.name] = analysisResult;
+                component.analyzed = true;
+                component.needsReanalysis = false; // Clear re-analysis flag
+                component.qualityScore = analysisResult.qualityScore;
+                
+                completed++;
+                
+                // Brief pause between analyses
+                await this.sleep(1000);
+                
+            } catch (error) {
+                console.warn(`Failed to analyze ${component.name}:`, error);
+                component.analyzed = false;
             }
-            
-            this.hideLoading();
-            this.updateDashboardWithResults();
-            this.enableExportButtons();
-            this.enableChat();
-            this.saveToDatabase();
-            
-            this.showSuccess(`✨ Auto-analysis complete! ${completed}/${components.length} components analyzed`);
-            
-            // Switch to dashboard to show results
-            document.querySelector('.tab[data-tab="dashboard"]').click();
-            
-        } catch (error) {
-            this.hideLoading();
-            this.showError(`Auto-analysis failed: ${error.message}`);
-        } finally {
-            this.autoAnalysisInProgress = false;
         }
-    },
+        
+        this.hideLoading();
+        this.updateDashboardWithResults();
+        this.enableExportButtons();
+        this.enableChat();
+        this.saveToDatabase();
+        
+        // **REFRESH CURRENT COMPONENT VIEW** if one is selected
+        if (this.currentSelectedComponent) {
+            this.syncAllTabsForComponent(this.currentSelectedComponent);
+        }
+        
+        this.showSuccess(`✨ Auto-analysis complete! ${completed}/${components.length} components analyzed (${reanalysisCount} re-analyzed)`);
+        
+        // Switch to dashboard to show results
+        document.querySelector('.tab[data-tab="dashboard"]').click();
+        
+    } catch (error) {
+        this.hideLoading();
+        this.showError(`Auto-analysis failed: ${error.message}`);
+    } finally {
+        this.autoAnalysisInProgress = false;
+    }
+},
 
     // Find Relevant Files for Component
     findRelevantFiles(componentName) {
