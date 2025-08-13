@@ -5114,11 +5114,184 @@ Return only the friendly name, no explanation.`;
     }
 
     // Chunked LLM Request (simplified for this part)
-    async makeChunkedLLMRequest(prompt, options) {
-        // For now, return a fallback response
-        console.warn('Chunked LLM request not fully implemented, using fallback');
-        return this.createComponentFallback('Component', 'Friendly Name', 'Type');
+    // Helper: split text by lines into ~targetTokens chunks
+chunkTextByTokens(text, targetTokens) {
+  const lines = text.split(/\r?\n/);
+  const chunks = [];
+  let cur = [];
+  let curTok = 0;
+  for (const line of lines) {
+    const lineTok = this.estimateTokens(line + "\n");
+    if (curTok + lineTok > targetTokens && cur.length) {
+      chunks.push(cur.join("\n"));
+      cur = [line];
+      curTok = lineTok;
+    } else {
+      cur.push(line);
+      curTok += lineTok;
     }
+  }
+  if (cur.length) chunks.push(cur.join("\n"));
+  return chunks;
+}
+
+// Helper: merge partial JSONs from map phase into one result
+mergeChunkAnalyses(partials, schemaSeed) {
+  const out = JSON.parse(JSON.stringify(schemaSeed));
+  const uniqPush = (arr, vals) => {
+    for (const v of vals || []) if (!arr.some(x => JSON.stringify(x) === JSON.stringify(v))) arr.push(v);
+  };
+  // Strings: take longest non-empty
+  const longest = (...vals) => vals.filter(Boolean).sort((a,b)=>b.length-a.length)[0] || "";
+
+  out.businessPurpose = longest(
+    out.businessPurpose,
+    ...partials.map(p => p.businessPurpose)
+  );
+
+  // businessLogic rules
+  out.businessLogic = out.businessLogic || { validationRules: [], businessRules: [], dataProcessing: "" };
+  const allValidation = [], allBusiness = [];
+  for (const p of partials) {
+    if (p.businessLogic) {
+      uniqPush(allValidation, p.businessLogic.validationRules || []);
+      uniqPush(allBusiness, p.businessLogic.businessRules || []);
+    }
+  }
+  out.businessLogic.validationRules = allValidation;
+  out.businessLogic.businessRules  = allBusiness;
+  out.businessLogic.dataProcessing = longest(
+    out.businessLogic.dataProcessing,
+    ...partials.map(p => p.businessLogic?.dataProcessing)
+  );
+
+  // recommendations (unique)
+  out.recommendations = [];
+  for (const p of partials) uniqPush(out.recommendations, p.recommendations || []);
+
+  // modernizationSuggestions (unique)
+  out.modernizationSuggestions = [];
+  for (const p of partials) uniqPush(out.modernizationSuggestions, p.modernizationSuggestions || []);
+
+  // riskAssessment: take most common non-empty or longest
+  const risks = partials.map(p => p.riskAssessment).filter(Boolean);
+  const freq = risks.reduce((m,r)=> (m[r]=(m[r]||0)+1, m), {});
+  out.riskAssessment = Object.keys(freq).sort((a,b)=>freq[b]-freq[a])[0] || longest(...risks);
+
+  // qualityScore: average of numeric chunk scores if available, else keep existing or 6
+  const qs = partials.map(p => Number(p.qualityScore)).filter(n => Number.isFinite(n));
+  if (qs.length) out.qualityScore = Math.round(qs.reduce((a,b)=>a+b,0)/qs.length);
+  else out.qualityScore = out.qualityScore ?? 6;
+
+  return out;
+}
+
+
+// Replace your stub:
+async makeChunkedLLMRequest(prompt, options = {}) {
+  const {
+    maxResponseTokens = 2000,   // leave ~2k for answer
+    retries = 1
+  } = options;
+
+  // Try to slice the big "FILE CONTENTS" region; if not found, chunk entire prompt
+  const headerMatch = prompt.match(/[\s\S]*?FILE CONTENTS:\s*/i);
+  const afterHeader = headerMatch ? prompt.slice(headerMatch[0].length) : prompt;
+  const headerText  = headerMatch ? headerMatch[0] : "";
+
+  // Compute safe prompt budget (<= this.maxTokens)
+  const SAFE_BUFFER = 200;
+  const promptBudget = Math.max(1000,
+    this.maxTokens - maxResponseTokens - SAFE_BUFFER
+  );
+
+  // Reserve some for non-file sections
+  const headerTok = this.estimateTokens(headerText);
+  const perChunkBudget = Math.max(800, Math.min(3600, promptBudget - headerTok - 400)); // extra safety
+
+  // Make chunks
+  const chunks = this.chunkTextByTokens(afterHeader || prompt, perChunkBudget);
+
+  // Map: analyze each chunk into partial JSON
+  const partials = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const part = chunks[i];
+
+    const mapPrompt = `
+You are analyzing mainframe code in parts. This is part ${i+1} of ${chunks.length}.
+
+Return ONLY a compact JSON object with these keys:
+{
+  "businessPurpose": "...",
+  "businessLogic": {
+    "validationRules": ["..."],
+    "businessRules": ["..."],
+    "dataProcessing": "..."
+  },
+  "qualityScore": 6,
+  "recommendations": ["..."],
+  "modernizationSuggestions": ["..."],
+  "riskAssessment": "low|medium|high"
+}
+
+Focus strictly on insights present in THIS PART. Avoid duplication and keep text concise.
+
+=== CONTEXT HEADER (truncated) ===
+${headerText.slice(0, 1500)}
+
+=== FILE CONTENTS PART ${i+1}/${chunks.length} ===
+${part}
+`;
+    // Ensure within token budget (fallback trim if necessary)
+    try { this.validateTokenLimits(mapPrompt, maxResponseTokens); }
+    catch {
+      // hard trim the part further if needed
+      const lines = part.split(/\r?\n/);
+      let trimmed = "", tok = this.estimateTokens(headerText);
+      for (const ln of lines) {
+        const t = this.estimateTokens(ln+"\n");
+        if (tok + t > promptBudget) break;
+        trimmed += ln + "\n";
+        tok += t;
+      }
+      // rebuild mapPrompt with trimmed part
+      // (re-validate is optional; vLLM still gets ample headroom)
+      const rebuilt = mapPrompt.replace(part, trimmed);
+      const res = await this.makeSingleLLMRequest(rebuilt, maxResponseTokens, retries);
+      partials.push(res);
+      continue;
+    }
+
+    const res = await this.makeSingleLLMRequest(mapPrompt, maxResponseTokens, retries);
+    partials.push(res);
+  }
+
+  // Reduce: merge partials into one JSON
+  const seed = {
+    businessPurpose: "",
+    businessLogic: { validationRules: [], businessRules: [], dataProcessing: "" },
+    qualityScore: 6,
+    recommendations: [],
+    modernizationSuggestions: [],
+    riskAssessment: ""
+  };
+  const merged = this.mergeChunkAnalyses(partials, seed);
+
+  // Optional: small reduce pass asking LLM to tidy/normalize (kept inside budget)
+  const reducePrompt = `
+Normalize and lightly de-duplicate the following JSON. Maintain the same keys.
+Return ONLY JSON:
+
+${JSON.stringify(merged)}
+`;
+  try {
+    this.validateTokenLimits(reducePrompt, Math.min(1200, maxResponseTokens));
+    return await this.makeSingleLLMRequest(reducePrompt, Math.min(1200, maxResponseTokens), 0);
+  } catch {
+    return merged; // already good enough
+  }
+}
+    
 
     // Extract Text from LLM Response
     extractTextFromResponse(data) {
