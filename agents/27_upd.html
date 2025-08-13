@@ -6099,7 +6099,8 @@ EnhancedCodeAnalyzer.prototype.selectComponent = function(componentName) {
     
     // Update chat context
     this.updateChatContext('component', componentName);
-    
+    this.persistSelection(componentName);       // <-- persist to DB
+    this.updateDashboardStats();  
     // Show field matrix for selected component if analyzed
     if (this.analysisResults[componentName]) {
         this.displayFieldMatrix(componentName);
