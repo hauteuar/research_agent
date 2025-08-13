@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Enhanced Code Analyzer — Chat + Dependency Map</title>
+  <style>
+    :root{--bg:#0f172a;--panel:#ffffff;--muted:#475569;--line:#e5e7eb;--em:#10b981}
+    *{box-sizing:border-box}
+    body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial; background:linear-gradient(135deg,#0f172a 0%,#1e293b 25%,#334155 50%,#475569 75%,#64748b 100%); margin:0; min-height:100vh; color:#0f172a}
+    header{position:sticky;top:0;background:#fff;box-shadow:0 1px 16px rgba(0,0,0,0.08);z-index:10}
+    .wrap{max-width:1400px;margin:0 auto;padding:16px}
+    .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px}
+    .row{display:flex;gap:12px}
+    .col{flex:1}
+    .panel{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px}
+    .sidebar{width:360px}
+    .badge{border:1px solid #cbd5e1;border-radius:9999px;padding:2px 6px;font-size:11px;color:#334155}
+    .muted{color:#475569}
+    .btn{background:#0ea5e9;border:none;color:#fff;padding:10px 12px;border-radius:10px;cursor:pointer}
+    .btn:disabled{opacity:.5;cursor:not-allowed}
+    .btn-ghost{background:#f1f5f9;color:#0f172a;border:1px solid var(--line)}
+    .em{color:#059669}
+    input[type="text"],input[type="number"],textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px}
+    .list{max-height:520px;overflow:auto}
+    .component-row{cursor:pointer;border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px;background:#fff}
+    .component-row:hover{background:#f8fafc}
+    .selected{outline:2px solid var(--em);background:#ecfdf5}
+    .grid-2{display:grid;grid-template-columns:360px 1fr;gap:12px}
+    .grid-2-vert{display:grid;grid-template-rows:auto 420px;gap:12px}
+    .help{font-size:12px;color:#64748b}
+    pre{background:#0b1020;color:#e2e8f0;padding:12px;border-radius:10px;overflow:auto}
+    code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+    .kv{display:grid;grid-template-columns:160px 1fr;gap:8px}
+    /* Chat */
+    .chat{display:flex;flex-direction:column;height:360px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+    .chat-history{flex:1;overflow:auto;padding:10px;background:#f8fafc}
+    .chat-msg{margin:6px 0;max-width:80%}
+    .chat-user{background:#e0f2fe;border:1px solid #bae6fd;border-radius:10px;padding:8px 10px;align-self:flex-end}
+    .chat-assistant{background:#ecfdf5;border:1px solid #bbf7d0;border-radius:10px;padding:8px 10px;align-self:flex-start}
+    .chat-input{display:flex;gap:8px;border-top:1px solid var(--line);padding:8px;background:#fff}
+    /* Graph */
+    .graph-wrap{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff}
+    .graph-toolbar{position:absolute;top:8px;left:8px;display:flex;gap:6px;z-index:2}
+    .graph-toolbar .btn{padding:6px 8px;border-radius:8px}
+    .legend{position:absolute;bottom:8px;left:8px;background:#ffffffcc;border:1px solid var(--line);padding:6px 8px;border-radius:8px;font-size:12px}
+    svg{touch-action:none}
+    .node{cursor:pointer}
+    .node circle{fill:#0ea5e9;stroke:#0b82b6;stroke-width:1.5}
+    .node.copy circle{fill:#22c55e;stroke:#16a34a}
+    .node.selected circle{stroke:#10b981;stroke-width:3;filter:drop-shadow(0 0 2px #10b981)}
+    .edge{stroke:#94a3b8;stroke-width:1.2;marker-end:url(#arrow)}
+    .edge.hl{stroke:#0ea5e9;stroke-width:2.2}
+    .label{font-size:11px;fill:#0f172a;pointer-events:none}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="row">
+        <div class="col">
+          <div style="font-size:20px;font-weight:700">Enhanced Code Analyzer <span class="em">— Chat + Dependency Map</span></div>
+          <div class="muted" style="font-size:13px">Upload code, auto-discover components, analyze (≤ 6000 tokens), explore dependencies, and chat with context.</div>
+        </div>
+        <div style="display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap:8px; min-width:380px">
+          <div class="card" style="text-align:center">
+            <div class="muted" style="font-size:12px">Components</div>
+            <div id="dashTotalComponents" style="font-weight:700; font-size:20px">0</div>
+          </div>
+          <div class="card" style="text-align:center">
+            <div class="muted" style="font-size:12px">Files</div>
+            <div id="dashTotalFiles" style="font-weight:700; font-size:20px">0</div>
+          </div>
+          <div class="card" style="text-align:center">
+            <div class="muted" style="font-size:12px">Fields</div>
+            <div id="dashTotalFields" style="font-weight:700; font-size:20px">0</div>
+          </div>
+          <div class="card" style="text-align:center">
+            <div class="muted" style="font-size:12px">Quality</div>
+            <div id="dashQualityScore" style="font-weight:700; font-size:20px">-</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap" style="margin-top:12px">
+    <div class="grid-2">
+      <aside class="sidebar panel">
+        <div style="font-weight:700; margin-bottom:8px">Data & Settings</div>
+        <div class="kv" style="margin-bottom:8px">
+          <label>vLLM Endpoint</label>
+          <input id="vllmEndpoint" type="text" placeholder="http://localhost:8000" />
+        </div>
+        <div class="kv" style="margin-bottom:8px">
+          <label>Max Tokens (cap)</label>
+          <input id="maxTokens" type="number" value="6000" min="1000" max="6000"/>
+        </div>
+        <div class="kv" style="margin-bottom:8px">
+          <label>Response Tokens</label>
+          <input id="respTokens" type="number" value="1800" min="200" max="3000"/>
+        </div>
+        <div class="kv" style="margin-bottom:8px">
+          <label>Upload Files</label>
+          <input id="fileInput" type="file" multiple />
+        </div>
+        <div class="row" style="margin-bottom:8px">
+          <button id="btnDiscover" class="btn">Auto-Discover</button>
+          <button id="btnAnalyze" class="btn btn-ghost">Auto-Analyze</button>
+        </div>
+        <div class="row" style="margin-bottom:8px">
+          <button id="btnGraph" class="btn btn-ghost">Build Dependency Map</button>
+          <button id="btnClear" class="btn btn-ghost">Clear All</button>
+        </div>
+
+        <hr style="margin:12px 0; border:none; border-top:1px solid var(--line)"/>
+
+        <div style="font-weight:700; margin-bottom:8px">Components</div>
+        <input id="componentSearch" type="text" placeholder="Filter components..." />
+        <div class="muted" style="font-size:12px;margin:6px 0">
+          <span>All: <b id="componentCount">0</b></span> ·
+          <span>Programs: <b id="programCount">0</b></span> ·
+          <span>Copybooks: <b id="copybookCount">0</b></span>
+        </div>
+        <div id="discoveredComponents" class="list"></div>
+      </aside>
+
+      <section class="panel grid-2-vert">
+        <div class="row" style="gap:12px">
+          <div class="card" style="flex:1">
+            <div style="font-weight:700; margin-bottom:8px">Selected Component</div>
+            <div id="selectedMeta" class="muted" style="margin-bottom:8px">None</div>
+            <div id="analysisOutput" class="card" style="margin-bottom:12px; display:none"></div>
+            <div class="card">
+              <div style="font-weight:700; margin-bottom:8px">Field Matrix</div>
+              <div id="fieldMatrix"></div>
+            </div>
+          </div>
+          <div class="card" style="flex:0.9">
+            <div style="font-weight:700; margin-bottom:8px">Chat</div>
+            <div class="chat">
+              <div id="chatHistory" class="chat-history"></div>
+              <div class="chat-input">
+                <input id="chatInput" type="text" placeholder="Ask about the selected component, dependencies, rules..." />
+                <button id="chatSend" class="btn">Send</button>
+              </div>
+            </div>
+            <div class="help" style="margin-top:6px">Chat uses the selected component + its neighbors in the dependency map as context. If no endpoint is set, it uses a mock for testing.</div>
+          </div>
+        </div>
+
+        <div class="graph-wrap" id="graphWrap">
+          <div class="graph-toolbar">
+            <button id="zoomIn" class="btn btn-ghost">＋</button>
+            <button id="zoomOut" class="btn btn-ghost">－</button>
+            <button id="resetZoom" class="btn btn-ghost">Reset</button>
+            <button id="focusSel" class="btn">Focus Selected</button>
+          </div>
+          <div class="legend">Legend: <span class="badge">PROGRAM</span> • <span class="badge">COPYBOOK</span> • Edge: dependency</div>
+          <svg id="depSvg" width="100%" height="100%" viewBox="0 0 1000 420" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+                <path d="M0,0 L0,6 L9,3 z" fill="#94a3b8"/>
+              </marker>
+            </defs>
+            <g id="viewport">
+              <g id="edges"></g>
+              <g id="nodes"></g>
+              <g id="labels"></g>
+            </g>
+          </svg>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel" style="margin-top:12px">
+      <div style="font-weight:700; margin-bottom:8px">Debug</div>
+      <pre id="debug"></pre>
+    </section>
+  </main>
+
+  <script>
+  // =============================
+  // EnhancedCodeAnalyzer with Chat + Graph
+  // =============================
+  class EnhancedCodeAnalyzer {
+    constructor() {
+      // State
+      this.vllmEndpoint = "";
+      this.maxTokens = 6000;
+      this.maxResponseTokens = 1800;
+      this.uploadedFiles = [];                 // { name, size, type, text }
+      this.discoveredComponents = new Map();   // name -> { name, type, ... }
+      this.analysisResults = {};               // name -> analysis JSON
+      this.autoAnalysisInProgress = false;
+
+      // Graph
+      this.graph = { nodes: [], edges: [] };   // nodes: {id,type,file}, edges: {from,to,kind}
+      this._graphScale = 1; this._graphTx = 0; this._graphTy = 0;
+
+      // Chat
+      this.chatHistory = [];                   // {role:'user'|'assistant', content:string}
+
+      // Persistence
+      this.dbKey = "eca_persist_v2";
+      this.persistEnabled = true;
+
+      // Bind UI
+      this.bindUI();
+      this.loadPersisted();
+      this.updateDashboardStats();
+      this.displayDiscoveredComponents();
+      this.renderDependencyGraph(); // empty at start
+    }
+
+    // ---------- UI Binding ----------
+    bindUI() {
+      const $$ = (id) => document.getElementById(id);
+      this.$debug = $$("debug");
+
+      $$("fileInput").addEventListener("change", async (e) => {
+        const files = Array.from(e.target.files || []);
+        for (const f of files) {
+          const text = await f.text();
+          this.uploadedFiles.push({ name: f.name, size: f.size, type: f.type || "text/plain", text });
+        }
+        this.log(`Uploaded ${files.length} file(s).`);
+        this.updateDashboardStats();
+        this.persistAll();
+      });
+
+      $$("btnDiscover").addEventListener("click", () => this.autoDiscoverComponents());
+      $$("btnAnalyze").addEventListener("click", () => this.startAutoAnalysis());
+      $$("btnClear").addEventListener("click", () => this.clearAll());
+      $$("btnGraph").addEventListener("click", () => { this.buildDependencyGraph(); this.renderDependencyGraph(); });
+
+      $$("componentSearch").addEventListener("input", () => this.displayDiscoveredComponents());
+
+      // Settings
+      $$("vllmEndpoint").addEventListener("input", (e)=> { this.vllmEndpoint = e.target.value.trim(); });
+      $$("maxTokens").addEventListener("input", (e)=> {
+        const v = parseInt(e.target.value, 10);
+        this.maxTokens = (Number.isFinite(v) && v>1000) ? Math.min(6000, v) : 6000;
+      });
+      $$("respTokens").addEventListener("input", (e)=> {
+        const v = parseInt(e.target.value, 10);
+        this.maxResponseTokens = (Number.isFinite(v) && v>200) ? Math.min(3000, v) : 1800;
+      });
+
+      // Chat
+      $$("chatSend").addEventListener("click", ()=> this.handleChatSend());
+      $$("chatInput").addEventListener("keydown", (ev)=> { if (ev.key === "Enter") this.handleChatSend(); });
+
+      // Graph controls
+      $$("zoomIn").addEventListener("click", ()=> this.zoomGraph(1.15));
+      $$("zoomOut").addEventListener("click", ()=> this.zoomGraph(1/1.15));
+      $$("resetZoom").addEventListener("click", ()=> this.resetGraphView());
+      $$("focusSel").addEventListener("click", ()=> this.focusSelectedNode());
+
+      // Drag to pan
+      const svg = $$("depSvg"); let dragging=false, last=null;
+      svg.addEventListener("mousedown", (e)=>{ dragging=true; last={x:e.clientX,y:e.clientY}; });
+      svg.addEventListener("mousemove", (e)=>{
+        if (!dragging) return;
+        const dx = e.clientX - last.x, dy = e.clientY - last.y;
+        last = {x:e.clientX,y:e.clientY};
+        this._graphTx += dx; this._graphTy += dy;
+        this.applyGraphTransform();
+      });
+      window.addEventListener("mouseup", ()=> dragging=false);
+      svg.addEventListener("wheel", (e)=>{
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.1 : 0.9;
+        this.zoomGraph(factor, {cx:e.offsetX, cy:e.offsetY});
+      }, {passive:false});
+    }
+
+    // ---------- Logging ----------
+    log(msg) {
+      const t = new Date().toISOString().replace('T',' ').slice(0,19);
+      this.$debug.textContent += `[${t}] ${msg}\n`;
+      this.$debug.scrollTop = this.$debug.scrollHeight;
+    }
+
+    // ---------- Persistence ----------
+    persistAll() {
+      if (!this.persistEnabled) return;
+      try {
+        const data = {
+          uploadedFiles: this.uploadedFiles,
+          discoveredComponents: Array.from(this.discoveredComponents.entries()),
+          analysisResults: this.analysisResults,
+          selected: this.getSelectedComponentName() || null,
+          graph: this.graph,
+          chatHistory: this.chatHistory
+        };
+        localStorage.setItem(this.dbKey, JSON.stringify(data));
+      } catch (e) { this.log("Persist failed: " + e.message); }
+    }
+
+    loadPersisted(report=false) {
+      try {
+        const raw = localStorage.getItem(this.dbKey);
+        if (!raw) { if (report) this.log("No persisted state."); return; }
+        const data = JSON.parse(raw);
+        this.uploadedFiles = data.uploadedFiles || [];
+        this.discoveredComponents = new Map(data.discoveredComponents || []);
+        this.analysisResults = data.analysisResults || {};
+        this.graph = data.graph || {nodes:[], edges:[]};
+        this.chatHistory = data.chatHistory || [];
+        this.displayDiscoveredComponents();
+        this.updateDashboardStats();
+        this.renderDependencyGraph();
+        this.renderChatHistory();
+        if (data.selected) this.selectComponent(data.selected, {silent:false});
+        if (report) this.log("Reloaded persisted state.");
+      } catch (e) { this.log("Reload failed: " + e.message); }
+    }
+
+    clearAll() {
+      this.uploadedFiles = [];
+      this.discoveredComponents.clear();
+      this.analysisResults = {};
+      this.graph = {nodes:[], edges:[]};
+      this.chatHistory = [];
+      localStorage.removeItem(this.dbKey);
+      document.getElementById("fileInput").value = "";
+      this.displayDiscoveredComponents();
+      this.updateDashboardStats();
+      this.$debug.textContent = "";
+      this.setSelectedMeta("None");
+      document.getElementById("analysisOutput").style.display = "none";
+      document.getElementById("fieldMatrix").innerHTML = "";
+      this.renderDependencyGraph();
+      this.renderChatHistory();
+      this.log("Cleared all data.");
+    }
+
+    // ---------- Discovery ----------
+    autoDiscoverComponents() {
+      let added = 0;
+      for (const f of this.uploadedFiles) {
+        const upper = f.name.toUpperCase();
+        const type = upper.includes(".CPY") || upper.includes("COPY") ? "COPYBOOK" :
+                     upper.includes(".COB") || upper.includes(".CBL") || upper.includes("PROGRAM") ? "PROGRAM" :
+                     "COMPONENT";
+        const compName = f.name.replace(/\.[^.]+$/, "");
+        if (!this.discoveredComponents.has(compName)) {
+          this.discoveredComponents.set(compName, {
+            name: compName,
+            friendlyName: compName,
+            type, businessPurpose: "",
+            fileSource: f.name,
+            fieldCount: 0,
+            lineCount: (f.text.match(/\n/g)||[]).length + 1,
+            complexityScore: Math.min(10, Math.max(1, Math.round(f.text.length/2000))),
+            selected: false
+          });
+          added++;
+        }
+      }
+      this.displayDiscoveredComponents();
+      this.updateDashboardStats();
+      this.persistAll();
+      this.log(`Auto-Discover completed. ${added} new component(s).`);
+    }
+
+    // ---------- Display Components ----------
+    displayDiscoveredComponents(opts={}) {
+      const container = document.getElementById("discoveredComponents");
+      const searchEl = document.getElementById("componentSearch");
+      const filterText = (opts.filter || (searchEl?.value || "")).toLowerCase().trim();
+
+      const items = Array.from(this.discoveredComponents.values());
+      const filtered = items.filter(it => {
+        if (!filterText) return true;
+        const hay = [it.name, it.friendlyName, it.type, it.businessPurpose, it.fileSource].join(" ").toLowerCase();
+        return hay.includes(filterText);
+      });
+
+      const programs = items.filter(i => (i.type||"").includes("PROGRAM")).length;
+      const copybooks = items.filter(i => (i.type||"").includes("COPY")).length;
+      this.setText("componentCount", items.length);
+      this.setText("programCount", programs);
+      this.setText("copybookCount", copybooks);
+
+      if (!filtered.length) {
+        container.innerHTML = `<div class="muted" style="font-size:13px;padding:8px;border:1px dashed var(--line);border-radius:10px">
+          No components ${filterText ? `matching "<b>${this.escapeHtml(filterText)}</b>"`:"found"}.
+        </div>`;
+        return;
+      }
+
+      const selectedName = this.getSelectedComponentName();
+      container.innerHTML = filtered.map(it => {
+        const selCls = it.name === selectedName ? "component-row selected" : "component-row";
+        const badgeType = it.type || "COMPONENT";
+        return `<div class="${selCls}" data-name="${this.escapeAttr(it.name)}">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+            <div style="min-width:0">
+              <div style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${this.escapeHtml(it.friendlyName)}</div>
+              <div class="muted" style="font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${this.escapeHtml(it.businessPurpose || it.fileSource || "")}</div>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center">
+              <span class="badge">${this.escapeHtml(badgeType)}</span>
+              <span class="muted" title="Fields" style="font-size:12px">🔢 ${it.fieldCount||0}</span>
+              <span class="muted" title="Complexity" style="font-size:12px">📈 ${it.complexityScore||0}</span>
+            </div>
+          </div>
+        </div>`;
+      }).join("");
+
+      container.querySelectorAll(".component-row").forEach(row => {
+        row.addEventListener("click", () => {
+          const name = row.getAttribute("data-name");
+          this.selectComponent(name);
+          container.querySelectorAll(".component-row").forEach(el => el.classList.remove("selected"));
+          row.classList.add("selected");
+          // Also highlight in graph if present
+          this.highlightGraphSelection(name);
+        });
+      });
+    }
+
+    // ---------- Selection ----------
+    selectComponent(componentName, {silent=false}={}) {
+      if (!this.discoveredComponents.has(componentName)) return;
+      for (const comp of this.discoveredComponents.values()) comp.selected = (comp.name === componentName);
+      this.persistAll();
+      const comp = this.discoveredComponents.get(componentName);
+      this.setSelectedMeta(`${comp.friendlyName} — <span class="badge">${this.escapeHtml(comp.type)}</span>`);
+      this.updateDashboardStats();
+      if (!silent) this.log(`Selected: ${componentName}`);
+
+      const res = this.analysisResults[componentName];
+      this.renderAnalysis(res);
+      this.displayFieldMatrix(res);
+    }
+
+    getSelectedComponentName() {
+      for (const comp of this.discoveredComponents.values()) if (comp.selected) return comp.name;
+      return null;
+    }
+
+    setSelectedMeta(html) { document.getElementById("selectedMeta").innerHTML = html; }
+
+    // ---------- Analysis ----------
+    async startAutoAnalysis() {
+      if (this.autoAnalysisInProgress) { this.log("Analysis already in progress."); return; }
+      if (!this.discoveredComponents.size) { this.log("No components to analyze."); return; }
+
+      this.autoAnalysisInProgress = true;
+      this.log("Auto-Analysis started...");
+      const endpoint = (this.vllmEndpoint || document.getElementById("vllmEndpoint").value || "").trim();
+      this.vllmEndpoint = endpoint;
+
+      const names = Array.from(this.discoveredComponents.keys());
+      for (const name of names) {
+        const comp = this.discoveredComponents.get(name);
+        if (this.analysisResults[name]) continue;
+
+        const file = this.uploadedFiles.find(f => f.name === comp.fileSource) || this.uploadedFiles[0];
+        const codeText = file?.text || "";
+        const prompt = this.buildPrompt(comp, codeText);
+
+        try {
+          const result = await this.callLLMAPIChunked(prompt, {
+            maxResponseTokens: this.maxResponseTokens,
+            allowChunking: true,
+            retries: 2
+          });
+          const normalized = this.normalizeLLMResult(result);
+          this.analysisResults[name] = normalized;
+          this.discoveredComponents.get(name).businessPurpose = normalized.businessPurpose || "";
+          this.updateDashboardStats();
+          const sel = this.getSelectedComponentName();
+          if (sel === name) {
+            this.renderAnalysis(normalized);
+            this.displayFieldMatrix(normalized);
+          }
+          this.log(`Analyzed: ${name}`);
+          this.persistAll();
+        } catch (e) {
+          this.log(`Analysis failed for ${name}: ${e.message}`);
+        }
+        await this.sleep(600);
+      }
+
+      this.autoAnalysisInProgress = false;
+      this.log("Auto-Analysis finished.");
+    }
+
+    buildPrompt(comp, codeText) {
+      const header = `SYSTEM: Mainframe Analysis Assistant
+GOAL: Summarize business purpose, logic rules, and modernization suggestions for the given component.
+FORMAT: JSON only.
+COMPONENT:
+- name: ${comp.name}
+- type: ${comp.type}
+- file: ${comp.fileSource}
+
+FILE CONTENTS:
+`;
+      return header + (codeText || "").slice(0, 250000);
+    }
+
+    normalizeLLMResult(obj) {
+      const out = {
+        businessPurpose: obj?.businessPurpose || "",
+        businessLogic: {
+          validationRules: Array.isArray(obj?.businessLogic?.validationRules) ? obj.businessLogic.validationRules : [],
+          businessRules:  Array.isArray(obj?.businessLogic?.businessRules) ? obj.businessLogic.businessRules : [],
+          dataProcessing: obj?.businessLogic?.dataProcessing || ""
+        },
+        recommendations: Array.isArray(obj?.recommendations) ? obj.recommendations : [],
+        modernizationSuggestions: Array.isArray(obj?.modernizationSuggestions) ? obj.modernizationSuggestions : [],
+        riskAssessment: obj?.riskAssessment || "",
+        qualityScore: Number.isFinite(Number(obj?.qualityScore)) ? Number(obj.qualityScore) : 6,
+        fieldAnalysis: obj?.fieldAnalysis || null
+      };
+      return out;
+    }
+
+    renderAnalysis(res) {
+      const box = document.getElementById("analysisOutput");
+      if (!res) { box.style.display="none"; return; }
+      box.style.display = "block";
+      box.innerHTML = `
+        <div style="font-weight:700; margin-bottom:8px">Analysis</div>
+        <div class="kv" style="margin-bottom:8px">
+          <div class="muted">Business Purpose</div>
+          <div>${this.escapeHtml(res.businessPurpose || "")}</div>
+        </div>
+        <div class="kv" style="margin-bottom:8px">
+          <div class="muted">Validation Rules</div>
+          <div>${(res.businessLogic.validationRules||[]).map(r=>`• ${this.escapeHtml(r)}`).join("<br/>") || "-"}</div>
+        </div>
+        <div class="kv" style="margin-bottom:8px">
+          <div class="muted">Business Rules</div>
+          <div>${(res.businessLogic.businessRules||[]).map(r=>`• ${this.escapeHtml(r)}`).join("<br/>") || "-"}</div>
+        </div>
+        <div class="kv" style="margin-bottom:8px">
+          <div class="muted">Data Processing</div>
+          <div>${this.escapeHtml(res.businessLogic.dataProcessing || "")}</div>
+        </div>
+        <div class="kv" style="margin-bottom:8px">
+          <div class="muted">Recommendations</div>
+          <div>${(res.recommendations||[]).map(r=>`• ${this.escapeHtml(r)}`).join("<br/>") || "-"}</div>
+        </div>
+        <div class="kv">
+          <div class="muted">Risk / Quality</div>
+          <div>${this.escapeHtml(res.riskAssessment || "-")} &nbsp; | &nbsp; <b>Quality:</b> ${this.escapeHtml(String(res.qualityScore))}</div>
+        </div>
+      `;
+    }
+
+    displayFieldMatrix(res) {
+      const root = document.getElementById("fieldMatrix");
+      if (!res || !res.fieldAnalysis || !Array.isArray(res.fieldAnalysis.fields)) {
+        root.innerHTML = `<div class="muted">No field analysis.</div>`;
+        return;
+      }
+      const rows = res.fieldAnalysis.fields.map(f => `
+        <tr>
+          <td>${this.escapeHtml(f.name||"")}</td>
+          <td>${this.escapeHtml(f.origin||"")}</td>
+          <td>${this.escapeHtml(f.usage||"")}</td>
+          <td>${this.escapeHtml(f.updatedBy||"")}</td>
+          <td>${this.escapeHtml(f.status||"")}</td>
+        </tr>
+      `).join("");
+      root.innerHTML = `
+        <table style="width:100%; border-collapse:collapse">
+          <thead>
+            <tr style="text-align:left">
+              <th style="border-bottom:1px solid var(--line); padding:6px">Field</th>
+              <th style="border-bottom:1px solid var(--line); padding:6px">Origin</th>
+              <th style="border-bottom:1px solid var(--line); padding:6px">Usage</th>
+              <th style="border-bottom:1px solid var(--line); padding:6px">Updated By</th>
+              <th style="border-bottom:1px solid var(--line); padding:6px">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || ""}
+          </tbody>
+        </table>
+      `;
+    }
+
+    // ---------- Chat ----------
+    async handleChatSend() {
+      const input = document.getElementById("chatInput");
+      const text = (input.value || "").trim();
+      if (!text) return;
+      input.value = "";
+      this.pushChat({role:"user", content:text});
+      try {
+        const ctx = this.composeChatContext();
+        const prompt = `You are a senior mainframe analyst.
+User question: ${text}
+
+Context:
+${ctx}
+
+Answer concisely with bullet points when helpful.`;
+        const result = await this.callLLMAPIChunked(prompt, {
+          maxResponseTokens: Math.min(1200, this.maxResponseTokens),
+          allowChunking: true,
+          retries: 1
+        });
+        const answer = this.formatChatAnswer(result);
+        this.pushChat({role:"assistant", content:answer});
+      } catch (e) {
+        this.pushChat({role:"assistant", content:`(error) ${e.message}`});
+      }
+      this.persistAll();
+    }
+
+    composeChatContext() {
+      const sel = this.getSelectedComponentName();
+      const comp = sel ? this.discoveredComponents.get(sel) : null;
+      const ar = sel ? this.analysisResults[sel] : null;
+
+      // neighbors from graph
+      const neighbors = new Set();
+      for (const e of this.graph.edges) {
+        if (e.from === sel) neighbors.add(e.to);
+        if (e.to === sel) neighbors.add(e.from);
+      }
+      const neighborList = Array.from(neighbors);
+
+      const parts = [];
+      if (sel) parts.push(`Selected: ${sel} (${comp?.type||"-"})`);
+      if (neighborList.length) parts.push(`Neighbors: ${neighborList.join(", ")}`);
+      if (ar) parts.push(`Analysis: ${JSON.stringify(ar).slice(0, 1500)}...`);
+      return parts.join("\n");
+    }
+
+    formatChatAnswer(objOrText) {
+      if (!objOrText) return "(no answer)";
+      if (typeof objOrText === "string") return objOrText;
+      // If LLM returned our analysis schema, compress to text
+      const bp = objOrText.businessPurpose ? `Business Purpose: ${objOrText.businessPurpose}` : null;
+      const br = (objOrText.businessLogic?.businessRules||[]).map(x=>"• "+x).join("\n");
+      const vr = (objOrText.businessLogic?.validationRules||[]).map(x=>"• "+x).join("\n");
+      const rec = (objOrText.recommendations||[]).map(x=>"• "+x).join("\n");
+      return [bp, br ? "Business Rules:\n"+br : null, vr ? "Validation:\n"+vr : null, rec ? "Recommendations:\n"+rec : null].filter(Boolean).join("\n\n");
+    }
+
+    pushChat(msg) {
+      this.chatHistory.push(msg);
+      this.renderChatHistory();
+    }
+
+    renderChatHistory() {
+      const root = document.getElementById("chatHistory");
+      root.innerHTML = this.chatHistory.map(m => {
+        const cls = m.role === "user" ? "chat-msg chat-user" : "chat-msg chat-assistant";
+        return `<div class="${cls}">${this.escapeHtml(m.content)}</div>`;
+      }).join("");
+      root.scrollTop = root.scrollHeight;
+    }
+
+    // ---------- Dependency Graph ----------
+    buildDependencyGraph() {
+      // Heuristics:
+      // - Program uses COPY 'XXXX' -> edge program -> copybook
+      // - CALL 'PGMNAME' -> edge program -> program
+      // - EXEC SQL INCLUDE XXXX -> program -> copybook
+      // - INCLUDE XXXX in preprocessors
+      const nodes = new Map(); // id -> {id,type,file}
+      const edges = [];
+
+      // Ensure nodes from discoveredComponents
+      for (const comp of this.discoveredComponents.values()) {
+        nodes.set(comp.name, { id: comp.name, type: comp.type.includes("COPY")?"COPYBOOK":(comp.type.includes("PROGRAM")?"PROGRAM":"COMPONENT"), file: comp.fileSource });
+      }
+
+      const addEdge = (from, to, kind) => { if (from && to && from!==to) edges.push({from,to,kind}); };
+
+      const getFileTextByComp = (compName) => {
+        const comp = this.discoveredComponents.get(compName);
+        if (!comp) return "";
+        const f = this.uploadedFiles.find(x => x.name === comp.fileSource);
+        return f?.text || "";
+      };
+
+      for (const comp of this.discoveredComponents.values()) {
+        const text = getFileTextByComp(comp.name);
+        const upper = text.toUpperCase();
+
+        // COPY 'NAME' or COPY NAME.
+        const copyMatches = upper.match(/\\bCOPY\\s+['"]?([A-Z0-9_\\-#$@]+)['"]?\\.?/g) || [];
+        for (const m of copyMatches) {
+          const name = (m.match(/COPY\\s+['"]?([A-Z0-9_\\-#$@]+)['"]?/)||[])[1];
+          if (name) {
+            // Map to known copybook node if present
+            const target = Array.from(this.discoveredComponents.values()).find(c => c.name.toUpperCase().includes(name));
+            const to = target ? target.name : name;
+            if (!nodes.has(to)) nodes.set(to, {id: to, type:"COPYBOOK", file:null});
+            addEdge(comp.name, to, "COPY");
+          }
+        }
+
+        // CALL 'PGMNAME'
+        const callMatches = upper.match(/\\bCALL\\s+['"]([A-Z0-9_\\-#$@]+)['"]/g) || [];
+        for (const m of callMatches) {
+          const name = (m.match(/CALL\\s+['"]([A-Z0-9_\\-#$@]+)['"]/)||[])[1];
+          if (name) {
+            const target = Array.from(this.discoveredComponents.values()).find(c => c.name.toUpperCase().includes(name));
+            const to = target ? target.name : name;
+            if (!nodes.has(to)) nodes.set(to, {id: to, type:"PROGRAM", file:null});
+            addEdge(comp.name, to, "CALL");
+          }
+        }
+
+        // EXEC SQL INCLUDE NAME
+        const incMatches = upper.match(/EXEC\\s+SQL\\s+INCLUDE\\s+([A-Z0-9_\\-#$@]+)/g) || [];
+        for (const m of incMatches) {
+          const name = (m.match(/INCLUDE\\s+([A-Z0-9_\\-#$@]+)/)||[])[1];
+          if (name) {
+            const target = Array.from(this.discoveredComponents.values()).find(c => c.name.toUpperCase().includes(name));
+            const to = target ? target.name : name;
+            if (!nodes.has(to)) nodes.set(to, {id: to, type:"COPYBOOK", file:null});
+            addEdge(comp.name, to, "INCLUDE");
+          }
+        }
+      }
+
+      this.graph = { nodes: Array.from(nodes.values()), edges };
+      this.persistAll();
+      this.log(`Dependency map: ${this.graph.nodes.length} nodes, ${this.graph.edges.length} edges.`);
+    }
+
+    renderDependencyGraph() {
+      const svg = document.getElementById("depSvg");
+      const gV = document.getElementById("viewport");
+      const gE = document.getElementById("edges");
+      const gN = document.getElementById("nodes");
+      const gL = document.getElementById("labels");
+      gE.innerHTML=""; gN.innerHTML=""; gL.innerHTML="";
+
+      // Simple circular layout
+      const W = 1000, H = 420, cx = W/2, cy = H/2, R = Math.min(W,H)/2 - 40;
+      const n = this.graph.nodes.length || 1;
+      const pos = {};
+      this.graph.nodes.forEach((node, i)=> {
+        const angle = (i / n) * Math.PI * 2;
+        pos[node.id] = { x: cx + R * Math.cos(angle), y: cy + R * Math.sin(angle) };
+      });
+
+      // Draw edges
+      for (const e of this.graph.edges) {
+        const a = pos[e.from], b = pos[e.to];
+        if (!a || !b) continue;
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", a.x); line.setAttribute("y1", a.y);
+        line.setAttribute("x2", b.x); line.setAttribute("y2", b.y);
+        line.setAttribute("class", "edge");
+        gE.appendChild(line);
+      }
+
+      // Draw nodes + labels
+      for (const node of this.graph.nodes) {
+        const p = pos[node.id]; if (!p) continue;
+        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        g.setAttribute("class", "node " + (node.type==="COPYBOOK"?"copy":"prog"));
+        g.setAttribute("data-id", node.id);
+        g.setAttribute("transform", `translate(${p.x},${p.y})`);
+
+        const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        c.setAttribute("r", 12);
+        g.appendChild(c);
+
+        g.addEventListener("click", ()=> {
+          this.selectComponent(node.id);
+          this.highlightGraphSelection(node.id);
+        });
+
+        gN.appendChild(g);
+
+        const lab = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        lab.setAttribute("class","label");
+        lab.setAttribute("x", p.x + 14);
+        lab.setAttribute("y", p.y + 4);
+        lab.textContent = node.id;
+        gL.appendChild(lab);
+      }
+
+      this.applyGraphTransform();
+      this.highlightGraphSelection(this.getSelectedComponentName());
+    }
+
+    highlightGraphSelection(id) {
+      const nodes = Array.from(document.querySelectorAll("#nodes .node"));
+      nodes.forEach(n => n.classList.remove("selected"));
+      if (!id) return;
+      const selNode = nodes.find(n => n.getAttribute("data-id") === id);
+      if (selNode) selNode.classList.add("selected");
+
+      // Highlight edges touching selection
+      const gE = document.getElementById("edges");
+      Array.from(gE.children).forEach(l => l.classList.remove("hl"));
+      const pos = {}; // rebuild positions to check near-coordinates if needed (skipped for simplicity)
+
+      // Optional: nothing else for now
+    }
+
+    zoomGraph(factor, pivot) {
+      const svg = document.getElementById("depSvg");
+      const rect = svg.getBoundingClientRect();
+      const cx = pivot ? pivot.cx : rect.width/2;
+      const cy = pivot ? pivot.cy : rect.height/2;
+      // translate so that zoom is around pivot
+      this._graphTx = (this._graphTx - cx) * factor + cx;
+      this._graphTy = (this._graphTy - cy) * factor + cy;
+      this._graphScale *= factor;
+      this.applyGraphTransform();
+    }
+
+    resetGraphView() {
+      this._graphScale = 1; this._graphTx = 0; this._graphTy = 0;
+      this.applyGraphTransform();
+    }
+
+    focusSelectedNode() {
+      const sel = this.getSelectedComponentName();
+      if (!sel) return;
+      const label = Array.from(document.querySelectorAll("#labels text")).find(t => t.textContent === sel);
+      if (!label) return;
+      const x = parseFloat(label.getAttribute("x")) || 500;
+      const y = parseFloat(label.getAttribute("y")) || 210;
+      const svg = document.getElementById("depSvg");
+      const rect = svg.getBoundingClientRect();
+      this._graphTx = rect.width/2 - x;
+      this._graphTy = rect.height/2 - y;
+      this._graphScale = 1.2;
+      this.applyGraphTransform();
+    }
+
+    applyGraphTransform() {
+      const vp = document.getElementById("viewport");
+      const s = this._graphScale.toFixed(3);
+      vp.setAttribute("transform", `translate(${this._graphTx},${this._graphTy}) scale(${s})`);
+    }
+
+    // ---------- Dashboard ----------
+    updateDashboardStats() {
+      try {
+        const all = Array.from(this.discoveredComponents.values());
+        const totalComponents = all.length;
+        const totalFiles = this.uploadedFiles.length;
+
+        let totalFields = 0, q = [];
+        for (const [name, res] of Object.entries(this.analysisResults)) {
+          if (res?.fieldAnalysis?.fields) totalFields += res.fieldAnalysis.fields.length;
+          if (Number.isFinite(res?.qualityScore)) q.push(Number(res.qualityScore));
+        }
+        const avgQ = q.length ? Math.round(q.reduce((a,b)=>a+b,0)/q.length) : "-";
+
+        this.setText("dashTotalComponents", totalComponents);
+        this.setText("dashTotalFiles", totalFiles);
+        this.setText("dashTotalFields", totalFields);
+        this.setText("dashQualityScore", avgQ);
+      } catch (e) { this.log("updateDashboardStats error: " + e.message); }
+    }
+
+    // ---------- Token & Chunk Helpers / LLM ----------
+    estimateTokens(text) {
+      if (!text || typeof text !== 'string') return 0;
+      const base = Math.ceil(text.length / 3.2);
+      const technicalWords = (text.match(/\b[A-Z][A-Z0-9\-_]{3,}\b/g) || []).length;
+      const codeLines = (text.match(/^\s*\d{2}\s+/gm) || []).length;
+      return base + Math.floor((technicalWords + codeLines) * 0.1);
+    }
+
+    validateTokenLimits(prompt, maxResponseTokens = 1800) {
+      const SAFE_BUFFER = 200;
+      const promptTokens = this.estimateTokens(prompt);
+      const safePromptLimit = this.maxTokens - maxResponseTokens - SAFE_BUFFER;
+      if (promptTokens > safePromptLimit) {
+        throw new Error(`Prompt too large: ${promptTokens} > ${safePromptLimit}`);
+      }
+      return { promptTokens, responseTokensAvailable: maxResponseTokens, withinLimits: true };
+    }
+
+    chunkTextByTokens(text, targetTokens) {
+      const lines = text.split(/\r?\n/);
+      const chunks = [];
+      let cur = [], curTok = 0;
+      for (const line of lines) {
+        const t = this.estimateTokens(line + "\n");
+        if (curTok + t > targetTokens && cur.length) {
+          chunks.push(cur.join("\n"));
+          cur = [line];
+          curTok = t;
+        } else {
+          cur.push(line);
+          curTok += t;
+        }
+      }
+      if (cur.length) chunks.push(cur.join("\n"));
+      return chunks;
+    }
+
+    mergeChunkAnalyses(partials, seed) {
+      const out = JSON.parse(JSON.stringify(seed));
+      const uniqPush = (arr, vals) => { for (const v of vals || []) if (!arr.some(x => JSON.stringify(x) === JSON.stringify(v))) arr.push(v); };
+      const longest = (...vals) => vals.filter(Boolean).sort((a,b)=> b.length - a.length)[0] || "";
+
+      out.businessPurpose = longest(out.businessPurpose, ...partials.map(p => p.businessPurpose));
+
+      out.businessLogic = out.businessLogic || { validationRules: [], businessRules: [], dataProcessing: "" };
+      const allValidation = [], allBusiness = [];
+      for (const p of partials) {
+        if (p?.businessLogic) {
+          uniqPush(allValidation, p.businessLogic.validationRules || []);
+          uniqPush(allBusiness, p.businessLogic.businessRules || []);
+        }
+      }
+      out.businessLogic.validationRules = allValidation;
+      out.businessLogic.businessRules  = allBusiness;
+      out.businessLogic.dataProcessing = longest(out.businessLogic.dataProcessing, ...partials.map(p => p.businessLogic?.dataProcessing));
+
+      out.recommendations = [];
+      for (const p of partials) uniqPush(out.recommendations, p.recommendations || []);
+      out.modernizationSuggestions = [];
+      for (const p of partials) uniqPush(out.modernizationSuggestions, p.modernizationSuggestions || []);
+
+      const risks = partials.map(p => p.riskAssessment).filter(Boolean);
+      if (risks.length) {
+        const freq = risks.reduce((m,r)=> (m[r]=(m[r]||0)+1, m), {});
+        const maj = Object.keys(freq).sort((a,b)=> freq[b]-freq[a])[0];
+        out.riskAssessment = maj || longest(...risks);
+      }
+
+      const qs = partials.map(p => Number(p.qualityScore)).filter(n => Number.isFinite(n));
+      if (qs.length) out.qualityScore = Math.round(qs.reduce((a,b)=>a+b,0)/qs.length);
+      else out.qualityScore = out.qualityScore ?? 6;
+
+      return out;
+    }
+
+    async callLLMAPIChunked(prompt, options = {}) {
+      const { maxResponseTokens = 1800, allowChunking = true, retries = 2 } = options;
+      try {
+        this.validateTokenLimits(prompt, maxResponseTokens);
+        return await this.makeSingleLLMRequest(prompt, maxResponseTokens, retries);
+      } catch (tokenError) {
+        if (!allowChunking) throw new Error("Prompt too large and chunking disabled: " + tokenError.message);
+        this.log("Prompt large → chunked: " + tokenError.message);
+        return await this.makeChunkedLLMRequest(prompt, { maxResponseTokens, retries });
+      }
+    }
+
+    async makeSingleLLMRequest(prompt, maxResponseTokens, retries = 2) {
+      const endpoint = (this.vllmEndpoint || document.getElementById("vllmEndpoint").value || "").trim();
+      this.vllmEndpoint = endpoint;
+      if (!endpoint) {
+        // mock
+        return this.mockLLMResponse(prompt);
+      }
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          const response = await fetch(endpoint + "/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt, max_tokens: maxResponseTokens, temperature: 0.1, top_p: 0.9, stream: false })
+          });
+          if (!response.ok) throw new Error("HTTP " + response.status + ": " + response.statusText);
+          const data = await response.json();
+          const resultText = this.extractTextFromResponse(data);
+          if (!resultText) throw new Error("No valid text content in LLM response");
+          const parsed = this.parseJSONResponse(resultText);
+          if (parsed.success) return parsed.data;
+          if (parsed.fallbackData) return parsed.fallbackData;
+          throw new Error("JSON parsing failed: " + parsed.error);
+        } catch (err) {
+          if (attempt < retries) { await this.sleep(1000 * (attempt + 1)); continue; }
+          throw err;
+        }
+      }
+    }
+
+    async makeChunkedLLMRequest(prompt, options = {}) {
+      const { maxResponseTokens = 1800, retries = 1 } = options;
+      const headerMatch = prompt.match(/[\s\S]*?FILE CONTENTS:\s*/i);
+      const afterHeader = headerMatch ? prompt.slice(headerMatch[0].length) : prompt;
+      const headerText  = headerMatch ? headerMatch[0] : "";
+
+      const SAFE_BUFFER = 200;
+      const promptBudget = Math.max(1000, this.maxTokens - maxResponseTokens - SAFE_BUFFER);
+
+      const headerTok = this.estimateTokens(headerText);
+      const perChunkBudget = Math.max(800, Math.min(3600, promptBudget - headerTok - 400));
+
+      const chunks = this.chunkTextByTokens(afterHeader || prompt, perChunkBudget);
+      const partials = [];
+      for (let i = 0; i < chunks.length; i++) {
+        const part = chunks[i];
+        let mapPrompt = `
+You are analyzing mainframe code in parts. This is part ${i+1} of ${chunks.length}.
+
+Return ONLY a compact JSON object with these keys:
+{
+  "businessPurpose": "...",
+  "businessLogic": {
+    "validationRules": ["..."],
+    "businessRules": ["..."],
+    "dataProcessing": "..."
+  },
+  "qualityScore": 6,
+  "recommendations": ["..."],
+  "modernizationSuggestions": ["..."],
+  "riskAssessment": "low|medium|high"
+}
+
+Focus strictly on insights present in THIS PART. Avoid duplication and keep text concise.
+
+=== CONTEXT HEADER (truncated) ===
+${headerText.slice(0, 1500)}
+
+=== FILE CONTENTS PART ${i+1}/${chunks.length} ===
+${part}
+`;
+        try { this.validateTokenLimits(mapPrompt, maxResponseTokens); }
+        catch {
+          const lines = part.split(/\r?\n/);
+          let trimmed = "", tok = this.estimateTokens(headerText);
+          for (const ln of lines) {
+            const t = this.estimateTokens(ln+"\n");
+            if (tok + t > promptBudget) break;
+            trimmed += ln + "\n"; tok += t;
+          }
+          mapPrompt = mapPrompt.replace(part, trimmed);
+        }
+        const res = await this.makeSingleLLMRequest(mapPrompt, maxResponseTokens, retries);
+        partials.push(res);
+      }
+
+      const seed = {
+        businessPurpose: "",
+        businessLogic: { validationRules: [], businessRules: [], dataProcessing: "" },
+        qualityScore: 6,
+        recommendations: [], modernizationSuggestions: [], riskAssessment: "",
+      };
+      const merged = this.mergeChunkAnalyses(partials, seed);
+
+      const reducePrompt = `Normalize and lightly de-duplicate the following JSON. Maintain the same keys.
+Return ONLY JSON:
+
+${JSON.stringify(merged)}`;
+
+      try {
+        this.validateTokenLimits(reducePrompt, Math.min(1200, maxResponseTokens));
+        return await this.makeSingleLLMRequest(reducePrompt, Math.min(1200, maxResponseTokens), 0);
+      } catch {
+        return merged;
+      }
+    }
+
+    extractTextFromResponse(resp) {
+      if (!resp) return "";
+      if (typeof resp === "string") return resp;
+      if (resp.text) return resp.text;
+      if (Array.isArray(resp.choices) && resp.choices[0]?.text) return resp.choices[0].text;
+      if (resp.data?.[0]?.text) return resp.data[0].text;
+      return JSON.stringify(resp);
+    }
+
+    parseJSONResponse(text) {
+      try { return { success:true, data: JSON.parse(text) }; } catch {}
+      const m = text.match(/\{[\s\S]*\}/g);
+      if (m && m.length) {
+        try { return { success:true, data: JSON.parse(m[m.length-1]) }; } catch {}
+      }
+      return {
+        success:false, error:"No JSON found",
+        fallbackData:{
+          businessPurpose:"(fallback) summarized purpose unavailable",
+          businessLogic:{validationRules:[],businessRules:[],dataProcessing:""},
+          qualityScore:6,recommendations:[],modernizationSuggestions:[],riskAssessment:""
+        }
+      };
+    }
+
+    mockLLMResponse(prompt) {
+      const L = this.estimateTokens(prompt);
+      const bucket = L % 3;
+      // For chat, return plain text. For analysis, return JSON-like.
+      if (prompt.includes("User question:")) {
+        return "• The selected component validates input records and calls downstream programs.\n• Neighbor components indicate data standardization and copybook-driven field layouts.\n• Consider isolating IO, adding unit tests, and externalizing mappings.";
+      }
+      return {
+        businessPurpose: bucket===0 ? "Ingests transaction records and validates control totals." :
+                           bucket===1 ? "Transforms and aggregates account-level data for daily reporting." :
+                                        "Performs referential checks and prepares downstream extract files.",
+        businessLogic: {
+          validationRules: ["Record length check", "Mandatory field presence", "Numeric field integrity"],
+          businessRules: ["Reject on control total mismatch", "Default missing region to 'NA'"],
+          dataProcessing: "Parse fixed-width fields, apply mappings, write to VSAM & DB2."
+        },
+        recommendations: ["Isolate IO into service layer","Add unit tests for field parsing"],
+        modernizationSuggestions: ["Externalize mappings to config","Replace flat file with parquet"],
+        riskAssessment: "medium",
+        qualityScore: 7,
+        fieldAnalysis: { fields: [
+          {name:"ACCNT_ID", origin:"input", usage:"key", updatedBy:"PGM1", status:"used"},
+          {name:"AMOUNT", origin:"input", usage:"sum/validate", updatedBy:"PGM1", status:"used"},
+          {name:"CURRENCY", origin:"derived", usage:"standardize", updatedBy:"PGM2", status:"updated"}
+        ]}
+      };
+    }
+
+    // ---------- Utils ----------
+    setText(id, val) { const el = document.getElementById(id); if (el) el.textContent = String(val); }
+    escapeHtml(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;"); }
+    escapeAttr(s){ return this.escapeHtml(s).replace(/"/g,"&quot;"); }
+    sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+  }
+
+  // Boot
+  window.addEventListener("DOMContentLoaded", () => {
+    window.app = new EnhancedCodeAnalyzer();
+  });
+  </script>
+</body>
+</html>
