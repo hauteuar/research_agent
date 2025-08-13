@@ -5708,31 +5708,482 @@ ${highRiskComponents.length > 0 ? highRiskComponents.slice(0, 5).map(name => `�
 },
 
 // **NEW METHOD: Generate Dependency Diagram**
+// ============================================
+// VISUAL DEPENDENCY FLOW DIAGRAM
+// True Flow Chart with Business Purposes and Connections
+// ============================================
+
+// **REPLACE: generateDependencyDiagram method in Part 5**
+// Replace the existing generateDependencyDiagram method with this enhanced version
+
 generateDependencyDiagram(dependencyAnalysis) {
     if (!dependencyAnalysis) return '<p>No dependency analysis available</p>';
 
-    let diagram = '<div style="display: flex; flex-direction: column; gap: 2rem; min-height: 400px;">';
+    return `
+        <div style="background: var(--grey-50); padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem;">
+            <h4 style="margin: 0 0 1rem 0; color: var(--grey-800);">🗺️ Business Dependency Flow Diagram</h4>
+            <div id="dependencyFlowChart" style="min-height: 600px; background: white; border-radius: 8px; padding: 1rem; overflow-x: auto;">
+                ${this.generateVisualFlowChart(dependencyAnalysis)}
+            </div>
+        </div>
 
-    // Current Component (Center)
-    if (this.currentSelectedComponent) {
-        diagram += this.generateCurrentComponentSection(this.currentSelectedComponent);
+        <div style="background: var(--grey-50); padding: 1.5rem; border-radius: 8px;">
+            <h4 style="margin: 0 0 1rem 0; color: var(--grey-800);">📊 Flow Analysis Summary</h4>
+            ${this.generateFlowSummary(dependencyAnalysis)}
+        </div>
+    `;
+},
+
+// **NEW METHOD: Generate Visual Flow Chart**
+generateVisualFlowChart(dependencyAnalysis) {
+    const currentComponent = this.currentSelectedComponent;
+    const component = this.discoveredComponents.get(currentComponent);
+    
+    if (!currentComponent || !component) {
+        return '<p style="text-align: center; color: var(--grey-500); padding: 2rem;">Select a component to view its dependency flow</p>';
     }
 
-    // Found Dependencies Flow
-    if (dependencyAnalysis.found.copybooks.length > 0 || dependencyAnalysis.found.programs.length > 0) {
-        diagram += this.generateFoundDependenciesSection(dependencyAnalysis.found);
+    // Build the flow structure
+    const flowData = this.buildFlowData(currentComponent, dependencyAnalysis);
+    
+    return `
+        <div style="display: flex; flex-direction: column; gap: 2rem; min-width: 800px; align-items: center;">
+            
+            <!-- UPSTREAM DEPENDENCIES (What this component depends on) -->
+            ${flowData.upstream.length > 0 ? `
+                <div style="text-align: center;">
+                    <h5 style="color: var(--info-blue); margin-bottom: 1rem;">⬆️ UPSTREAM DEPENDENCIES</h5>
+                    <div style="font-size: 0.8rem; color: var(--grey-600); margin-bottom: 1rem;">Components that ${component.friendlyName} depends on</div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; margin-bottom: 2rem;">
+                        ${flowData.upstream.map(dep => this.createFlowNode(dep, 'upstream')).join('')}
+                    </div>
+                    <!-- Connection lines -->
+                    <div style="display: flex; justify-content: center; margin-bottom: 1rem;">
+                        ${flowData.upstream.map(() => '<div style="width: 2px; height: 30px; background: var(--info-blue); margin: 0 2rem;"></div>').join('')}
+                    </div>
+                    <!-- Arrow down -->
+                    <div style="text-align: center; margin-bottom: 1rem;">
+                        <div style="font-size: 1.5rem; color: var(--info-blue);">⬇️</div>
+                        <div style="font-size: 0.8rem; color: var(--grey-600);">feeds into</div>
+                    </div>
+                </div>
+            ` : ''}
+
+            <!-- CURRENT COMPONENT (Center) -->
+            <div style="text-align: center; margin: 2rem 0;">
+                <div style="position: relative;">
+                    ${this.createCenterComponentNode(currentComponent, component)}
+                </div>
+            </div>
+
+            <!-- DOWNSTREAM DEPENDENCIES (What depends on this component) -->
+            ${flowData.downstream.length > 0 ? `
+                <div style="text-align: center;">
+                    <!-- Arrow down -->
+                    <div style="text-align: center; margin-bottom: 1rem;">
+                        <div style="font-size: 1.5rem; color: var(--success-green);">⬇️</div>
+                        <div style="font-size: 0.8rem; color: var(--grey-600);">flows to</div>
+                    </div>
+                    <!-- Connection lines -->
+                    <div style="display: flex; justify-content: center; margin-bottom: 1rem;">
+                        ${flowData.downstream.map(() => '<div style="width: 2px; height: 30px; background: var(--success-green); margin: 0 2rem;"></div>').join('')}
+                    </div>
+                    <h5 style="color: var(--success-green); margin-bottom: 1rem;">⬇️ DOWNSTREAM DEPENDENCIES</h5>
+                    <div style="font-size: 0.8rem; color: var(--grey-600); margin-bottom: 1rem;">Components that depend on ${component.friendlyName}</div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center;">
+                        ${flowData.downstream.map(dep => this.createFlowNode(dep, 'downstream')).join('')}
+                    </div>
+                </div>
+            ` : ''}
+
+            <!-- MISSING DEPENDENCIES (Broken connections) -->
+            ${flowData.missing.length > 0 ? `
+                <div style="text-align: center; margin-top: 2rem; padding: 1rem; background: rgba(239, 68, 68, 0.1); border-radius: 8px; border: 2px dashed var(--error-red);">
+                    <h5 style="color: var(--error-red); margin-bottom: 1rem;">⚠️ MISSING DEPENDENCIES</h5>
+                    <div style="font-size: 0.8rem; color: var(--grey-600); margin-bottom: 1rem;">Components referenced but not available</div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center;">
+                        ${flowData.missing.map(dep => this.createFlowNode(dep, 'missing')).join('')}
+                    </div>
+                    <div style="margin-top: 1rem; padding: 0.75rem; background: white; border-radius: 6px;">
+                        <strong style="color: var(--error-red);">⚠️ Business Impact:</strong>
+                        <span style="color: var(--grey-700);">These missing components may cause compilation errors or runtime failures. Upload the missing files or remove unused references.</span>
+                    </div>
+                </div>
+            ` : ''}
+
+            <!-- FLOW LEGEND -->
+            <div style="margin-top: 2rem; padding: 1rem; background: white; border-radius: 8px; border: 1px solid var(--grey-200);">
+                <h6 style="margin: 0 0 0.75rem 0; color: var(--grey-800);">📋 Flow Legend</h6>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; font-size: 0.8rem;">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <div style="width: 16px; height: 16px; background: var(--info-blue); border-radius: 50%;"></div>
+                        <span>Upstream: Dependencies required</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <div style="width: 16px; height: 16px; background: var(--primary-blue); border-radius: 50%;"></div>
+                        <span>Current: Selected component</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <div style="width: 16px; height: 16px; background: var(--success-green); border-radius: 50%;"></div>
+                        <span>Downstream: Dependent components</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <div style="width: 16px; height: 16px; background: var(--error-red); border-radius: 50%; border: 2px dashed white;"></div>
+                        <span>Missing: Unavailable dependencies</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+},
+
+// **NEW METHOD: Build Flow Data**
+buildFlowData(currentComponent, dependencyAnalysis) {
+    const flowData = {
+        upstream: [],
+        downstream: [],
+        missing: []
+    };
+
+    // UPSTREAM: Components that the current component depends on
+    if (dependencyAnalysis.found) {
+        [...dependencyAnalysis.found.copybooks, ...dependencyAnalysis.found.programs, ...dependencyAnalysis.found.files]
+            .forEach(depName => {
+                const depComponent = this.discoveredComponents.get(depName);
+                const depResult = this.analysisResults[depName];
+                flowData.upstream.push({
+                    name: depName,
+                    component: depComponent,
+                    result: depResult,
+                    type: this.getComponentTypeFromName(depName),
+                    status: 'found'
+                });
+            });
     }
 
-    // Missing Dependencies Section
-    if (dependencyAnalysis.missing.copybooks.length > 0 || dependencyAnalysis.missing.programs.length > 0) {
-        diagram += this.generateMissingDependenciesSection(dependencyAnalysis.missing);
+    // MISSING: Components that are referenced but not available
+    if (dependencyAnalysis.missing) {
+        [...dependencyAnalysis.missing.copybooks, ...dependencyAnalysis.missing.programs, ...dependencyAnalysis.missing.files]
+            .forEach(depName => {
+                flowData.missing.push({
+                    name: depName,
+                    component: null,
+                    result: null,
+                    type: this.getComponentTypeFromName(depName),
+                    status: 'missing'
+                });
+            });
     }
 
-    // Dependency Connections Visualization
-    diagram += this.generateConnectionsVisualization(dependencyAnalysis);
+    // DOWNSTREAM: Components that depend on the current component
+    Object.entries(this.analysisResults).forEach(([compName, result]) => {
+        if (compName === currentComponent) return; // Skip self
+        
+        if (result.dependencyAnalysis && result.dependencyAnalysis.found) {
+            const isDependent = [
+                ...result.dependencyAnalysis.found.copybooks,
+                ...result.dependencyAnalysis.found.programs,
+                ...result.dependencyAnalysis.found.files
+            ].includes(currentComponent);
+            
+            if (isDependent) {
+                const depComponent = this.discoveredComponents.get(compName);
+                flowData.downstream.push({
+                    name: compName,
+                    component: depComponent,
+                    result: result,
+                    type: depComponent?.type || 'Unknown',
+                    status: 'found'
+                });
+            }
+        }
+    });
 
-    diagram += '</div>';
-    return diagram;
+    return flowData;
+},
+
+// **NEW METHOD: Get Component Type from Name**
+getComponentTypeFromName(name) {
+    // Try to determine type from naming patterns
+    const upperName = name.toUpperCase();
+    
+    if (upperName.includes('COPY') || upperName.endsWith('CPY') || upperName.includes('MASTER')) {
+        return 'Copybook';
+    } else if (upperName.includes('PROG') || upperName.includes('PGM') || upperName.includes('PROC')) {
+        return 'Program';
+    } else if (upperName.includes('FILE') || upperName.includes('FIL')) {
+        return 'File';
+    } else {
+        return 'Component';
+    }
+},
+
+// **NEW METHOD: Create Center Component Node**
+createCenterComponentNode(componentName, component) {
+    const result = this.analysisResults[componentName];
+    const displayName = component?.friendlyName || componentName;
+    const businessPurpose = component?.businessPurpose || 'Business purpose pending analysis';
+    
+    return `
+        <div style="
+            background: linear-gradient(135deg, var(--primary-blue) 0%, var(--indigo) 100%);
+            color: white;
+            padding: 2rem;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(37, 99, 235, 0.3);
+            min-width: 320px;
+            max-width: 400px;
+            position: relative;
+            border: 4px solid var(--primary-blue);
+        ">
+            <!-- Pulse animation ring -->
+            <div style="
+                position: absolute;
+                top: -8px; left: -8px; right: -8px; bottom: -8px;
+                border: 2px solid var(--primary-blue);
+                border-radius: 20px;
+                animation: pulse 2s infinite;
+                opacity: 0.6;
+            "></div>
+            
+            <div style="text-align: center;">
+                <div style="font-size: 2rem; margin-bottom: 0.75rem;">🎯</div>
+                <h4 style="margin: 0 0 0.5rem 0; color: white; font-size: 1.1rem;">${displayName}</h4>
+                <div style="font-size: 0.8rem; opacity: 0.9; margin-bottom: 1rem; font-family: monospace;">${componentName}</div>
+                
+                <div style="background: rgba(255, 255, 255, 0.2); padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+                    <div style="font-size: 0.85rem; line-height: 1.4; margin-bottom: 0.75rem;">
+                        ${businessPurpose.length > 100 ? businessPurpose.substring(0, 100) + '...' : businessPurpose}
+                    </div>
+                    <div style="display: flex; justify-content: space-around; font-size: 0.75rem;">
+                        <div>
+                            <div style="font-weight: bold;">${component?.type || 'Unknown'}</div>
+                            <div style="opacity: 0.8;">Type</div>
+                        </div>
+                        <div>
+                            <div style="font-weight: bold;">${component?.fieldCount || 0}</div>
+                            <div style="opacity: 0.8;">Fields</div>
+                        </div>
+                        <div>
+                            <div style="font-weight: bold;">${result?.qualityScore || 'N/A'}</div>
+                            <div style="opacity: 0.8;">Quality</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="font-size: 0.75rem; opacity: 0.8;">🔍 CURRENT COMPONENT</div>
+            </div>
+        </div>
+        
+        <style>
+            @keyframes pulse {
+                0%, 100% { opacity: 0.6; transform: scale(1); }
+                50% { opacity: 0.2; transform: scale(1.05); }
+            }
+        </style>
+    `;
+},
+
+// **NEW METHOD: Create Flow Node**
+createFlowNode(dependency, flowType) {
+    const { name, component, result, type, status } = dependency;
+    const displayName = component?.friendlyName || this.generateFriendlyNameFromPattern(name);
+    const businessPurpose = component?.businessPurpose || this.generateBusinessPurpose(name);
+    
+    // Determine colors and styles based on flow type and status
+    let borderColor, bgColor, iconColor, statusIcon, connectionColor;
+    
+    switch (flowType) {
+        case 'upstream':
+            borderColor = status === 'found' ? 'var(--info-blue)' : 'var(--error-red)';
+            bgColor = status === 'found' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(239, 68, 68, 0.1)';
+            iconColor = 'var(--info-blue)';
+            statusIcon = status === 'found' ? '✅' : '❌';
+            connectionColor = 'var(--info-blue)';
+            break;
+        case 'downstream':
+            borderColor = 'var(--success-green)';
+            bgColor = 'rgba(16, 185, 129, 0.1)';
+            iconColor = 'var(--success-green)';
+            statusIcon = '✅';
+            connectionColor = 'var(--success-green)';
+            break;
+        case 'missing':
+            borderColor = 'var(--error-red)';
+            bgColor = 'rgba(239, 68, 68, 0.1)';
+            iconColor = 'var(--error-red)';
+            statusIcon = '❌';
+            connectionColor = 'var(--error-red)';
+            break;
+        default:
+            borderColor = 'var(--grey-400)';
+            bgColor = 'var(--grey-50)';
+            iconColor = 'var(--grey-600)';
+            statusIcon = '❓';
+            connectionColor = 'var(--grey-400)';
+    }
+    
+    const typeIcon = type === 'Copybook' ? '📚' : type === 'Program' ? '💼' : '📄';
+    const isClickable = status === 'found';
+    
+    return `
+        <div style="
+            background: ${bgColor};
+            border: 2px solid ${borderColor};
+            border-radius: 12px;
+            padding: 1rem;
+            min-width: 200px;
+            max-width: 250px;
+            cursor: ${isClickable ? 'pointer' : 'default'};
+            transition: all 0.3s ease;
+            position: relative;
+            ${status === 'missing' ? 'border-style: dashed;' : ''}
+        " ${isClickable ? `onclick="analyzer.selectComponent('${name}')"` : ''}
+           onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 8px 25px rgba(0,0,0,0.15)';"
+           onmouseout="this.style.transform='translateY(0px)'; this.style.boxShadow='none';">
+           
+            <!-- Status indicator -->
+            <div style="
+                position: absolute;
+                top: -8px;
+                right: -8px;
+                background: ${borderColor};
+                color: white;
+                border-radius: 50%;
+                width: 24px;
+                height: 24px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 0.7rem;
+                border: 2px solid white;
+            ">${statusIcon}</div>
+            
+            <!-- Component info -->
+            <div style="text-align: center;">
+                <div style="font-size: 1.25rem; margin-bottom: 0.5rem; color: ${iconColor};">${typeIcon}</div>
+                
+                <div style="font-weight: bold; font-size: 0.9rem; color: var(--grey-800); margin-bottom: 0.25rem;">
+                    ${name}
+                </div>
+                
+                <div style="font-size: 0.8rem; color: var(--primary-blue); margin-bottom: 0.75rem; font-weight: 500; line-height: 1.2;">
+                    ${displayName}
+                </div>
+                
+                <div style="font-size: 0.75rem; color: var(--grey-600); line-height: 1.3; margin-bottom: 0.75rem; min-height: 40px;">
+                    ${businessPurpose.substring(0, 80)}${businessPurpose.length > 80 ? '...' : ''}
+                </div>
+                
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.7rem;">
+                    <span class="badge badge-grey">${type}</span>
+                    ${result ? `<span class="badge badge-info">Q: ${result.qualityScore}/10</span>` : ''}
+                    ${status === 'missing' ? '<span class="badge badge-danger">MISSING</span>' : ''}
+                </div>
+                
+                ${isClickable ? `
+                    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--grey-200);">
+                        <div style="color: ${borderColor}; font-size: 0.7rem;">
+                            🔍 Click to analyze
+                        </div>
+                    </div>
+                ` : status === 'missing' ? `
+                    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--grey-200);">
+                        <div style="color: var(--error-red); font-size: 0.7rem;">
+                            📁 Upload required
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+},
+
+// **NEW METHOD: Generate Flow Summary**
+generateFlowSummary(dependencyAnalysis) {
+    const upstreamCount = (dependencyAnalysis.found?.copybooks?.length || 0) + 
+                         (dependencyAnalysis.found?.programs?.length || 0) + 
+                         (dependencyAnalysis.found?.files?.length || 0);
+    
+    const missingCount = (dependencyAnalysis.missing?.copybooks?.length || 0) + 
+                        (dependencyAnalysis.missing?.programs?.length || 0) + 
+                        (dependencyAnalysis.missing?.files?.length || 0);
+    
+    // Calculate downstream dependencies
+    const currentComponent = this.currentSelectedComponent;
+    const downstreamCount = Object.values(this.analysisResults).filter(result => {
+        if (!result.dependencyAnalysis || !result.dependencyAnalysis.found) return false;
+        return [...result.dependencyAnalysis.found.copybooks,
+                ...result.dependencyAnalysis.found.programs,
+                ...result.dependencyAnalysis.found.files].includes(currentComponent);
+    }).length;
+    
+    const totalDependencies = upstreamCount + missingCount;
+    const healthPercentage = totalDependencies > 0 ? Math.round((upstreamCount / totalDependencies) * 100) : 100;
+    
+    return `
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+            <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border-left: 4px solid var(--info-blue);">
+                <div style="font-size: 1.5rem; font-weight: bold; color: var(--info-blue);">${upstreamCount}</div>
+                <div style="font-size: 0.8rem; color: var(--grey-600);">Upstream Dependencies</div>
+                <div style="font-size: 0.7rem; color: var(--grey-500); margin-top: 0.25rem;">Components this depends on</div>
+            </div>
+            
+            <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border-left: 4px solid var(--success-green);">
+                <div style="font-size: 1.5rem; font-weight: bold; color: var(--success-green);">${downstreamCount}</div>
+                <div style="font-size: 0.8rem; color: var(--grey-600);">Downstream Dependencies</div>
+                <div style="font-size: 0.7rem; color: var(--grey-500); margin-top: 0.25rem;">Components that depend on this</div>
+            </div>
+            
+            <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border-left: 4px solid var(--error-red);">
+                <div style="font-size: 1.5rem; font-weight: bold; color: var(--error-red);">${missingCount}</div>
+                <div style="font-size: 0.8rem; color: var(--grey-600);">Missing Dependencies</div>
+                <div style="font-size: 0.7rem; color: var(--grey-500); margin-top: 0.25rem;">Broken connections</div>
+            </div>
+            
+            <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border-left: 4px solid var(--primary-blue);">
+                <div style="font-size: 1.5rem; font-weight: bold; color: var(--primary-blue);">${healthPercentage}%</div>
+                <div style="font-size: 0.8rem; color: var(--grey-600);">Health Score</div>
+                <div style="font-size: 0.7rem; color: var(--grey-500); margin-top: 0.25rem;">Dependency completeness</div>
+            </div>
+        </div>
+        
+        <div style="background: white; padding: 1rem; border-radius: 8px;">
+            <h6 style="margin: 0 0 0.75rem 0; color: var(--grey-800);">📈 Business Flow Impact</h6>
+            <div style="background: ${healthPercentage >= 80 ? 'rgba(16, 185, 129, 0.1)' : healthPercentage >= 50 ? 'rgba(245, 158, 11, 0.1)' : 'rgba(239, 68, 68, 0.1)'}; padding: 1rem; border-radius: 6px;">
+                <strong style="color: ${healthPercentage >= 80 ? 'var(--success-green)' : healthPercentage >= 50 ? 'var(--warning-yellow)' : 'var(--error-red)'};">
+                    ${healthPercentage >= 80 ? '✅ HEALTHY FLOW:' : healthPercentage >= 50 ? '⚠️ MODERATE ISSUES:' : '🔴 CRITICAL ISSUES:'}
+                </strong>
+                <span style="color: var(--grey-700); margin-left: 0.5rem;">
+                    ${healthPercentage >= 80 ? 
+                        'This component has excellent dependency health and should function reliably in the business process flow.' :
+                        healthPercentage >= 50 ?
+                        'Some missing dependencies may cause intermittent issues in business operations. Consider resolving missing components.' :
+                        'Multiple missing dependencies will likely disrupt business processes. Immediate attention required to restore functionality.'
+                    }
+                </span>
+            </div>
+            
+            ${missingCount > 0 ? `
+                <div style="margin-top: 1rem; padding: 1rem; background: rgba(239, 68, 68, 0.1); border-radius: 6px; border-left: 4px solid var(--error-red);">
+                    <strong style="color: var(--error-red);">⚡ Action Required:</strong>
+                    <ul style="margin: 0.5rem 0 0 1rem; color: var(--grey-700); font-size: 0.9rem;">
+                        <li>Upload the ${missingCount} missing component${missingCount > 1 ? 's' : ''} listed above</li>
+                        <li>Remove unused references if components are no longer needed</li>
+                        <li>Update dependency mappings after resolving missing items</li>
+                        <li>Re-run analysis to verify dependency health</li>
+                    </ul>
+                </div>
+            ` : `
+                <div style="margin-top: 1rem; padding: 1rem; background: rgba(16, 185, 129, 0.1); border-radius: 6px; border-left: 4px solid var(--success-green);">
+                    <strong style="color: var(--success-green);">✅ All Dependencies Resolved:</strong>
+                    <span style="color: var(--grey-700); margin-left: 0.5rem;">
+                        This component has all required dependencies available and should function without issues.
+                    </span>
+                </div>
+            `}
+        </div>
+    `;
 },
 
 // **NEW METHOD: Current Component Section**
