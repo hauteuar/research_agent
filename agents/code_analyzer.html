@@ -1518,6 +1518,41 @@
                 border-color: var(--primary-blue);
                 transform: translateY(-1px);
             }
+            .dependency-node:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+}
+
+.field-row:hover {
+    background-color: var(--grey-50);
+    transform: translateX(4px);
+}
+
+.field-row:hover td {
+    color: var(--primary-blue);
+}
+
+.dependency-node {
+    transition: all 0.3s ease;
+}
+
+.dependency-node::before {
+    content: '';
+    position: absolute;
+    top: -1px;
+    left: -1px;
+    right: -1px;
+    bottom: -1px;
+    background: linear-gradient(45deg, transparent, rgba(37, 99, 235, 0.1), transparent);
+    border-radius: 10px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    z-index: -1;
+}
+
+.dependency-node:hover::before {
+    opacity: 1;
+}
         </style>
         <script>
 
@@ -1896,86 +1931,87 @@ class EnhancedCodeAnalyzer {
 
     // Save to Database with Auto-save
     saveToDatabase() {
-        if (!this.db || !this.dbInitialized) return;
+    if (!this.db || !this.dbInitialized) return;
 
-        try {
-            // Save uploaded files
-            this.uploadedFiles.forEach(file => {
-                this.db.run(`
-                    INSERT OR REPLACE INTO uploaded_files 
-                    (file_id, name, content, size, type, upload_date, components, metrics)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                `, [
-                    file.id,
-                    file.name,
-                    file.content,
-                    file.size,
-                    file.type,
-                    file.uploadDate,
-                    JSON.stringify(file.components || []),
-                    JSON.stringify(file.metrics || {})
-                ]);
-            });
-
-            // Save discovered components
-            this.discoveredComponents.forEach((component, name) => {
-                this.db.run(`
-                    INSERT OR REPLACE INTO discovered_components 
-                    (component_name, friendly_name, component_type, business_purpose, 
-                     file_source, line_count, complexity_score, input_files, output_files, 
-                     field_count, analyzed, quality_score, selected)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                `, [
-                    name,
-                    component.friendlyName,
-                    component.type,
-                    component.businessPurpose,
-                    component.fileSource,
-                    component.lineCount,
-                    component.complexityScore,
-                    JSON.stringify(component.inputFiles || []),
-                    JSON.stringify(component.outputFiles || []),
-                    component.fieldCount,
-                    component.analyzed ? 1 : 0,
-                    component.qualityScore,
-                    component.selected ? 1 : 0
-                ]);
-            });
-
-            // Save analysis results
-            Object.entries(this.analysisResults).forEach(([name, result]) => {
-                this.db.run(`
-                    INSERT OR REPLACE INTO analysis_results 
-                    (component_name, friendly_name, component_type, results_data, 
-                     quality_score, business_context, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                `, [
-                    name,
-                    result.friendlyName,
-                    result.componentType,
-                    JSON.stringify(result),
-                    result.qualityScore,
-                    result.llmAnalysis?.businessPurpose || ''
-                ]);
-            });
-
-            // Save system settings
+    try {
+        // Save uploaded files
+        this.uploadedFiles.forEach(file => {
             this.db.run(`
-                INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at)
-                VALUES ('vllm_endpoint', ?, CURRENT_TIMESTAMP)
-            `, [this.vllmEndpoint]);
+                INSERT OR REPLACE INTO uploaded_files 
+                (file_id, name, content, size, type, upload_date, components, metrics)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `, [
+                file.id || '',
+                file.name || '',
+                file.content || '',
+                file.size || 0,
+                file.type || '',
+                file.uploadDate || new Date().toISOString(),
+                JSON.stringify(file.components || []),
+                JSON.stringify(file.metrics || {})
+            ]);
+        });
 
+        // Save discovered components with null checks
+        this.discoveredComponents.forEach((component, name) => {
             this.db.run(`
-                INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at)
-                VALUES ('max_tokens', ?, CURRENT_TIMESTAMP)
-            `, [this.maxTokens.toString()]);
+                INSERT OR REPLACE INTO discovered_components 
+                (component_name, friendly_name, component_type, business_purpose, 
+                 file_source, line_count, complexity_score, input_files, output_files, 
+                 field_count, analyzed, quality_score, selected)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `, [
+                name || '',
+                component.friendlyName || '',
+                component.type || '',
+                component.businessPurpose || '',
+                component.fileSource || '',
+                component.lineCount || 0,
+                component.complexityScore || 0,
+                JSON.stringify(component.inputFiles || []),
+                JSON.stringify(component.outputFiles || []),
+                component.fieldCount || 0,
+                component.analyzed ? 1 : 0,
+                component.qualityScore || null,
+                component.selected ? 1 : 0
+            ]);
+        });
 
-            console.log('💾 Data saved to database');
+        // Save analysis results with null checks
+        Object.entries(this.analysisResults).forEach(([name, result]) => {
+            this.db.run(`
+                INSERT OR REPLACE INTO analysis_results 
+                (component_name, friendly_name, component_type, results_data, 
+                 quality_score, business_context, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            `, [
+                name || '',
+                result.friendlyName || '',
+                result.componentType || '',
+                JSON.stringify(result),
+                result.qualityScore || null,
+                (result.llmAnalysis && result.llmAnalysis.businessPurpose) || ''
+            ]);
+        });
 
-        } catch (error) {
-            console.error('Failed to save to database:', error);
-        }
+        // Save system settings
+        this.db.run(`
+            INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at)
+            VALUES ('vllm_endpoint', ?, CURRENT_TIMESTAMP)
+        `, [this.vllmEndpoint || 'http://localhost:8000']);
+
+        this.db.run(`
+            INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at)
+            VALUES ('max_tokens', ?, CURRENT_TIMESTAMP)
+        `, [this.maxTokens ? this.maxTokens.toString() : '6000']);
+
+        console.log('💾 Data saved to database');
+
+    } catch (error) {
+        console.error('Failed to save to database:', error);
     }
+}
+
 
     // Load Data from Database
     async loadDataFromDatabase() {
@@ -2865,19 +2901,76 @@ Object.assign(EnhancedCodeAnalyzer.prototype, {
 
     // Generate Friendly Name using patterns
     async generateFriendlyName(componentName) {
-        // Check cache first
-        if (this.friendlyNameCache.has(componentName.toUpperCase())) {
-            return this.friendlyNameCache.get(componentName.toUpperCase());
+    // Check cache first
+    if (this.friendlyNameCache.has(componentName.toUpperCase())) {
+        return this.friendlyNameCache.get(componentName.toUpperCase());
+    }
+    
+    // Try LLM generation if available and validated
+    if (this.serverValidated) {
+        try {
+            const llmName = await this.getLLMBusinessName(componentName);
+            if (llmName && llmName.length > 0 && llmName.length < 100) {
+                this.friendlyNameCache.set(componentName.toUpperCase(), llmName);
+                return llmName;
+            }
+        } catch (error) {
+            console.warn('LLM business name generation failed:', error);
+        }
+    }
+    
+    // Fallback to pattern-based generation
+    const patternName = this.generateFriendlyNameFromPattern(componentName);
+    this.friendlyNameCache.set(componentName.toUpperCase(), patternName);
+    return patternName;
+},
+
+// **NEW METHOD: Get LLM Business Name**
+async getLLMBusinessName(componentName) {
+    const prompt = `Generate a business-friendly name for this mainframe component: "${componentName}"
+
+Context: This is a mainframe component name that needs a clear business description.
+
+Examples:
+- CUST-MASTER → "Customer Master File"
+- ACCT-VALIDATE → "Account Validation Program" 
+- TRANS-LOG → "Transaction Log Handler"
+- PAY-PROCESS → "Payment Processing System"
+- INV-REPORT → "Invoice Report Generator"
+
+Rules:
+- Return ONLY the business-friendly name
+- Maximum 50 characters
+- No technical jargon
+- Focus on business purpose
+- Use proper capitalization
+
+Business Name:`;
+
+    try {
+        const response = await this.callLLMAPI(prompt);
+        
+        // Handle different response formats
+        let businessName = '';
+        if (typeof response === 'string') {
+            businessName = response.trim();
+        } else if (response && response.businessPurpose) {
+            businessName = response.businessPurpose.trim();
+        } else if (response && response.rawResponse) {
+            businessName = response.rawResponse.trim();
         }
         
-        // Use pattern-based generation for speed and reliability
-        const friendlyName = this.generateFriendlyNameFromPattern(componentName);
+        // Clean up the response
+        businessName = businessName.replace(/^["']|["']$/g, ''); // Remove quotes
+        businessName = businessName.split('\n')[0]; // Take first line only
         
-        // Cache the result
-        this.friendlyNameCache.set(componentName.toUpperCase(), friendlyName);
+        return businessName.length > 0 && businessName.length < 100 ? businessName : null;
         
-        return friendlyName;
-    },
+    } catch (error) {
+        console.warn('LLM business name failed:', error);
+        return null;
+    }
+},
 
     // Pattern-based friendly name generation
     generateFriendlyNameFromPattern(componentName) {
@@ -3160,33 +3253,169 @@ getAnalyzedComponentsCount() {
 
     // Select Component
     selectComponent(componentName) {
-        // Clear previous selections
-        Array.from(this.discoveredComponents.values()).forEach(comp => {
-            comp.selected = false;
-        });
+    console.log(`Selecting component: ${componentName}`);
+    
+    // Clear previous selections
+    Array.from(this.discoveredComponents.values()).forEach(comp => {
+        comp.selected = false;
+    });
+    
+    // Set new selection
+    const component = this.discoveredComponents.get(componentName);
+    if (component) {
+        component.selected = true;
+        this.currentSelectedComponent = componentName;
+    }
+    
+    // Update UI
+    this.displayDiscoveredComponents();
+    this.persistSelection(componentName);
+    this.updateDashboardStats();
+    
+    // **SYNC ALL TABS**
+    this.syncAllTabsForComponent(componentName);
+    
+    // Update chat context
+    this.updateChatContext('component', componentName);
+    
+    this.showInfo(`Selected component: ${component ? component.friendlyName : componentName}`);
+},
+
+// **NEW METHOD: Sync All Tabs for Component**
+syncAllTabsForComponent(componentName) {
+    const result = this.analysisResults[componentName];
+    const component = this.discoveredComponents.get(componentName);
+    
+    if (!result) {
+        // Component not analyzed yet - show pending analysis message
+        this.showPendingAnalysisMessage(componentName);
+        return;
+    }
+    
+    // Update Dependencies Tab
+    this.displayDependencyFlow(componentName, result);
+    
+    // Update Field Matrix Tab
+    if (result.fieldAnalysis && result.fieldAnalysis.fields && result.fieldAnalysis.fields.length > 0) {
+        this.displayFieldMatrix(componentName, result);
+    } else {
+        this.showNoFieldsMessage(componentName);
+    }
+    
+    // Update Dashboard with component focus
+    this.updateDashboardWithComponentFocus(componentName, result);
+    
+    console.log(`✅ All tabs synchronized for component: ${componentName}`);
+},
+
+// **NEW METHOD: Show Pending Analysis Message**
+showPendingAnalysisMessage(componentName) {
+    const component = this.discoveredComponents.get(componentName);
+    const displayName = component?.friendlyName || componentName;
+    
+    // Dependencies tab
+    const dependenciesContainer = document.getElementById('dependenciesContent');
+    if (dependenciesContainer) {
+        dependenciesContainer.innerHTML = `
+            <div style="text-align: center; padding: 3rem; background: var(--grey-50); border-radius: 12px;">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">⏳</div>
+                <h3 style="color: var(--grey-700); margin-bottom: 1rem;">Analysis Pending</h3>
+                <p style="color: var(--grey-600); margin-bottom: 2rem;">
+                    Component "${displayName}" needs to be analyzed to view dependency information.
+                </p>
+                <button class="btn btn-primary" onclick="analyzer.analyzeSpecificComponent('${componentName}')">
+                    <span>🤖</span>
+                    Analyze This Component
+                </button>
+            </div>
+        `;
+    }
+    
+    // Field Matrix tab
+    const fieldMatrixContainer = document.getElementById('fieldMatrixContent');
+    if (fieldMatrixContainer) {
+        fieldMatrixContainer.innerHTML = `
+            <div style="text-align: center; padding: 3rem; background: var(--grey-50); border-radius: 12px;">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">📋</div>
+                <h3 style="color: var(--grey-700); margin-bottom: 1rem;">Field Analysis Pending</h3>
+                <p style="color: var(--grey-600); margin-bottom: 2rem;">
+                    Component "${displayName}" needs to be analyzed to view field matrix information.
+                </p>
+                <button class="btn btn-primary" onclick="analyzer.analyzeSpecificComponent('${componentName}')">
+                    <span>🤖</span>
+                    Analyze This Component
+                </button>
+            </div>
+        `;
+    }
+},
+
+// **NEW METHOD: Show No Fields Message**
+showNoFieldsMessage(componentName) {
+    const component = this.discoveredComponents.get(componentName);
+    const displayName = component?.friendlyName || componentName;
+    
+    const fieldMatrixContainer = document.getElementById('fieldMatrixContent');
+    if (fieldMatrixContainer) {
+        fieldMatrixContainer.innerHTML = `
+            <div style="text-align: center; padding: 3rem; background: var(--grey-50); border-radius: 12px;">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">📄</div>
+                <h3 style="color: var(--grey-700); margin-bottom: 1rem;">No Field Data Available</h3>
+                <p style="color: var(--grey-600); margin-bottom: 1rem;">
+                    Component "${displayName}" doesn't contain field definitions or is not a copybook/record layout.
+                </p>
+                <div style="background: white; padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+                    <strong>Component Type:</strong> ${component?.type || 'Unknown'}<br>
+                    <strong>Business Purpose:</strong> ${component?.businessPurpose || 'Not defined'}
+                </div>
+            </div>
+        `;
+    }
+},
+
+// **NEW METHOD: Analyze Specific Component**
+async analyzeSpecificComponent(componentName) {
+    if (this.autoAnalysisInProgress) {
+        this.showWarning('Analysis already in progress');
+        return;
+    }
+    
+    const component = this.discoveredComponents.get(componentName);
+    if (!component) {
+        this.showError('Component not found');
+        return;
+    }
+    
+    this.showLoading();
+    this.updateLoadingStatus(`🔍 Analyzing ${component.friendlyName || componentName}...`);
+    
+    try {
+        const relevantFiles = this.findRelevantFiles(componentName);
+        const analysisResult = await this.runComponentAnalysis(componentName, relevantFiles);
         
-        // Set new selection
-        const component = this.discoveredComponents.get(componentName);
-        if (component) {
-            component.selected = true;
-            this.currentSelectedComponent = componentName;
-        }
+        this.analysisResults[componentName] = analysisResult;
+        component.analyzed = true;
+        component.qualityScore = analysisResult.qualityScore;
         
-        // Update UI
-        this.displayDiscoveredComponents();
-        this.persistSelection(componentName);
-        this.updateDashboardStats();
+        // Sync all tabs with new analysis
+        this.syncAllTabsForComponent(componentName);
         
-        // Show analysis if available
-        if (this.analysisResults[componentName]) {
-            this.displayComponentAnalysis(componentName);
-            // Switch to appropriate tab
-            const analysisTab = document.querySelector('.tab[data-tab="dependencies"]');
-            if (analysisTab) analysisTab.click();
-        }
+        // Save to database
+        this.saveToDatabase();
         
-        this.showInfo(`Selected component: ${component ? component.friendlyName : componentName}`);
-    },
+        this.hideLoading();
+        this.showSuccess(`✨ Analysis complete for ${component.friendlyName || componentName}`);
+        
+        // Switch to dependencies tab to show results
+        const dependenciesTab = document.querySelector('.tab[data-tab="dependencies"]');
+        if (dependenciesTab) dependenciesTab.click();
+        
+    } catch (error) {
+        this.hideLoading();
+        this.showError(`Analysis failed: ${error.message}`);
+        console.error('Component analysis failed:', error);
+    }
+},
 
     // Persist Selection in Database
     persistSelection(selectedName) {
@@ -3874,39 +4103,218 @@ Object.assign(EnhancedCodeAnalyzer.prototype, {
 
     // Parse JSON Response with Fallback
     parseJSONResponse(text) {
-        try {
-            // Try to extract JSON from response
-            const jsonMatch = text.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                const parsed = JSON.parse(jsonMatch[0]);
-                return { success: true, data: parsed };
-            }
-            
-            // If no JSON found, create structured fallback
-            return {
-                success: false,
-                error: 'No JSON found in response',
-                fallbackData: {
-                    businessPurpose: text.substring(0, 300),
-                    recommendations: ['Manual review recommended'],
-                    qualityScore: 5,
-                    rawResponse: text
-                }
-            };
-            
-        } catch (error) {
-            return {
-                success: false,
-                error: error.message,
-                fallbackData: {
-                    businessPurpose: 'Analysis failed - LLM response could not be parsed',
-                    recommendations: ['Check LLM connection', 'Verify component data'],
-                    qualityScore: 3,
-                    rawResponse: text
-                }
-            };
+    // First, try to parse as JSON
+    try {
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            return { success: true, data: parsed };
         }
-    },
+    } catch (error) {
+        console.warn('JSON parsing failed:', error);
+    }
+    
+    // If JSON parsing fails, extract structured information from text
+    return {
+        success: false,
+        error: 'Using text parsing fallback',
+        data: this.parseTextResponse(text)
+    };
+},
+
+// **NEW METHOD: Parse Text Response**
+parseTextResponse(text) {
+    // Extract business purpose
+    const businessPurpose = this.extractBusinessPurpose(text);
+    const recommendations = this.extractRecommendations(text);
+    const riskAssessment = this.extractRiskAssessment(text);
+    const businessRules = this.extractBusinessRules(text);
+    
+    return {
+        businessPurpose: businessPurpose,
+        businessLogic: {
+            validationRules: this.extractValidationRules(text),
+            businessRules: businessRules,
+            dataProcessing: this.extractDataProcessing(text)
+        },
+        recommendations: recommendations,
+        modernizationSuggestions: this.extractModernizationSuggestions(text),
+        riskAssessment: riskAssessment,
+        qualityScore: this.extractQualityScore(text),
+        rawResponse: text,
+        fallbackUsed: true
+    };
+},
+
+// **NEW HELPER METHODS for Text Parsing**
+extractBusinessPurpose(text) {
+    const patterns = [
+        /business purpose[:\s]+([^\.!?]*[\.!?])/i,
+        /purpose[:\s]+([^\.!?]*[\.!?])/i,
+        /this component[:\s]+([^\.!?]*[\.!?])/i,
+        /system[:\s]+([^\.!?]*[\.!?])/i
+    ];
+    
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match && match[1]) {
+            return match[1].trim();
+        }
+    }
+    
+    // Fallback: take first meaningful sentence
+    const sentences = text.split(/[\.!?]+/);
+    for (const sentence of sentences) {
+        if (sentence.trim().length > 20) {
+            return sentence.trim() + '.';
+        }
+    }
+    
+    return 'Business purpose analysis available in full response';
+},
+
+extractRecommendations(text) {
+    const recommendations = [];
+    const patterns = [
+        /recommend[a-z]*[:\s]+([^\.!?]*[\.!?])/gi,
+        /suggest[a-z]*[:\s]+([^\.!?]*[\.!?])/gi,
+        /should[:\s]+([^\.!?]*[\.!?])/gi,
+        /consider[:\s]+([^\.!?]*[\.!?])/gi
+    ];
+    
+    patterns.forEach(pattern => {
+        const matches = text.matchAll(pattern);
+        for (const match of matches) {
+            if (match[1] && match[1].trim().length > 10) {
+                recommendations.push(match[1].trim());
+            }
+        }
+    });
+    
+    return recommendations.slice(0, 5); // Limit to 5 recommendations
+},
+
+extractRiskAssessment(text) {
+    const riskPatterns = [
+        /high.{0,20}risk/i,
+        /medium.{0,20}risk/i,
+        /low.{0,20}risk/i,
+        /risk.{0,20}high/i,
+        /risk.{0,20}medium/i,
+        /risk.{0,20}low/i
+    ];
+    
+    for (const pattern of riskPatterns) {
+        const match = text.match(pattern);
+        if (match) {
+            if (match[0].toLowerCase().includes('high')) return 'high';
+            if (match[0].toLowerCase().includes('medium')) return 'medium';
+            if (match[0].toLowerCase().includes('low')) return 'low';
+        }
+    }
+    
+    return 'medium'; // Default risk level
+},
+
+extractValidationRules(text) {
+    const rules = [];
+    const patterns = [
+        /validat[a-z]*[:\s]+([^\.!?]*[\.!?])/gi,
+        /check[a-z]*[:\s]+([^\.!?]*[\.!?])/gi,
+        /verif[a-z]*[:\s]+([^\.!?]*[\.!?])/gi
+    ];
+    
+    patterns.forEach(pattern => {
+        const matches = text.matchAll(pattern);
+        for (const match of matches) {
+            if (match[1] && match[1].trim().length > 10) {
+                rules.push(match[1].trim());
+            }
+        }
+    });
+    
+    return rules.slice(0, 3);
+},
+
+extractBusinessRules(text) {
+    const rules = [];
+    const patterns = [
+        /business rule[:\s]+([^\.!?]*[\.!?])/gi,
+        /rule[:\s]+([^\.!?]*[\.!?])/gi,
+        /logic[:\s]+([^\.!?]*[\.!?])/gi
+    ];
+    
+    patterns.forEach(pattern => {
+        const matches = text.matchAll(pattern);
+        for (const match of matches) {
+            if (match[1] && match[1].trim().length > 10) {
+                rules.push(match[1].trim());
+            }
+        }
+    });
+    
+    return rules.slice(0, 3);
+},
+
+extractDataProcessing(text) {
+    const patterns = [
+        /process[a-z]*[:\s]+([^\.!?]*[\.!?])/i,
+        /data[:\s]+([^\.!?]*[\.!?])/i,
+        /transform[a-z]*[:\s]+([^\.!?]*[\.!?])/i
+    ];
+    
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match && match[1] && match[1].trim().length > 20) {
+            return match[1].trim();
+        }
+    }
+    
+    return 'Data processing logic analysis available in full response';
+},
+
+extractModernizationSuggestions(text) {
+    const suggestions = [];
+    const patterns = [
+        /modern[a-z]*[:\s]+([^\.!?]*[\.!?])/gi,
+        /upgrad[a-z]*[:\s]+([^\.!?]*[\.!?])/gi,
+        /improv[a-z]*[:\s]+([^\.!?]*[\.!?])/gi,
+        /optim[a-z]*[:\s]+([^\.!?]*[\.!?])/gi
+    ];
+    
+    patterns.forEach(pattern => {
+        const matches = text.matchAll(pattern);
+        for (const match of matches) {
+            if (match[1] && match[1].trim().length > 10) {
+                suggestions.push(match[1].trim());
+            }
+        }
+    });
+    
+    return suggestions.slice(0, 3);
+},
+
+extractQualityScore(text) {
+    const scorePatterns = [
+        /quality[:\s]+(\d+)/i,
+        /score[:\s]+(\d+)/i,
+        /rating[:\s]+(\d+)/i,
+        /(\d+)\/10/,
+        /(\d+)\s*out\s*of\s*10/i
+    ];
+    
+    for (const pattern of scorePatterns) {
+        const match = text.match(pattern);
+        if (match && match[1]) {
+            const score = parseInt(match[1]);
+            if (score >= 1 && score <= 10) {
+                return score;
+            }
+        }
+    }
+    
+    return 6; // Default quality score
+},
 
     // Get Business Intelligence from LLM
     async getBusinessIntelligenceFromLLM(componentName, friendlyName, componentType, relevantFiles, dependencyAnalysis, fieldAnalysis) {
@@ -4857,56 +5265,248 @@ ${highRiskComponents.length > 0 ? highRiskComponents.slice(0, 5).map(name => `�
 
 // **NEW METHOD: Generate Dependency Diagram**
 generateDependencyDiagram(dependencyAnalysis) {
-    let diagram = '<div style="display: flex; flex-direction: column; gap: 1.5rem; min-height: 300px;">';
+    if (!dependencyAnalysis) return '<p>No dependency analysis available</p>';
 
-    // Found Dependencies Section
+    let diagram = '<div style="display: flex; flex-direction: column; gap: 2rem; min-height: 400px;">';
+
+    // Current Component (Center)
+    if (this.currentSelectedComponent) {
+        diagram += this.generateCurrentComponentSection(this.currentSelectedComponent);
+    }
+
+    // Found Dependencies Flow
     if (dependencyAnalysis.found.copybooks.length > 0 || dependencyAnalysis.found.programs.length > 0) {
-        diagram += '<div style="background: white; padding: 1rem; border-radius: 8px; border-left: 4px solid var(--success-green);">';
-        diagram += '<h5 style="color: var(--success-green); margin: 0 0 1rem 0;">✅ Found Dependencies</h5>';
-        diagram += '<div style="display: flex; flex-wrap: wrap; gap: 1rem;">';
-
-        // Found Copybooks
-        dependencyAnalysis.found.copybooks.forEach(name => {
-            const component = this.discoveredComponents.get(name);
-            diagram += this.createDependencyNode(name, component, 'found', 'copybook');
-        });
-
-        // Found Programs
-        dependencyAnalysis.found.programs.forEach(name => {
-            const component = this.discoveredComponents.get(name);
-            diagram += this.createDependencyNode(name, component, 'found', 'program');
-        });
-
-        diagram += '</div></div>';
+        diagram += this.generateFoundDependenciesSection(dependencyAnalysis.found);
     }
 
     // Missing Dependencies Section
     if (dependencyAnalysis.missing.copybooks.length > 0 || dependencyAnalysis.missing.programs.length > 0) {
-        diagram += '<div style="background: white; padding: 1rem; border-radius: 8px; border-left: 4px solid var(--error-red);">';
-        diagram += '<h5 style="color: var(--error-red); margin: 0 0 1rem 0;">⚠️ Missing Dependencies</h5>';
-        diagram += '<div style="display: flex; flex-wrap: wrap; gap: 1rem;">';
-
-        // Missing Copybooks
-        dependencyAnalysis.missing.copybooks.slice(0, 10).forEach(name => {
-            diagram += this.createDependencyNode(name, null, 'missing', 'copybook');
-        });
-
-        // Missing Programs
-        dependencyAnalysis.missing.programs.slice(0, 10).forEach(name => {
-            diagram += this.createDependencyNode(name, null, 'missing', 'program');
-        });
-
-        if (dependencyAnalysis.missing.copybooks.length + dependencyAnalysis.missing.programs.length > 10) {
-            diagram += `<div style="display: flex; align-items: center; justify-content: center; min-width: 120px; padding: 0.75rem; background: var(--grey-100); border: 2px dashed var(--grey-400); border-radius: 8px; color: var(--grey-600);">
-                +${dependencyAnalysis.missing.copybooks.length + dependencyAnalysis.missing.programs.length - 10} more
-            </div>`;
-        }
-
-        diagram += '</div></div>';
+        diagram += this.generateMissingDependenciesSection(dependencyAnalysis.missing);
     }
+
+    // Dependency Connections Visualization
+    diagram += this.generateConnectionsVisualization(dependencyAnalysis);
 
     diagram += '</div>';
     return diagram;
+},
+
+// **NEW METHOD: Current Component Section**
+generateCurrentComponentSection(componentName) {
+    const component = this.discoveredComponents.get(componentName);
+    const result = this.analysisResults[componentName];
+    
+    return `
+        <div style="background: linear-gradient(135deg, var(--primary-blue) 0%, var(--indigo) 100%); padding: 1.5rem; border-radius: 12px; color: white; text-align: center;">
+            <h4 style="margin: 0 0 0.5rem 0; color: white;">🎯 Current Component</h4>
+            <div style="font-size: 1.25rem; font-weight: bold; margin-bottom: 0.5rem;">
+                ${component?.friendlyName || componentName}
+            </div>
+            <div style="font-size: 0.9rem; opacity: 0.9; margin-bottom: 1rem;">
+                ${component?.businessPurpose || 'Business purpose analysis pending'}
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem;">
+                <div>
+                    <div style="font-weight: bold;">${component?.type || 'Unknown'}</div>
+                    <div style="font-size: 0.8rem; opacity: 0.8;">Component Type</div>
+                </div>
+                <div>
+                    <div style="font-weight: bold;">${component?.fieldCount || 0}</div>
+                    <div style="font-size: 0.8rem; opacity: 0.8;">Fields</div>
+                </div>
+                <div>
+                    <div style="font-weight: bold;">${result?.qualityScore || 'N/A'}/10</div>
+                    <div style="font-size: 0.8rem; opacity: 0.8;">Quality</div>
+                </div>
+                <div>
+                    <div style="font-weight: bold;">${(result?.llmAnalysis?.riskAssessment || 'Medium').toUpperCase()}</div>
+                    <div style="font-size: 0.8rem; opacity: 0.8;">Risk Level</div>
+                </div>
+            </div>
+        </div>
+    `;
+},
+
+// **NEW METHOD: Found Dependencies Section**
+generateFoundDependenciesSection(found) {
+    return `
+        <div style="background: white; padding: 1.5rem; border-radius: 12px; border-left: 4px solid var(--success-green);">
+            <h4 style="color: var(--success-green); margin: 0 0 1rem 0;">✅ Connected Dependencies (${found.copybooks.length + found.programs.length + found.files.length})</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
+                ${this.generateDependencyNodes(found, 'found')}
+            </div>
+            <div style="margin-top: 1rem; padding: 1rem; background: rgba(16, 185, 129, 0.1); border-radius: 8px;">
+                <strong>💡 Business Impact:</strong> These components are properly connected and will function correctly together. 
+                All dependencies are resolved and available for processing.
+            </div>
+        </div>
+    `;
+},
+
+// **NEW METHOD: Missing Dependencies Section**
+generateMissingDependenciesSection(missing) {
+    return `
+        <div style="background: white; padding: 1.5rem; border-radius: 12px; border-left: 4px solid var(--error-red);">
+            <h4 style="color: var(--error-red); margin: 0 0 1rem 0;">⚠️ Missing Dependencies (${missing.copybooks.length + missing.programs.length + missing.files.length})</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
+                ${this.generateDependencyNodes(missing, 'missing')}
+            </div>
+            <div style="margin-top: 1rem; padding: 1rem; background: rgba(239, 68, 68, 0.1); border-radius: 8px;">
+                <strong>⚠️ Business Impact:</strong> These missing components may cause compilation failures or runtime errors. 
+                Consider uploading these dependencies or updating the code to remove unused references.
+            </div>
+        </div>
+    `;
+},
+
+// **NEW METHOD: Generate Dependency Nodes**
+generateDependencyNodes(dependencies, status) {
+    let nodes = '';
+    
+    // Process copybooks
+    dependencies.copybooks.forEach(name => {
+        nodes += this.createEnhancedDependencyNode(name, 'copybook', status);
+    });
+    
+    // Process programs
+    dependencies.programs.forEach(name => {
+        nodes += this.createEnhancedDependencyNode(name, 'program', status);
+    });
+    
+    // Process files
+    dependencies.files.forEach(name => {
+        nodes += this.createEnhancedDependencyNode(name, 'file', status);
+    });
+    
+    return nodes;
+},
+
+// **NEW METHOD: Enhanced Dependency Node**
+createEnhancedDependencyNode(name, type, status) {
+    const component = this.discoveredComponents.get(name);
+    const result = this.analysisResults[name];
+    const isFound = status === 'found';
+    
+    const friendlyName = component?.friendlyName || this.generateFriendlyNameFromPattern(name);
+    const businessPurpose = component?.businessPurpose || this.generateBusinessPurpose(name);
+    
+    const borderColor = isFound ? 'var(--success-green)' : 'var(--error-red)';
+    const bgColor = isFound ? 'rgba(16, 185, 129, 0.05)' : 'rgba(239, 68, 68, 0.05)';
+    const icon = type === 'copybook' ? '📚' : type === 'program' ? '💼' : '📄';
+    
+    return `
+        <div class="dependency-node" data-component="${name}" style="
+            padding: 1rem; 
+            background: ${bgColor}; 
+            border: 2px solid ${borderColor}; 
+            border-radius: 10px; 
+            cursor: ${isFound ? 'pointer' : 'default'};
+            transition: all 0.3s ease;
+            position: relative;
+        " ${isFound ? `onclick="analyzer.selectComponent('${name}')"` : ''}>
+            <!-- Connection indicator -->
+            <div style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); width: 16px; height: 16px; background: ${borderColor}; border-radius: 50%; border: 3px solid white;"></div>
+            
+            <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;">
+                <span style="font-size: 1.5rem;">${icon}</span>
+                <div>
+                    <div style="font-weight: bold; font-size: 0.9rem; color: var(--grey-800);">${name}</div>
+                    <div style="font-size: 0.75rem; color: var(--grey-500); text-transform: uppercase;">${type}</div>
+                </div>
+            </div>
+            
+            <div style="font-size: 0.85rem; color: var(--primary-blue); margin-bottom: 0.75rem; font-weight: 500; line-height: 1.3;">
+                ${friendlyName}
+            </div>
+            
+            <div style="font-size: 0.8rem; color: var(--grey-600); line-height: 1.4; margin-bottom: 1rem;">
+                ${businessPurpose.substring(0, 100)}${businessPurpose.length > 100 ? '...' : ''}
+            </div>
+            
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <span class="badge ${isFound ? 'badge-success' : 'badge-danger'}" style="font-size: 0.7rem;">
+                        ${isFound ? 'Available' : 'Missing'}
+                    </span>
+                    ${component && result ? `<span class="badge badge-info" style="font-size: 0.7rem; margin-left: 0.25rem;">Analyzed</span>` : ''}
+                </div>
+                ${isFound && result ? `<div style="font-size: 0.75rem; color: var(--grey-500);">Quality: ${result.qualityScore || 'N/A'}/10</div>` : ''}
+            </div>
+            
+            ${isFound ? `
+                <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--grey-200);">
+                    <div style="font-size: 0.75rem; color: var(--success-green);">
+                        🔗 Click to analyze this component
+                    </div>
+                </div>
+            ` : `
+                <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--grey-200);">
+                    <div style="font-size: 0.75rem; color: var(--error-red);">
+                        ⚠️ Component not found in uploaded files
+                    </div>
+                </div>
+            `}
+        </div>
+    `;
+},
+
+// **NEW METHOD: Connections Visualization**
+generateConnectionsVisualization(dependencyAnalysis) {
+    const totalConnections = dependencyAnalysis.summary.foundCount;
+    const totalMissing = dependencyAnalysis.summary.missingCount;
+    const totalDependencies = totalConnections + totalMissing;
+    
+    if (totalDependencies === 0) {
+        return `
+            <div style="background: white; padding: 1.5rem; border-radius: 12px; text-align: center;">
+                <h4 style="color: var(--grey-600); margin: 0 0 0.5rem 0;">🔗 No Dependencies Found</h4>
+                <p style="color: var(--grey-500); margin: 0;">This component appears to be standalone or dependencies are not explicitly referenced.</p>
+            </div>
+        `;
+    }
+    
+    const connectionPercentage = Math.round((totalConnections / totalDependencies) * 100);
+    
+    return `
+        <div style="background: white; padding: 1.5rem; border-radius: 12px;">
+            <h4 style="color: var(--grey-800); margin: 0 0 1rem 0;">🌐 Dependency Network Health</h4>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem;">
+                <div style="text-align: center; padding: 1rem; background: var(--grey-50); border-radius: 8px;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: var(--primary-blue);">${totalDependencies}</div>
+                    <div style="font-size: 0.8rem; color: var(--grey-600);">Total Dependencies</div>
+                </div>
+                <div style="text-align: center; padding: 1rem; background: var(--grey-50); border-radius: 8px;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: var(--success-green);">${totalConnections}</div>
+                    <div style="font-size: 0.8rem; color: var(--grey-600);">Connected</div>
+                </div>
+                <div style="text-align: center; padding: 1rem; background: var(--grey-50); border-radius: 8px;">
+                    <div style="font-size: 1.5rem; font-weight: bold; color: var(--error-red);">${totalMissing}</div>
+                    <div style="font-size: 0.8rem; color: var(--grey-600);">Missing</div>
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 1rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <span style="font-weight: 500;">Network Completeness</span>
+                    <span style="font-weight: bold; color: ${connectionPercentage >= 80 ? 'var(--success-green)' : connectionPercentage >= 50 ? 'var(--warning-yellow)' : 'var(--error-red)'};">${connectionPercentage}%</span>
+                </div>
+                <div style="background: var(--grey-200); height: 12px; border-radius: 6px; overflow: hidden;">
+                    <div style="background: ${connectionPercentage >= 80 ? 'var(--success-green)' : connectionPercentage >= 50 ? 'var(--warning-yellow)' : 'var(--error-red)'}; height: 100%; width: ${connectionPercentage}%; border-radius: 6px; transition: width 0.5s ease;"></div>
+                </div>
+            </div>
+            
+            <div style="padding: 1rem; background: ${connectionPercentage >= 80 ? 'rgba(16, 185, 129, 0.1)' : connectionPercentage >= 50 ? 'rgba(245, 158, 11, 0.1)' : 'rgba(239, 68, 68, 0.1)'}; border-radius: 8px;">
+                <strong>💼 Business Assessment:</strong>
+                ${connectionPercentage >= 80 ? 
+                    'Excellent dependency health. This component is well-connected and should function reliably in the system.' :
+                    connectionPercentage >= 50 ?
+                    'Moderate dependency issues. Some missing components may cause runtime problems or require manual intervention.' :
+                    'Critical dependency issues. Multiple missing components will likely prevent proper system operation.'
+                }
+            </div>
+        </div>
+    `;
 },
 
 // **NEW METHOD: Create Dependency Node**
@@ -5039,88 +5639,300 @@ createDependencyNode(name, component, status, type) {
 
     // Display Field Matrix
     displayFieldMatrix(componentName, result) {
-        const container = document.getElementById('fieldMatrixContent');
-        if (!container) return;
+    const container = document.getElementById('fieldMatrixContent');
+    if (!container) return;
 
-        const component = this.discoveredComponents.get(componentName);
-        const displayName = component?.friendlyName || componentName;
-        const fieldAnalysis = result.fieldAnalysis;
+    const component = this.discoveredComponents.get(componentName);
+    const displayName = component?.friendlyName || componentName;
+    const fieldAnalysis = result?.fieldAnalysis;
 
-        if (!fieldAnalysis || !fieldAnalysis.fields || fieldAnalysis.fields.length === 0) {
-            container.innerHTML = `
-                <div style="text-align: center; padding: 2rem; color: var(--grey-500);">
-                    <h4>No Field Analysis Available</h4>
-                    <p>Component "${displayName}" doesn't contain field data or hasn't been analyzed for fields.</p>
-                </div>
-            `;
-            return;
-        }
+    if (!fieldAnalysis || !fieldAnalysis.fields || fieldAnalysis.fields.length === 0) {
+        this.showNoFieldsMessage(componentName);
+        return;
+    }
 
-        let html = `
-            <h4 style="margin-bottom: 1rem;">Field Matrix Analysis for ${displayName}</h4>
-            
-            <!-- Field Overview Metrics -->
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
-                <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px; text-align: center;">
-                    <div style="font-size: 1.5rem; font-weight: bold; color: var(--primary-blue);">${fieldAnalysis.fields.length}</div>
-                    <div style="font-size: 0.8rem; color: var(--grey-600);">Total Fields</div>
-                </div>
-                <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px; text-align: center;">
-                    <div style="font-size: 1.5rem; font-weight: bold; color: var(--success-green);">${fieldAnalysis.inputFields.length}</div>
-                    <div style="font-size: 0.8rem; color: var(--grey-600);">Input Fields</div>
-                </div>
-                <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px; text-align: center;">
-                    <div style="font-size: 1.5rem; font-weight: bold; color: var(--info-blue);">${fieldAnalysis.outputFields.length}</div>
-                    <div style="font-size: 0.8rem; color: var(--grey-600);">Output Fields</div>
-                </div>
-                <div style="background: var(--grey-50); padding: 1rem; border-radius: 8px; text-align: center;">
-                    <div style="font-size: 1.5rem; font-weight: bold; color: var(--error-red);">${fieldAnalysis.unusedFields.length}</div>
-                    <div style="font-size: 0.8rem; color: var(--grey-600);">Unused Fields</div>
-                </div>
+    let html = `
+        <!-- Component Header -->
+        <div style="background: linear-gradient(135deg, var(--primary-blue) 0%, var(--indigo) 100%); color: white; padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem;">
+            <h3 style="margin: 0 0 0.5rem 0; color: white;">📋 Field Matrix Analysis</h3>
+            <div style="font-size: 1.1rem; font-weight: 500; margin-bottom: 0.5rem;">${displayName}</div>
+            <div style="font-size: 0.9rem; opacity: 0.9;">${component?.businessPurpose || 'Field-level business intelligence analysis'}</div>
+        </div>
+        
+        <!-- Field Overview Metrics -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+            <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid var(--grey-200);">
+                <div style="font-size: 1.5rem; font-weight: bold; color: var(--primary-blue);">${fieldAnalysis.fields.length}</div>
+                <div style="font-size: 0.8rem; color: var(--grey-600);">Total Fields</div>
             </div>
+            <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid var(--grey-200);">
+                <div style="font-size: 1.5rem; font-weight: bold; color: var(--success-green);">${fieldAnalysis.inputFields?.length || 0}</div>
+                <div style="font-size: 0.8rem; color: var(--grey-600);">Input Fields</div>
+            </div>
+            <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid var(--grey-200);">
+                <div style="font-size: 1.5rem; font-weight: bold; color: var(--info-blue);">${fieldAnalysis.outputFields?.length || 0}</div>
+                <div style="font-size: 0.8rem; color: var(--grey-600);">Output Fields</div>
+            </div>
+            <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid var(--grey-200);">
+                <div style="font-size: 1.5rem; font-weight: bold; color: var(--warning-yellow);">${fieldAnalysis.unusedFields?.length || 0}</div>
+                <div style="font-size: 0.8rem; color: var(--grey-600);">Unused Fields</div>
+            </div>
+        </div>
 
+        <!-- Business Logic Summary -->
+        ${this.generateBusinessLogicSummary(result)}
+
+        <!-- Field Details Table -->
+        <div style="background: white; border-radius: 12px; overflow: hidden; border: 1px solid var(--grey-200);">
+            <div style="background: var(--grey-50); padding: 1rem; border-bottom: 1px solid var(--grey-200);">
+                <h4 style="margin: 0; color: var(--grey-800);">📊 Detailed Field Analysis</h4>
+                <p style="margin: 0.5rem 0 0 0; color: var(--grey-600); font-size: 0.9rem;">Click on any field to get business intelligence insights</p>
+            </div>
             <div class="data-table">
                 <table>
                     <thead>
                         <tr>
                             <th>Field Name</th>
                             <th>Level</th>
-                            <th>Picture</th>
+                            <th>Picture Clause</th>
                             <th>Usage Pattern</th>
                             <th>Business Purpose</th>
+                            <th>Data Type</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-        `;
-        
-        fieldAnalysis.fields.slice(0, 50).forEach(field => {
-            const usage = this.determineFieldUsage(field, fieldAnalysis);
-            const badgeClass = this.getUsageBadgeClass(usage);
-            const businessPurpose = field.businessLogic?.businessMeaning || this.generateFieldPurpose(field.name);
-            
-            html += `
-                <tr onclick="analyzer.updateChatContext('field', '${field.name}')" style="cursor: pointer;">
-                    <td style="font-family: monospace; font-weight: 600;">${field.name}</td>
-                    <td><span class="badge badge-grey">${field.level}</span></td>
-                    <td style="font-family: monospace;">${field.picture || '-'}</td>
-                    <td><span class="badge ${badgeClass}">${usage}</span></td>
-                    <td style="font-size: 0.85rem; max-width: 200px;">${businessPurpose}</td>
-                </tr>
-            `;
-        });
+    `;
+    
+    fieldAnalysis.fields.slice(0, 100).forEach((field, index) => {
+        const usage = this.determineFieldUsage(field, fieldAnalysis);
+        const badgeClass = this.getUsageBadgeClass(usage);
+        const businessPurpose = field.businessLogic?.businessMeaning || this.generateFieldPurpose(field.name);
+        const dataType = this.determineDataType(field.picture);
         
         html += `
+            <tr class="field-row" data-field="${field.name}" style="cursor: pointer;">
+                <td style="font-family: monospace; font-weight: 600;">${field.name}</td>
+                <td>
+                    <span class="badge badge-grey">${field.level}</span>
+                    ${field.level === 1 ? '<span class="badge badge-primary" style="margin-left: 0.25rem; font-size: 0.7rem;">MAIN</span>' : ''}
+                </td>
+                <td style="font-family: monospace; font-size: 0.85rem;">${field.picture || '-'}</td>
+                <td><span class="badge ${badgeClass}">${usage}</span></td>
+                <td style="font-size: 0.85rem; max-width: 250px; line-height: 1.4;">${businessPurpose}</td>
+                <td><span class="badge badge-info">${dataType}</span></td>
+                <td>
+                    <button class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.7rem;" onclick="analyzer.analyzeField('${componentName}', '${field.name}')">
+                        💡 Analyze
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+    
+    html += `
                     </tbody>
                 </table>
             </div>
+        </div>
+    `;
+    
+    if (fieldAnalysis.fields.length > 100) {
+        html += `
+            <div style="margin-top: 1rem; padding: 1rem; background: var(--grey-50); border-radius: 8px; text-align: center;">
+                <p style="margin: 0; color: var(--grey-600);">
+                    Showing 100 of ${fieldAnalysis.fields.length} fields. 
+                    <button class="btn btn-primary" style="margin-left: 0.5rem; padding: 0.25rem 0.75rem; font-size: 0.8rem;" onclick="analyzer.showAllFields('${componentName}')">
+                        Show All Fields
+                    </button>
+                </p>
+            </div>
         `;
-        
-        if (fieldAnalysis.fields.length > 50) {
-            html += `<p style="margin-top: 1rem; color: var(--grey-500);">Showing 50 of ${fieldAnalysis.fields.length} fields</p>`;
-        }
+    }
 
-        container.innerHTML = html;
-    },
+    container.innerHTML = html;
+
+    // Add click handlers for field rows
+    setTimeout(() => {
+        document.querySelectorAll('.field-row').forEach(row => {
+            row.addEventListener('click', (e) => {
+                if (e.target.tagName !== 'BUTTON') {
+                    const fieldName = row.getAttribute('data-field');
+                    this.updateChatContext('field', fieldName);
+                    this.showFieldDetails(componentName, fieldName);
+                }
+            });
+        });
+    }, 100);
+},
+
+// **NEW METHOD: Generate Business Logic Summary**
+generateBusinessLogicSummary(result) {
+    const llmAnalysis = result.llmAnalysis;
+    
+    if (!llmAnalysis || (!llmAnalysis.businessLogic && !llmAnalysis.businessPurpose)) {
+        return '';
+    }
+    
+    return `
+        <div style="background: white; padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem; border: 1px solid var(--grey-200);">
+            <h4 style="margin: 0 0 1rem 0; color: var(--grey-800);">🧠 Business Logic Intelligence</h4>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+                <div>
+                    <h5 style="color: var(--primary-blue); margin: 0 0 0.5rem 0;">📋 Business Purpose</h5>
+                    <p style="margin: 0; color: var(--grey-700); font-size: 0.9rem; line-height: 1.5;">
+                        ${llmAnalysis.businessPurpose || 'Business purpose analysis pending'}
+                    </p>
+                </div>
+                
+                <div>
+                    <h5 style="color: var(--success-green); margin: 0 0 0.5rem 0;">⚖️ Business Rules</h5>
+                    <div style="font-size: 0.85rem; color: var(--grey-700);">
+                        ${(llmAnalysis.businessLogic?.businessRules || []).slice(0, 3).map(rule => 
+                            `• ${rule}`
+                        ).join('<br>') || '• No specific business rules identified'}
+                    </div>
+                </div>
+            </div>
+            
+            ${llmAnalysis.businessLogic?.dataProcessing ? `
+                <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--grey-200);">
+                    <h5 style="color: var(--warning-yellow); margin: 0 0 0.5rem 0;">🔄 Data Processing Logic</h5>
+                    <p style="margin: 0; color: var(--grey-700); font-size: 0.9rem; line-height: 1.5;">
+                        ${llmAnalysis.businessLogic.dataProcessing}
+                    </p>
+                </div>
+            ` : ''}
+        </div>
+    `;
+},
+
+// **NEW METHOD: Determine Data Type**
+determineDataType(picture) {
+    if (!picture) return 'Unknown';
+    
+    const pic = picture.toUpperCase();
+    
+    if (pic.includes('9')) {
+        if (pic.includes('V') || pic.includes('.')) {
+            return 'Decimal';
+        } else if (pic.includes('COMP') || pic.includes('BINARY')) {
+            return 'Binary';
+        } else {
+            return 'Numeric';
+        }
+    } else if (pic.includes('X')) {
+        return 'Alphanumeric';
+    } else if (pic.includes('A')) {
+        return 'Alphabetic';
+    } else {
+        return 'Other';
+    }
+},
+
+// **NEW METHOD: Analyze Field**
+async analyzeField(componentName, fieldName) {
+    if (!this.serverValidated) {
+        this.showError('LLM server not connected');
+        return;
+    }
+    
+    const result = this.analysisResults[componentName];
+    if (!result || !result.fieldAnalysis) {
+        this.showError('Field analysis not available');
+        return;
+    }
+    
+    const field = result.fieldAnalysis.fields.find(f => f.name === fieldName);
+    if (!field) {
+        this.showError('Field not found');
+        return;
+    }
+    
+    // Add to chat with field-specific question
+    const chatInput = document.getElementById('chatInput');
+    if (chatInput) {
+        chatInput.value = `Tell me about the business purpose and usage of field ${fieldName} in component ${componentName}. What does this field represent in business terms?`;
+        this.updateChatContext('field', fieldName);
+        this.sendChatMessage();
+    }
+    
+    // Switch to chat panel
+    const rightPanel = document.getElementById('rightPanel');
+    if (rightPanel && rightPanel.classList.contains('collapsed')) {
+        this.togglePanel('right');
+    }
+},
+
+// **NEW METHOD: Show Field Details**
+showFieldDetails(componentName, fieldName) {
+    const result = this.analysisResults[componentName];
+    if (!result || !result.fieldAnalysis) return;
+    
+    const field = result.fieldAnalysis.fields.find(f => f.name === fieldName);
+    if (!field) return;
+    
+    const usage = this.determineFieldUsage(field, result.fieldAnalysis);
+    const businessPurpose = field.businessLogic?.businessMeaning || this.generateFieldPurpose(field.name);
+    const dataType = this.determineDataType(field.picture);
+    
+    // Create modal-like display
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0; 
+        background: rgba(0,0,0,0.5); z-index: 10000; 
+        display: flex; align-items: center; justify-content: center;
+    `;
+    
+    modal.innerHTML = `
+        <div style="background: white; padding: 2rem; border-radius: 12px; max-width: 600px; max-height: 80vh; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h3 style="margin: 0; color: var(--grey-800);">📋 Field Analysis: ${fieldName}</h3>
+                <button onclick="this.parentElement.parentElement.parentElement.remove()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer;">×</button>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                <div>
+                    <strong>Level:</strong> ${field.level}<br>
+                    <strong>Picture:</strong> ${field.picture || 'Not specified'}<br>
+                    <strong>Data Type:</strong> ${dataType}<br>
+                    <strong>Usage Pattern:</strong> <span class="badge ${this.getUsageBadgeClass(usage)}">${usage}</span>
+                </div>
+                <div>
+                    <strong>File:</strong> ${field.fileName}<br>
+                    <strong>Line Number:</strong> ${field.lineNumber}<br>
+                    <strong>Component:</strong> ${componentName}
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 1rem;">
+                <strong>Business Purpose:</strong><br>
+                <p style="margin: 0.5rem 0; padding: 1rem; background: var(--grey-50); border-radius: 8px; line-height: 1.5;">
+                    ${businessPurpose}
+                </p>
+            </div>
+            
+            <div style="display: flex; gap: 0.5rem;">
+                <button class="btn btn-primary" onclick="analyzer.analyzeField('${componentName}', '${fieldName}'); this.parentElement.parentElement.parentElement.remove();">
+                    💬 Ask AI About This Field
+                </button>
+                <button class="btn btn-primary" onclick="this.parentElement.parentElement.parentElement.remove();">
+                    Close
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Close on background click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+},
 
     // Determine Field Usage
     determineFieldUsage(field, fieldAnalysis) {
