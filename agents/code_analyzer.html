@@ -344,6 +344,27 @@
             color: var(--grey-500);
         }
 
+        .component-grid-row {
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+
+        .component-grid-row:hover {
+            background-color: var(--grey-50);
+        }
+
+        .file-list-compact {
+            max-width: 150px;
+            line-height: 1.4;
+        }
+
+        .component-detail-row {
+            background-color: var(--grey-25) !important;
+        }
+
+        .component-detail-row td {
+            border-top: none !important;
+        }
         /* Enhanced Collapsible Sections */
         .collapsible-section {
             background: white;
@@ -1025,6 +1046,15 @@
                         <span class="header-stat-value" id="headerFields">0</span>
                         <span class="header-stat-label">Fields</span>
                     </div>
+                    <div class="header-stat">
+                        <span class="header-stat-value" id="headerLinesOfCode">0</span>
+                        <span class="header-stat-label">Lines of Code</span>
+                    </div>
+                    <div class="header-stat">
+                        <span class="header-stat-value" id="headerFileSize">0 KB</span>
+                        <span class="header-stat-label">Total Size</span>
+                    </div>
+
                 </div>
             </div>
         </div>
@@ -2998,38 +3028,135 @@ Object.assign(EnhancedCodeAnalyzer.prototype, {
     },
 
     // Update Dashboard Stats
-    updateDashboardStats() {
-        // Counts
-        const totalComponents = this.discoveredComponents.size;
-        const totalFiles = this.uploadedFiles.length;
-        const totalFields = Array.from(this.discoveredComponents.values())
-            .reduce((sum, c) => sum + (c.fieldCount || 0), 0);
+    
+updateDashboardStats() {
+    // Counts
+    const totalComponents = this.discoveredComponents.size;
+    const totalFiles = this.uploadedFiles.length;
+    const totalFields = Array.from(this.discoveredComponents.values())
+        .reduce((sum, c) => sum + (c.fieldCount || 0), 0);
 
-        const programs = Array.from(this.discoveredComponents.values())
-            .filter(c => (c.type || '').toUpperCase().includes('PROGRAM')).length;
-        const copybooks = Array.from(this.discoveredComponents.values())
-            .filter(c => (c.type || '').toUpperCase().includes('COPY') || (c.type || '').toUpperCase().includes('RECORD')).length;
+    // **NEW: Code Metrics**
+    const totalLinesOfCode = this.uploadedFiles.reduce((sum, file) => sum + (file.metrics?.codeLines || 0), 0);
+    const totalFileSize = this.uploadedFiles.reduce((sum, file) => sum + (file.size || 0), 0);
+    const avgComplexity = Array.from(this.discoveredComponents.values())
+        .reduce((sum, c) => sum + (c.complexityScore || 0), 0) / Math.max(totalComponents, 1);
 
-        // Quality average (only analyzed comps with numeric score)
-        const scored = Array.from(this.discoveredComponents.values())
-            .map(c => Number(c.qualityScore))
-            .filter(v => Number.isFinite(v));
-        const avgQuality = scored.length ? (scored.reduce((a,b)=>a+b,0) / scored.length).toFixed(1) : '-';
+    const programs = Array.from(this.discoveredComponents.values())
+        .filter(c => (c.type || '').toUpperCase().includes('PROGRAM')).length;
+    const copybooks = Array.from(this.discoveredComponents.values())
+        .filter(c => (c.type || '').toUpperCase().includes('COPY') || (c.type || '').toUpperCase().includes('RECORD')).length;
 
-        // Header stats
-        const setText = (id, val) => { 
-            const el = document.getElementById(id); 
-            if (el) el.textContent = String(val); 
-        };
-        
-        setText('headerComponents', totalComponents);
-        setText('headerPrograms', programs);
-        setText('headerCopybooks', copybooks);
-        setText('headerFields', totalFields);
+    // Quality average (only analyzed comps with numeric score)
+    const scored = Array.from(this.discoveredComponents.values())
+        .map(c => Number(c.qualityScore))
+        .filter(v => Number.isFinite(v));
+    const avgQuality = scored.length ? (scored.reduce((a,b)=>a+b,0) / scored.length).toFixed(1) : '-';
 
-        // Component count in left panel
-        setText('componentCount', totalComponents);
-    },
+    // Header stats
+    const setText = (id, val) => { 
+        const el = document.getElementById(id); 
+        if (el) el.textContent = String(val); 
+    };
+    
+    setText('headerComponents', totalComponents);
+    setText('headerPrograms', programs);
+    setText('headerCopybooks', copybooks);
+    setText('headerFields', totalFields);
+
+    // **NEW: Additional metrics in header**
+    setText('headerLinesOfCode', totalLinesOfCode.toLocaleString());
+    setText('headerFileSize', this.formatFileSize(totalFileSize));
+
+    // Component count in left panel
+    setText('componentCount', totalComponents);
+
+    // **NEW: Update dashboard cards with enhanced metrics**
+    this.updateDashboardMetricsCards(totalComponents, totalFiles, totalFields, totalLinesOfCode, avgComplexity, avgQuality);
+},
+
+// **NEW METHOD: Update Dashboard Metrics Cards**
+updateDashboardMetricsCards(totalComponents, totalFiles, totalFields, totalLinesOfCode, avgComplexity, avgQuality) {
+    const dashboardGrid = document.getElementById('dashboardGrid');
+    if (!dashboardGrid) return;
+
+    dashboardGrid.innerHTML = `
+        <div class="dashboard-card">
+            <div class="dashboard-card-header">
+                <div class="dashboard-card-icon">📊</div>
+                <div>
+                    <div class="dashboard-card-title">System Overview</div>
+                    <div class="dashboard-card-subtitle">Complete mainframe analysis</div>
+                </div>
+            </div>
+            <div class="dashboard-card-content">
+                <p>Comprehensive analysis of your mainframe system components with business intelligence insights.</p>
+            </div>
+            <div class="dashboard-card-metrics">
+                <div class="dashboard-metric">
+                    <span class="dashboard-metric-value">${totalComponents}</span>
+                    <span class="dashboard-metric-label">Components</span>
+                </div>
+                <div class="dashboard-metric">
+                    <span class="dashboard-metric-value">${totalFiles}</span>
+                    <span class="dashboard-metric-label">Files</span>
+                </div>
+                <div class="dashboard-metric">
+                    <span class="dashboard-metric-value">${totalFields}</span>
+                    <span class="dashboard-metric-label">Fields</span>
+                </div>
+                <div class="dashboard-metric">
+                    <span class="dashboard-metric-value">${avgQuality}</span>
+                    <span class="dashboard-metric-label">Avg Quality</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="dashboard-card">
+            <div class="dashboard-card-header">
+                <div class="dashboard-card-icon">💻</div>
+                <div>
+                    <div class="dashboard-card-title">Code Metrics</div>
+                    <div class="dashboard-card-subtitle">Lines of code and complexity</div>
+                </div>
+            </div>
+            <div class="dashboard-card-content">
+                <p>Analysis of code volume, complexity, and maintainability across all uploaded files.</p>
+            </div>
+            <div class="dashboard-card-metrics">
+                <div class="dashboard-metric">
+                    <span class="dashboard-metric-value">${totalLinesOfCode.toLocaleString()}</span>
+                    <span class="dashboard-metric-label">Lines of Code</span>
+                </div>
+                <div class="dashboard-metric">
+                    <span class="dashboard-metric-value">${avgComplexity.toFixed(1)}</span>
+                    <span class="dashboard-metric-label">Avg Complexity</span>
+                </div>
+                <div class="dashboard-metric">
+                    <span class="dashboard-metric-value">${this.getAnalyzedComponentsCount()}</span>
+                    <span class="dashboard-metric-label">Analyzed</span>
+                </div>
+                <div class="dashboard-metric">
+                    <span class="dashboard-metric-value">${this.formatFileSize(this.uploadedFiles.reduce((sum, file) => sum + (file.size || 0), 0))}</span>
+                    <span class="dashboard-metric-label">Total Size</span>
+                </div>
+            </div>
+        </div>
+    `;
+},
+
+// **NEW HELPER METHODS**
+formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+},
+
+getAnalyzedComponentsCount() {
+    return Object.keys(this.analysisResults).length;
+},
 
     // Select Component
     selectComponent(componentName) {
@@ -3945,44 +4072,191 @@ Return ONLY a JSON object with this exact structure:
 
     // Generate Component Results
     generateComponentResults() {
-        const analyzedComponents = Object.entries(this.analysisResults);
+    const analyzedComponents = Object.entries(this.analysisResults);
+    
+    if (analyzedComponents.length === 0) {
+        return '<p style="color: var(--grey-500); text-align: center; padding: 2rem;">No components analyzed yet. Run auto-analysis to see results.</p>';
+    }
+
+    let html = `
+        <div style="margin-bottom: 1rem;">
+            <h4 style="margin: 0 0 1rem 0;">📋 Components Grid</h4>
+            <div class="data-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Component</th>
+                            <th>Type</th>
+                            <th>Input Files</th>
+                            <th>Output Files</th>
+                            <th>Operations</th>
+                            <th>Quality</th>
+                            <th>Risk</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+    `;
+    
+    analyzedComponents.forEach(([name, result]) => {
+        const component = this.discoveredComponents.get(name);
+        const displayName = component?.friendlyName || name;
+        const qualityColor = this.getQualityColor(result.qualityScore);
+        const riskColor = this.getRiskColor(result.llmAnalysis?.riskAssessment);
         
-        let html = '<div style="display: grid; gap: 1rem;">';
+        // Determine file operations
+        const operations = this.determineFileOperations(result);
         
-        analyzedComponents.forEach(([name, result]) => {
-            const component = this.discoveredComponents.get(name);
-            const displayName = component?.friendlyName || name;
-            const qualityColor = this.getQualityColor(result.qualityScore);
-            const riskColor = this.getRiskColor(result.llmAnalysis?.riskAssessment);
-            
-            html += `
-                <div style="background: white; border: 1px solid var(--grey-200); border-radius: 8px; padding: 1rem; cursor: pointer;" 
-                     onclick="analyzer.selectComponent('${name}')">
-                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.75rem;">
-                        <div>
-                            <h4 style="margin: 0; color: var(--grey-800);">${displayName}</h4>
-                            <div style="font-size: 0.8rem; color: var(--grey-500); font-family: monospace;">${name}</div>
-                        </div>
-                        <div style="text-align: right;">
-                            <span class="badge" style="background: ${qualityColor}; color: white; margin-bottom: 0.25rem;">
-                                Quality: ${result.qualityScore}/10
-                            </span>
-                            <br>
-                            <span class="badge" style="background: ${riskColor}; color: white;">
-                                ${result.llmAnalysis?.riskAssessment || 'Unknown'} Risk
-                            </span>
-                        </div>
+        html += `
+            <tr class="component-grid-row" data-component="${name}">
+                <td>
+                    <div style="font-weight: 600; color: var(--grey-800);">${displayName}</div>
+                    <div style="font-size: 0.75rem; color: var(--grey-500); font-family: monospace;">${name}</div>
+                </td>
+                <td>
+                    <span class="badge badge-primary">${result.componentType || 'Unknown'}</span>
+                </td>
+                <td>
+                    <div class="file-list-compact">
+                        ${(component?.inputFiles || []).slice(0, 2).map(file => 
+                            `<span class="badge badge-success" style="margin: 0.1rem; font-size: 0.7rem;">${file}</span>`
+                        ).join('')}
+                        ${(component?.inputFiles || []).length > 2 ? `<span class="badge badge-grey">+${(component?.inputFiles || []).length - 2}</span>` : ''}
+                        ${(component?.inputFiles || []).length === 0 ? '<span style="color: var(--grey-400);">None</span>' : ''}
                     </div>
-                    <p style="color: var(--grey-600); font-size: 0.85rem; margin: 0; line-height: 1.4;">
-                        ${result.llmAnalysis?.businessPurpose?.substring(0, 200) || 'No business purpose available'}...
-                    </p>
-                </div>
-            `;
+                </td>
+                <td>
+                    <div class="file-list-compact">
+                        ${(component?.outputFiles || []).slice(0, 2).map(file => 
+                            `<span class="badge badge-info" style="margin: 0.1rem; font-size: 0.7rem;">${file}</span>`
+                        ).join('')}
+                        ${(component?.outputFiles || []).length > 2 ? `<span class="badge badge-grey">+${(component?.outputFiles || []).length - 2}</span>` : ''}
+                        ${(component?.outputFiles || []).length === 0 ? '<span style="color: var(--grey-400);">None</span>' : ''}
+                    </div>
+                </td>
+                <td>
+                    <div style="font-size: 0.8rem;">
+                        ${operations.map(op => `<span class="badge badge-warning" style="margin: 0.1rem; font-size: 0.7rem;">${op}</span>`).join('')}
+                    </div>
+                </td>
+                <td>
+                    <span class="badge" style="background: ${qualityColor}; color: white;">
+                        ${result.qualityScore}/10
+                    </span>
+                </td>
+                <td>
+                    <span class="badge" style="background: ${riskColor}; color: white;">
+                        ${(result.llmAnalysis?.riskAssessment || 'Unknown').toUpperCase()}
+                    </span>
+                </td>
+                <td>
+                    <button class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.7rem;" onclick="analyzer.selectComponent('${name}')">
+                        View Details
+                    </button>
+                </td>
+            </tr>
+            <tr class="component-detail-row" id="detail-${name}" style="display: none;">
+                <td colspan="8">
+                    <div style="background: var(--grey-50); padding: 1rem; border-radius: 4px;">
+                        ${this.generateComponentDetailView(name, result, component)}
+                    </div>
+                </td>
+            </tr>
+        `;
+    });
+    
+    html += `
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+
+    // Add click handlers for expandable rows
+    setTimeout(() => {
+        document.querySelectorAll('.component-grid-row').forEach(row => {
+            row.addEventListener('click', (e) => {
+                if (e.target.tagName !== 'BUTTON') {
+                    const componentName = row.getAttribute('data-component');
+                    const detailRow = document.getElementById(`detail-${componentName}`);
+                    if (detailRow) {
+                        detailRow.style.display = detailRow.style.display === 'none' ? 'table-row' : 'none';
+                    }
+                }
+            });
         });
-        
-        html += '</div>';
-        return html;
-    },
+    }, 100);
+
+    return html;
+},
+
+// **NEW METHOD: Determine File Operations**
+determineFileOperations(result) {
+    const operations = [];
+    
+    if (result.fieldAnalysis) {
+        if (result.fieldAnalysis.inputFields && result.fieldAnalysis.inputFields.length > 0) {
+            operations.push('READ');
+        }
+        if (result.fieldAnalysis.outputFields && result.fieldAnalysis.outputFields.length > 0) {
+            operations.push('WRITE');
+        }
+    }
+    
+    // Check for specific operations in LLM analysis
+    if (result.llmAnalysis?.businessLogic?.dataProcessing) {
+        const processing = result.llmAnalysis.businessLogic.dataProcessing.toLowerCase();
+        if (processing.includes('update') || processing.includes('modify')) {
+            operations.push('UPDATE');
+        }
+        if (processing.includes('validate') || processing.includes('check')) {
+            operations.push('VALIDATE');
+        }
+        if (processing.includes('transform') || processing.includes('convert')) {
+            operations.push('TRANSFORM');
+        }
+    }
+    
+    return operations.length > 0 ? operations : ['PROCESS'];
+},
+
+// **NEW METHOD: Generate Component Detail View**
+generateComponentDetailView(name, result, component) {
+    return `
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div>
+                <h5 style="margin: 0 0 0.5rem 0; color: var(--grey-800);">📋 Component Details</h5>
+                <div style="font-size: 0.85rem; line-height: 1.6;">
+                    <strong>Business Purpose:</strong><br>
+                    ${result.llmAnalysis?.businessPurpose || component?.businessPurpose || 'Not available'}
+                </div>
+                
+                <h6 style="margin: 1rem 0 0.5rem 0; color: var(--grey-700);">📊 Metrics</h6>
+                <div style="font-size: 0.8rem;">
+                    • <strong>Lines of Code:</strong> ${component?.lineCount || 'N/A'}<br>
+                    • <strong>Complexity Score:</strong> ${component?.complexityScore || 'N/A'}<br>
+                    • <strong>Field Count:</strong> ${component?.fieldCount || 'N/A'}<br>
+                    • <strong>Quality Score:</strong> ${result.qualityScore || 'N/A'}/10
+                </div>
+            </div>
+            
+            <div>
+                <h5 style="margin: 0 0 0.5rem 0; color: var(--grey-800);">🔗 Dependencies</h5>
+                <div style="font-size: 0.8rem;">
+                    <strong>Found:</strong> ${result.dependencyAnalysis?.summary?.foundCount || 0}<br>
+                    <strong>Missing:</strong> ${result.dependencyAnalysis?.summary?.missingCount || 0}
+                </div>
+                
+                <h6 style="margin: 1rem 0 0.5rem 0; color: var(--grey-700);">💡 Recommendations</h6>
+                <div style="font-size: 0.8rem;">
+                    ${(result.llmAnalysis?.recommendations || []).slice(0, 3).map(rec => 
+                        `• ${rec}`
+                    ).join('<br>') || 'No recommendations available'}
+                </div>
+            </div>
+        </div>
+    `;
+},
 
     // Generate Dependencies Summary
     generateDependenciesSummary() {
@@ -4541,39 +4815,143 @@ ${highRiskComponents.length > 0 ? highRiskComponents.slice(0, 5).map(name => `�
 
     // Generate Dependency Flow Chart
     generateDependencyFlowChart(dependencyAnalysis) {
-        if (!dependencyAnalysis) return '<p>No dependency analysis available</p>';
+    if (!dependencyAnalysis) return '<p>No dependency analysis available</p>';
 
-        return `
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
-                <div style="background: rgba(16, 185, 129, 0.1); padding: 1rem; border-radius: 8px; text-align: center;">
-                    <div style="font-size: 1.5rem; font-weight: bold; color: var(--success-green);">${dependencyAnalysis.summary.foundCount}</div>
-                    <div style="font-size: 0.8rem; color: var(--grey-600);">Dependencies Found</div>
+    return `
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+            <div style="background: rgba(16, 185, 129, 0.1); padding: 1rem; border-radius: 8px; text-align: center;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: var(--success-green);">${dependencyAnalysis.summary.foundCount}</div>
+                <div style="font-size: 0.8rem; color: var(--grey-600);">Dependencies Found</div>
+            </div>
+            <div style="background: rgba(239, 68, 68, 0.1); padding: 1rem; border-radius: 8px; text-align: center;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: var(--error-red);">${dependencyAnalysis.summary.missingCount}</div>
+                <div style="font-size: 0.8rem; color: var(--grey-600);">Dependencies Missing</div>
+            </div>
+        </div>
+
+        <!-- **NEW: Diagrammatic Dependency Flow** -->
+        <div style="background: var(--grey-50); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem;">
+            <h4 style="margin: 0 0 1rem 0; color: var(--grey-800);">🗺️ Dependency Flow Diagram</h4>
+            ${this.generateDependencyDiagram(dependencyAnalysis)}
+        </div>
+
+        <div style="background: var(--grey-50); padding: 1.5rem; border-radius: 8px;">
+            <h4 style="margin: 0 0 1rem 0; color: var(--grey-800);">📊 Dependency Health Status</h4>
+            <div style="background: white; padding: 1rem; border-radius: 6px; margin-bottom: 1rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <span>Dependency Completion</span>
+                    <span style="font-weight: bold;">${Math.round((dependencyAnalysis.summary.foundCount / (dependencyAnalysis.summary.foundCount + dependencyAnalysis.summary.missingCount)) * 100) || 0}%</span>
                 </div>
-                <div style="background: rgba(239, 68, 68, 0.1); padding: 1rem; border-radius: 8px; text-align: center;">
-                    <div style="font-size: 1.5rem; font-weight: bold; color: var(--error-red);">${dependencyAnalysis.summary.missingCount}</div>
-                    <div style="font-size: 0.8rem; color: var(--grey-600);">Dependencies Missing</div>
+                <div style="background: var(--grey-200); height: 8px; border-radius: 4px; overflow: hidden;">
+                    <div style="background: var(--success-green); height: 100%; width: ${Math.round((dependencyAnalysis.summary.foundCount / (dependencyAnalysis.summary.foundCount + dependencyAnalysis.summary.missingCount)) * 100) || 0}%; border-radius: 4px;"></div>
                 </div>
             </div>
+            <p style="color: var(--grey-600); font-size: 0.9rem; margin: 0;">
+                ${dependencyAnalysis.summary.missingCount > 5 ? '⚠️ High impact: Many missing dependencies may affect system functionality' : 
+                  dependencyAnalysis.summary.missingCount > 0 ? '⚡ Medium impact: Some dependencies missing' : 
+                  '✅ Low impact: All major dependencies found'}
+            </p>
+        </div>
+    `;
+},
 
-            <div style="background: var(--grey-50); padding: 1.5rem; border-radius: 8px;">
-                <h4 style="margin: 0 0 1rem 0; color: var(--grey-800);">📊 Dependency Health Status</h4>
-                <div style="background: white; padding: 1rem; border-radius: 6px; margin-bottom: 1rem;">
-                    <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 0.5rem;">
-                        <span>Dependency Completion</span>
-                        <span style="font-weight: bold;">${Math.round((dependencyAnalysis.summary.foundCount / (dependencyAnalysis.summary.foundCount + dependencyAnalysis.summary.missingCount)) * 100) || 0}%</span>
-                    </div>
-                    <div style="background: var(--grey-200); height: 8px; border-radius: 4px; overflow: hidden;">
-                        <div style="background: var(--success-green); height: 100%; width: ${Math.round((dependencyAnalysis.summary.foundCount / (dependencyAnalysis.summary.foundCount + dependencyAnalysis.summary.missingCount)) * 100) || 0}%; border-radius: 4px;"></div>
-                    </div>
-                </div>
-                <p style="color: var(--grey-600); font-size: 0.9rem; margin: 0;">
-                    ${dependencyAnalysis.summary.missingCount > 5 ? '⚠️ High impact: Many missing dependencies may affect system functionality' : 
-                      dependencyAnalysis.summary.missingCount > 0 ? '⚡ Medium impact: Some dependencies missing' : 
-                      '✅ Low impact: All major dependencies found'}
-                </p>
+// **NEW METHOD: Generate Dependency Diagram**
+generateDependencyDiagram(dependencyAnalysis) {
+    let diagram = '<div style="display: flex; flex-direction: column; gap: 1.5rem; min-height: 300px;">';
+
+    // Found Dependencies Section
+    if (dependencyAnalysis.found.copybooks.length > 0 || dependencyAnalysis.found.programs.length > 0) {
+        diagram += '<div style="background: white; padding: 1rem; border-radius: 8px; border-left: 4px solid var(--success-green);">';
+        diagram += '<h5 style="color: var(--success-green); margin: 0 0 1rem 0;">✅ Found Dependencies</h5>';
+        diagram += '<div style="display: flex; flex-wrap: wrap; gap: 1rem;">';
+
+        // Found Copybooks
+        dependencyAnalysis.found.copybooks.forEach(name => {
+            const component = this.discoveredComponents.get(name);
+            diagram += this.createDependencyNode(name, component, 'found', 'copybook');
+        });
+
+        // Found Programs
+        dependencyAnalysis.found.programs.forEach(name => {
+            const component = this.discoveredComponents.get(name);
+            diagram += this.createDependencyNode(name, component, 'found', 'program');
+        });
+
+        diagram += '</div></div>';
+    }
+
+    // Missing Dependencies Section
+    if (dependencyAnalysis.missing.copybooks.length > 0 || dependencyAnalysis.missing.programs.length > 0) {
+        diagram += '<div style="background: white; padding: 1rem; border-radius: 8px; border-left: 4px solid var(--error-red);">';
+        diagram += '<h5 style="color: var(--error-red); margin: 0 0 1rem 0;">⚠️ Missing Dependencies</h5>';
+        diagram += '<div style="display: flex; flex-wrap: wrap; gap: 1rem;">';
+
+        // Missing Copybooks
+        dependencyAnalysis.missing.copybooks.slice(0, 10).forEach(name => {
+            diagram += this.createDependencyNode(name, null, 'missing', 'copybook');
+        });
+
+        // Missing Programs
+        dependencyAnalysis.missing.programs.slice(0, 10).forEach(name => {
+            diagram += this.createDependencyNode(name, null, 'missing', 'program');
+        });
+
+        if (dependencyAnalysis.missing.copybooks.length + dependencyAnalysis.missing.programs.length > 10) {
+            diagram += `<div style="display: flex; align-items: center; justify-content: center; min-width: 120px; padding: 0.75rem; background: var(--grey-100); border: 2px dashed var(--grey-400); border-radius: 8px; color: var(--grey-600);">
+                +${dependencyAnalysis.missing.copybooks.length + dependencyAnalysis.missing.programs.length - 10} more
+            </div>`;
+        }
+
+        diagram += '</div></div>';
+    }
+
+    diagram += '</div>';
+    return diagram;
+},
+
+// **NEW METHOD: Create Dependency Node**
+createDependencyNode(name, component, status, type) {
+    const isFound = status === 'found';
+    const borderColor = isFound ? 'var(--success-green)' : 'var(--error-red)';
+    const bgColor = isFound ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)';
+    const icon = type === 'copybook' ? '📚' : '💼';
+    const friendlyName = component?.friendlyName || this.generateFriendlyNameFromPattern(name);
+    const businessPurpose = component?.businessPurpose || this.generateBusinessPurpose(name);
+    
+    return `
+        <div style="
+            min-width: 200px; 
+            max-width: 250px;
+            padding: 1rem; 
+            background: ${bgColor}; 
+            border: 2px solid ${borderColor}; 
+            border-radius: 8px; 
+            cursor: ${isFound ? 'pointer' : 'default'};
+            transition: transform 0.2s ease;
+        " ${isFound ? `onclick="analyzer.selectComponent('${name}')"` : ''} 
+        onmouseover="this.style.transform='scale(1.02)'" 
+        onmouseout="this.style.transform='scale(1)'">
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                <span style="font-size: 1.2rem;">${icon}</span>
+                <span style="font-weight: bold; font-size: 0.85rem; color: var(--grey-800);">${name}</span>
             </div>
-        `;
-    },
+            <div style="font-size: 0.8rem; color: var(--primary-blue); margin-bottom: 0.5rem; font-weight: 500;">
+                ${friendlyName}
+            </div>
+            <div style="font-size: 0.75rem; color: var(--grey-600); line-height: 1.3;">
+                ${businessPurpose.substring(0, 80)}${businessPurpose.length > 80 ? '...' : ''}
+            </div>
+            <div style="margin-top: 0.5rem;">
+                <span class="badge ${isFound ? 'badge-success' : 'badge-danger'}" style="font-size: 0.7rem;">
+                    ${isFound ? 'Found' : 'Missing'}
+                </span>
+                <span class="badge badge-grey" style="font-size: 0.7rem; margin-left: 0.25rem;">
+                    ${type}
+                </span>
+            </div>
+        </div>
+    `;
+},
 
     // Generate Dependency Table
     generateDependencyTable(dependencyAnalysis) {
