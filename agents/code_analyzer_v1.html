@@ -3598,6 +3598,59 @@ async analyzeProgramFields(componentName, relevantFiles) {
     
     return fieldAnalysis;
 },
+extractPictureClause(lineContent) {
+    const picMatch = lineContent.match(/PIC\s+([X9VS\(\)\.]+)/i);
+    return picMatch ? picMatch[1] : '';
+},
+checkForSubFields(lines, currentIndex) {
+    // Look ahead to see if there are subordinate levels
+    for (let i = currentIndex + 1; i < Math.min(currentIndex + 10, lines.length); i++) {
+        const nextLine = lines[i].trim().toUpperCase();
+        const levelMatch = nextLine.match(/^\s*(\d{2})\s+/);
+        if (levelMatch) {
+            const nextLevel = parseInt(levelMatch[1]);
+            if (nextLevel > 1 && nextLevel < 50) {
+                return true; // Has sub-fields
+            } else if (nextLevel === 1) {
+                return false; // Next 01-level, no sub-fields
+            }
+        }
+    }
+    return false;
+},
+
+// Determine Program Field Usage
+determineProgramFieldUsage(fieldName, content, section) {
+    // Different usage patterns for different sections
+    if (section === 'linkageSection') {
+        return 'PARAMETER';
+    } else if (section === 'fileSection') {
+        return 'FILE_RECORD';
+    } else if (section === 'workingStorage') {
+        if (this.isInputField(fieldName, content)) return 'INPUT_VAR';
+        if (this.isOutputField(fieldName, content)) return 'OUTPUT_VAR';
+        if (this.isReferenceField(fieldName, content)) return 'REFERENCE_VAR';
+        return 'STORAGE_VAR';
+    }
+    return 'VARIABLE';
+},
+
+// Categorize Field Usage
+categorizeFieldUsage(field, fieldAnalysis) {
+    switch (field.usage) {
+        case 'INPUT_VAR':
+        case 'PARAMETER':
+            fieldAnalysis.inputFields.push(field.name);
+            break;
+        case 'OUTPUT_VAR':
+        case 'FILE_RECORD':
+            fieldAnalysis.outputFields.push(field.name);
+            break;
+        case 'REFERENCE_VAR':
+            fieldAnalysis.referenceFields.push(field.name);
+            break;
+    }
+},
 debugComponentDiscovery() {
     console.log('=== COMPONENT DISCOVERY DEBUG ===');
     console.log(`Total uploaded files: ${this.uploadedFiles.length}`);
@@ -4940,62 +4993,66 @@ Object.assign(EnhancedCodeAnalyzer.prototype, {
 
     // Run Component Analysis
     async runComponentAnalysis(componentName, relevantFiles) {
-        console.log(`Running analysis for: ${componentName}`);
+    console.log(`Running analysis for: ${componentName}`);
+    
+    const component = this.discoveredComponents.get(componentName);
+    const friendlyName = component?.friendlyName || componentName;
+    
+    try {
+        // Stage 1: Basic component analysis
+        const componentType = this.detectComponentType(componentName, relevantFiles);
         
-        const component = this.discoveredComponents.get(componentName);
-        const friendlyName = component?.friendlyName || componentName;
+        // Stage 2: Extract dependencies
+        const dependencyAnalysis = await this.extractDependencies(relevantFiles);
         
-        try {
-            // Stage 1: Basic component analysis
-            const componentType = this.detectComponentType(componentName, relevantFiles);
-            
-            // Stage 2: Extract dependencies
-            const dependencyAnalysis = await this.extractDependencies(relevantFiles);
-            
-            // Stage 3: Field analysis (for copybooks)
-            let fieldAnalysis = null;
-            if (componentType === 'Copybook' || componentType === 'RECORD_LAYOUT') {
-                fieldAnalysis = await this.analyzeFieldsInComponent(componentName, relevantFiles);
-            }
-            
-            // Stage 4: LLM-enhanced analysis
-            let llmAnalysis = null;
-            try {
-                llmAnalysis = await this.getBusinessIntelligenceFromLLM(
-                    componentName, friendlyName, componentType, relevantFiles, dependencyAnalysis, fieldAnalysis
-                );
-            } catch (llmError) {
-                console.warn('LLM analysis failed:', llmError);
-                llmAnalysis = {
-                    error: true,
-                    message: llmError.message,
-                    businessPurpose: component?.businessPurpose || 'Business purpose analysis failed',
-                    recommendations: ['Check LLM server connection', 'Verify component data', 'Try manual analysis'],
-                    fallbackUsed: true
-                };
-            }
-            
-            const results = {
-                componentName: componentName,
-                friendlyName: friendlyName,
-                timestamp: new Date().toISOString(),
-                filesAnalyzed: relevantFiles.map(f => f.name),
-                componentType: componentType,
-                dependencyAnalysis: dependencyAnalysis,
-                fieldAnalysis: fieldAnalysis,
-                llmAnalysis: llmAnalysis,
-                totalFields: fieldAnalysis?.fields?.length || 0,
-                qualityScore: this.calculateQualityScore(llmAnalysis, fieldAnalysis),
-                analysisMethod: 'Auto-Discovery-Enhanced'
-            };
-            
-            return results;
-            
-        } catch (error) {
-            console.error(`Analysis failed for ${componentName}:`, error);
-            throw new Error(`Analysis failed: ${error.message}`);
+        // **CORRECTED: Stage 3: Field analysis for BOTH copybooks AND programs**
+        let fieldAnalysis = null;
+        if (componentType === 'Copybook' || componentType === 'RECORD_LAYOUT') {
+            // Detailed field analysis for copybooks/records (all field levels)
+            fieldAnalysis = await this.analyzeFieldsInComponent(componentName, relevantFiles);
+        } else if (componentType === 'Program' || componentType === 'COBOL Program' || componentType === 'COBOL_PROGRAM') {
+            // **CORRECTED: Program-level field analysis (01-levels only)**
+            fieldAnalysis = await this.analyzeProgramFieldsForPrograms(componentName, relevantFiles);
         }
-    },
+        
+        // Stage 4: LLM-enhanced analysis
+        let llmAnalysis = null;
+        try {
+            llmAnalysis = await this.getBusinessIntelligenceFromLLM(
+                componentName, friendlyName, componentType, relevantFiles, dependencyAnalysis, fieldAnalysis
+            );
+        } catch (llmError) {
+            console.warn('LLM analysis failed:', llmError);
+            llmAnalysis = {
+                error: true,
+                message: llmError.message,
+                businessPurpose: component?.businessPurpose || 'Business purpose analysis failed',
+                recommendations: ['Check LLM server connection', 'Verify component data', 'Try manual analysis'],
+                fallbackUsed: true
+            };
+        }
+        
+        const results = {
+            componentName: componentName,
+            friendlyName: friendlyName,
+            timestamp: new Date().toISOString(),
+            filesAnalyzed: relevantFiles.map(f => f.name),
+            componentType: componentType,
+            dependencyAnalysis: dependencyAnalysis,
+            fieldAnalysis: fieldAnalysis,
+            llmAnalysis: llmAnalysis,
+            totalFields: fieldAnalysis?.fields?.length || 0,
+            qualityScore: this.calculateQualityScore(llmAnalysis, fieldAnalysis),
+            analysisMethod: 'Auto-Discovery-Enhanced'
+        };
+        
+        return results;
+        
+    } catch (error) {
+        console.error(`Analysis failed for ${componentName}:`, error);
+        throw new Error(`Analysis failed: ${error.message}`);
+    }
+},
 
     // Detect Component Type
     detectComponentType(componentName, relevantFiles) {
@@ -5121,7 +5178,120 @@ Object.assign(EnhancedCodeAnalyzer.prototype, {
             }
         }
     },
-
+async analyzeProgramFieldsForPrograms(componentName, relevantFiles) {
+    console.log(`🔍 Analyzing PROGRAM fields for: ${componentName}`);
+    
+    const fieldAnalysis = {
+        fields: [],
+        sections: {
+            workingStorage: [],
+            linkageSection: [],
+            fileSection: [],
+            localStorage: []
+        },
+        inputFields: [],
+        outputFields: [],
+        referenceFields: [],
+        businessLogicSummary: {
+            totalSections: 0,
+            total01Levels: 0,
+            hasWorkingStorage: false,
+            hasLinkageSection: false,
+            hasFileSection: false
+        }
+    };
+    
+    for (const file of relevantFiles) {
+        const content = file.content;
+        const lines = content.split('\n');
+        
+        let currentSection = 'unknown';
+        let inDataDivision = false;
+        const foundFields = new Set(); // Prevent duplicates
+        
+        lines.forEach((line, index) => {
+            const trimmed = line.trim().toUpperCase();
+            
+            // Detect COBOL divisions and sections
+            if (trimmed.includes('DATA DIVISION')) {
+                inDataDivision = true;
+                return;
+            }
+            
+            if (trimmed.includes('PROCEDURE DIVISION')) {
+                inDataDivision = false;
+                return;
+            }
+            
+            if (!inDataDivision) return;
+            
+            // Detect sections within Data Division
+            if (trimmed.includes('WORKING-STORAGE SECTION')) {
+                currentSection = 'workingStorage';
+                fieldAnalysis.businessLogicSummary.hasWorkingStorage = true;
+                return;
+            } else if (trimmed.includes('LINKAGE SECTION')) {
+                currentSection = 'linkageSection';
+                fieldAnalysis.businessLogicSummary.hasLinkageSection = true;
+                return;
+            } else if (trimmed.includes('FILE SECTION')) {
+                currentSection = 'fileSection';
+                fieldAnalysis.businessLogicSummary.hasFileSection = true;
+                return;
+            } else if (trimmed.includes('LOCAL-STORAGE SECTION')) {
+                currentSection = 'localStorage';
+                return;
+            }
+            
+            // **EXTRACT ALL 01-LEVEL FIELDS** for program view
+            const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]+)(?:\s+(.*))?/);
+            if (field01Match && currentSection !== 'unknown') {
+                const fieldName = field01Match[1];
+                const restOfLine = field01Match[2] || '';
+                
+                // Skip FILLER and duplicates
+                if (fieldName === 'FILLER' || foundFields.has(fieldName)) return;
+                foundFields.add(fieldName);
+                
+                const field = {
+                    name: fieldName,
+                    level: 1,
+                    section: currentSection,
+                    sectionDisplay: this.getSectionDisplayName(currentSection),
+                    lineNumber: index + 1,
+                    fileName: file.name,
+                    picClause: this.extractPictureClause(restOfLine),
+                    hasSubFields: this.checkForSubFields(lines, index),
+                    individualFieldCount: this.calculateIndividualFieldCount(fieldName, lines, index),
+                    businessLogic: {
+                        businessMeaning: this.generateFieldPurpose(fieldName),
+                        validationRules: [],
+                        calculations: []
+                    },
+                    usage: this.determineProgramFieldUsage(fieldName, content, currentSection)
+                };
+                
+                fieldAnalysis.fields.push(field);
+                fieldAnalysis.sections[currentSection].push(field);
+                fieldAnalysis.businessLogicSummary.total01Levels++;
+                
+                // Categorize field usage for program context
+                this.categorizeFieldUsage(field, fieldAnalysis);
+            }
+        });
+    }
+    
+    // Calculate section count
+    fieldAnalysis.businessLogicSummary.totalSections = 
+        Object.values(fieldAnalysis.sections).filter(section => section.length > 0).length;
+    
+    console.log(`✅ Program field analysis complete: ${fieldAnalysis.fields.length} 01-level fields found`);
+    console.log(`   📊 Working Storage: ${fieldAnalysis.sections.workingStorage.length}`);
+    console.log(`   📊 Linkage Section: ${fieldAnalysis.sections.linkageSection.length}`);
+    console.log(`   📊 File Section: ${fieldAnalysis.sections.fileSection.length}`);
+    
+    return fieldAnalysis;
+},
     // **NEW: Detect System Interfaces in Line**
     detectSystemInterfacesInLine(line, lineNumber, dependencies) {
         // SQL/DB2 Interface Detection
@@ -5187,66 +5357,90 @@ Object.assign(EnhancedCodeAnalyzer.prototype, {
 
     // Analyze Fields in Component
     async analyzeFieldsInComponent(componentName, relevantFiles) {
-        const fieldAnalysis = {
-            fields: [],
-            inputFields: [],
-            outputFields: [],
-            referenceFields: [],
-            unusedFields: [],
-            businessLogicSummary: {
-                totalValidationRules: 0,
-                totalCalculations: 0,
-                fieldsWithBusinessLogic: 0
-            }
-        };
+    console.log(`🔍 Analyzing detailed fields for copybook/record: ${componentName}`);
+    
+    const fieldAnalysis = {
+        fields: [],
+        inputFields: [],
+        outputFields: [],
+        referenceFields: [],
+        unusedFields: [],
+        businessLogicSummary: {
+            totalValidationRules: 0,
+            totalCalculations: 0,
+            fieldsWithBusinessLogic: 0,
+            maxLevel: 1,
+            recordStructureDepth: 0
+        }
+    };
+    
+    for (const file of relevantFiles) {
+        const content = file.content;
+        const lines = content.split('\n');
         
-        for (const file of relevantFiles) {
-            const content = file.content;
-            const lines = content.split('\n');
+        let inTargetRecord = false;
+        let targetRecordLevel = 0;
+        
+        lines.forEach((line, index) => {
+            const trimmed = line.trim().toUpperCase();
             
-            lines.forEach((line, index) => {
-                const trimmed = line.trim().toUpperCase();
+            // Extract ALL field levels for detailed copybook/record view
+            const fieldMatch = trimmed.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]+)(?:\s+PIC\s+([X9VS\(\)]+))?/);
+            if (fieldMatch) {
+                const level = parseInt(fieldMatch[1]);
+                const fieldName = fieldMatch[2];
+                const picture = fieldMatch[3] || '';
                 
-                // Extract field definitions
-                const fieldMatch = trimmed.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]+)(?:\s+PIC\s+([X9VS\(\)]+))?/);
-                if (fieldMatch) {
-                    const level = parseInt(fieldMatch[1]);
-                    const fieldName = fieldMatch[2];
-                    const picture = fieldMatch[3] || '';
-                    
-                    if (level !== 88 && fieldName && level <= 49) {
-                        const field = {
-                            name: fieldName,
-                            level: level,
-                            picture: picture,
-                            lineNumber: index + 1,
-                            fileName: file.name,
-                            businessLogic: {
-                                businessMeaning: this.generateFieldPurpose(fieldName),
-                                validationRules: [],
-                                calculations: []
-                            }
-                        };
-                        
-                        fieldAnalysis.fields.push(field);
-                        
-                        // Determine usage pattern
-                        if (this.isInputField(fieldName, content)) {
-                            fieldAnalysis.inputFields.push(fieldName);
-                        } else if (this.isOutputField(fieldName, content)) {
-                            fieldAnalysis.outputFields.push(fieldName);
-                        } else if (this.isReferenceField(fieldName, content)) {
-                            fieldAnalysis.referenceFields.push(fieldName);
-                        } else {
-                            fieldAnalysis.unusedFields.push(fieldName);
+                // Skip condition names and FILLER
+                if (level === 88 || fieldName === 'FILLER') return;
+                
+                // Check if we're in the target record for this component
+                if (level === 1 && fieldName === componentName.toUpperCase()) {
+                    inTargetRecord = true;
+                    targetRecordLevel = 1;
+                } else if (level === 1 && inTargetRecord && fieldName !== componentName.toUpperCase()) {
+                    inTargetRecord = false;
+                    return;
+                }
+                
+                // Only include fields that belong to this specific component
+                if (inTargetRecord || level === 1) {
+                    const field = {
+                        name: fieldName,
+                        level: level,
+                        picture: picture,
+                        lineNumber: index + 1,
+                        fileName: file.name,
+                        indent: level * 2, // For visual indentation
+                        businessLogic: {
+                            businessMeaning: this.generateFieldPurpose(fieldName),
+                            validationRules: [],
+                            calculations: []
                         }
+                    };
+                    
+                    fieldAnalysis.fields.push(field);
+                    fieldAnalysis.businessLogicSummary.maxLevel = Math.max(fieldAnalysis.businessLogicSummary.maxLevel, level);
+                    
+                    // Determine usage pattern
+                    if (this.isInputField(fieldName, content)) {
+                        fieldAnalysis.inputFields.push(fieldName);
+                    } else if (this.isOutputField(fieldName, content)) {
+                        fieldAnalysis.outputFields.push(fieldName);
+                    } else if (this.isReferenceField(fieldName, content)) {
+                        fieldAnalysis.referenceFields.push(fieldName);
+                    } else {
+                        fieldAnalysis.unusedFields.push(fieldName);
                     }
                 }
-            });
-        }
-        
-        return fieldAnalysis;
-    },
+            }
+        });
+    }
+    
+    fieldAnalysis.businessLogicSummary.recordStructureDepth = fieldAnalysis.businessLogicSummary.maxLevel;
+    console.log(`Detailed field analysis complete: ${fieldAnalysis.fields.length} fields found`);
+    return fieldAnalysis;
+},
 
     // Field Usage Detection Methods
     isInputField(fieldName, content) {
@@ -5303,10 +5497,19 @@ Object.assign(EnhancedCodeAnalyzer.prototype, {
             return `Business data field for ${fieldName.toLowerCase().replace(/-/g, ' ')} processing`;
         }
     },
+getSectionDisplayName(section) {
+    const sectionNames = {
+        'workingStorage': 'Working Storage',
+        'linkageSection': 'Linkage Section',
+        'fileSection': 'File Section',
+        'localStorage': 'Local Storage'
+    };
+    return sectionNames[section] || 'Unknown Section';
+},
 
     // Calculate Quality Score
     calculateQualityScore(llmAnalysis, fieldAnalysis) {
-        let score = 5; // Base score
+        let score = 2; // Base score
         
         // LLM analysis quality factors
         if (llmAnalysis && !llmAnalysis.error) {
