@@ -3082,6 +3082,25 @@ enableAutoAnalysis() {
         return Math.min(complexity, 10);
     },
 
+    extractCobolCode(line) {
+    // If line is shorter than 6 characters, return as-is
+    if (line.length <= 6) {
+        return line.trim();
+    }
+    
+    // Extract from column 7 onwards (position 6 in 0-based indexing)
+    const cobolCode = line.substring(6);
+    
+    // Check indicator area (column 7) for comments
+    const indicator = cobolCode.charAt(0);
+    if (indicator === '*' || indicator === '/') {
+        return ''; // Skip comment lines
+    }
+    
+    // Return the actual COBOL code (columns 8-72)
+    return cobolCode.trim();
+},
+
     // ============================================
     // COMPONENT EXTRACTION AND DISCOVERY
     // ============================================
@@ -3099,12 +3118,21 @@ enableAutoAnalysis() {
     let inLocalStorage = false;
 
     lines.forEach((line, index) => {
-        const trimmed = line.trim().toUpperCase();
-        const originalLine = line.trim(); // Keep original case
+        // **EXTRACT COBOL CODE FROM COLUMN 7 ONWARDS**
+        const cobolCode = extractCobolCode(line);
+        const trimmed = cobolCode.toUpperCase();
+        
+        // **SKIP EMPTY LINES AND COMMENTS**
+        if (!trimmed || trimmed.length === 0) {
+            return;
+        }
+        
+        console.log(`Line ${index + 1}: "${line}" → COBOL: "${trimmed}"`);
         
         // **TRACK COBOL SECTIONS**
         if (trimmed.includes('DATA DIVISION')) {
             inDataDivision = true;
+            console.log(`📁 Entered DATA DIVISION at line ${index + 1}`);
             return;
         }
         
@@ -3114,6 +3142,7 @@ enableAutoAnalysis() {
             inLinkageSection = false;
             inFileSection = false;
             inLocalStorage = false;
+            console.log(`📁 Entered PROCEDURE DIVISION at line ${index + 1}`);
             return;
         }
         
@@ -3123,35 +3152,42 @@ enableAutoAnalysis() {
                 inLinkageSection = false;
                 inFileSection = false;
                 inLocalStorage = false;
+                console.log(`📁 Entered WORKING-STORAGE SECTION at line ${index + 1}`);
                 return;
             } else if (trimmed.includes('LINKAGE SECTION')) {
                 inWorkingStorage = false;
                 inLinkageSection = true;
                 inFileSection = false;
                 inLocalStorage = false;
+                console.log(`📁 Entered LINKAGE SECTION at line ${index + 1}`);
                 return;
             } else if (trimmed.includes('FILE SECTION')) {
                 inWorkingStorage = false;
                 inLinkageSection = false;
                 inFileSection = true;
                 inLocalStorage = false;
+                console.log(`📁 Entered FILE SECTION at line ${index + 1}`);
                 return;
             } else if (trimmed.includes('LOCAL-STORAGE SECTION')) {
                 inWorkingStorage = false;
                 inLinkageSection = false;
                 inFileSection = false;
                 inLocalStorage = true;
+                console.log(`📁 Entered LOCAL-STORAGE SECTION at line ${index + 1}`);
                 return;
             }
         }
         
         // **EXTRACT ALL 01-LEVEL FIELDS (including Working Storage) - IGNORE FILLER**
-        const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]+)(?:\s|\.|$)/)
+        const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]+)(?:\s|\.|$)/);
         if (field01Match) {
             const componentName = field01Match[1];
             
+            console.log(`🔍 Found 01-level candidate: "${componentName}" from COBOL code: "${trimmed}"`);
+            
             // **SKIP FILLER FIELDS**
             if (componentName === 'FILLER') {
+                console.log(`   ⏭️ Skipping FILLER field`);
                 return;
             }
             
@@ -3173,14 +3209,16 @@ enableAutoAnalysis() {
                     level: '01',
                     lineNumber: index + 1,
                     fileType: fileType,
-                    isMainComponent: true, // **ALL 01-levels are main components**
+                    isMainComponent: true,
                     businessPurpose: this.generateBusinessPurpose(componentName),
                     individualFieldCount: fieldCount,
                     hasSubFields: this.checkIfHasSubFields(lines, index),
                     section: section
                 });
                 
-                console.log(`✅ Found 01-level: ${componentName} in ${section} section (${fieldCount} fields)`);
+                console.log(`✅ Added 01-level: ${componentName} in ${section} section (${fieldCount} fields)`);
+            } else {
+                console.log(`   🔄 Duplicate 01-level skipped: ${componentName}`);
             }
         }
         
@@ -3197,7 +3235,7 @@ enableAutoAnalysis() {
                     level: level,
                     lineNumber: index + 1,
                     fileType: fileType,
-                    isMainComponent: false, // Sub-fields are not main components
+                    isMainComponent: false,
                     businessPurpose: this.generateFieldPurpose(fieldName),
                     parentRecord: this.findParentRecord(lines, index)
                 });
@@ -3273,7 +3311,6 @@ enableAutoAnalysis() {
     });
     
     console.log(`📋 Extracted ${components.length} components from ${fileType} file (${foundComponents.size} unique)`);
-    this.debugRegexMatching(lines[0] || '');
     return components;
 },
 
@@ -3307,26 +3344,43 @@ calculateIndividualFieldCount(componentName, lines, startIndex) {
     let i = startIndex + 1;
     const componentUpper = componentName.toUpperCase();
     
+    console.log(`🔍 Calculating field count for: ${componentName} starting at line ${startIndex + 1}`);
+    
     // Look ahead from the 01-level to count its subordinate fields
     while (i < lines.length) {
-        const line = lines[i].trim().toUpperCase();
-        const fieldMatch = line.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]*)/);
+        // **EXTRACT COBOL CODE FROM COLUMN 7 ONWARDS**
+        const cobolCode = extractCobolCode(lines[i]);
+        const trimmed = cobolCode.toUpperCase();
+        
+        if (!trimmed) {
+            i++;
+            continue;
+        }
+        
+        const fieldMatch = trimmed.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]*)/);
         
         if (fieldMatch) {
             const level = parseInt(fieldMatch[1]);
             const fieldName = fieldMatch[2];
             
+            console.log(`   📋 Line ${i + 1}: L${level} ${fieldName}`);
+            
             if (level === 1) {
                 // Found another 01-level, stop counting
+                console.log(`   🛑 Found next 01-level, stopping count`);
                 break;
             } else if (level > 1 && level !== 88 && fieldName !== 'FILLER') {
                 // Count subordinate fields (exclude 88-level condition names and FILLER)
                 fieldCount++;
+                console.log(`   ✅ Counted subordinate field: L${level} ${fieldName} (total: ${fieldCount})`);
+            } else if (fieldName === 'FILLER') {
+                console.log(`   ⏭️ Skipped FILLER at level ${level}`);
             }
         }
         i++;
     }
     
+    console.log(`📊 ${componentName} has ${fieldCount} total fields`);
     return fieldCount;
 },
 
@@ -5365,7 +5419,11 @@ async analyzeProgramFieldsForPrograms(componentName, relevantFiles) {
         const foundFields = new Set(); // Prevent duplicates
         
         lines.forEach((line, index) => {
-            const trimmed = line.trim().toUpperCase();
+            // **EXTRACT COBOL CODE FROM COLUMN 7 ONWARDS**
+            const cobolCode = extractCobolCode(line);
+            const trimmed = cobolCode.toUpperCase();
+            
+            if (!trimmed) return;
             
             // Detect COBOL divisions and sections
             if (trimmed.includes('DATA DIVISION')) {
@@ -5408,8 +5466,19 @@ async analyzeProgramFieldsForPrograms(componentName, relevantFiles) {
                 const fieldName = field01Match[1];
                 const restOfLine = field01Match[2] || '';
                 
+                console.log(`🔍 Program field test: "${fieldName}" in section: ${currentSection} from COBOL: "${trimmed}"`);
+                
                 // **SKIP FILLER and duplicates**
-                if (fieldName === 'FILLER' || foundFields.has(fieldName)) return;
+                if (fieldName === 'FILLER') {
+                    console.log(`   ⏭️ Skipping FILLER field in program`);
+                    return;
+                }
+                
+                if (foundFields.has(fieldName)) {
+                    console.log(`   🔄 Duplicate program field skipped: ${fieldName}`);
+                    return;
+                }
+                
                 foundFields.add(fieldName);
                 
                 const field = {
@@ -5434,7 +5503,7 @@ async analyzeProgramFieldsForPrograms(componentName, relevantFiles) {
                 fieldAnalysis.sections[currentSection].push(field);
                 fieldAnalysis.businessLogicSummary.total01Levels++;
                 
-                console.log(`   ✅ Added 01-level: ${fieldName} in ${currentSection} (${field.individualFieldCount} sub-fields)`);
+                console.log(`   ✅ Added program 01-level: ${fieldName} in ${currentSection} (${field.individualFieldCount} sub-fields)`);
                 
                 // Categorize field usage for program context
                 this.categorizeFieldUsage(field, fieldAnalysis);
@@ -5517,21 +5586,26 @@ async analyzeProgramFieldsForPrograms(componentName, relevantFiles) {
     },
 
     // Analyze Fields in Component
-    async analyzeFieldsInComponent(componentName, relevantFiles) {
-    console.log(`🔍 Analyzing ALL fields for copybook/record: ${componentName}`);
+    async analyzeProgramFieldsForPrograms(componentName, relevantFiles) {
+    console.log(`🔍 Analyzing PROGRAM 01-level fields for: ${componentName}`);
     
     const fieldAnalysis = {
         fields: [],
+        sections: {
+            workingStorage: [],
+            linkageSection: [],
+            fileSection: [],
+            localStorage: []
+        },
         inputFields: [],
         outputFields: [],
         referenceFields: [],
-        unusedFields: [],
         businessLogicSummary: {
-            totalValidationRules: 0,
-            totalCalculations: 0,
-            fieldsWithBusinessLogic: 0,
-            maxLevel: 1,
-            recordStructureDepth: 0
+            totalSections: 0,
+            total01Levels: 0,
+            hasWorkingStorage: false,
+            hasLinkageSection: false,
+            hasFileSection: false
         }
     };
     
@@ -5539,77 +5613,112 @@ async analyzeProgramFieldsForPrograms(componentName, relevantFiles) {
         const content = file.content;
         const lines = content.split('\n');
         
-        let inTargetRecord = false;
-        let targetRecordLevel = 0;
-        let foundTargetRecord = false;
+        let currentSection = 'unknown';
+        let inDataDivision = false;
+        const foundFields = new Set(); // Prevent duplicates
         
         lines.forEach((line, index) => {
-            const trimmed = line.trim().toUpperCase();
+            // **EXTRACT COBOL CODE FROM COLUMN 7 ONWARDS**
+            const cobolCode = extractCobolCode(line);
+            const trimmed = cobolCode.toUpperCase();
             
-            // **EXTRACT ALL FIELD LEVELS** for detailed copybook/record view
-            const fieldMatch = trimmed.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]+)(?:\s+PIC\s+([X9VS\(\)\.]+))?/);
-            if (fieldMatch) {
-                const level = parseInt(fieldMatch[1]);
-                const fieldName = fieldMatch[2];
-                const picture = fieldMatch[3] || '';
+            if (!trimmed) return;
+            
+            // Detect COBOL divisions and sections
+            if (trimmed.includes('DATA DIVISION')) {
+                inDataDivision = true;
+                return;
+            }
+            
+            if (trimmed.includes('PROCEDURE DIVISION')) {
+                inDataDivision = false;
+                return;
+            }
+            
+            if (!inDataDivision) return;
+            
+            // Detect sections within Data Division
+            if (trimmed.includes('WORKING-STORAGE SECTION')) {
+                currentSection = 'workingStorage';
+                fieldAnalysis.businessLogicSummary.hasWorkingStorage = true;
+                console.log(`📁 Entering Working Storage Section`);
+                return;
+            } else if (trimmed.includes('LINKAGE SECTION')) {
+                currentSection = 'linkageSection';
+                fieldAnalysis.businessLogicSummary.hasLinkageSection = true;
+                console.log(`📁 Entering Linkage Section`);
+                return;
+            } else if (trimmed.includes('FILE SECTION')) {
+                currentSection = 'fileSection';
+                fieldAnalysis.businessLogicSummary.hasFileSection = true;
+                console.log(`📁 Entering File Section`);
+                return;
+            } else if (trimmed.includes('LOCAL-STORAGE SECTION')) {
+                currentSection = 'localStorage';
+                console.log(`📁 Entering Local Storage Section`);
+                return;
+            }
+            
+            // **EXTRACT ONLY 01-LEVEL FIELDS** for program view
+            const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]+)(?:\s+(.*))?/);
+            if (field01Match && currentSection !== 'unknown') {
+                const fieldName = field01Match[1];
+                const restOfLine = field01Match[2] || '';
                 
-                // **SKIP condition names and FILLER**
-                if (level === 88 || fieldName === 'FILLER') return;
+                console.log(`🔍 Program field test: "${fieldName}" in section: ${currentSection} from COBOL: "${trimmed}"`);
                 
-                // **FIND TARGET RECORD AND ITS SUBORDINATES**
-                if (level === 1 && fieldName === componentName.toUpperCase()) {
-                    inTargetRecord = true;
-                    targetRecordLevel = 1;
-                    foundTargetRecord = true;
-                    console.log(`📋 Found target record: ${fieldName}`);
-                } else if (level === 1 && inTargetRecord && fieldName !== componentName.toUpperCase()) {
-                    // Found another 01-level, stop including fields
-                    inTargetRecord = false;
+                // **SKIP FILLER and duplicates**
+                if (fieldName === 'FILLER') {
+                    console.log(`   ⏭️ Skipping FILLER field in program`);
                     return;
                 }
                 
-                // **INCLUDE ALL FIELDS** that belong to this specific component
-                if (inTargetRecord || (level === 1 && fieldName === componentName.toUpperCase())) {
-                    const field = {
-                        name: fieldName,
-                        level: level,
-                        picture: picture,
-                        lineNumber: index + 1,
-                        fileName: file.name,
-                        indent: (level - 1) * 20, // For visual indentation
-                        businessLogic: {
-                            businessMeaning: this.generateFieldPurpose(fieldName),
-                            validationRules: [],
-                            calculations: []
-                        }
-                    };
-                    
-                    fieldAnalysis.fields.push(field);
-                    fieldAnalysis.businessLogicSummary.maxLevel = Math.max(fieldAnalysis.businessLogicSummary.maxLevel, level);
-                    
-                    // Determine usage pattern
-                    if (this.isInputField(fieldName, content)) {
-                        fieldAnalysis.inputFields.push(fieldName);
-                    } else if (this.isOutputField(fieldName, content)) {
-                        fieldAnalysis.outputFields.push(fieldName);
-                    } else if (this.isReferenceField(fieldName, content)) {
-                        fieldAnalysis.referenceFields.push(fieldName);
-                    } else {
-                        fieldAnalysis.unusedFields.push(fieldName);
-                    }
-                    
-                    console.log(`   📌 Added field: L${level} ${fieldName} ${picture}`);
+                if (foundFields.has(fieldName)) {
+                    console.log(`   🔄 Duplicate program field skipped: ${fieldName}`);
+                    return;
                 }
+                
+                foundFields.add(fieldName);
+                
+                const field = {
+                    name: fieldName,
+                    level: 1,
+                    section: currentSection,
+                    sectionDisplay: this.getSectionDisplayName(currentSection),
+                    lineNumber: index + 1,
+                    fileName: file.name,
+                    picClause: this.extractPictureClause(restOfLine),
+                    hasSubFields: this.checkForSubFields(lines, index),
+                    individualFieldCount: this.calculateIndividualFieldCount(fieldName, lines, index),
+                    businessLogic: {
+                        businessMeaning: this.generateFieldPurpose(fieldName),
+                        validationRules: [],
+                        calculations: []
+                    },
+                    usage: this.determineProgramFieldUsage(fieldName, content, currentSection)
+                };
+                
+                fieldAnalysis.fields.push(field);
+                fieldAnalysis.sections[currentSection].push(field);
+                fieldAnalysis.businessLogicSummary.total01Levels++;
+                
+                console.log(`   ✅ Added program 01-level: ${fieldName} in ${currentSection} (${field.individualFieldCount} sub-fields)`);
+                
+                // Categorize field usage for program context
+                this.categorizeFieldUsage(field, fieldAnalysis);
             }
         });
-        
-        if (!foundTargetRecord) {
-            console.warn(`⚠️ Target record ${componentName} not found in ${file.name}`);
-        }
     }
     
-    fieldAnalysis.businessLogicSummary.recordStructureDepth = fieldAnalysis.businessLogicSummary.maxLevel;
-    console.log(`✅ Record field analysis complete: ${fieldAnalysis.fields.length} fields found (max level: ${fieldAnalysis.businessLogicSummary.maxLevel})`);
+    // Calculate section count
+    fieldAnalysis.businessLogicSummary.totalSections = 
+        Object.values(fieldAnalysis.sections).filter(section => section.length > 0).length;
+    
+    console.log(`✅ Program field analysis complete: ${fieldAnalysis.fields.length} 01-level fields found`);
+    console.log(`   📊 Working Storage: ${fieldAnalysis.sections.workingStorage.length}`);
+    console.log(`   📊 Linkage Section: ${fieldAnalysis.sections.linkageSection.length}`);
+    console.log(`   📊 File Section: ${fieldAnalysis.sections.fileSection.length}`);
+    
     return fieldAnalysis;
 },
 
