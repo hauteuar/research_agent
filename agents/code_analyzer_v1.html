@@ -976,6 +976,58 @@
         .font-bold { font-weight: bold; }
         .opacity-50 { opacity: 0.5; }
         .opacity-75 { opacity: 0.75; }
+
+        .badge-purple {
+    background: rgba(139, 92, 246, 0.1);
+    color: var(--purple);
+}
+
+:root {
+    --purple: #8b5cf6;
+}
+
+/* Enhanced animation for interface nodes */
+@keyframes interfacePulse {
+    0%, 100% { 
+        box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.3); 
+    }
+    50% { 
+        box-shadow: 0 0 0 6px rgba(139, 92, 246, 0.1), 0 0 0 2px rgba(139, 92, 246, 0.3); 
+    }
+}
+
+.interface-node {
+    animation: interfacePulse 3s infinite;
+}
+
+/* Fix for missing dependencies display */
+.dependency-status-fixed {
+    background: linear-gradient(45deg, var(--warning-yellow), var(--success-green));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+/* Enhanced connection lines */
+.connection-line {
+    position: relative;
+    overflow: hidden;
+}
+
+.connection-line::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+    animation: flowAnimation 2s infinite;
+}
+
+@keyframes flowAnimation {
+    0% { left: -100%; }
+    100% { left: 100%; }
+}
             </style>
 
         <!-- Load all JavaScript parts -->
@@ -4407,68 +4459,74 @@ Object.assign(EnhancedCodeAnalyzer.prototype, {
     },
 
     // Extract Dependencies
-    async extractDependencies(relevantFiles) {
+     async extractDependencies(relevantFiles) {
         const dependencies = {
-            found: { copybooks: [], programs: [], files: [] },
-            missing: { copybooks: [], programs: [], files: [] },
-            summary: { foundCount: 0, missingCount: 0 }
+            found: { copybooks: [], programs: [], files: [], interfaces: [] },
+            missing: { copybooks: [], programs: [], files: [], interfaces: [] },
+            systemInterfaces: [],
+            summary: { foundCount: 0, missingCount: 0, interfaceCount: 0 }
         };
         
         for (const file of relevantFiles) {
             const content = file.content.toUpperCase();
             const lines = content.split('\n');
             
-            lines.forEach(line => {
+            lines.forEach((line, lineNumber) => {
                 const trimmed = line.trim();
                 
-                // Extract COPY statements
-                const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]+)/);
-                if (copyMatch) {
-                    const copybook = copyMatch[1];
-                    if (this.discoveredComponents.has(copybook)) {
-                        if (!dependencies.found.copybooks.includes(copybook)) {
-                            dependencies.found.copybooks.push(copybook);
-                        }
-                    } else {
-                        if (!dependencies.missing.copybooks.includes(copybook)) {
-                            dependencies.missing.copybooks.push(copybook);
-                        }
-                    }
-                }
+                // **ENHANCED: Extract COPY statements with better matching**
+                const copyMatches = [
+                    /COPY\s+([A-Z][A-Z0-9\-_]+)/g,
+                    /COPY\s+"([A-Z][A-Z0-9\-_]+)"/g,
+                    /COPY\s+'([A-Z][A-Z0-9\-_]+)'/g,
+                    /%INCLUDE\s+([A-Z][A-Z0-9\-_]+)/g
+                ];
                 
-                // Extract CALL statements
-                const callMatch = trimmed.match(/CALL\s+['"]([A-Z][A-Z0-9\-_]+)['"]/);
-                if (callMatch) {
-                    const program = callMatch[1];
-                    if (this.discoveredComponents.has(program)) {
-                        if (!dependencies.found.programs.includes(program)) {
-                            dependencies.found.programs.push(program);
-                        }
-                    } else {
-                        if (!dependencies.missing.programs.includes(program)) {
-                            dependencies.missing.programs.push(program);
-                        }
+                copyMatches.forEach(pattern => {
+                    let match;
+                    while ((match = pattern.exec(trimmed)) !== null) {
+                        const copybook = match[1];
+                        this.categorizeDependency(copybook, 'copybook', dependencies);
                     }
-                }
+                });
                 
-                // Extract file references
-                const fileMatch = trimmed.match(/SELECT\s+([A-Z][A-Z0-9\-_]+)/);
-                if (fileMatch) {
-                    const fileName = fileMatch[1];
-                    if (this.discoveredComponents.has(fileName)) {
-                        if (!dependencies.found.files.includes(fileName)) {
-                            dependencies.found.files.push(fileName);
-                        }
-                    } else {
-                        if (!dependencies.missing.files.includes(fileName)) {
-                            dependencies.missing.files.push(fileName);
-                        }
+                // **ENHANCED: Extract CALL statements with better patterns**
+                const callMatches = [
+                    /CALL\s+['"]([A-Z][A-Z0-9\-_]+)['"]/g,
+                    /CALL\s+([A-Z][A-Z0-9\-_]+)/g,
+                    /LINK\s+([A-Z][A-Z0-9\-_]+)/g,
+                    /XCTL\s+([A-Z][A-Z0-9\-_]+)/g
+                ];
+                
+                callMatches.forEach(pattern => {
+                    let match;
+                    while ((match = pattern.exec(trimmed)) !== null) {
+                        const program = match[1];
+                        this.categorizeDependency(program, 'program', dependencies);
                     }
-                }
+                });
+                
+                // **NEW: Extract File References with enhanced patterns**
+                const fileMatches = [
+                    /SELECT\s+([A-Z][A-Z0-9\-_]+)\s+ASSIGN/g,
+                    /FD\s+([A-Z][A-Z0-9\-_]+)/g,
+                    /FILE-CONTROL\.\s*SELECT\s+([A-Z][A-Z0-9\-_]+)/g
+                ];
+                
+                fileMatches.forEach(pattern => {
+                    let match;
+                    while ((match = pattern.exec(trimmed)) !== null) {
+                        const fileName = match[1];
+                        this.categorizeDependency(fileName, 'file', dependencies);
+                    }
+                });
+                
+                // **NEW: Detect System Interfaces**
+                this.detectSystemInterfacesInLine(trimmed, lineNumber, dependencies);
             });
         }
         
-        // Calculate summary
+        // Calculate summary with interfaces
         dependencies.summary.foundCount = 
             dependencies.found.copybooks.length + 
             dependencies.found.programs.length + 
@@ -4478,8 +4536,97 @@ Object.assign(EnhancedCodeAnalyzer.prototype, {
             dependencies.missing.copybooks.length + 
             dependencies.missing.programs.length + 
             dependencies.missing.files.length;
+            
+        dependencies.summary.interfaceCount = dependencies.systemInterfaces.length;
         
         return dependencies;
+    },
+
+    // **NEW: Categorize Dependency (Found vs Missing)**
+    categorizeDependency(name, type, dependencies) {
+        // Check if component exists in our discovered components
+        const exists = this.discoveredComponents.has(name);
+        
+        // Also check for fuzzy matches (case insensitive, partial matches)
+        const fuzzyMatch = Array.from(this.discoveredComponents.keys()).find(comp => 
+            comp.toUpperCase() === name.toUpperCase() ||
+            comp.toUpperCase().includes(name.toUpperCase()) ||
+            name.toUpperCase().includes(comp.toUpperCase())
+        );
+        
+        if (exists || fuzzyMatch) {
+            const actualName = fuzzyMatch || name;
+            if (!dependencies.found[type + 's'].includes(actualName)) {
+                dependencies.found[type + 's'].push(actualName);
+            }
+        } else {
+            if (!dependencies.missing[type + 's'].includes(name)) {
+                dependencies.missing[type + 's'].push(name);
+            }
+        }
+    },
+
+    // **NEW: Detect System Interfaces in Line**
+    detectSystemInterfacesInLine(line, lineNumber, dependencies) {
+        // SQL/DB2 Interface Detection
+        if (line.includes('EXEC SQL') || line.includes('EXEC SQLIMS')) {
+            this.addSystemInterface(dependencies, 'SQL-DATABASE', 'database', 
+                'SQL Database Interface', lineNumber, 'EXEC SQL operations detected');
+        }
+        
+        // CICS Interface Detection
+        if (line.includes('EXEC CICS')) {
+            const cicsCommands = line.match(/EXEC CICS\s+(\w+)/);
+            const command = cicsCommands ? cicsCommands[1] : 'GENERAL';
+            this.addSystemInterface(dependencies, `CICS-${command}`, 'transaction', 
+                `CICS ${command} Interface`, lineNumber, line.substring(0, 60));
+        }
+        
+        // MQ Interface Detection
+        if (line.includes('MQOPEN') || line.includes('MQPUT') || line.includes('MQGET') || line.includes('MQCLOSE')) {
+            const mqCommand = line.match(/(MQ\w+)/)?.[1] || 'MQ';
+            this.addSystemInterface(dependencies, `MQ-${mqCommand}`, 'queue', 
+                'Message Queue Interface', lineNumber, line.substring(0, 60));
+        }
+        
+        // File System Interface Detection
+        if (line.includes('OPEN INPUT') || line.includes('OPEN OUTPUT') || line.includes('OPEN I-O')) {
+            const openType = line.match(/OPEN\s+(INPUT|OUTPUT|I-O)\s+([A-Z][A-Z0-9\-_]+)/);
+            if (openType) {
+                this.addSystemInterface(dependencies, `FILE-${openType[2]}`, 'file', 
+                    `File System Interface (${openType[1]})`, lineNumber, line.substring(0, 60));
+            }
+        }
+        
+        // Web Service/API Interface Detection
+        if (line.includes('HTTP') || line.includes('SOAP') || line.includes('REST') || line.includes('XML')) {
+            const apiType = line.includes('SOAP') ? 'SOAP' : line.includes('REST') ? 'REST' : 'HTTP';
+            this.addSystemInterface(dependencies, `${apiType}-SERVICE`, 'api', 
+                `${apiType} Web Service Interface`, lineNumber, line.substring(0, 60));
+        }
+        
+        // VSAM Interface Detection
+        if (line.includes('VSAM') || line.includes('KSDS') || line.includes('ESDS') || line.includes('RRDS')) {
+            const vsamType = line.match(/(KSDS|ESDS|RRDS|VSAM)/)?.[1] || 'VSAM';
+            this.addSystemInterface(dependencies, `VSAM-${vsamType}`, 'database', 
+                `VSAM ${vsamType} Interface`, lineNumber, line.substring(0, 60));
+        }
+    },
+
+    // **NEW: Add System Interface**
+    addSystemInterface(dependencies, name, type, description, lineNumber, context) {
+        // Avoid duplicates
+        const existing = dependencies.systemInterfaces.find(iface => iface.name === name);
+        if (!existing) {
+            dependencies.systemInterfaces.push({
+                name: name,
+                type: type,
+                description: description,
+                lineNumber: lineNumber,
+                context: context,
+                detectedAt: new Date().toISOString()
+            });
+        }
     },
 
     // Analyze Fields in Component
@@ -7042,43 +7189,397 @@ generateArchitectureHealthMetrics(architecturalFlow) {
 },
 // **NEW METHOD: Generate Visual Flow Chart - High-Level Structural View**
 generateVisualFlowChart(dependencyAnalysis) {
-    const currentComponent = this.currentSelectedComponent;
-    const component = this.discoveredComponents.get(currentComponent);
-    
-    if (!currentComponent || !component) {
-        return this.generateSystemWideArchitectureView();
-    }
+        const currentComponent = this.currentSelectedComponent;
+        const component = this.discoveredComponents.get(currentComponent);
+        
+        if (!currentComponent || !component) {
+            return '<p style="text-align: center; color: var(--grey-500); padding: 2rem;">Select a component to view its dependency flow</p>';
+        }
 
-    // Build comprehensive architectural flow data
-    const architecturalFlow = this.buildArchitecturalFlowData(currentComponent, dependencyAnalysis);
-    
-    return `
-        <div style="background: white; border-radius: 12px; padding: 2rem; min-width: 1000px;">
-            <!-- System Architecture Header -->
-            <div style="text-align: center; margin-bottom: 2rem; padding: 1.5rem; background: linear-gradient(135deg, var(--primary-blue) 0%, var(--indigo) 100%); color: white; border-radius: 8px;">
-                <h3 style="margin: 0 0 0.5rem 0;">🗺️ High-Level Dependency Flow - City Map View</h3>
-                <p style="margin: 0; opacity: 0.9; font-size: 0.9rem;">Architectural view showing neighborhoods (modules), main roads (dependencies), and data highways</p>
+        // Build enhanced flow structure
+        const flowData = this.buildFlowData(currentComponent, dependencyAnalysis);
+        
+        return `
+            <div style="display: flex; flex-direction: column; gap: 2rem; min-width: 800px; align-items: center;">
+                
+                <!-- **ENHANCED: Interface Layer Display** -->
+                ${flowData.interfaces.apis.length > 0 || flowData.interfaces.databases.length > 0 || 
+                  flowData.interfaces.queues.length > 0 || flowData.interfaces.files.length > 0 ? `
+                    <div style="text-align: center; width: 100%;">
+                        <h5 style="color: var(--purple); margin-bottom: 1rem;">🔌 SYSTEM INTERFACES</h5>
+                        <div style="font-size: 0.8rem; color: var(--grey-600); margin-bottom: 1rem;">External systems and interfaces connected to ${component.friendlyName}</div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+                            ${this.generateInterfaceNodes(flowData.interfaces)}
+                        </div>
+                        <!-- Interface connection lines -->
+                        <div style="display: flex; justify-content: center; margin-bottom: 1rem;">
+                            <div style="width: 2px; height: 30px; background: var(--purple);"></div>
+                        </div>
+                        <div style="text-align: center; margin-bottom: 1rem;">
+                            <div style="font-size: 1.5rem; color: var(--purple);">⬇️</div>
+                            <div style="font-size: 0.8rem; color: var(--grey-600);">interface connections</div>
+                        </div>
+                    </div>
+                ` : ''}
+
+                <!-- UPSTREAM DEPENDENCIES -->
+                ${flowData.upstream.length > 0 ? `
+                    <div style="text-align: center;">
+                        <h5 style="color: var(--info-blue); margin-bottom: 1rem;">⬆️ UPSTREAM DEPENDENCIES</h5>
+                        <div style="font-size: 0.8rem; color: var(--grey-600); margin-bottom: 1rem;">Components that ${component.friendlyName} depends on</div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; margin-bottom: 2rem;">
+                            ${flowData.upstream.map(dep => this.createEnhancedFlowNode(dep, 'upstream')).join('')}
+                        </div>
+                        <!-- Connection lines -->
+                        <div style="display: flex; justify-content: center; margin-bottom: 1rem;">
+                            ${flowData.upstream.map(() => '<div style="width: 2px; height: 30px; background: var(--info-blue); margin: 0 2rem;"></div>').join('')}
+                        </div>
+                        <div style="text-align: center; margin-bottom: 1rem;">
+                            <div style="font-size: 1.5rem; color: var(--info-blue);">⬇️</div>
+                            <div style="font-size: 0.8rem; color: var(--grey-600);">feeds into</div>
+                        </div>
+                    </div>
+                ` : ''}
+
+                <!-- CURRENT COMPONENT (Center) -->
+                <div style="text-align: center; margin: 2rem 0;">
+                    <div style="position: relative;">
+                        ${this.createCenterComponentNode(currentComponent, component)}
+                    </div>
+                </div>
+
+                <!-- DOWNSTREAM DEPENDENCIES -->
+                ${flowData.downstream.length > 0 ? `
+                    <div style="text-align: center;">
+                        <div style="text-align: center; margin-bottom: 1rem;">
+                            <div style="font-size: 1.5rem; color: var(--success-green);">⬇️</div>
+                            <div style="font-size: 0.8rem; color: var(--grey-600);">flows to</div>
+                        </div>
+                        <div style="display: flex; justify-content: center; margin-bottom: 1rem;">
+                            ${flowData.downstream.map(() => '<div style="width: 2px; height: 30px; background: var(--success-green); margin: 0 2rem;"></div>').join('')}
+                        </div>
+                        <h5 style="color: var(--success-green); margin-bottom: 1rem;">⬇️ DOWNSTREAM DEPENDENCIES</h5>
+                        <div style="font-size: 0.8rem; color: var(--grey-600); margin-bottom: 1rem;">Components that depend on ${component.friendlyName}</div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center;">
+                            ${flowData.downstream.map(dep => this.createEnhancedFlowNode(dep, 'downstream')).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+
+                <!-- **ENHANCED: Missing Dependencies with Better Classification** -->
+                ${flowData.missing.length > 0 ? `
+                    <div style="text-align: center; margin-top: 2rem; padding: 1rem; background: rgba(239, 68, 68, 0.1); border-radius: 8px; border: 2px dashed var(--error-red);">
+                        <h5 style="color: var(--error-red); margin-bottom: 1rem;">⚠️ MISSING DEPENDENCIES</h5>
+                        <div style="font-size: 0.8rem; color: var(--grey-600); margin-bottom: 1rem;">Components referenced but not available</div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center;">
+                            ${flowData.missing.map(dep => this.createEnhancedFlowNode(dep, 'missing')).join('')}
+                        </div>
+                        <div style="margin-top: 1rem; padding: 0.75rem; background: white; border-radius: 6px;">
+                            <strong style="color: var(--error-red);">⚠️ Resolution Actions:</strong>
+                            <div style="color: var(--grey-700); font-size: 0.9rem; margin-top: 0.5rem;">
+                                • Upload missing files to complete dependencies<br>
+                                • Remove unused COPY/CALL statements<br>
+                                • Update file assignment statements<br>
+                                • Verify external interface configurations
+                            </div>
+                        </div>
+                    </div>
+                ` : ''}
+
+                <!-- **NEW: Interface Legend** -->
+                <div style="margin-top: 2rem; padding: 1rem; background: white; border-radius: 8px; border: 1px solid var(--grey-200);">
+                    <h6 style="margin: 0 0 0.75rem 0; color: var(--grey-800);">📋 Enhanced Flow Legend</h6>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; font-size: 0.8rem;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div style="width: 16px; height: 16px; background: var(--purple); border-radius: 50%;"></div>
+                            <span>System Interfaces (APIs, DB, MQ)</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div style="width: 16px; height: 16px; background: var(--info-blue); border-radius: 50%;"></div>
+                            <span>Upstream: Dependencies required</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div style="width: 16px; height: 16px; background: var(--primary-blue); border-radius: 50%;"></div>
+                            <span>Current: Selected component</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div style="width: 16px; height: 16px; background: var(--success-green); border-radius: 50%;"></div>
+                            <span>Downstream: Dependent components</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div style="width: 16px; height: 16px; background: var(--error-red); border-radius: 50%; border: 2px dashed white;"></div>
+                            <span>Missing: Unavailable dependencies</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div style="width: 16px; height: 16px; background: var(--warning-yellow); border-radius: 50%;"></div>
+                            <span>Auto-detected: System interfaces</span>
+                        </div>
+                    </div>
+                </div>
             </div>
-
-            <!-- Impact Zone Analysis -->
-            ${this.generateImpactZoneSection(architecturalFlow)}
-
-            <!-- Main Architectural Flow -->
-            <div style="background: var(--grey-50); border-radius: 8px; padding: 1.5rem; margin-bottom: 2rem; overflow-x: auto;">
-                ${this.generateMainArchitecturalFlow(architecturalFlow)}
+        `;
+    },
+    createEnhancedFlowNode(dependency, flowType) {
+        const { name, component, result, type, status, interfaceType, isInterface, wasMissingButFound, isSystemDetected } = dependency;
+        const displayName = component?.friendlyName || this.generateFriendlyNameFromPattern(name);
+        const businessPurpose = component?.businessPurpose || this.generateBusinessPurpose(name);
+        
+        // Enhanced styling for interfaces
+        let borderColor, bgColor, iconColor, statusIcon, connectionColor, typeIcon;
+        
+        if (isInterface) {
+            // Special styling for interfaces
+            switch (interfaceType) {
+                case 'api':
+                case 'external':
+                    borderColor = 'var(--info-blue)';
+                    bgColor = 'rgba(59, 130, 246, 0.1)';
+                    iconColor = 'var(--info-blue)';
+                    typeIcon = '🌐';
+                    break;
+                case 'database':
+                    borderColor = 'var(--success-green)';
+                    bgColor = 'rgba(16, 185, 129, 0.1)';
+                    iconColor = 'var(--success-green)';
+                    typeIcon = '🗄️';
+                    break;
+                case 'queue':
+                    borderColor = 'var(--purple)';
+                    bgColor = 'rgba(139, 92, 246, 0.1)';
+                    iconColor = 'var(--purple)';
+                    typeIcon = '📨';
+                    break;
+                case 'file':
+                    borderColor = 'var(--warning-yellow)';
+                    bgColor = 'rgba(245, 158, 11, 0.1)';
+                    iconColor = 'var(--warning-yellow)';
+                    typeIcon = '📄';
+                    break;
+                default:
+                    borderColor = 'var(--grey-400)';
+                    bgColor = 'var(--grey-50)';
+                    iconColor = 'var(--grey-600)';
+                    typeIcon = '🔌';
+            }
+        } else {
+            // Regular component styling
+            switch (flowType) {
+                case 'upstream':
+                    borderColor = status === 'found' ? 'var(--info-blue)' : 'var(--error-red)';
+                    bgColor = status === 'found' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(239, 68, 68, 0.1)';
+                    iconColor = 'var(--info-blue)';
+                    typeIcon = type === 'Copybook' ? '📚' : type === 'Program' ? '💼' : '📄';
+                    break;
+                case 'downstream':
+                    borderColor = 'var(--success-green)';
+                    bgColor = 'rgba(16, 185, 129, 0.1)';
+                    iconColor = 'var(--success-green)';
+                    typeIcon = type === 'Copybook' ? '📚' : type === 'Program' ? '💼' : '📄';
+                    break;
+                case 'missing':
+                    borderColor = 'var(--error-red)';
+                    bgColor = 'rgba(239, 68, 68, 0.1)';
+                    iconColor = 'var(--error-red)';
+                    typeIcon = type === 'Copybook' ? '📚' : type === 'Program' ? '💼' : '📄';
+                    break;
+            }
+        }
+        
+        // Status icon logic
+        if (wasMissingButFound) {
+            statusIcon = '🔄'; // Fixed dependency
+        } else if (isSystemDetected) {
+            statusIcon = '🔍'; // Auto-detected
+        } else if (status === 'found') {
+            statusIcon = '✅';
+        } else if (status === 'detected') {
+            statusIcon = '🔍';
+        } else {
+            statusIcon = '❌';
+        }
+        
+        const isClickable = (status === 'found' || status === 'detected') && !isSystemDetected;
+        
+        return `
+            <div style="
+                background: ${bgColor};
+                border: 2px solid ${borderColor};
+                border-radius: 12px;
+                padding: 1rem;
+                min-width: 200px;
+                max-width: 250px;
+                cursor: ${isClickable ? 'pointer' : 'default'};
+                transition: all 0.3s ease;
+                position: relative;
+                ${status === 'missing' ? 'border-style: dashed;' : ''}
+                ${isInterface ? 'box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.3);' : ''}
+            " ${isClickable ? `onclick="analyzer.selectComponent('${name}')"` : ''}
+               onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 8px 25px rgba(0,0,0,0.15)';"
+               onmouseout="this.style.transform='translateY(0px)'; this.style.boxShadow='${isInterface ? '0 0 0 2px rgba(139, 92, 246, 0.3)' : 'none'}';">
+               
+                <!-- Status indicator -->
+                <div style="
+                    position: absolute;
+                    top: -8px;
+                    right: -8px;
+                    background: ${borderColor};
+                    color: white;
+                    border-radius: 50%;
+                    width: 24px;
+                    height: 24px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 0.7rem;
+                    border: 2px solid white;
+                ">${statusIcon}</div>
+                
+                ${isInterface ? `
+                    <!-- Interface indicator -->
+                    <div style="
+                        position: absolute;
+                        top: -8px;
+                        left: -8px;
+                        background: var(--purple);
+                        color: white;
+                        border-radius: 50%;
+                        width: 20px;
+                        height: 20px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 0.6rem;
+                        border: 2px solid white;
+                    ">🔌</div>
+                ` : ''}
+                
+                <!-- Component info -->
+                <div style="text-align: center;">
+                    <div style="font-size: 1.25rem; margin-bottom: 0.5rem; color: ${iconColor};">${typeIcon}</div>
+                    
+                    <div style="font-weight: bold; font-size: 0.9rem; color: var(--grey-800); margin-bottom: 0.25rem;">
+                        ${name}
+                    </div>
+                    
+                    <div style="font-size: 0.8rem; color: var(--primary-blue); margin-bottom: 0.75rem; font-weight: 500; line-height: 1.2;">
+                        ${displayName}
+                    </div>
+                    
+                    <div style="font-size: 0.75rem; color: var(--grey-600); line-height: 1.3; margin-bottom: 0.75rem; min-height: 40px;">
+                        ${businessPurpose.substring(0, 80)}${businessPurpose.length > 80 ? '...' : ''}
+                    </div>
+                    
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.7rem;">
+                        <span class="badge ${isInterface ? 'badge-purple' : 'badge-grey'}">${isInterface ? interfaceType.toUpperCase() : type}</span>
+                        ${result ? `<span class="badge badge-info">Q: ${result.qualityScore}/10</span>` : ''}
+                        ${status === 'missing' ? '<span class="badge badge-danger">MISSING</span>' : ''}
+                        ${wasMissingButFound ? '<span class="badge badge-warning">FIXED</span>' : ''}
+                        ${isSystemDetected ? '<span class="badge badge-info">AUTO</span>' : ''}
+                    </div>
+                    
+                    ${isClickable ? `
+                        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--grey-200);">
+                            <div style="color: ${borderColor}; font-size: 0.7rem;">
+                                🔍 Click to ${isInterface ? 'view interface' : 'analyze'}
+                            </div>
+                        </div>
+                    ` : status === 'missing' ? `
+                        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--grey-200);">
+                            <div style="color: var(--error-red); font-size: 0.7rem;">
+                                📁 ${isInterface ? 'Configure interface' : 'Upload required'}
+                            </div>
+                        </div>
+                    ` : isSystemDetected ? `
+                        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--grey-200);">
+                            <div style="color: var(--warning-yellow); font-size: 0.7rem;">
+                                🔍 System detected interface
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
             </div>
+        `;
+    },
+    // **NEW: Generate Interface Nodes**
+    generateInterfaceNodes(interfaces) {
+        let html = '';
+        
+        // API Interfaces
+        interfaces.apis.forEach(api => {
+            html += this.createInterfaceNode(api, 'api', '🌐', 'var(--info-blue)');
+        });
+        
+        // Database Interfaces
+        interfaces.databases.forEach(db => {
+            html += this.createInterfaceNode(db, 'database', '🗄️', 'var(--success-green)');
+        });
+        
+        // Queue Interfaces
+        interfaces.queues.forEach(queue => {
+            html += this.createInterfaceNode(queue, 'queue', '📨', 'var(--purple)');
+        });
+        
+        // File Interfaces
+        interfaces.files.forEach(file => {
+            html += this.createInterfaceNode(file, 'file', '📄', 'var(--warning-yellow)');
+        });
+        
+        return html;
+    },
 
-            <!-- Data Flow & File Dependencies -->
-            ${this.generateDataFlowSection(architecturalFlow)}
+    // **NEW: Create Interface Node**
+    createInterfaceNode(interfaceData, type, icon, color) {
+        const { name, status, description, isSystemDetected } = interfaceData;
+        
+        return `
+            <div style="
+                background: rgba(139, 92, 246, 0.1);
+                border: 2px solid ${color};
+                border-radius: 12px;
+                padding: 1rem;
+                min-width: 180px;
+                max-width: 220px;
+                text-align: center;
+                position: relative;
+            ">
+                <!-- Interface Type Badge -->
+                <div style="
+                    position: absolute;
+                    top: -8px;
+                    right: -8px;
+                    background: ${color};
+                    color: white;
+                    border-radius: 50%;
+                    width: 24px;
+                    height: 24px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 0.7rem;
+                    border: 2px solid white;
+                ">${status === 'detected' ? '🔍' : '✓'}</div>
+                
+                <div style="font-size: 1.5rem; margin-bottom: 0.5rem; color: ${color};">${icon}</div>
+                <div style="font-weight: bold; font-size: 0.9rem; color: var(--grey-800); margin-bottom: 0.25rem;">
+                    ${name}
+                </div>
+                <div style="font-size: 0.75rem; color: ${color}; margin-bottom: 0.5rem; font-weight: 500; text-transform: uppercase;">
+                    ${type} Interface
+                </div>
+                ${description ? `
+                    <div style="font-size: 0.7rem; color: var(--grey-600); line-height: 1.3;">
+                        ${description}
+                    </div>
+                ` : ''}
+                ${isSystemDetected ? `
+                    <div style="margin-top: 0.5rem; font-size: 0.7rem; color: var(--warning-yellow);">
+                        🔍 Auto-detected
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    },
 
-            <!-- External Connections -->
-            ${this.generateExternalConnectionsSection(architecturalFlow)}
-
-            <!-- Architecture Health Metrics -->
-            ${this.generateArchitectureHealthMetrics(architecturalFlow)}
-        </div>
-    `;
-},
 
 // **NEW METHOD: Generate Dependency Diagram**
 // ============================================
@@ -7732,69 +8233,254 @@ generateVisualFlowChart(dependencyAnalysis) {
 },
 
 // **NEW METHOD: Build Flow Data**
-buildFlowData(currentComponent, dependencyAnalysis) {
-    const flowData = {
-        upstream: [],
-        downstream: [],
-        missing: []
-    };
-
-    // UPSTREAM: Components that the current component depends on
-    if (dependencyAnalysis.found) {
-        [...dependencyAnalysis.found.copybooks, ...dependencyAnalysis.found.programs, ...dependencyAnalysis.found.files]
-            .forEach(depName => {
-                const depComponent = this.discoveredComponents.get(depName);
-                const depResult = this.analysisResults[depName];
-                flowData.upstream.push({
-                    name: depName,
-                    component: depComponent,
-                    result: depResult,
-                    type: this.getComponentTypeFromName(depName),
-                    status: 'found'
-                });
-            });
-    }
-
-    // MISSING: Components that are referenced but not available
-    if (dependencyAnalysis.missing) {
-        [...dependencyAnalysis.missing.copybooks, ...dependencyAnalysis.missing.programs, ...dependencyAnalysis.missing.files]
-            .forEach(depName => {
-                flowData.missing.push({
-                    name: depName,
-                    component: null,
-                    result: null,
-                    type: this.getComponentTypeFromName(depName),
-                    status: 'missing'
-                });
-            });
-    }
-
-    // DOWNSTREAM: Components that depend on the current component
-    Object.entries(this.analysisResults).forEach(([compName, result]) => {
-        if (compName === currentComponent) return; // Skip self
-        
-        if (result.dependencyAnalysis && result.dependencyAnalysis.found) {
-            const isDependent = [
-                ...result.dependencyAnalysis.found.copybooks,
-                ...result.dependencyAnalysis.found.programs,
-                ...result.dependencyAnalysis.found.files
-            ].includes(currentComponent);
-            
-            if (isDependent) {
-                const depComponent = this.discoveredComponents.get(compName);
-                flowData.downstream.push({
-                    name: compName,
-                    component: depComponent,
-                    result: result,
-                    type: depComponent?.type || 'Unknown',
-                    status: 'found'
-                });
+  buildFlowData(currentComponent, dependencyAnalysis) {
+        const flowData = {
+            upstream: [],
+            downstream: [],
+            missing: [],
+            interfaces: {
+                apis: [],
+                databases: [],
+                queues: [],
+                files: []
             }
-        }
-    });
+        };
 
-    return flowData;
-},
+        // **FIX 1: Include ALL discovered components as potential dependencies**
+        const allAvailableComponents = Array.from(this.discoveredComponents.keys());
+        
+        // UPSTREAM: Components that the current component depends on
+        if (dependencyAnalysis.found) {
+            [...dependencyAnalysis.found.copybooks, ...dependencyAnalysis.found.programs, ...dependencyAnalysis.found.files]
+                .forEach(depName => {
+                    const depComponent = this.discoveredComponents.get(depName);
+                    const depResult = this.analysisResults[depName];
+                    
+                    // **ENHANCED: Classify if this is an interface**
+                    const interfaceType = this.classifyAsInterface(depName);
+                    
+                    const flowNode = {
+                        name: depName,
+                        component: depComponent,
+                        result: depResult,
+                        type: this.getComponentTypeFromName(depName),
+                        status: 'found',
+                        interfaceType: interfaceType,
+                        isInterface: interfaceType !== null
+                    };
+                    
+                    flowData.upstream.push(flowNode);
+                    
+                    // **NEW: Add to interface categories if applicable**
+                    if (interfaceType) {
+                        this.addToInterfaceCategory(flowData.interfaces, interfaceType, flowNode);
+                    }
+                });
+        }
+
+        // **FIX 2: Better Missing Dependencies Detection**
+        if (dependencyAnalysis.missing) {
+            [...dependencyAnalysis.missing.copybooks, ...dependencyAnalysis.missing.programs, ...dependencyAnalysis.missing.files]
+                .forEach(depName => {
+                    // **CHECK: Is this actually available but not properly linked?**
+                    const actuallyAvailable = allAvailableComponents.find(comp => 
+                        comp.toUpperCase() === depName.toUpperCase() ||
+                        comp.toUpperCase().includes(depName.toUpperCase()) ||
+                        depName.toUpperCase().includes(comp.toUpperCase())
+                    );
+                    
+                    if (actuallyAvailable) {
+                        // **FIX: Move from missing to found**
+                        const depComponent = this.discoveredComponents.get(actuallyAvailable);
+                        const depResult = this.analysisResults[actuallyAvailable];
+                        const interfaceType = this.classifyAsInterface(actuallyAvailable);
+                        
+                        const flowNode = {
+                            name: actuallyAvailable,
+                            component: depComponent,
+                            result: depResult,
+                            type: this.getComponentTypeFromName(actuallyAvailable),
+                            status: 'found',
+                            interfaceType: interfaceType,
+                            isInterface: interfaceType !== null,
+                            wasMissingButFound: true
+                        };
+                        
+                        flowData.upstream.push(flowNode);
+                        
+                        if (interfaceType) {
+                            this.addToInterfaceCategory(flowData.interfaces, interfaceType, flowNode);
+                        }
+                    } else {
+                        // **TRULY MISSING: Classify what type of interface this might be**
+                        const interfaceType = this.classifyAsInterface(depName);
+                        
+                        flowData.missing.push({
+                            name: depName,
+                            component: null,
+                            result: null,
+                            type: this.getComponentTypeFromName(depName),
+                            status: 'missing',
+                            interfaceType: interfaceType,
+                            isInterface: interfaceType !== null
+                        });
+                    }
+                });
+        }
+
+        // DOWNSTREAM: Components that depend on the current component
+        Object.entries(this.analysisResults).forEach(([compName, result]) => {
+            if (compName === currentComponent) return; // Skip self
+            
+            if (result.dependencyAnalysis && result.dependencyAnalysis.found) {
+                const isDependent = [
+                    ...result.dependencyAnalysis.found.copybooks,
+                    ...result.dependencyAnalysis.found.programs,
+                    ...result.dependencyAnalysis.found.files
+                ].includes(currentComponent);
+                
+                if (isDependent) {
+                    const depComponent = this.discoveredComponents.get(compName);
+                    const interfaceType = this.classifyAsInterface(compName);
+                    
+                    const flowNode = {
+                        name: compName,
+                        component: depComponent,
+                        result: result,
+                        type: depComponent?.type || 'Unknown',
+                        status: 'found',
+                        interfaceType: interfaceType,
+                        isInterface: interfaceType !== null
+                    };
+                    
+                    flowData.downstream.push(flowNode);
+                    
+                    if (interfaceType) {
+                        this.addToInterfaceCategory(flowData.interfaces, interfaceType, flowNode);
+                    }
+                }
+            }
+        });
+
+        // **NEW: Auto-detect system interfaces from current component**
+        this.detectSystemInterfaces(currentComponent, flowData);
+
+        return flowData;
+    },
+
+    // **NEW: Classify Component as Interface Type**
+    classifyAsInterface(name) {
+        const upperName = name.toUpperCase();
+        
+        // API Interfaces
+        if (upperName.includes('API') || upperName.includes('REST') || upperName.includes('SOAP') || 
+            upperName.includes('WS') || upperName.includes('SERVICE') || upperName.includes('ENDPOINT')) {
+            return 'api';
+        }
+        
+        // Database Interfaces
+        if (upperName.includes('DB2') || upperName.includes('DATABASE') || upperName.includes('TABLE') || 
+            upperName.includes('VSAM') || upperName.includes('KSDS') || upperName.includes('ESDS') ||
+            upperName.includes('SQL') || upperName.includes('CURSOR')) {
+            return 'database';
+        }
+        
+        // Message Queue Interfaces  
+        if (upperName.includes('MQ') || upperName.includes('QUEUE') || upperName.includes('MSG') || 
+            upperName.includes('TOPIC') || upperName.includes('CHANNEL') || upperName.includes('BROKER')) {
+            return 'queue';
+        }
+        
+        // File Interfaces
+        if (upperName.includes('FILE') || upperName.includes('DATASET') || upperName.includes('FD') || 
+            upperName.includes('SEQUENTIAL') || upperName.includes('INDEXED') || upperName.includes('RELATIVE')) {
+            return 'file';
+        }
+        
+        // External System Interfaces
+        if (upperName.includes('EXTERNAL') || upperName.includes('INTERFACE') || upperName.includes('ADAPTER') || 
+            upperName.includes('CONNECTOR') || upperName.includes('GATEWAY') || upperName.includes('BRIDGE')) {
+            return 'external';
+        }
+        
+        return null; // Not an interface
+    },
+
+    // **NEW: Add to Interface Category**
+    addToInterfaceCategory(interfaces, interfaceType, flowNode) {
+        switch (interfaceType) {
+            case 'api':
+            case 'external':
+                interfaces.apis.push(flowNode);
+                break;
+            case 'database':
+                interfaces.databases.push(flowNode);
+                break;
+            case 'queue':
+                interfaces.queues.push(flowNode);
+                break;
+            case 'file':
+                interfaces.files.push(flowNode);
+                break;
+        }
+    },
+
+    // **NEW: Detect System Interfaces from Component Content**
+    detectSystemInterfaces(componentName, flowData) {
+        // Find files containing this component
+        const relevantFiles = this.uploadedFiles.filter(file => 
+            file.components && file.components.some(comp => comp.name === componentName)
+        );
+        
+        relevantFiles.forEach(file => {
+            const content = file.content.toUpperCase();
+            
+            // Detect SQL/DB2 interfaces
+            if (content.includes('EXEC SQL') || content.includes('DB2') || content.includes('CURSOR')) {
+                this.addDetectedInterface(flowData, 'DB2-CONNECTION', 'database', 'SQL Database Interface');
+            }
+            
+            // Detect MQ interfaces
+            if (content.includes('MQOPEN') || content.includes('MQPUT') || content.includes('MQGET')) {
+                this.addDetectedInterface(flowData, 'MQ-INTERFACE', 'queue', 'Message Queue Interface');
+            }
+            
+            // Detect CICS interfaces
+            if (content.includes('EXEC CICS') || content.includes('COMMAREA') || content.includes('RETURN')) {
+                this.addDetectedInterface(flowData, 'CICS-INTERFACE', 'external', 'CICS Transaction Interface');
+            }
+            
+            // Detect file operations
+            if (content.includes('SELECT') && content.includes('ASSIGN')) {
+                const fileMatches = content.match(/SELECT\s+([A-Z][A-Z0-9\-_]+)\s+ASSIGN/g);
+                if (fileMatches) {
+                    fileMatches.forEach(match => {
+                        const fileName = match.split(/\s+/)[1];
+                        this.addDetectedInterface(flowData, fileName, 'file', 'Data File Interface');
+                    });
+                }
+            }
+        });
+    },
+
+    // **NEW: Add Detected Interface**
+    addDetectedInterface(flowData, name, type, description) {
+        const interfaceNode = {
+            name: name,
+            component: null,
+            result: null,
+            type: type,
+            status: 'detected',
+            interfaceType: type,
+            isInterface: true,
+            description: description,
+            isSystemDetected: true
+        };
+        
+        // Add to upstream (components this depends on)
+        flowData.upstream.push(interfaceNode);
+        this.addToInterfaceCategory(flowData.interfaces, type, interfaceNode);
+    },
 
 // **NEW METHOD: Get Component Type from Name**
 getComponentTypeFromName(name) {
