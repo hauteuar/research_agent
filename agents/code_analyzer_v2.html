@@ -4531,6 +4531,38 @@ debugFieldAnalysisConsistency(componentName, result) {
     
     return issues;
 },
+categorizeFieldUsage(field, fieldAnalysis) {
+    // For programs, use the enhanced detection
+    if (field.fileName) {
+        const relevantFile = this.uploadedFiles.find(f => f.name === field.fileName);
+        if (relevantFile) {
+            this.categorizeRecordFieldUsage(field, relevantFile.content, fieldAnalysis);
+            return;
+        }
+    }
+    
+    // Fallback to existing logic for compatibility
+    const fieldName = field.name;
+    
+    if (fieldAnalysis.inputFields && fieldAnalysis.inputFields.includes(fieldName)) {
+        field.usagePattern = 'INPUT';
+        return;
+    }
+    if (fieldAnalysis.outputFields && fieldAnalysis.outputFields.includes(fieldName)) {
+        field.usagePattern = 'OUTPUT';
+        return;
+    }
+    if (fieldAnalysis.referenceFields && fieldAnalysis.referenceFields.includes(fieldName)) {
+        field.usagePattern = 'REFERENCE';
+        return;
+    }
+    if (fieldAnalysis.unusedFields && fieldAnalysis.unusedFields.includes(fieldName)) {
+        field.usagePattern = 'UNUSED';
+        return;
+    }
+    
+    field.usagePattern = 'GENERAL';
+},
 // **NEW METHOD: Sync All Tabs for Component**
 syncAllTabsForComponent(componentName) {
     const result = this.analysisResults[componentName];
@@ -6520,34 +6552,43 @@ getSectionDisplayName(section) {
         return null;
     },
 
-    // Parse JSON Response with Fallback
-    parseJSONResponse(text) {
+    
+
+parseJSONResponse(text) {
+    console.log('🔍 Parsing LLM response:', text.substring(0, 200) + '...');
+    
     // First, try to parse as JSON
     try {
         const jsonMatch = text.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
             const parsed = JSON.parse(jsonMatch[0]);
             
-            // VALIDATE that we got a meaningful business purpose
-            if (parsed.businessPurpose && 
-                parsed.businessPurpose.length > 20 &&
-                !parsed.businessPurpose.includes('Mainframe Business Component') &&
-                !parsed.businessPurpose.includes('Business purpose analysis failed') &&
-                !parsed.businessPurpose.includes('Generic')) {
-                
-                console.log(`✅ Valid LLM response received: ${parsed.businessPurpose.substring(0, 100)}...`);
+            console.log('✅ Successfully parsed JSON response');
+            console.log('📋 Business Purpose:', parsed.businessPurpose?.substring(0, 100) + '...');
+            
+            // SIMPLE validation - just check if we have the required fields
+            if (parsed.businessPurpose && parsed.businessPurpose.length > 10) {
+                console.log('✅ Valid business purpose found, accepting response');
                 return { success: true, data: parsed };
             } else {
-                console.warn(`⚠️ LLM returned generic business purpose: ${parsed.businessPurpose}`);
-                throw new Error('LLM returned generic business purpose');
+                console.warn('⚠️ Business purpose too short or missing');
+                throw new Error('Business purpose missing or too short');
             }
+        } else {
+            console.warn('⚠️ No JSON object found in response');
+            throw new Error('No JSON object found in response');
         }
     } catch (error) {
-        console.warn('JSON parsing failed or invalid response:', error);
+        console.warn('❌ JSON parsing failed:', error.message);
+        console.log('📝 Raw response text:', text);
     }
     
-    // If we get here, the LLM response was not useful
-    throw new Error('LLM did not provide specific business intelligence');
+    // If JSON parsing fails, return structured fallback using text parsing
+    return {
+        success: false,
+        error: 'JSON parsing failed, using text fallback',
+        data: this.parseTextResponse(text)
+    };
 },
 
 // **NEW METHOD: Parse Text Response**
