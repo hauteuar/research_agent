@@ -2686,50 +2686,331 @@ Object.assign(EnhancedCodeAnalyzer.prototype, {
 
     // Process Files with Auto-Discovery
     async processFiles(files) {
-        this.showLoading();
-        this.updateLoadingStatus('📁 Processing uploaded files...');
+    this.showLoading();
+    this.updateLoadingStatus('📁 Processing uploaded files...');
+    
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        this.updateProgress((i / files.length) * 50); // First 50% for file processing
         
-        for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-            this.updateProgress((i / files.length) * 50); // First 50% for file processing
+        try {
+            const content = await this.readFile(file);
+            const fileType = this.detectFileType(file.name, content);
             
-            try {
-                const content = await this.readFile(file);
-                const fileType = this.detectFileType(file.name, content);
-                
-                const fileObj = {
-                    name: file.name,
-                    content: content,
-                    size: file.size,
-                    type: fileType,
-                    uploadDate: new Date().toISOString(),
-                    id: Date.now() + Math.random(),
-                    components: this.extractComponentsFromFile(content, fileType),
-                    metrics: this.calculateFileMetrics(content, fileType)
-                };
-                
-                this.uploadedFiles.push(fileObj);
-                
-                // Auto-discover components
-                this.updateLoadingStatus(`🔍 Auto-discovering components in ${file.name}...`);
-                await this.autoDiscoverComponents(fileObj);
-                
-            } catch (error) {
-                this.showError(`Failed to read ${file.name}: ${error.message}`);
+            const fileObj = {
+                name: file.name,
+                content: content,
+                size: file.size,
+                type: fileType,
+                uploadDate: new Date().toISOString(),
+                id: Date.now() + Math.random(),
+                components: this.extractComponentsFromFile(content, fileType),
+                metrics: this.calculateFileMetrics(content, fileType)
+            };
+            
+            this.uploadedFiles.push(fileObj);
+            
+            // Auto-discover components
+            this.updateLoadingStatus(`🔍 Auto-discovering components in ${file.name}...`);
+            await this.autoDiscoverComponents(fileObj);
+            
+        } catch (error) {
+            this.showError(`Failed to read ${file.name}: ${error.message}`);
+        }
+    }
+    
+    this.updateProgress(100);
+    this.hideLoading();
+    
+    // **FIX: Force UI updates after processing**
+    this.updateDashboardStats();
+    this.displayDiscoveredComponents();
+    this.updateComponentsLibrary(); // **ADDED: Update Components tab**
+    this.enableAutoAnalysis();
+    this.saveToDatabase();
+    
+    this.showSuccess(`📁 ${files.length} files uploaded and ${this.discoveredComponents.size} components auto-discovered!`);
+},
+updateComponentsLibrary() {
+    // Show the library content if components exist
+    const componentsEmptyState = document.getElementById('componentsEmptyState');
+    const componentsLibraryContent = document.getElementById('componentsLibraryContent');
+    
+    if (this.uploadedFiles.length > 0) {
+        if (componentsEmptyState) componentsEmptyState.style.display = 'none';
+        if (componentsLibraryContent) componentsLibraryContent.style.display = 'block';
+        
+        // Update library statistics
+        this.updateLibraryStats();
+        
+        // Update files and components list
+        this.updateFilesComponentsList();
+        
+        // Attach search listeners
+        this.attachLibrarySearchListeners();
+    } else {
+        if (componentsEmptyState) componentsEmptyState.style.display = 'block';
+        if (componentsLibraryContent) componentsLibraryContent.style.display = 'none';
+    }
+},
+updateLibraryStats() {
+    const analyzedCount = Object.keys(this.analysisResults).length;
+    
+    // Update stat elements
+    const statElements = {
+        'statUploadedFiles': this.uploadedFiles.length,
+        'statDiscoveredComponents': this.discoveredComponents.size,
+        'statAnalyzedComponents': analyzedCount,
+        'statLinesOfCode': this.uploadedFiles.reduce((sum, file) => sum + (file.metrics?.codeLines || 0), 0)
+    };
+    
+    Object.entries(statElements).forEach(([id, value]) => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = value.toLocaleString();
+        }
+    });
+    
+    // Update subtitle
+    const librarySubtitle = document.getElementById('librarySubtitle');
+    if (librarySubtitle) {
+        librarySubtitle.textContent = `${this.uploadedFiles.length} files uploaded • ${this.discoveredComponents.size} components discovered`;
+    }
+},
+updateFilesComponentsList() {
+    const container = document.getElementById('filesComponentsList');
+    if (!container) return;
+    
+    if (this.uploadedFiles.length === 0) {
+        container.innerHTML = `
+            <div style="padding: 2rem; text-align: center; color: var(--grey-500);">
+                <div style="font-size: 2rem; margin-bottom: 1rem;">📁</div>
+                <h4>No files uploaded yet</h4>
+                <p>Upload COBOL, JCL, or Copybook files to see them here</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = this.generateFilesComponentsList();
+    
+    // Attach event listeners
+    setTimeout(() => {
+        this.attachFileExpansionListeners();
+    }, 100);
+},
+
+generateFilesComponentsList() {
+    let html = '';
+    
+    this.uploadedFiles.forEach((file, index) => {
+        const fileComponents = file.components || [];
+        const mainComponents = fileComponents.filter(comp => comp.isMainComponent);
+        const otherComponents = fileComponents.filter(comp => !comp.isMainComponent);
+        
+        const fileTypeIcon = this.getFileTypeIcon(file.type);
+        const fileTypeColor = this.getFileTypeColor(file.type);
+        
+        html += `
+            <!-- File Row -->
+            <div class="file-row" data-file-index="${index}" style="
+                border-bottom: 1px solid var(--grey-200);
+                cursor: pointer;
+                transition: background-color 0.2s ease;
+            " onclick="analyzer.toggleFileExpansion(${index})">
+                <div style="padding: 1rem; display: flex; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <!-- File Icon -->
+                        <div style="
+                            width: 48px; 
+                            height: 48px; 
+                            background: ${fileTypeColor}; 
+                            color: white; 
+                            border-radius: 8px; 
+                            display: flex; 
+                            align-items: center; 
+                            justify-content: center; 
+                            font-size: 1.25rem;
+                        ">
+                            ${fileTypeIcon}
+                        </div>
+                        
+                        <!-- File Info -->
+                        <div>
+                            <div style="font-weight: bold; font-size: 1rem; color: var(--grey-800); margin-bottom: 0.25rem;">
+                                ${file.name}
+                            </div>
+                            <div style="display: flex; gap: 1rem; font-size: 0.8rem; color: var(--grey-600);">
+                                <span>📋 ${file.type}</span>
+                                <span>📏 ${(file.size / 1024).toFixed(1)} KB</span>
+                                <span>📊 ${file.metrics?.codeLines || 0} lines</span>
+                                <span>🎯 ${fileComponents.length} components</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Expand/Collapse Indicator -->
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <div style="text-align: right;">
+                            <div style="font-size: 0.9rem; font-weight: 600; color: var(--primary-blue);">
+                                ${mainComponents.length} Main
+                            </div>
+                            <div style="font-size: 0.75rem; color: var(--grey-500);">
+                                ${otherComponents.length} Other
+                            </div>
+                        </div>
+                        <div class="expand-icon" id="expand-icon-${index}" style="
+                            width: 24px; 
+                            height: 24px; 
+                            color: var(--grey-400); 
+                            transition: transform 0.3s ease;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                        ">
+                            ▼
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Expandable Components Section -->
+            <div class="file-components" id="file-components-${index}" style="
+                max-height: 0;
+                overflow: hidden;
+                transition: max-height 0.3s ease;
+                background: var(--grey-50);
+            ">
+                <div style="padding: 1.5rem;">
+                    ${this.generateFileComponentsContent(file, fileComponents)}
+                </div>
+            </div>
+        `;
+    });
+    
+    return html;
+},
+
+// **FIX 6: ADD generateFileComponentsContent method if missing**
+// Location: Add this method
+
+generateFileComponentsContent(file, components) {
+    if (components.length === 0) {
+        return `
+            <div style="text-align: center; padding: 2rem; color: var(--grey-500);">
+                <div style="font-size: 1.5rem; margin-bottom: 1rem;">📦</div>
+                <h5>No components found</h5>
+                <p>This file doesn't contain recognizable COBOL components</p>
+            </div>
+        `;
+    }
+    
+    const mainComponents = components.filter(comp => comp.isMainComponent);
+    const otherComponents = components.filter(comp => !comp.isMainComponent);
+    
+    let html = '';
+    
+    // Main Components Section
+    if (mainComponents.length > 0) {
+        html += `
+            <div style="margin-bottom: 2rem;">
+                <h5 style="color: var(--primary-blue); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                    <span>🎯</span>
+                    Main Components (${mainComponents.length})
+                </h5>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">
+                    ${mainComponents.map(comp => this.generateComponentCard(comp, file)).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    // Other Components Section (show first 10, then collapse)
+    if (otherComponents.length > 0) {
+        const showCount = 10;
+        const hiddenCount = Math.max(0, otherComponents.length - showCount);
+        
+        html += `
+            <div>
+                <h5 style="color: var(--grey-600); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                    <span>📋</span>
+                    Other Components (${otherComponents.length})
+                </h5>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 0.75rem;">
+                    ${otherComponents.slice(0, showCount).map(comp => this.generateSmallComponentCard(comp, file)).join('')}
+                </div>
+                ${hiddenCount > 0 ? `
+                    <div style="text-align: center; margin-top: 1rem;">
+                        <button class="btn btn-primary" style="padding: 0.5rem 1rem; font-size: 0.8rem;" onclick="analyzer.showAllComponents('${file.name}')">
+                            Show ${hiddenCount} more components
+                        </button>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+    
+    return html;
+},
+
+// **FIX 7: ADD attachFileExpansionListeners method if missing**
+// Location: Add this method
+
+attachFileExpansionListeners() {
+    // File expansion listeners are handled by onclick in the HTML
+    // But we can add additional listeners here if needed
+    
+    document.querySelectorAll('.file-row').forEach((row, index) => {
+        row.addEventListener('mouseover', function() {
+            this.style.backgroundColor = 'var(--grey-50)';
+        });
+        
+        row.addEventListener('mouseout', function() {
+            this.style.backgroundColor = 'white';
+        });
+    });
+},
+
+// **FIX 8: ENSURE enableAutoAnalysis works properly**
+// Location: Find and replace the enableAutoAnalysis method
+
+enableAutoAnalysis() {
+    const autoAnalyzeBtn = document.getElementById('autoAnalyzeBtn');
+    const hasComponents = this.discoveredComponents.size > 0;
+    const isServerValidated = this.serverValidated;
+    
+    console.log(`enableAutoAnalysis: components=${hasComponents}, server=${isServerValidated}`);
+    
+    if (autoAnalyzeBtn) {
+        if (hasComponents && isServerValidated) {
+            autoAnalyzeBtn.disabled = false;
+            autoAnalyzeBtn.innerHTML = `
+                <span>🤖</span>
+                Start Auto-Analysis (${this.discoveredComponents.size} components)
+            `;
+        } else {
+            autoAnalyzeBtn.disabled = true;
+            if (!isServerValidated) {
+                autoAnalyzeBtn.innerHTML = `
+                    <span>🔒</span>
+                    Connect LLM Server First
+                `;
+            } else if (!hasComponents) {
+                autoAnalyzeBtn.innerHTML = `
+                    <span>📁</span>
+                    Upload Files First
+                `;
             }
         }
-        
-        this.updateProgress(100);
-        this.hideLoading();
-        
-        this.updateDashboardStats();
-        this.displayDiscoveredComponents();
-        this.enableAutoAnalysis();
-        this.saveToDatabase();
-        
-        this.showSuccess(`📁 ${files.length} files uploaded and ${this.discoveredComponents.size} components auto-discovered!`);
-    },
-
+    }
+    
+    // **ALSO UPDATE EXPORT BUTTONS**
+    const exportJsonBtn = document.getElementById('exportJsonBtn');
+    const exportMdBtn = document.getElementById('exportMdBtn');
+    
+    if (exportJsonBtn) exportJsonBtn.disabled = !hasComponents;
+    if (exportMdBtn) exportMdBtn.disabled = !hasComponents;
+},
     // Read File
     readFile(file) {
         return new Promise((resolve, reject) => {
@@ -2995,70 +3276,94 @@ extractComponentsFromFile(content, fileType) {
     // ============================================
 
     // Auto-Discover Components
-    // Auto-Discover Components
-async autoDiscoverComponents(fileObj) {
-    for (const component of fileObj.components) {
-        if (component.isMainComponent) {
-            const existingComponent = this.discoveredComponents.get(component.name);
-            
-            if (existingComponent) {
-                // **UPDATE EXISTING COMPONENT** - merge new information
-                existingComponent.inputFiles = this.mergeUniqueArrays(
-                    existingComponent.inputFiles || [], 
-                    this.extractInputFiles(fileObj.content)
-                );
-                existingComponent.outputFiles = this.mergeUniqueArrays(
-                    existingComponent.outputFiles || [], 
-                    this.extractOutputFiles(fileObj.content)
-                );
+    async autoDiscoverComponents(fileObj) {
+        console.log(`🔍 Auto-discovering components in: ${fileObj.name}`);
+        console.log(`File has ${fileObj.components.length} extracted components`);
+        
+        for (const component of fileObj.components) {
+            if (component.isMainComponent) {
+                const existingComponent = this.discoveredComponents.get(component.name);
                 
-                // **FIX: Calculate individual component field count**
-                const componentFieldCount = this.calculateComponentFieldCount(component.name, fileObj);
-                existingComponent.fieldCount = Math.max(
-                    existingComponent.fieldCount || 0,
-                    componentFieldCount
-                );
-                
-                // Update other metrics if they're better
-                if (fileObj.metrics.codeLines > (existingComponent.lineCount || 0)) {
-                    existingComponent.lineCount = fileObj.metrics.codeLines;
-                    existingComponent.complexityScore = fileObj.metrics.complexity;
-                    existingComponent.fileSource = fileObj.name; // Update to latest file
+                if (existingComponent) {
+                    console.log(`🔄 Updating existing component: ${component.name}`);
+                    // Update existing component logic
+                    existingComponent.inputFiles = this.mergeUniqueArrays(
+                        existingComponent.inputFiles || [], 
+                        this.extractInputFiles(fileObj.content)
+                    );
+                    existingComponent.outputFiles = this.mergeUniqueArrays(
+                        existingComponent.outputFiles || [], 
+                        this.extractOutputFiles(fileObj.content)
+                    );
+                    
+                    const componentFieldCount = this.calculateComponentFieldCount(component.name, fileObj);
+                    existingComponent.fieldCount = Math.max(
+                        existingComponent.fieldCount || 0,
+                        componentFieldCount
+                    );
+                    
+                    if (fileObj.metrics.codeLines > (existingComponent.lineCount || 0)) {
+                        existingComponent.lineCount = fileObj.metrics.codeLines;
+                        existingComponent.complexityScore = fileObj.metrics.complexity;
+                        existingComponent.fileSource = fileObj.name;
+                    }
+                    
+                    existingComponent.analyzed = false;
+                    existingComponent.needsReanalysis = true;
+                } else {
+                    console.log(`✨ Creating new component: ${component.name}`);
+                    const componentFieldCount = this.calculateComponentFieldCount(component.name, fileObj);
+                    
+                    const discoveredComponent = {
+                        name: component.name,
+                        friendlyName: await this.generateFriendlyName(component.name),
+                        type: component.type,
+                        businessPurpose: component.businessPurpose,
+                        fileSource: fileObj.name,
+                        lineCount: fileObj.metrics.codeLines,
+                        complexityScore: fileObj.metrics.complexity,
+                        inputFiles: this.extractInputFiles(fileObj.content),
+                        outputFiles: this.extractOutputFiles(fileObj.content),
+                        fieldCount: componentFieldCount,
+                        analyzed: false,
+                        selected: false,
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    this.discoveredComponents.set(component.name, discoveredComponent);
+                    console.log(`✅ Added component to discoveredComponents Map: ${component.name}`);
                 }
-                
-                // **MARK FOR RE-ANALYSIS** - this is key for dependency refresh
-                existingComponent.analyzed = false;
-                existingComponent.needsReanalysis = true;
-                
-                console.log(`🔄 Updated existing component: ${component.name}`);
-            } else {
-                // **CREATE NEW COMPONENT** with individual field count
-                const componentFieldCount = this.calculateComponentFieldCount(component.name, fileObj);
-                
-                const discoveredComponent = {
-                    name: component.name,
-                    friendlyName: await this.generateFriendlyName(component.name),
-                    type: component.type,
-                    businessPurpose: component.businessPurpose,
-                    fileSource: fileObj.name,
-                    lineCount: fileObj.metrics.codeLines,
-                    complexityScore: fileObj.metrics.complexity,
-                    inputFiles: this.extractInputFiles(fileObj.content),
-                    outputFiles: this.extractOutputFiles(fileObj.content),
-                    fieldCount: componentFieldCount, // **FIX: Individual component field count**
-                    analyzed: false,
-                    selected: false,
-                    timestamp: new Date().toISOString()
-                };
-                
-                this.discoveredComponents.set(component.name, discoveredComponent);
-                console.log(`✨ Created new component: ${component.name} with ${componentFieldCount} fields`);
             }
         }
-    }
+        
+        console.log(`📊 Total discovered components now: ${this.discoveredComponents.size}`);
+        this.invalidateAnalysesWithMissingDependencies();
+    },
+
+// **DEBUGGING: Add console logging to verify component discovery**
+// Location: Add this method for debugging
+
+debugComponentDiscovery() {
+    console.log('=== COMPONENT DISCOVERY DEBUG ===');
+    console.log(`Total uploaded files: ${this.uploadedFiles.length}`);
+    console.log(`Total discovered components: ${this.discoveredComponents.size}`);
     
-    // **INVALIDATE EXISTING ANALYSES** that might have missing dependencies now resolved
-    this.invalidateAnalysesWithMissingDependencies();
+    this.uploadedFiles.forEach((file, index) => {
+        console.log(`File ${index + 1}: ${file.name}`);
+        console.log(`  - Type: ${file.type}`);
+        console.log(`  - Components extracted: ${file.components.length}`);
+        console.log(`  - Main components: ${file.components.filter(c => c.isMainComponent).length}`);
+        
+        file.components.filter(c => c.isMainComponent).forEach(comp => {
+            console.log(`    * ${comp.name} (${comp.type})`);
+        });
+    });
+    
+    console.log('Discovered components in Map:');
+    Array.from(this.discoveredComponents.entries()).forEach(([name, comp]) => {
+        console.log(`  - ${name}: ${comp.friendlyName} (${comp.type})`);
+    });
+    console.log('=== END DEBUG ===');
 },
 // **NEW METHOD: Calculate Component Field Count**
 calculateComponentFieldCount(componentName, fileObj) {
@@ -3409,80 +3714,84 @@ Business Name:`;
 
     // Display Discovered Components
     displayDiscoveredComponents() {
-        const container = document.getElementById('componentsList');
-        if (!container) return;
+    const container = document.getElementById('componentsList');
+    if (!container) return;
 
-        const components = Array.from(this.discoveredComponents.values());
-        
-        if (components.length === 0) {
-            container.innerHTML = `
-                <p style="color: var(--grey-500); text-align: center; padding: 2rem;">
-                    Upload files to auto-discover components
-                </p>
-            `;
-            return;
+    const components = Array.from(this.discoveredComponents.values());
+    
+    console.log(`displayDiscoveredComponents: ${components.length} components to display`);
+    
+    if (components.length === 0) {
+        container.innerHTML = `
+            <p style="color: var(--grey-500); text-align: center; padding: 2rem;">
+                Upload files to auto-discover components
+            </p>
+        `;
+        return;
+    }
+
+    // Sort components by type and name
+    components.sort((a, b) => {
+        if (a.type !== b.type) {
+            const typeOrder = { 'PROGRAM': 1, 'RECORD_LAYOUT': 2, 'COPYBOOK': 3, 'FILE': 4 };
+            return (typeOrder[a.type] || 5) - (typeOrder[b.type] || 5);
         }
+        return a.friendlyName.localeCompare(b.friendlyName);
+    });
 
-        // Sort components by type and name
-        components.sort((a, b) => {
-            if (a.type !== b.type) {
-                const typeOrder = { 'PROGRAM': 1, 'RECORD_LAYOUT': 2, 'COPYBOOK': 3, 'FILE': 4 };
-                return (typeOrder[a.type] || 5) - (typeOrder[b.type] || 5);
-            }
-            return a.friendlyName.localeCompare(b.friendlyName);
-        });
-
-        let html = '';
+    let html = '';
+    
+    components.forEach(component => {
+        const iconClass = this.getComponentIconClass(component.type);
+        const analysisStatus = component.analyzed ? 
+            '<span class="badge badge-success">Analyzed</span>' : 
+            '<span class="badge badge-warning">Pending</span>';
         
-        components.forEach(component => {
-            const iconClass = this.getComponentIconClass(component.type);
-            const analysisStatus = component.analyzed ? 
-                '<span class="badge badge-success">Analyzed</span>' : 
-                '<span class="badge badge-warning">Pending</span>';
-            
-            const selectedClass = component.selected ? 'selected' : '';
-            
-            html += `
-                <div class="component-card ${selectedClass}" onclick="analyzer.selectComponent('${component.name}')" data-component="${component.name}">
-                    <div class="component-card-header">
-                        <div class="component-card-icon ${iconClass}">
-                            ${this.getComponentIcon(component.type)}
-                        </div>
-                        <div class="component-card-info">
-                            <div class="component-card-name">${component.name}</div>
-                            <div class="component-card-friendly">${component.friendlyName}</div>
-                            <div class="component-card-description">${component.businessPurpose}</div>
-                        </div>
+        const selectedClass = component.selected ? 'selected' : '';
+        
+        html += `
+            <div class="component-card ${selectedClass}" onclick="analyzer.selectComponent('${component.name}')" data-component="${component.name}">
+                <div class="component-card-header">
+                    <div class="component-card-icon ${iconClass}">
+                        ${this.getComponentIcon(component.type)}
                     </div>
-                    <div class="component-card-metrics">
-                        <div class="component-metric">
-                            <span class="component-metric-icon">📁</span>
-                            <span>${component.fileSource}</span>
-                        </div>
-                        <div class="component-metric">
-                            <span class="component-metric-icon">📋</span>
-                            <span>${component.fieldCount} fields</span>
-                        </div>
-                        <div class="component-metric">
-                            <span class="component-metric-icon">📊</span>
-                            <span>Complexity: ${component.complexityScore}</span>
-                        </div>
-                        <div class="component-metric">
-                            ${analysisStatus}
-                        </div>
+                    <div class="component-card-info">
+                        <div class="component-card-name">${component.name}</div>
+                        <div class="component-card-friendly">${component.friendlyName}</div>
+                        <div class="component-card-description">${component.businessPurpose}</div>
                     </div>
                 </div>
-            `;
-        });
+                <div class="component-card-metrics">
+                    <div class="component-metric">
+                        <span class="component-metric-icon">📁</span>
+                        <span>${component.fileSource}</span>
+                    </div>
+                    <div class="component-metric">
+                        <span class="component-metric-icon">📋</span>
+                        <span>${component.fieldCount} fields</span>
+                    </div>
+                    <div class="component-metric">
+                        <span class="component-metric-icon">📊</span>
+                        <span>Complexity: ${component.complexityScore}</span>
+                    </div>
+                    <div class="component-metric">
+                        ${analysisStatus}
+                    </div>
+                </div>
+            </div>
+        `;
+    });
 
-        container.innerHTML = html;
-        
-        // Update count
-        const countElement = document.getElementById('componentCount');
-        if (countElement) {
-            countElement.textContent = components.length;
-        }
-    },
+    container.innerHTML = html;
+    
+    // Update count
+    const countElement = document.getElementById('componentCount');
+    if (countElement) {
+        countElement.textContent = components.length;
+    }
+    
+    console.log(`✅ Displayed ${components.length} components in left panel`);
+},
 
     // Get Component Icon Class
     getComponentIconClass(type) {
