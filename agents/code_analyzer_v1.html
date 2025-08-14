@@ -3119,7 +3119,7 @@ enableAutoAnalysis() {
 
     lines.forEach((line, index) => {
         // **EXTRACT COBOL CODE FROM COLUMN 7 ONWARDS**
-        const cobolCode = extractCobolCode(line);
+        const cobolCode = this.extractCobolCode(line);
         const trimmed = cobolCode.toUpperCase();
         
         // **SKIP EMPTY LINES AND COMMENTS**
@@ -3349,7 +3349,7 @@ calculateIndividualFieldCount(componentName, lines, startIndex) {
     // Look ahead from the 01-level to count its subordinate fields
     while (i < lines.length) {
         // **EXTRACT COBOL CODE FROM COLUMN 7 ONWARDS**
-        const cobolCode = extractCobolCode(lines[i]);
+        const cobolCode = this.extractCobolCode(lines[i]);
         const trimmed = cobolCode.toUpperCase();
         
         if (!trimmed) {
@@ -4228,7 +4228,7 @@ Business Name:`;
                     <div class="component-card-info">
                         <div class="component-card-name">${component.name}</div>
                         <div class="component-card-friendly">${component.friendlyName}</div>
-                        <div class="component-card-description">${component.businessPurpose}</div>
+                        <div class="component-card-description">${this.getDisplayBusinessPurpose(componentName)}</div>
                     </div>
                 </div>
                 <div class="component-card-metrics">
@@ -4262,7 +4262,15 @@ Business Name:`;
     
     console.log(`✅ Displayed ${components.length} components in left panel`);
 },
-
+// NEW METHOD: Get business purpose with proper priority
+getDisplayBusinessPurpose(componentName) {
+    const result = this.analysisResults[componentName];
+    const component = this.discoveredComponents.get(componentName);
+    
+    return result?.llmAnalysis?.businessPurpose || 
+           component?.businessPurpose || 
+           'Business purpose pending analysis';
+},
     // Get Component Icon Class
     getComponentIconClass(type) {
         switch(type) {
@@ -5201,7 +5209,13 @@ Object.assign(EnhancedCodeAnalyzer.prototype, {
                 fallbackUsed: true
             };
         }
-        
+        if (llmAnalysis && llmAnalysis.businessPurpose && !llmAnalysis.error) {
+            const discoveredComponent = this.discoveredComponents.get(componentName);
+            if (discoveredComponent) {
+                discoveredComponent.businessPurpose = llmAnalysis.businessPurpose;
+                discoveredComponent.llmAnalyzed = true;
+            }
+        }
         const results = {
             componentName: componentName,
             friendlyName: friendlyName,
@@ -5420,7 +5434,7 @@ async analyzeProgramFieldsForPrograms(componentName, relevantFiles) {
         
         lines.forEach((line, index) => {
             // **EXTRACT COBOL CODE FROM COLUMN 7 ONWARDS**
-            const cobolCode = extractCobolCode(line);
+            const cobolCode = this.extractCobolCode(line);
             const trimmed = cobolCode.toUpperCase();
             
             if (!trimmed) return;
@@ -5619,7 +5633,7 @@ async analyzeProgramFieldsForPrograms(componentName, relevantFiles) {
         
         lines.forEach((line, index) => {
             // **EXTRACT COBOL CODE FROM COLUMN 7 ONWARDS**
-            const cobolCode = extractCobolCode(line);
+            const cobolCode = this.extractCobolCode(line);
             const trimmed = cobolCode.toUpperCase();
             
             if (!trimmed) return;
@@ -6519,7 +6533,7 @@ generateComponentDetailView(name, result, component) {
                 <h5 style="margin: 0 0 0.5rem 0; color: var(--grey-800);">📋 Component Details</h5>
                 <div style="font-size: 0.85rem; line-height: 1.6;">
                     <strong>Business Purpose:</strong><br>
-                    ${result.llmAnalysis?.businessPurpose || component?.businessPurpose || 'Not available'}
+                    ${result?.llmAnalysis?.businessPurpose || component?.businessPurpose || 'Business purpose pending LLM analysis'}
                 </div>
                 
                 <h6 style="margin: 1rem 0 0.5rem 0; color: var(--grey-700);">📊 Metrics</h6>
@@ -8361,8 +8375,10 @@ generateVisualFlowChart(dependencyAnalysis) {
     createEnhancedFlowNode(dependency, flowType) {
         const { name, component, result, type, status, interfaceType, isInterface, wasMissingButFound, isSystemDetected } = dependency;
         const displayName = component?.friendlyName || this.generateFriendlyNameFromPattern(name);
-        const businessPurpose = component?.businessPurpose || this.generateBusinessPurpose(name);
-        
+        //const businessPurpose = component?.businessPurpose || this.generateBusinessPurpose(name);
+        const businessPurpose = result?.llmAnalysis?.businessPurpose || 
+                       component?.businessPurpose || 
+                       this.generateBusinessPurpose(name);
         // Enhanced styling for interfaces
         let borderColor, bgColor, iconColor, statusIcon, connectionColor, typeIcon;
         
@@ -8444,9 +8460,9 @@ generateVisualFlowChart(dependencyAnalysis) {
                 background: ${bgColor};
                 border: 2px solid ${borderColor};
                 border-radius: 12px;
-                padding: 1rem;
-                min-width: 200px;
-                max-width: 250px;
+                padding: 0.75rem;
+                min-width: 100px;
+                max-width: 150px;
                 cursor: ${isClickable ? 'pointer' : 'default'};
                 transition: all 0.3s ease;
                 position: relative;
@@ -8653,7 +8669,10 @@ generateDependencyDiagram(dependencyAnalysis) {
         
         const isAnalyzed = discoveredComponent?.analyzed || false;
         const qualityScore = analysisResult?.qualityScore;
-        const businessPurpose = discoveredComponent?.businessPurpose || component.businessPurpose;
+        //const businessPurpose = discoveredComponent?.businessPurpose || component.businessPurpose;
+        const businessPurpose = analysisResult?.llmAnalysis?.businessPurpose || 
+                       discoveredComponent?.businessPurpose || 
+                       component.businessPurpose;
         
         return `
             <div style="
@@ -9539,10 +9558,14 @@ getComponentTypeFromName(name) {
 
 // **NEW METHOD: Create Center Component Node**
 createCenterComponentNode(componentName, component) {
-    const result = this.analysisResults[componentName];
+    //const result = this.analysisResults[componentName];
     const displayName = component?.friendlyName || componentName;
-    const businessPurpose = component?.businessPurpose || 'Business purpose pending analysis';
-    
+    //const businessPurpose = component?.businessPurpose || 'Business purpose pending analysis';
+    const result = this.analysisResults[componentName];
+    const businessPurpose = result?.llmAnalysis?.businessPurpose || 
+                       component?.businessPurpose || 
+                       'Business purpose pending analysis';
+
     return `
         <div style="
             background: linear-gradient(135deg, var(--primary-blue) 0%, var(--indigo) 100%);
