@@ -3092,20 +3092,80 @@ enableAutoAnalysis() {
     const lines = content.split('\n');
     const foundComponents = new Set(); // Prevent duplicates
 
+    let inDataDivision = false;
+    let inWorkingStorage = false;
+    let inLinkageSection = false;
+    let inFileSection = false;
+    let inLocalStorage = false;
+
     lines.forEach((line, index) => {
         const trimmed = line.trim().toUpperCase();
         const originalLine = line.trim(); // Keep original case
         
-        // **ENHANCED: Extract ALL 01-level fields as components**
+        // **TRACK COBOL SECTIONS**
+        if (trimmed.includes('DATA DIVISION')) {
+            inDataDivision = true;
+            return;
+        }
+        
+        if (trimmed.includes('PROCEDURE DIVISION')) {
+            inDataDivision = false;
+            inWorkingStorage = false;
+            inLinkageSection = false;
+            inFileSection = false;
+            inLocalStorage = false;
+            return;
+        }
+        
+        if (inDataDivision) {
+            if (trimmed.includes('WORKING-STORAGE SECTION')) {
+                inWorkingStorage = true;
+                inLinkageSection = false;
+                inFileSection = false;
+                inLocalStorage = false;
+                return;
+            } else if (trimmed.includes('LINKAGE SECTION')) {
+                inWorkingStorage = false;
+                inLinkageSection = true;
+                inFileSection = false;
+                inLocalStorage = false;
+                return;
+            } else if (trimmed.includes('FILE SECTION')) {
+                inWorkingStorage = false;
+                inLinkageSection = false;
+                inFileSection = true;
+                inLocalStorage = false;
+                return;
+            } else if (trimmed.includes('LOCAL-STORAGE SECTION')) {
+                inWorkingStorage = false;
+                inLinkageSection = false;
+                inFileSection = false;
+                inLocalStorage = true;
+                return;
+            }
+        }
+        
+        // **EXTRACT ALL 01-LEVEL FIELDS (including Working Storage) - IGNORE FILLER**
         const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]{2,})/);
         if (field01Match) {
             const componentName = field01Match[1];
             
-            // **FIX: Prevent duplicates**
+            // **SKIP FILLER FIELDS**
+            if (componentName === 'FILLER') {
+                return;
+            }
+            
+            // **PREVENT DUPLICATES**
             if (!foundComponents.has(componentName)) {
                 foundComponents.add(componentName);
                 
                 const fieldCount = this.calculateIndividualFieldCount(componentName, lines, index);
+                let section = 'UNKNOWN';
+                
+                if (inWorkingStorage) section = 'WORKING-STORAGE';
+                else if (inLinkageSection) section = 'LINKAGE';
+                else if (inFileSection) section = 'FILE';
+                else if (inLocalStorage) section = 'LOCAL-STORAGE';
                 
                 components.push({
                     name: componentName,
@@ -3115,20 +3175,22 @@ enableAutoAnalysis() {
                     fileType: fileType,
                     isMainComponent: true, // **ALL 01-levels are main components**
                     businessPurpose: this.generateBusinessPurpose(componentName),
-                    individualFieldCount: fieldCount, // **INDIVIDUAL field count**
+                    individualFieldCount: fieldCount,
                     hasSubFields: this.checkIfHasSubFields(lines, index),
-                    section: this.detectSection(lines, index)
+                    section: section
                 });
+                
+                console.log(`✅ Found 01-level: ${componentName} in ${section} section (${fieldCount} fields)`);
             }
         }
         
-        // **ENHANCED: Extract ALL field levels for detailed analysis**
+        // **EXTRACT ALL field levels for detailed analysis (sub-fields)**
         const fieldMatch = trimmed.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]*)/);
         if (fieldMatch) {
             const level = parseInt(fieldMatch[1]);
             const fieldName = fieldMatch[2];
             
-            if (level !== 88 && fieldName && level <= 49 && level > 1) {
+            if (level !== 88 && fieldName && level <= 49 && level > 1 && fieldName !== 'FILLER') {
                 components.push({
                     name: fieldName,
                     type: 'FIELD',
@@ -3150,7 +3212,7 @@ enableAutoAnalysis() {
             if (!foundComponents.has(programName)) {
                 foundComponents.add(programName);
                 
-                // **COUNT: All 01-levels in the entire program**
+                // Count ALL 01-levels in the entire program
                 const programFieldCount = this.countAllO1LevelsInProgram(lines);
                 
                 components.push({
@@ -3163,10 +3225,12 @@ enableAutoAnalysis() {
                     individualFieldCount: programFieldCount,
                     isProgramComponent: true
                 });
+                
+                console.log(`✅ Found Program: ${programName} with ${programFieldCount} 01-level fields`);
             }
         }
         
-        // **EXTRACT: Copybook references (but don't duplicate if already found as 01-level)**
+        // **EXTRACT: Copybook references**
         const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]{2,})/);
         if (copyMatch) {
             const copybookName = copyMatch[1];
@@ -3179,9 +3243,9 @@ enableAutoAnalysis() {
                     type: 'COPYBOOK',
                     lineNumber: index + 1,
                     fileType: fileType,
-                    isMainComponent: false, // Referenced, not defined
+                    isMainComponent: false,
                     businessPurpose: this.generateBusinessPurpose(copybookName),
-                    individualFieldCount: 0, // Will be counted when actual copybook is uploaded
+                    individualFieldCount: 0,
                     isReference: true
                 });
             }
@@ -3255,12 +3319,14 @@ countAllO1LevelsInProgram(lines) {
         
         if (field01Match) {
             const fieldName = field01Match[1];
+            // **IGNORE FILLER FIELDS**
             if (fieldName !== 'FILLER') {
                 count++;
             }
         }
     });
     
+    console.log(`📊 Program has ${count} 01-level fields (excluding FILLER)`);
     return count;
 },
 
@@ -3480,6 +3546,33 @@ detectSection(lines, currentIndex) {
     
     console.log(`📊 Total discovered components now: ${this.discoveredComponents.size}`);
     this.invalidateAnalysesWithMissingDependencies();
+},
+debugFieldMatrixDisplay(componentName, result) {
+    console.log('=== FIELD MATRIX DISPLAY DEBUG ===');
+    console.log(`Component: ${componentName}`);
+    console.log(`Component Type: ${result?.componentType}`);
+    console.log(`Has Field Analysis: ${!!result?.fieldAnalysis}`);
+    console.log(`Is Program: ${result?.componentType === 'COBOL Program' || result?.componentType === 'Program'}`);
+    
+    if (result?.fieldAnalysis) {
+        console.log(`Total Fields in Analysis: ${result.fieldAnalysis.fields?.length || 0}`);
+        
+        if (result.fieldAnalysis.sections) {
+            console.log('Program Sections:');
+            Object.entries(result.fieldAnalysis.sections).forEach(([section, fields]) => {
+                console.log(`  ${section}: ${fields.length} fields`);
+                fields.slice(0, 3).forEach(field => {
+                    console.log(`    - ${field.name} (L${field.level})`);
+                });
+            });
+        } else {
+            console.log('Record Fields:');
+            result.fieldAnalysis.fields.slice(0, 5).forEach(field => {
+                console.log(`  - L${field.level} ${field.name} ${field.picture || ''}`);
+            });
+        }
+    }
+    console.log('=== END DEBUG ===');
 },
 
 // **DEBUGGING: Add console logging to verify component discovery**
@@ -5056,20 +5149,59 @@ Object.assign(EnhancedCodeAnalyzer.prototype, {
 
     // Detect Component Type
     detectComponentType(componentName, relevantFiles) {
-        const component = this.discoveredComponents.get(componentName);
-        if (component?.type) {
-            return component.type;
+    const component = this.discoveredComponents.get(componentName);
+    
+    console.log(`🔍 Detecting component type for: ${componentName}`);
+    console.log(`   Component from map: ${component?.type}`);
+    
+    if (component?.type) {
+        // Enhanced: Distinguish between COBOL Program and Record Layout
+        if (component.type === 'PROGRAM') {
+            console.log(`   ✅ Detected as: COBOL Program`);
+            return 'COBOL Program';
+        } else if (component.type === 'RECORD_LAYOUT') {
+            console.log(`   ✅ Detected as: Record Layout`);
+            return 'RECORD_LAYOUT';
+        }
+        return component.type;
+    }
+    
+    // Analyze files to determine type
+    for (const file of relevantFiles) {
+        const content = file.content.toUpperCase();
+        
+        // Check if this component is defined as PROGRAM-ID
+        if (content.includes(`PROGRAM-ID. ${componentName}`) || 
+            content.includes(`PROGRAM-ID.${componentName}`)) {
+            console.log(`   ✅ Detected as: COBOL Program (PROGRAM-ID found)`);
+            return 'COBOL Program';
         }
         
-        // Analyze files to determine type
-        for (const file of relevantFiles) {
-            if (file.type === 'Copybook') return 'Copybook';
-            if (file.type === 'COBOL Program') return 'Program';
-            if (file.type === 'JCL Job') return 'Job';
+        // Check if it's a 01-level record
+        if (content.includes(`01 ${componentName}`) || 
+            content.includes(`01  ${componentName}`)) {
+            console.log(`   ✅ Detected as: Record Layout (01-level found)`);
+            return 'RECORD_LAYOUT';
         }
         
-        return 'Unknown';
-    },
+        // File type analysis
+        if (file.type === 'Copybook') {
+            console.log(`   ✅ Detected as: Copybook`);
+            return 'Copybook';
+        }
+        if (file.type === 'COBOL Program') {
+            console.log(`   ✅ Detected as: COBOL Program (file type)`);
+            return 'COBOL Program';
+        }
+        if (file.type === 'JCL Job') {
+            console.log(`   ✅ Detected as: JCL Job`);
+            return 'JCL Job';
+        }
+    }
+    
+    console.log(`   ⚠️ Detected as: Unknown`);
+    return 'Unknown';
+},
 
     // Extract Dependencies
      async extractDependencies(relevantFiles) {
@@ -5179,7 +5311,7 @@ Object.assign(EnhancedCodeAnalyzer.prototype, {
         }
     },
 async analyzeProgramFieldsForPrograms(componentName, relevantFiles) {
-    console.log(`🔍 Analyzing PROGRAM fields for: ${componentName}`);
+    console.log(`🔍 Analyzing PROGRAM 01-level fields for: ${componentName}`);
     
     const fieldAnalysis = {
         fields: [],
@@ -5229,27 +5361,31 @@ async analyzeProgramFieldsForPrograms(componentName, relevantFiles) {
             if (trimmed.includes('WORKING-STORAGE SECTION')) {
                 currentSection = 'workingStorage';
                 fieldAnalysis.businessLogicSummary.hasWorkingStorage = true;
+                console.log(`📁 Entering Working Storage Section`);
                 return;
             } else if (trimmed.includes('LINKAGE SECTION')) {
                 currentSection = 'linkageSection';
                 fieldAnalysis.businessLogicSummary.hasLinkageSection = true;
+                console.log(`📁 Entering Linkage Section`);
                 return;
             } else if (trimmed.includes('FILE SECTION')) {
                 currentSection = 'fileSection';
                 fieldAnalysis.businessLogicSummary.hasFileSection = true;
+                console.log(`📁 Entering File Section`);
                 return;
             } else if (trimmed.includes('LOCAL-STORAGE SECTION')) {
                 currentSection = 'localStorage';
+                console.log(`📁 Entering Local Storage Section`);
                 return;
             }
             
-            // **EXTRACT ALL 01-LEVEL FIELDS** for program view
+            // **EXTRACT ONLY 01-LEVEL FIELDS** for program view
             const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]+)(?:\s+(.*))?/);
             if (field01Match && currentSection !== 'unknown') {
                 const fieldName = field01Match[1];
                 const restOfLine = field01Match[2] || '';
                 
-                // Skip FILLER and duplicates
+                // **SKIP FILLER and duplicates**
                 if (fieldName === 'FILLER' || foundFields.has(fieldName)) return;
                 foundFields.add(fieldName);
                 
@@ -5274,6 +5410,8 @@ async analyzeProgramFieldsForPrograms(componentName, relevantFiles) {
                 fieldAnalysis.fields.push(field);
                 fieldAnalysis.sections[currentSection].push(field);
                 fieldAnalysis.businessLogicSummary.total01Levels++;
+                
+                console.log(`   ✅ Added 01-level: ${fieldName} in ${currentSection} (${field.individualFieldCount} sub-fields)`);
                 
                 // Categorize field usage for program context
                 this.categorizeFieldUsage(field, fieldAnalysis);
@@ -5357,7 +5495,7 @@ async analyzeProgramFieldsForPrograms(componentName, relevantFiles) {
 
     // Analyze Fields in Component
     async analyzeFieldsInComponent(componentName, relevantFiles) {
-    console.log(`🔍 Analyzing detailed fields for copybook/record: ${componentName}`);
+    console.log(`🔍 Analyzing ALL fields for copybook/record: ${componentName}`);
     
     const fieldAnalysis = {
         fields: [],
@@ -5380,38 +5518,42 @@ async analyzeProgramFieldsForPrograms(componentName, relevantFiles) {
         
         let inTargetRecord = false;
         let targetRecordLevel = 0;
+        let foundTargetRecord = false;
         
         lines.forEach((line, index) => {
             const trimmed = line.trim().toUpperCase();
             
-            // Extract ALL field levels for detailed copybook/record view
-            const fieldMatch = trimmed.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]+)(?:\s+PIC\s+([X9VS\(\)]+))?/);
+            // **EXTRACT ALL FIELD LEVELS** for detailed copybook/record view
+            const fieldMatch = trimmed.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]+)(?:\s+PIC\s+([X9VS\(\)\.]+))?/);
             if (fieldMatch) {
                 const level = parseInt(fieldMatch[1]);
                 const fieldName = fieldMatch[2];
                 const picture = fieldMatch[3] || '';
                 
-                // Skip condition names and FILLER
+                // **SKIP condition names and FILLER**
                 if (level === 88 || fieldName === 'FILLER') return;
                 
-                // Check if we're in the target record for this component
+                // **FIND TARGET RECORD AND ITS SUBORDINATES**
                 if (level === 1 && fieldName === componentName.toUpperCase()) {
                     inTargetRecord = true;
                     targetRecordLevel = 1;
+                    foundTargetRecord = true;
+                    console.log(`📋 Found target record: ${fieldName}`);
                 } else if (level === 1 && inTargetRecord && fieldName !== componentName.toUpperCase()) {
+                    // Found another 01-level, stop including fields
                     inTargetRecord = false;
                     return;
                 }
                 
-                // Only include fields that belong to this specific component
-                if (inTargetRecord || level === 1) {
+                // **INCLUDE ALL FIELDS** that belong to this specific component
+                if (inTargetRecord || (level === 1 && fieldName === componentName.toUpperCase())) {
                     const field = {
                         name: fieldName,
                         level: level,
                         picture: picture,
                         lineNumber: index + 1,
                         fileName: file.name,
-                        indent: level * 2, // For visual indentation
+                        indent: (level - 1) * 20, // For visual indentation
                         businessLogic: {
                             businessMeaning: this.generateFieldPurpose(fieldName),
                             validationRules: [],
@@ -5432,13 +5574,19 @@ async analyzeProgramFieldsForPrograms(componentName, relevantFiles) {
                     } else {
                         fieldAnalysis.unusedFields.push(fieldName);
                     }
+                    
+                    console.log(`   📌 Added field: L${level} ${fieldName} ${picture}`);
                 }
             }
         });
+        
+        if (!foundTargetRecord) {
+            console.warn(`⚠️ Target record ${componentName} not found in ${file.name}`);
+        }
     }
     
     fieldAnalysis.businessLogicSummary.recordStructureDepth = fieldAnalysis.businessLogicSummary.maxLevel;
-    console.log(`Detailed field analysis complete: ${fieldAnalysis.fields.length} fields found`);
+    console.log(`✅ Record field analysis complete: ${fieldAnalysis.fields.length} fields found (max level: ${fieldAnalysis.businessLogicSummary.maxLevel})`);
     return fieldAnalysis;
 },
 
@@ -9998,6 +10146,7 @@ createDependencyNode(name, component, status, type) {
             });
         });
     }, 100);
+    this.debugFieldMatrixDisplay(componentName, result);
 },
 
 // **NEW METHOD: Generate Business Logic Summary**
