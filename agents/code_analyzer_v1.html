@@ -3087,92 +3087,225 @@ enableAutoAnalysis() {
     // ============================================
 
     // Extract Components from Files
-    // **ENHANCED METHOD: Extract Components from Files with Individual Field Counting**
-extractComponentsFromFile(content, fileType) {
+  extractComponentsFromFile(content, fileType) {
     const components = [];
     const lines = content.split('\n');
+    const foundComponents = new Set(); // Prevent duplicates
 
     lines.forEach((line, index) => {
         const trimmed = line.trim().toUpperCase();
+        const originalLine = line.trim(); // Keep original case
         
-        // Extract COBOL 01-level fields (main focus for copybooks)
+        // **ENHANCED: Extract ALL 01-level fields as components**
         const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]{2,})/);
         if (field01Match) {
             const componentName = field01Match[1];
-            components.push({
-                name: componentName,
-                type: 'RECORD_LAYOUT',
-                level: '01',
-                lineNumber: index + 1,
-                fileType: fileType,
-                isMainComponent: true,
-                businessPurpose: this.generateBusinessPurpose(componentName),
-                // **NEW: Calculate individual field count for this record**
-                individualFieldCount: this.calculateRecordFieldCount(componentName, lines, index)
-            });
+            
+            // **FIX: Prevent duplicates**
+            if (!foundComponents.has(componentName)) {
+                foundComponents.add(componentName);
+                
+                const fieldCount = this.calculateIndividualFieldCount(componentName, lines, index);
+                
+                components.push({
+                    name: componentName,
+                    type: 'RECORD_LAYOUT',
+                    level: '01',
+                    lineNumber: index + 1,
+                    fileType: fileType,
+                    isMainComponent: true, // **ALL 01-levels are main components**
+                    businessPurpose: this.generateBusinessPurpose(componentName),
+                    individualFieldCount: fieldCount, // **INDIVIDUAL field count**
+                    hasSubFields: this.checkIfHasSubFields(lines, index),
+                    section: this.detectSection(lines, index)
+                });
+            }
         }
         
-        // Extract ALL field levels for complete analysis
+        // **ENHANCED: Extract ALL field levels for detailed analysis**
         const fieldMatch = trimmed.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]*)/);
         if (fieldMatch) {
             const level = parseInt(fieldMatch[1]);
             const fieldName = fieldMatch[2];
             
-            if (level !== 88 && fieldName && level <= 49) {
+            if (level !== 88 && fieldName && level <= 49 && level > 1) {
                 components.push({
                     name: fieldName,
-                    type: level === 1 ? 'RECORD_LAYOUT' : 'FIELD',
+                    type: 'FIELD',
                     level: level,
                     lineNumber: index + 1,
                     fileType: fileType,
-                    isMainComponent: level === 1,
-                    businessPurpose: this.generateBusinessPurpose(fieldName),
-                    parentRecord: level > 1 ? this.findParentRecord(lines, index) : null
+                    isMainComponent: false, // Sub-fields are not main components
+                    businessPurpose: this.generateFieldPurpose(fieldName),
+                    parentRecord: this.findParentRecord(lines, index)
                 });
             }
         }
         
-        // Extract copybook names
-        const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]{2,})/);
-        if (copyMatch) {
-            components.push({
-                name: copyMatch[1],
-                type: 'COPYBOOK',
-                lineNumber: index + 1,
-                fileType: fileType,
-                isMainComponent: false,
-                businessPurpose: this.generateBusinessPurpose(copyMatch[1])
-            });
-        }
-        
-        // Extract program names
+        // **EXTRACT: COBOL Program Names**
         const programMatch = trimmed.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]{2,})/);
         if (programMatch) {
-            components.push({
-                name: programMatch[1],
-                type: 'PROGRAM',
-                lineNumber: index + 1,
-                fileType: fileType,
-                isMainComponent: true,
-                businessPurpose: this.generateBusinessPurpose(programMatch[1])
-            });
+            const programName = programMatch[1];
+            
+            if (!foundComponents.has(programName)) {
+                foundComponents.add(programName);
+                
+                // **COUNT: All 01-levels in the entire program**
+                const programFieldCount = this.countAllO1LevelsInProgram(lines);
+                
+                components.push({
+                    name: programName,
+                    type: 'PROGRAM',
+                    lineNumber: index + 1,
+                    fileType: fileType,
+                    isMainComponent: true,
+                    businessPurpose: this.generateBusinessPurpose(programName),
+                    individualFieldCount: programFieldCount,
+                    isProgramComponent: true
+                });
+            }
         }
-
-        // Extract file names from FD statements
+        
+        // **EXTRACT: Copybook references (but don't duplicate if already found as 01-level)**
+        const copyMatch = trimmed.match(/COPY\s+([A-Z][A-Z0-9\-_]{2,})/);
+        if (copyMatch) {
+            const copybookName = copyMatch[1];
+            
+            if (!foundComponents.has(copybookName)) {
+                foundComponents.add(copybookName);
+                
+                components.push({
+                    name: copybookName,
+                    type: 'COPYBOOK',
+                    lineNumber: index + 1,
+                    fileType: fileType,
+                    isMainComponent: false, // Referenced, not defined
+                    businessPurpose: this.generateBusinessPurpose(copybookName),
+                    individualFieldCount: 0, // Will be counted when actual copybook is uploaded
+                    isReference: true
+                });
+            }
+        }
+        
+        // **EXTRACT: File references**
         const fileMatch = trimmed.match(/FD\s+([A-Z][A-Z0-9\-_]{2,})/);
         if (fileMatch) {
-            components.push({
-                name: fileMatch[1],
-                type: 'FILE',
-                lineNumber: index + 1,
-                fileType: fileType,
-                isMainComponent: false,
-                businessPurpose: this.generateBusinessPurpose(fileMatch[1])
-            });
+            const fileName = fileMatch[1];
+            
+            if (!foundComponents.has(fileName)) {
+                foundComponents.add(fileName);
+                
+                components.push({
+                    name: fileName,
+                    type: 'FILE',
+                    lineNumber: index + 1,
+                    fileType: fileType,
+                    isMainComponent: false,
+                    businessPurpose: this.generateBusinessPurpose(fileName),
+                    individualFieldCount: 0
+                });
+            }
         }
     });
     
+    console.log(`📋 Extracted ${components.length} components from ${fileType} file (${foundComponents.size} unique)`);
     return components;
+},
+
+// **FIX 2: ADD calculateIndividualFieldCount method**
+// Location: Add this new method
+
+calculateIndividualFieldCount(componentName, lines, startIndex) {
+    let fieldCount = 1; // Count the 01-level itself
+    let i = startIndex + 1;
+    const componentUpper = componentName.toUpperCase();
+    
+    // Look ahead from the 01-level to count its subordinate fields
+    while (i < lines.length) {
+        const line = lines[i].trim().toUpperCase();
+        const fieldMatch = line.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]*)/);
+        
+        if (fieldMatch) {
+            const level = parseInt(fieldMatch[1]);
+            const fieldName = fieldMatch[2];
+            
+            if (level === 1) {
+                // Found another 01-level, stop counting
+                break;
+            } else if (level > 1 && level !== 88 && fieldName !== 'FILLER') {
+                // Count subordinate fields (exclude 88-level condition names and FILLER)
+                fieldCount++;
+            }
+        }
+        i++;
+    }
+    
+    return fieldCount;
+},
+
+// **FIX 3: ADD countAllO1LevelsInProgram method**
+// Location: Add this new method
+
+countAllO1LevelsInProgram(lines) {
+    let count = 0;
+    
+    lines.forEach(line => {
+        const trimmed = line.trim().toUpperCase();
+        const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]+)/);
+        
+        if (field01Match) {
+            const fieldName = field01Match[1];
+            if (fieldName !== 'FILLER') {
+                count++;
+            }
+        }
+    });
+    
+    return count;
+},
+
+// **FIX 4: ADD checkIfHasSubFields method**
+// Location: Add this new method
+
+checkIfHasSubFields(lines, currentIndex) {
+    // Look ahead to see if there are subordinate levels
+    for (let i = currentIndex + 1; i < Math.min(currentIndex + 20, lines.length); i++) {
+        const nextLine = lines[i].trim().toUpperCase();
+        const levelMatch = nextLine.match(/^\s*(\d{2})\s+/);
+        
+        if (levelMatch) {
+            const nextLevel = parseInt(levelMatch[1]);
+            if (nextLevel > 1 && nextLevel < 50) {
+                return true; // Has sub-fields
+            } else if (nextLevel === 1) {
+                return false; // Next 01-level, no sub-fields
+            }
+        }
+    }
+    return false;
+},
+
+// **FIX 5: ADD detectSection method**
+// Location: Add this new method
+
+detectSection(lines, currentIndex) {
+    // Look backwards to find which section we're in
+    for (let i = currentIndex; i >= 0; i--) {
+        const line = lines[i].trim().toUpperCase();
+        
+        if (line.includes('WORKING-STORAGE SECTION')) {
+            return 'WORKING-STORAGE';
+        } else if (line.includes('LINKAGE SECTION')) {
+            return 'LINKAGE';
+        } else if (line.includes('FILE SECTION')) {
+            return 'FILE';
+        } else if (line.includes('LOCAL-STORAGE SECTION')) {
+            return 'LOCAL-STORAGE';
+        } else if (line.includes('PROCEDURE DIVISION')) {
+            return 'UNKNOWN'; // We're past data sections
+        }
+    }
+    return 'UNKNOWN';
 },
 
     // Generate Business Purpose based on naming patterns
@@ -3277,72 +3410,194 @@ extractComponentsFromFile(content, fileType) {
 
     // Auto-Discover Components
     async autoDiscoverComponents(fileObj) {
-        console.log(`🔍 Auto-discovering components in: ${fileObj.name}`);
-        console.log(`File has ${fileObj.components.length} extracted components`);
+    console.log(`🔍 Auto-discovering components in: ${fileObj.name}`);
+    console.log(`File has ${fileObj.components.length} extracted components`);
+    
+    // **PROCESS ALL MAIN COMPONENTS (including all 01-levels)**
+    const mainComponents = fileObj.components.filter(comp => comp.isMainComponent);
+    console.log(`📋 Found ${mainComponents.length} main components to process`);
+    
+    for (const component of mainComponents) {
+        const existingComponent = this.discoveredComponents.get(component.name);
         
-        for (const component of fileObj.components) {
-            if (component.isMainComponent) {
-                const existingComponent = this.discoveredComponents.get(component.name);
-                
-                if (existingComponent) {
-                    console.log(`🔄 Updating existing component: ${component.name}`);
-                    // Update existing component logic
-                    existingComponent.inputFiles = this.mergeUniqueArrays(
-                        existingComponent.inputFiles || [], 
-                        this.extractInputFiles(fileObj.content)
-                    );
-                    existingComponent.outputFiles = this.mergeUniqueArrays(
-                        existingComponent.outputFiles || [], 
-                        this.extractOutputFiles(fileObj.content)
-                    );
-                    
-                    const componentFieldCount = this.calculateComponentFieldCount(component.name, fileObj);
-                    existingComponent.fieldCount = Math.max(
-                        existingComponent.fieldCount || 0,
-                        componentFieldCount
-                    );
-                    
-                    if (fileObj.metrics.codeLines > (existingComponent.lineCount || 0)) {
-                        existingComponent.lineCount = fileObj.metrics.codeLines;
-                        existingComponent.complexityScore = fileObj.metrics.complexity;
-                        existingComponent.fileSource = fileObj.name;
-                    }
-                    
-                    existingComponent.analyzed = false;
-                    existingComponent.needsReanalysis = true;
-                } else {
-                    console.log(`✨ Creating new component: ${component.name}`);
-                    const componentFieldCount = this.calculateComponentFieldCount(component.name, fileObj);
-                    
-                    const discoveredComponent = {
-                        name: component.name,
-                        friendlyName: await this.generateFriendlyName(component.name),
-                        type: component.type,
-                        businessPurpose: component.businessPurpose,
-                        fileSource: fileObj.name,
-                        lineCount: fileObj.metrics.codeLines,
-                        complexityScore: fileObj.metrics.complexity,
-                        inputFiles: this.extractInputFiles(fileObj.content),
-                        outputFiles: this.extractOutputFiles(fileObj.content),
-                        fieldCount: componentFieldCount,
-                        analyzed: false,
-                        selected: false,
-                        timestamp: new Date().toISOString()
-                    };
-                    
-                    this.discoveredComponents.set(component.name, discoveredComponent);
-                    console.log(`✅ Added component to discoveredComponents Map: ${component.name}`);
-                }
+        if (existingComponent) {
+            console.log(`🔄 Updating existing component: ${component.name}`);
+            
+            // **UPDATE: Use individual field count**
+            const newFieldCount = component.individualFieldCount || 0;
+            existingComponent.fieldCount = Math.max(existingComponent.fieldCount || 0, newFieldCount);
+            
+            // Update other properties
+            existingComponent.inputFiles = this.mergeUniqueArrays(
+                existingComponent.inputFiles || [], 
+                this.extractInputFiles(fileObj.content)
+            );
+            existingComponent.outputFiles = this.mergeUniqueArrays(
+                existingComponent.outputFiles || [], 
+                this.extractOutputFiles(fileObj.content)
+            );
+            
+            if (fileObj.metrics.codeLines > (existingComponent.lineCount || 0)) {
+                existingComponent.lineCount = fileObj.metrics.codeLines;
+                existingComponent.complexityScore = fileObj.metrics.complexity;
+                existingComponent.fileSource = fileObj.name;
             }
+            
+            existingComponent.analyzed = false;
+            existingComponent.needsReanalysis = true;
+            
+        } else {
+            console.log(`✨ Creating new component: ${component.name} (Type: ${component.type})`);
+            
+            // **CREATE: Use individual field count**
+            const componentFieldCount = component.individualFieldCount || 0;
+            console.log(`   📊 Individual field count: ${componentFieldCount}`);
+            
+            const discoveredComponent = {
+                name: component.name,
+                friendlyName: await this.generateFriendlyName(component.name),
+                type: component.type,
+                businessPurpose: component.businessPurpose,
+                fileSource: fileObj.name,
+                lineNumber: component.lineNumber,
+                section: component.section,
+                hasSubFields: component.hasSubFields,
+                lineCount: fileObj.metrics.codeLines,
+                complexityScore: fileObj.metrics.complexity,
+                inputFiles: this.extractInputFiles(fileObj.content),
+                outputFiles: this.extractOutputFiles(fileObj.content),
+                fieldCount: componentFieldCount, // **USE INDIVIDUAL COUNT**
+                analyzed: false,
+                selected: false,
+                timestamp: new Date().toISOString(),
+                isProgramComponent: component.isProgramComponent || false
+            };
+            
+            this.discoveredComponents.set(component.name, discoveredComponent);
+            console.log(`✅ Added component: ${component.name} with ${componentFieldCount} fields`);
         }
-        
-        console.log(`📊 Total discovered components now: ${this.discoveredComponents.size}`);
-        this.invalidateAnalysesWithMissingDependencies();
-    },
+    }
+    
+    console.log(`📊 Total discovered components now: ${this.discoveredComponents.size}`);
+    this.invalidateAnalysesWithMissingDependencies();
+},
 
 // **DEBUGGING: Add console logging to verify component discovery**
 // Location: Add this method for debugging
-
+async analyzeProgramFields(componentName, relevantFiles) {
+    console.log(`🔍 Analyzing program fields for: ${componentName}`);
+    
+    const fieldAnalysis = {
+        fields: [],
+        sections: {
+            workingStorage: [],
+            linkageSection: [],
+            fileSection: [],
+            localStorage: []
+        },
+        inputFields: [],
+        outputFields: [],
+        referenceFields: [],
+        businessLogicSummary: {
+            totalSections: 0,
+            total01Levels: 0,
+            hasWorkingStorage: false,
+            hasLinkageSection: false,
+            hasFileSection: false
+        }
+    };
+    
+    for (const file of relevantFiles) {
+        const content = file.content;
+        const lines = content.split('\n');
+        
+        let currentSection = 'unknown';
+        let inDataDivision = false;
+        const foundFields = new Set(); // **PREVENT DUPLICATES**
+        
+        lines.forEach((line, index) => {
+            const trimmed = line.trim().toUpperCase();
+            
+            // Detect COBOL divisions and sections
+            if (trimmed.includes('DATA DIVISION')) {
+                inDataDivision = true;
+                return;
+            }
+            
+            if (trimmed.includes('PROCEDURE DIVISION')) {
+                inDataDivision = false;
+                return;
+            }
+            
+            if (!inDataDivision) return;
+            
+            // Detect sections within Data Division
+            if (trimmed.includes('WORKING-STORAGE SECTION')) {
+                currentSection = 'workingStorage';
+                fieldAnalysis.businessLogicSummary.hasWorkingStorage = true;
+                return;
+            } else if (trimmed.includes('LINKAGE SECTION')) {
+                currentSection = 'linkageSection';
+                fieldAnalysis.businessLogicSummary.hasLinkageSection = true;
+                return;
+            } else if (trimmed.includes('FILE SECTION')) {
+                currentSection = 'fileSection';
+                fieldAnalysis.businessLogicSummary.hasFileSection = true;
+                return;
+            } else if (trimmed.includes('LOCAL-STORAGE SECTION')) {
+                currentSection = 'localStorage';
+                return;
+            }
+            
+            // **EXTRACT ALL 01-LEVEL FIELDS** for program view
+            const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]+)(?:\s+(.*))?/);
+            if (field01Match && currentSection !== 'unknown') {
+                const fieldName = field01Match[1];
+                const restOfLine = field01Match[2] || '';
+                
+                // **SKIP: FILLER and duplicates**
+                if (fieldName === 'FILLER' || foundFields.has(fieldName)) return;
+                foundFields.add(fieldName);
+                
+                const field = {
+                    name: fieldName,
+                    level: 1,
+                    section: currentSection,
+                    sectionDisplay: this.getSectionDisplayName(currentSection),
+                    lineNumber: index + 1,
+                    fileName: file.name,
+                    picClause: this.extractPictureClause(restOfLine),
+                    hasSubFields: this.checkForSubFields(lines, index),
+                    individualFieldCount: this.calculateIndividualFieldCount(fieldName, lines, index),
+                    businessLogic: {
+                        businessMeaning: this.generateFieldPurpose(fieldName),
+                        validationRules: [],
+                        calculations: []
+                    },
+                    usage: this.determineProgramFieldUsage(fieldName, content, currentSection)
+                };
+                
+                fieldAnalysis.fields.push(field);
+                fieldAnalysis.sections[currentSection].push(field);
+                fieldAnalysis.businessLogicSummary.total01Levels++;
+                
+                // Categorize field usage for program context
+                this.categorizeFieldUsage(field, fieldAnalysis);
+            }
+        });
+    }
+    
+    // Calculate section count
+    fieldAnalysis.businessLogicSummary.totalSections = 
+        Object.values(fieldAnalysis.sections).filter(section => section.length > 0).length;
+    
+    console.log(`✅ Program field analysis complete: ${fieldAnalysis.fields.length} 01-level fields found`);
+    console.log(`   📊 Working Storage: ${fieldAnalysis.sections.workingStorage.length}`);
+    console.log(`   📊 Linkage Section: ${fieldAnalysis.sections.linkageSection.length}`);
+    console.log(`   📊 File Section: ${fieldAnalysis.sections.fileSection.length}`);
+    
+    return fieldAnalysis;
+},
 debugComponentDiscovery() {
     console.log('=== COMPONENT DISCOVERY DEBUG ===');
     console.log(`Total uploaded files: ${this.uploadedFiles.length}`);
@@ -3367,41 +3622,33 @@ debugComponentDiscovery() {
 },
 // **NEW METHOD: Calculate Component Field Count**
 calculateComponentFieldCount(componentName, fileObj) {
+    console.log(`🔍 Calculating field count for component: ${componentName}`);
+    
     if (!fileObj.components || fileObj.components.length === 0) {
         return 0;
     }
     
     const componentUpperName = componentName.toUpperCase();
     
-    // For COBOL programs, count all fields/record layouts within the program
+    // **FIX: Use individualFieldCount if available**
+    const component = fileObj.components.find(c => c.name.toUpperCase() === componentUpperName);
+    if (component && component.individualFieldCount !== undefined) {
+        console.log(`✅ Using individual field count for ${componentName}: ${component.individualFieldCount}`);
+        return component.individualFieldCount;
+    }
+    
+    // **FALLBACK: Calculate from file content**
     if (fileObj.type === 'COBOL Program') {
-        // Count all fields and record layouts in the entire program
-        return fileObj.components.filter(c => 
-            c.type === 'FIELD' || c.type === 'RECORD_LAYOUT'
-        ).length;
+        // For programs, count all 01-levels
+        const programFieldCount = this.countAllO1LevelsInProgram(fileObj.content.split('\n'));
+        console.log(`📊 Program ${componentName} has ${programFieldCount} 01-level fields`);
+        return programFieldCount;
     }
     
-    // For copybooks, count fields that belong to this specific component
-    if (fileObj.type === 'Copybook' || componentName.toUpperCase().includes('COPY')) {
-        return this.countFieldsInCopybook(componentName, fileObj);
-    }
-    
-    // For other file types, try to count related fields
-    return fileObj.components.filter(c => {
-        if (c.type !== 'FIELD' && c.type !== 'RECORD_LAYOUT') return false;
-        
-        // Check if field belongs to this component
-        const fieldName = c.name.toUpperCase();
-        
-        // Direct name match or prefix match
-        if (fieldName.startsWith(componentUpperName) || 
-            fieldName.includes(componentUpperName) ||
-            componentUpperName.includes(fieldName.split('-')[0])) {
-            return true;
-        }
-        
-        return false;
-    }).length;
+    // For copybooks, count fields in the specific record
+    const fieldCount = this.countFieldsInCopybook(componentName, fileObj);
+    console.log(`📋 Copybook ${componentName} has ${fieldCount} fields`);
+    return fieldCount;
 },
 
 // **NEW METHOD: Count Fields in Copybook**
