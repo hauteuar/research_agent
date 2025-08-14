@@ -3119,7 +3119,7 @@ enableAutoAnalysis() {
 
     lines.forEach((line, index) => {
         // **EXTRACT COBOL CODE FROM COLUMN 7 ONWARDS**
-        const cobolCode = extractCobolCode(line);
+        const cobolCode = this.extractCobolCode(line);
         const trimmed = cobolCode.toUpperCase();
         
         // **SKIP EMPTY LINES AND COMMENTS**
@@ -3349,7 +3349,7 @@ calculateIndividualFieldCount(componentName, lines, startIndex) {
     // Look ahead from the 01-level to count its subordinate fields
     while (i < lines.length) {
         // **EXTRACT COBOL CODE FROM COLUMN 7 ONWARDS**
-        const cobolCode = extractCobolCode(lines[i]);
+        const cobolCode = this.extractCobolCode(lines[i]);
         const trimmed = cobolCode.toUpperCase();
         
         if (!trimmed) {
@@ -5420,7 +5420,7 @@ async analyzeProgramFieldsForPrograms(componentName, relevantFiles) {
         
         lines.forEach((line, index) => {
             // **EXTRACT COBOL CODE FROM COLUMN 7 ONWARDS**
-            const cobolCode = extractCobolCode(line);
+            const cobolCode = this.extractCobolCode(line);
             const trimmed = cobolCode.toUpperCase();
             
             if (!trimmed) return;
@@ -5617,9 +5617,10 @@ async analyzeProgramFieldsForPrograms(componentName, relevantFiles) {
         let inDataDivision = false;
         const foundFields = new Set(); // Prevent duplicates
         
+        
         lines.forEach((line, index) => {
             // **EXTRACT COBOL CODE FROM COLUMN 7 ONWARDS**
-            const cobolCode = extractCobolCode(line);
+            const cobolCode = this.extractCobolCode(line);
             const trimmed = cobolCode.toUpperCase();
             
             if (!trimmed) return;
