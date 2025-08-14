@@ -3145,13 +3145,17 @@ enableAutoAnalysis() {
             }
         }
         
-        // **EXTRACT ALL 01-LEVEL FIELDS (including Working Storage) - IGNORE FILLER**
-        const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]{2,})/);
+        
+        // **EXTRACT ALL field levels for detailed analysis (sub-fields)**
+        const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]+)(?:\s|\.|$)/);
         if (field01Match) {
             const componentName = field01Match[1];
             
+            console.log(`🔍 Testing 01-level: "${componentName}" from line: "${trimmed}"`);
+            
             // **SKIP FILLER FIELDS**
             if (componentName === 'FILLER') {
+                console.log(`   ⏭️ Skipping FILLER field`);
                 return;
             }
             
@@ -3173,7 +3177,7 @@ enableAutoAnalysis() {
                     level: '01',
                     lineNumber: index + 1,
                     fileType: fileType,
-                    isMainComponent: true, // **ALL 01-levels are main components**
+                    isMainComponent: true,
                     businessPurpose: this.generateBusinessPurpose(componentName),
                     individualFieldCount: fieldCount,
                     hasSubFields: this.checkIfHasSubFields(lines, index),
@@ -3181,52 +3185,8 @@ enableAutoAnalysis() {
                 });
                 
                 console.log(`✅ Found 01-level: ${componentName} in ${section} section (${fieldCount} fields)`);
-            }
-        }
-        
-        // **EXTRACT ALL field levels for detailed analysis (sub-fields)**
-        const fieldMatch = trimmed.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]*)/);
-        if (fieldMatch) {
-            const level = parseInt(fieldMatch[1]);
-            const fieldName = fieldMatch[2];
-            
-            if (level !== 88 && fieldName && level <= 49 && level > 1 && fieldName !== 'FILLER') {
-                components.push({
-                    name: fieldName,
-                    type: 'FIELD',
-                    level: level,
-                    lineNumber: index + 1,
-                    fileType: fileType,
-                    isMainComponent: false, // Sub-fields are not main components
-                    businessPurpose: this.generateFieldPurpose(fieldName),
-                    parentRecord: this.findParentRecord(lines, index)
-                });
-            }
-        }
-        
-        // **EXTRACT: COBOL Program Names**
-        const programMatch = trimmed.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]{2,})/);
-        if (programMatch) {
-            const programName = programMatch[1];
-            
-            if (!foundComponents.has(programName)) {
-                foundComponents.add(programName);
-                
-                // Count ALL 01-levels in the entire program
-                const programFieldCount = this.countAllO1LevelsInProgram(lines);
-                
-                components.push({
-                    name: programName,
-                    type: 'PROGRAM',
-                    lineNumber: index + 1,
-                    fileType: fileType,
-                    isMainComponent: true,
-                    businessPurpose: this.generateBusinessPurpose(programName),
-                    individualFieldCount: programFieldCount,
-                    isProgramComponent: true
-                });
-                
-                console.log(`✅ Found Program: ${programName} with ${programFieldCount} 01-level fields`);
+            } else {
+                console.log(`   🔄 Duplicate 01-level skipped: ${componentName}`);
             }
         }
         
@@ -3273,7 +3233,30 @@ enableAutoAnalysis() {
     });
     
     console.log(`📋 Extracted ${components.length} components from ${fileType} file (${foundComponents.size} unique)`);
+    this.debugRegexMatching(lines[0] || '');
     return components;
+},
+
+debugRegexMatching(line) {
+    const trimmed = line.trim().toUpperCase();
+    console.log(`Testing line: "${trimmed}"`);
+    
+    // Current regex (not working for some fields)
+    const currentRegex = /^\s*01\s+([A-Z][A-Z0-9\-_]{2,})/;
+    const currentMatch = trimmed.match(currentRegex);
+    console.log(`Current regex match:`, currentMatch);
+    
+    // Enhanced regex (should work better)
+    const enhancedRegex = /^\s*01\s+([A-Z][A-Z0-9\-_]+)/;
+    const enhancedMatch = trimmed.match(enhancedRegex);
+    console.log(`Enhanced regex match:`, enhancedMatch);
+    
+    // Super flexible regex (for testing)
+    const flexibleRegex = /^\s*01\s+([A-Z][\w\-]+)/;
+    const flexibleMatch = trimmed.match(flexibleRegex);
+    console.log(`Flexible regex match:`, flexibleMatch);
+    
+    console.log('---');
 },
 
 // **FIX 2: ADD calculateIndividualFieldCount method**
@@ -3284,6 +3267,8 @@ calculateIndividualFieldCount(componentName, lines, startIndex) {
     let i = startIndex + 1;
     const componentUpper = componentName.toUpperCase();
     
+    console.log(`🔍 Calculating field count for: ${componentName} starting at line ${startIndex + 1}`);
+    
     // Look ahead from the 01-level to count its subordinate fields
     while (i < lines.length) {
         const line = lines[i].trim().toUpperCase();
@@ -3293,17 +3278,24 @@ calculateIndividualFieldCount(componentName, lines, startIndex) {
             const level = parseInt(fieldMatch[1]);
             const fieldName = fieldMatch[2];
             
+            console.log(`   📋 Line ${i + 1}: L${level} ${fieldName}`);
+            
             if (level === 1) {
                 // Found another 01-level, stop counting
+                console.log(`   🛑 Found next 01-level, stopping count`);
                 break;
             } else if (level > 1 && level !== 88 && fieldName !== 'FILLER') {
                 // Count subordinate fields (exclude 88-level condition names and FILLER)
                 fieldCount++;
+                console.log(`   ✅ Counted subordinate field: L${level} ${fieldName} (total: ${fieldCount})`);
+            } else if (fieldName === 'FILLER') {
+                console.log(`   ⏭️ Skipped FILLER at level ${level}`);
             }
         }
         i++;
     }
     
+    console.log(`📊 ${componentName} has ${fieldCount} total fields`);
     return fieldCount;
 },
 
@@ -3313,15 +3305,20 @@ calculateIndividualFieldCount(componentName, lines, startIndex) {
 countAllO1LevelsInProgram(lines) {
     let count = 0;
     
-    lines.forEach(line => {
+    lines.forEach((line, index) => {
         const trimmed = line.trim().toUpperCase();
-        const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]+)/);
+        const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]+)(?:\s|\.|$)/);
         
         if (field01Match) {
             const fieldName = field01Match[1];
+            console.log(`🔍 Program count test: "${fieldName}" from line ${index + 1}: "${trimmed}"`);
+            
             // **IGNORE FILLER FIELDS**
             if (fieldName !== 'FILLER') {
                 count++;
+                console.log(`   ✅ Counted: ${fieldName} (total: ${count})`);
+            } else {
+                console.log(`   ⏭️ Skipped FILLER (total: ${count})`);
             }
         }
     });
@@ -3643,13 +3640,24 @@ async analyzeProgramFields(componentName, relevantFiles) {
             }
             
             // **EXTRACT ALL 01-LEVEL FIELDS** for program view
-            const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]+)(?:\s+(.*))?/);
+             const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]+)(?:\s+(.*))?/);
             if (field01Match && currentSection !== 'unknown') {
                 const fieldName = field01Match[1];
                 const restOfLine = field01Match[2] || '';
                 
-                // **SKIP: FILLER and duplicates**
-                if (fieldName === 'FILLER' || foundFields.has(fieldName)) return;
+                console.log(`🔍 Program field test: "${fieldName}" in section: ${currentSection}`);
+                
+                // **SKIP FILLER and duplicates**
+                if (fieldName === 'FILLER') {
+                    console.log(`   ⏭️ Skipping FILLER field in program`);
+                    return;
+                }
+                
+                if (foundFields.has(fieldName)) {
+                    console.log(`   🔄 Duplicate program field skipped: ${fieldName}`);
+                    return;
+                }
+                
                 foundFields.add(fieldName);
                 
                 const field = {
@@ -3673,6 +3681,8 @@ async analyzeProgramFields(componentName, relevantFiles) {
                 fieldAnalysis.fields.push(field);
                 fieldAnalysis.sections[currentSection].push(field);
                 fieldAnalysis.businessLogicSummary.total01Levels++;
+                
+                console.log(`   ✅ Added program 01-level: ${fieldName} in ${currentSection} (${field.individualFieldCount} sub-fields)`);
                 
                 // Categorize field usage for program context
                 this.categorizeFieldUsage(field, fieldAnalysis);
