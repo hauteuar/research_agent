@@ -5366,13 +5366,18 @@ Object.assign(EnhancedCodeAnalyzer.prototype, {
         }
         
         // **SAFE STAGE 3: Field analysis**
-        console.log(`📊 Stage 3: Analyzing fields...`);
+        console.log(`📊 Stage 3: Analyzing fields for ${componentType}...`);
         let fieldAnalysis = null;
         try {
-            if (componentType === 'Copybook' || componentType === 'RECORD_LAYOUT') {
-                fieldAnalysis = await this.analyzeFieldsInComponent(componentName, relevantFiles);
-            } else if (componentType === 'Program' || componentType === 'COBOL Program' || componentType === 'COBOL_PROGRAM') {
+            if (componentType === 'COBOL Program') {
+                // **PROGRAM: Show all 01-level fields across all sections**
                 fieldAnalysis = await this.analyzeProgramFieldsForPrograms(componentName, relevantFiles);
+            } else if (componentType === 'Program Record') {
+                // **RECORD WITHIN PROGRAM: Show only this specific 01-level and its sub-fields**
+                fieldAnalysis = await this.analyzeSpecificRecordInProgram(componentName, relevantFiles);
+            } else if (componentType === 'RECORD_LAYOUT' || componentType === 'Copybook') {
+                // **STANDALONE RECORD: Show the record structure**
+                fieldAnalysis = await this.analyzeFieldsInComponent(componentName, relevantFiles);
             }
             console.log(`✅ Field analysis completed: ${fieldAnalysis?.fields?.length || 0} fields`);
         } catch (fieldError) {
@@ -5450,6 +5455,177 @@ Object.assign(EnhancedCodeAnalyzer.prototype, {
         console.error(`❌ Analysis failed for ${componentName}:`, error);
         throw new Error(`Analysis failed: ${error.message}`);
     }
+},
+
+async analyzeSpecificRecordInProgram(componentName, relevantFiles) {
+    console.log(`🔍 Analyzing SPECIFIC RECORD within program: ${componentName}`);
+    
+    const fieldAnalysis = {
+        fields: [],
+        recordStructure: {
+            recordName: componentName,
+            parentProgram: null,
+            section: null,
+            totalFields: 0,
+            maxLevel: 1,
+            hasRedefines: false,
+            hasOccurs: false
+        },
+        inputFields: [],
+        outputFields: [],
+        referenceFields: [],
+        unusedFields: [],
+        businessLogicSummary: {
+            recordName: componentName,
+            purpose: 'Record within program structure',
+            isSubRecord: true
+        }
+    };
+    
+    const componentUpper = componentName.toUpperCase();
+    let recordFound = false;
+    
+    for (const file of relevantFiles) {
+        const content = file.content;
+        const lines = content.split('\n');
+        
+        // **FIND THE SPECIFIC 01-LEVEL RECORD AND ITS CONTEXT**
+        let recordStartIndex = -1;
+        let recordEndIndex = -1;
+        let currentSection = 'unknown';
+        let parentProgram = null;
+        let inDataDivision = false;
+        
+        // First pass: Find program and section context
+        lines.forEach((line, index) => {
+            const cobolCode = this.extractCobolCode(line);
+            const trimmed = cobolCode.toUpperCase();
+            
+            if (!trimmed) return;
+            
+            // Track program
+            const programMatch = trimmed.match(/PROGRAM-ID\.?\s+([A-Z][A-Z0-9\-_]+)/);
+            if (programMatch) {
+                parentProgram = programMatch[1];
+            }
+            
+            // Track sections
+            if (trimmed.includes('DATA DIVISION')) {
+                inDataDivision = true;
+            } else if (trimmed.includes('PROCEDURE DIVISION')) {
+                inDataDivision = false;
+            }
+            
+            if (inDataDivision) {
+                if (trimmed.includes('WORKING-STORAGE SECTION')) {
+                    currentSection = 'WORKING-STORAGE';
+                } else if (trimmed.includes('LINKAGE SECTION')) {
+                    currentSection = 'LINKAGE';
+                } else if (trimmed.includes('FILE SECTION')) {
+                    currentSection = 'FILE';
+                } else if (trimmed.includes('LOCAL-STORAGE SECTION')) {
+                    currentSection = 'LOCAL-STORAGE';
+                }
+            }
+            
+            // **FIND OUR TARGET RECORD**
+            const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]+)/);
+            if (field01Match && field01Match[1] === componentUpper) {
+                recordStartIndex = index;
+                recordFound = true;
+                fieldAnalysis.recordStructure.parentProgram = parentProgram;
+                fieldAnalysis.recordStructure.section = currentSection;
+                console.log(`✅ Found target record ${componentName} at line ${index + 1} in ${currentSection} section of program ${parentProgram}`);
+            } else if (recordFound && field01Match && field01Match[1] !== componentUpper) {
+                // Found next 01-level, end of our record
+                recordEndIndex = index;
+                return;
+            }
+        });
+        
+        if (!recordFound) {
+            console.warn(`⚠️ Record ${componentName} not found in ${file.name}`);
+            continue;
+        }
+        
+        // Set end of record if not found
+        if (recordEndIndex === -1) {
+            recordEndIndex = lines.length;
+        }
+        
+        // **PROCESS ONLY THIS SPECIFIC RECORD AND ITS SUB-FIELDS**
+        console.log(`📋 Processing record ${componentName} from line ${recordStartIndex + 1} to ${recordEndIndex}`);
+        
+        const recordLines = lines.slice(recordStartIndex, recordEndIndex);
+        let maxLevel = 1;
+        
+        recordLines.forEach((line, relativeIndex) => {
+            const actualIndex = recordStartIndex + relativeIndex;
+            const cobolCode = this.extractCobolCode(line);
+            const trimmed = cobolCode.toUpperCase();
+            
+            if (!trimmed) return;
+            
+            const fieldMatch = trimmed.match(/^\s*(\d{2})\s+([A-Z][A-Z0-9\-_]*)\s*(.*)/);
+            if (fieldMatch) {
+                const level = parseInt(fieldMatch[1]);
+                const fieldName = fieldMatch[2];
+                const restOfLine = fieldMatch[3] || '';
+                
+                // Skip FILLER
+                if (fieldName === 'FILLER') return;
+                
+                maxLevel = Math.max(maxLevel, level);
+                
+                const field = {
+                    name: fieldName,
+                    level: level,
+                    lineNumber: actualIndex + 1,
+                    fileName: file.name,
+                    parentRecord: componentName,
+                    parentProgram: parentProgram,
+                    section: currentSection,
+                    picClause: this.extractPictureClause(restOfLine),
+                    picture: this.extractPictureClause(restOfLine),
+                    usage: this.extractUsageClause(restOfLine),
+                    occurs: this.extractOccursClause(restOfLine),
+                    redefines: this.extractRedefinesClause(restOfLine),
+                    value: this.extractValueClause(restOfLine),
+                    businessLogic: {
+                        businessMeaning: this.generateFieldPurpose(fieldName),
+                        fieldCategory: this.categorizeFieldByName(fieldName),
+                        dataType: this.determineDataType(this.extractPictureClause(restOfLine))
+                    },
+                    isMainRecord: level === 1,
+                    parentField: level > 1 ? this.findParentField(fieldAnalysis.fields, level) : null
+                };
+                
+                fieldAnalysis.fields.push(field);
+                
+                // Categorize usage
+                this.categorizeRecordFieldUsage(field, content, fieldAnalysis);
+                
+                // Track special characteristics
+                if (field.redefines) fieldAnalysis.recordStructure.hasRedefines = true;
+                if (field.occurs) fieldAnalysis.recordStructure.hasOccurs = true;
+                
+                console.log(`   ✅ Added L${level} field: ${fieldName} (parent: ${field.parentField || 'none'})`);
+            }
+        });
+        
+        fieldAnalysis.recordStructure.totalFields = fieldAnalysis.fields.length;
+        fieldAnalysis.recordStructure.maxLevel = maxLevel;
+        
+        console.log(`✅ Specific record analysis complete: ${fieldAnalysis.fields.length} fields in ${componentName}`);
+    }
+    
+    if (!recordFound) {
+        fieldAnalysis.businessLogicSummary.purpose = `Record ${componentName} - not found in program files`;
+    } else {
+        fieldAnalysis.businessLogicSummary.purpose = this.generateRecordPurpose(componentName, fieldAnalysis.fields);
+    }
+    
+    return fieldAnalysis;
 },
     
     // **SAFE ANALYSIS OF FIELDS IN RECORD LAYOUTS**
@@ -5779,23 +5955,30 @@ extractRecordBusinessRules(fields) {
     console.log(`   Component from map: ${component?.type}`);
     
     if (component?.type) {
-        // Enhanced: Distinguish between COBOL Program and Record Layout more precisely
+        // **ENHANCED: Check if this is actually a program or a record within a program**
         if (component.type === 'PROGRAM') {
-            console.log(`   ✅ Detected as: COBOL Program`);
+            console.log(`   ✅ Detected as: COBOL Program (main program)`);
             return 'COBOL Program';
         } else if (component.type === 'RECORD_LAYOUT') {
-            console.log(`   ✅ Detected as: RECORD_LAYOUT`);
-            return 'RECORD_LAYOUT';
+            // Check if this record is inside a program file
+            const isInsideProgram = this.isRecordInsideProgram(componentName, relevantFiles);
+            if (isInsideProgram) {
+                console.log(`   ✅ Detected as: Program Record (01-level within program)`);
+                return 'Program Record';
+            } else {
+                console.log(`   ✅ Detected as: Standalone Record Layout`);
+                return 'RECORD_LAYOUT';
+            }
         }
         return component.type;
     }
     
-    // Analyze files to determine type with better precision
+    // Analyze files to determine type
     for (const file of relevantFiles) {
         const content = file.content.toUpperCase();
         const componentUpper = componentName.toUpperCase();
         
-        // **ENHANCED: Check if this component is defined as PROGRAM-ID**
+        // **CHECK 1: Is this the main program?**
         const programIdPatterns = [
             new RegExp(`PROGRAM-ID\\.?\\s+${componentUpper}\\b`, 'i'),
             new RegExp(`PROGRAM-ID\\.?\\s+'${componentUpper}'`, 'i'),
@@ -5807,55 +5990,26 @@ extractRecordBusinessRules(fields) {
             return 'COBOL Program';
         }
         
-        // **ENHANCED: Check if it's a 01-level record with more precision**
+        // **CHECK 2: Is this a 01-level record?**
         const recordPatterns = [
             new RegExp(`^\\s*01\\s+${componentUpper}\\b`, 'm'),
             new RegExp(`^\\s*01\\s\\s+${componentUpper}\\b`, 'm'),
-            new RegExp(`^.{6}\\s*01\\s+${componentUpper}\\b`, 'm') // Account for COBOL column formatting
+            new RegExp(`^.{6}\\s*01\\s+${componentUpper}\\b`, 'm')
         ];
         
         if (recordPatterns.some(pattern => pattern.test(content))) {
-            // **ADDITIONAL CHECK: Ensure this is not inside a program's data division**
-            // Look for PROGRAM-ID before this record definition
+            // **CHECK 3: Is this record inside a program?**
             const beforeRecord = content.substring(0, content.indexOf(componentUpper));
             
             if (beforeRecord.includes('PROGRAM-ID') && 
-                beforeRecord.includes('DATA DIVISION') &&
-                (beforeRecord.includes('WORKING-STORAGE SECTION') || 
-                 beforeRecord.includes('LINKAGE SECTION') ||
-                 beforeRecord.includes('FILE SECTION'))) {
-                console.log(`   ⚠️ Found 01-level but inside program - treating as program field`);
-                return 'COBOL Program';
+                beforeRecord.includes('DATA DIVISION')) {
+                console.log(`   ✅ Detected as: Program Record (01-level within program)`);
+                return 'Program Record';
             } else {
-                console.log(`   ✅ Detected as: RECORD_LAYOUT (01-level found)`);
+                console.log(`   ✅ Detected as: Standalone Record Layout`);
                 return 'RECORD_LAYOUT';
             }
         }
-        
-        // **File type analysis with better logic**
-        if (file.type === 'Copybook' && !content.includes('PROGRAM-ID')) {
-            console.log(`   ✅ Detected as: Copybook (file type + no PROGRAM-ID)`);
-            return 'Copybook';
-        }
-        if (file.type === 'COBOL Program' || content.includes('PROGRAM-ID')) {
-            console.log(`   ✅ Detected as: COBOL Program (file type or PROGRAM-ID found)`);
-            return 'COBOL Program';
-        }
-        if (file.type === 'JCL Job') {
-            console.log(`   ✅ Detected as: JCL Job`);
-            return 'JCL Job';
-        }
-    }
-    
-    // **ENHANCED FALLBACK: More intelligent detection based on naming**
-    const componentUpper = componentName.toUpperCase();
-    if (componentUpper.includes('COPY') || componentUpper.includes('CPY') || componentUpper.endsWith('-REC')) {
-        console.log(`   ✅ Detected as: Copybook (naming pattern)`);
-        return 'Copybook';
-    }
-    if (componentUpper.includes('PROG') || componentUpper.includes('PGM') || componentUpper.endsWith('-PGM')) {
-        console.log(`   ✅ Detected as: COBOL Program (naming pattern)`);
-        return 'COBOL Program';
     }
     
     console.log(`   ⚠️ Detected as: Unknown`);
@@ -10972,23 +11126,37 @@ createDependencyNode(name, component, status, type) {
         return;
     }
 
-    // **DETERMINE IF THIS IS A PROGRAM OR RECORD LAYOUT**
-    const isProgram = componentType === 'COBOL Program' || componentType === 'Program';
-    const isRecord = componentType === 'RECORD_LAYOUT' || componentType === 'Copybook';
+    // **DETERMINE COMPONENT TYPE FOR DISPLAY**
+    const isMainProgram = componentType === 'COBOL Program';
+    const isProgramRecord = componentType === 'Program Record';
+    const isStandaloneRecord = componentType === 'RECORD_LAYOUT' || componentType === 'Copybook';
+
+    let headerTitle, headerDescription;
+    
+    if (isMainProgram) {
+        headerTitle = '🏢 Program Field Matrix - All 01-Level Structures';
+        headerDescription = `Complete program analysis showing all 01-level data structures across sections`;
+    } else if (isProgramRecord) {
+        headerTitle = '📋 Record Structure - Specific 01-Level Analysis';
+        headerDescription = `Detailed analysis of ${componentName} record structure and all subordinate fields`;
+    } else {
+        headerTitle = '📋 Record Layout Structure';
+        headerDescription = `Standalone record layout analysis for ${componentName} data structure`;
+    }
 
     let html = `
         <!-- Component Header -->
         <div style="background: linear-gradient(135deg, var(--primary-blue) 0%, var(--indigo) 100%); color: white; padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem;">
-            <h3 style="margin: 0 0 0.5rem 0; color: white;">
-                📋 ${isProgram ? 'Program Field Matrix' : 'Record Layout Structure'}
-            </h3>
+            <h3 style="margin: 0 0 0.5rem 0; color: white;">${headerTitle}</h3>
             <div style="font-size: 1.1rem; font-weight: 500; margin-bottom: 0.5rem;">${displayName}</div>
-            <div style="font-size: 0.9rem; opacity: 0.9;">
-                ${isProgram ? 
-                    'Program-level field analysis showing 01-level data structures' : 
-                    `Record layout analysis for ${componentName} data structure`
-                }
-            </div>
+            <div style="font-size: 0.9rem; opacity: 0.9;">${headerDescription}</div>
+            
+            ${isProgramRecord && fieldAnalysis.recordStructure ? `
+                <div style="margin-top: 1rem; padding: 1rem; background: rgba(255,255,255,0.1); border-radius: 8px;">
+                    <strong>Context:</strong> Record in ${fieldAnalysis.recordStructure.parentProgram || 'Unknown Program'} 
+                    → ${fieldAnalysis.recordStructure.section || 'Unknown Section'}
+                </div>
+            ` : ''}
         </div>
         
         <!-- Field Overview Metrics -->
@@ -10996,7 +11164,7 @@ createDependencyNode(name, component, status, type) {
             <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid var(--grey-200);">
                 <div style="font-size: 1.5rem; font-weight: bold; color: var(--primary-blue);">${fieldAnalysis.fields.length}</div>
                 <div style="font-size: 0.8rem; color: var(--grey-600);">
-                    ${isProgram ? 'Program Fields (01-level)' : 'Record Fields (All levels)'}
+                    ${isMainProgram ? 'Total 01-Level Fields' : isProgramRecord ? 'Fields in Record' : 'Record Fields'}
                 </div>
             </div>
             <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid var(--grey-200);">
@@ -11008,22 +11176,30 @@ createDependencyNode(name, component, status, type) {
                 <div style="font-size: 0.8rem; color: var(--grey-600);">Output Fields</div>
             </div>
             <div style="background: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid var(--grey-200);">
-                <div style="font-size: 1.5rem; font-weight: bold; color: var(--warning-yellow);">${fieldAnalysis.unusedFields?.length || 0}</div>
-                <div style="font-size: 0.8rem; color: var(--grey-600);">Unused Fields</div>
+                <div style="font-size: 1.5rem; font-weight: bold; color: var(--warning-yellow);">
+                    ${isMainProgram ? fieldAnalysis.fields.filter(f => f.level === 1).length : 
+                      isProgramRecord ? (fieldAnalysis.recordStructure?.maxLevel || 1) :
+                      fieldAnalysis.fields.filter(f => f.level === 1).length}
+                </div>
+                <div style="font-size: 0.8rem; color: var(--grey-600);">
+                    ${isMainProgram ? '01-Level Records' : isProgramRecord ? 'Max Level Depth' : 'Record Layouts'}
+                </div>
             </div>
         </div>
 
-        ${isProgram ? this.generateProgramFieldsSummary(fieldAnalysis) : this.generateRecordLayoutSummary(fieldAnalysis)}
+        ${this.generateFieldMatrixSummary(fieldAnalysis, componentType)}
 
         <!-- Field Details Table -->
         <div style="background: white; border-radius: 12px; overflow: hidden; border: 1px solid var(--grey-200);">
             <div style="background: var(--grey-50); padding: 1rem; border-bottom: 1px solid var(--grey-200);">
                 <h4 style="margin: 0; color: var(--grey-800);">
-                    📊 ${isProgram ? 'Program Field Analysis' : 'Record Field Structure'}
+                    📊 ${isMainProgram ? 'Program Field Analysis' : isProgramRecord ? 'Record Field Structure' : 'Layout Field Analysis'}
                 </h4>
                 <p style="margin: 0.5rem 0 0 0; color: var(--grey-600); font-size: 0.9rem;">
-                    ${isProgram ? 
-                        'All 01-level fields across program sections' : 
+                    ${isMainProgram ? 
+                        'All 01-level fields discovered across program sections' : 
+                        isProgramRecord ?
+                        `All fields within the ${componentName} record structure` :
                         `Detailed field structure for ${componentName} record layout`
                     }
                 </p>
@@ -11034,8 +11210,8 @@ createDependencyNode(name, component, status, type) {
                         <tr>
                             <th>Field Name</th>
                             <th>Level</th>
-                            ${isRecord ? '<th>Picture Clause</th>' : ''}
-                            ${isProgram ? '<th>Section</th>' : '<th>Parent Field</th>'}
+                            ${!isMainProgram ? '<th>Picture Clause</th>' : ''}
+                            ${isMainProgram ? '<th>Section</th>' : isProgramRecord ? '<th>Parent Field</th>' : '<th>Parent</th>'}
                             <th>Usage Pattern</th>
                             <th>Business Purpose</th>
                             <th>Data Type</th>
@@ -11045,7 +11221,7 @@ createDependencyNode(name, component, status, type) {
                     <tbody>
     `;
     
-    // **DISPLAY FIELDS DIFFERENTLY FOR PROGRAMS VS RECORDS**
+    // **DISPLAY FIELDS BASED ON COMPONENT TYPE**
     fieldAnalysis.fields.slice(0, 100).forEach((field, index) => {
         const usage = field.usagePattern || this.determineFieldUsage(field, fieldAnalysis);
         const badgeClass = this.getUsageBadgeClass(usage);
@@ -11056,16 +11232,19 @@ createDependencyNode(name, component, status, type) {
             <tr class="field-row" data-field="${field.name}" style="cursor: pointer;">
                 <td style="font-family: monospace; font-weight: 600;">
                     ${field.name}
-                    ${field.isMainRecord ? '<span class="badge badge-primary" style="margin-left: 0.5rem; font-size: 0.7rem;">MAIN</span>' : ''}
+                    ${field.isMainRecord ? '<span class="badge badge-primary" style="margin-left: 0.5rem; font-size: 0.7rem;">01-LEVEL</span>' : ''}
+                    ${isProgramRecord && field.level > 1 ? `<span class="badge badge-grey" style="margin-left: 0.25rem; font-size: 0.7rem;">L${field.level}</span>` : ''}
                 </td>
                 <td>
                     <span class="badge badge-grey">${field.level}</span>
-                    ${isRecord && field.level > 1 ? '<span style="margin-left: 0.25rem; color: var(--grey-500); font-size: 0.8rem;">SUB</span>' : ''}
+                    ${field.level === 1 ? '<span style="margin-left: 0.25rem; color: var(--success-green); font-size: 0.8rem;">●</span>' : ''}
                 </td>
-                ${isRecord ? `<td style="font-family: monospace; font-size: 0.85rem;">${field.picture || field.picClause || '-'}</td>` : ''}
+                ${!isMainProgram ? `<td style="font-family: monospace; font-size: 0.85rem;">${field.picture || field.picClause || '-'}</td>` : ''}
                 <td>
-                    ${isProgram ? 
+                    ${isMainProgram ? 
                         `<span class="badge badge-info">${field.sectionDisplay || field.section || 'Unknown'}</span>` :
+                        isProgramRecord ?
+                        `<span style="font-family: monospace; font-size: 0.8rem; color: var(--grey-600);">${field.parentField || (field.level === 1 ? 'ROOT' : '-')}</span>` :
                         `<span style="font-family: monospace; font-size: 0.8rem; color: var(--grey-600);">${field.parentField || '-'}</span>`
                     }
                 </td>
@@ -11116,6 +11295,49 @@ createDependencyNode(name, component, status, type) {
         });
     }, 100);
 },
+generateFieldMatrixSummary(fieldAnalysis, componentType) {
+    const isMainProgram = componentType === 'COBOL Program';
+    const isProgramRecord = componentType === 'Program Record';
+    
+    if (isMainProgram && fieldAnalysis.sections) {
+        // Program-level summary
+        return `
+            <div style="background: white; padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem; border: 1px solid var(--grey-200);">
+                <h4 style="margin: 0 0 1rem 0; color: var(--grey-800);">🏢 Program Structure Overview</h4>
+                
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+                    <div style="padding: 1rem; background: var(--grey-50); border-radius: 8px;">
+                        <h6 style="margin: 0 0 0.5rem 0; color: var(--primary-blue);">Working Storage</h6>
+                        <div style="font-size: 1.25rem; font-weight: bold;">${fieldAnalysis.sections.workingStorage?.length || 0}</div>
+                        <div style="font-size: 0.8rem; color: var(--grey-600);">01-level fields</div>
+                    </div>
+                    <div style="padding: 1rem; background: var(--grey-50); border-radius: 8px;">
+                        <h6 style="margin: 0 0 0.5rem 0; color: var(--success-green);">Linkage Section</h6>
+                        <div style="font-size: 1.25rem; font-weight: bold;">${fieldAnalysis.sections.linkageSection?.length || 0}</div>
+                        <div style="font-size: 0.8rem; color: var(--grey-600);">Parameter fields</div>
+                    </div>
+                    <div style="padding: 1rem; background: var(--grey-50); border-radius: 8px;">
+                        <h6 style="margin: 0 0 0.5rem 0; color: var(--warning-yellow);">File Section</h6>
+                        <div style="font-size: 1.25rem; font-weight: bold;">${fieldAnalysis.sections.fileSection?.length || 0}</div>
+                        <div style="font-size: 0.8rem; color: var(--grey-600);">File records</div>
+                    </div>
+                    <div style="padding: 1rem; background: var(--grey-50); border-radius: 8px;">
+                        <h6 style="margin: 0 0 0.5rem 0; color: var(--info-blue);">Local Storage</h6>
+                        <div style="font-size: 1.25rem; font-weight: bold;">${fieldAnalysis.sections.localStorage?.length || 0}</div>
+                        <div style="font-size: 0.8rem; color: var(--grey-600);">Local variables</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    } else if (isProgramRecord && fieldAnalysis.recordStructure) {
+        // Record-specific summary
+        return this.generateRecordLayoutSummary(fieldAnalysis);
+    } else {
+        // Standalone record summary
+        return this.generateRecordLayoutSummary(fieldAnalysis);
+    }
+},
+
 generateRecordLayoutSummary(fieldAnalysis) {
     const recordStructure = fieldAnalysis.recordStructure || {};
     const businessSummary = fieldAnalysis.businessLogicSummary || {};
