@@ -6015,6 +6015,28 @@ extractRecordBusinessRules(fields) {
     console.log(`   ⚠️ Detected as: Unknown`);
     return 'Unknown';
 },
+isRecordInsideProgram(componentName, relevantFiles) {
+    const componentUpper = componentName.toUpperCase();
+    
+    for (const file of relevantFiles) {
+        const content = file.content.toUpperCase();
+        
+        // Find the component in the file
+        const componentIndex = content.indexOf(componentUpper);
+        if (componentIndex === -1) continue;
+        
+        // Check what comes before this component
+        const beforeComponent = content.substring(0, componentIndex);
+        
+        // If we find PROGRAM-ID before this component, it's inside a program
+        if (beforeComponent.includes('PROGRAM-ID') && 
+            beforeComponent.includes('DATA DIVISION')) {
+            return true;
+        }
+    }
+    
+    return false;
+},
 
     // Extract Dependencies
     async extractDependencies(relevantFiles) {
