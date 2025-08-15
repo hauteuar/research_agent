@@ -11907,23 +11907,53 @@ generateBusinessLogicSummary(result) {
 },
 
 // **NEW METHOD: Determine Data Type**
+// Location: Replace the existing determineDataType method
 determineDataType(picture) {
     if (!picture) return 'Unknown';
     
     const pic = picture.toUpperCase();
     
     if (pic.includes('9')) {
-        if (pic.includes('V') || pic.includes('.')) {
+        // Check for COMP variations first (more specific)
+        if (pic.includes('COMP-3') || pic.includes('COMPUTATIONAL-3')) {
+            return 'Packed Decimal';
+        } else if (pic.includes('COMP-2') || pic.includes('COMPUTATIONAL-2')) {
+            return 'Double Float';
+        } else if (pic.includes('COMP-1') || pic.includes('COMPUTATIONAL-1')) {
+            return 'Single Float';
+        } else if (pic.includes('COMP-4') || pic.includes('COMPUTATIONAL-4') || pic.includes('BINARY')) {
+            return 'Binary Integer';
+        } else if (pic.includes('COMP-5') || pic.includes('COMPUTATIONAL-5')) {
+            return 'Native Binary';
+        } else if (pic.includes('COMP') || pic.includes('COMPUTATIONAL')) {
+            return 'Binary Integer'; // Default COMP is binary integer
+        } else if (pic.includes('V') || pic.includes('.')) {
             return 'Decimal';
-        } else if (pic.includes('COMP') || pic.includes('BINARY')) {
-            return 'Binary';
         } else {
             return 'Numeric';
         }
     } else if (pic.includes('X')) {
-        return 'Alphanumeric';
+        // Alphanumeric fields
+        if (pic.includes('COMP')) {
+            return 'Binary Data'; // X fields with COMP are binary data
+        } else {
+            return 'Alphanumeric';
+        }
     } else if (pic.includes('A')) {
         return 'Alphabetic';
+    } else if (pic.includes('S9')) {
+        // Signed numeric
+        if (pic.includes('COMP-3')) {
+            return 'Signed Packed';
+        } else if (pic.includes('COMP')) {
+            return 'Signed Binary';
+        } else {
+            return 'Signed Numeric';
+        }
+    } else if (pic.includes('P')) {
+        return 'Pointer';
+    } else if (pic.includes('N')) {
+        return 'National';
     } else {
         return 'Other';
     }
