@@ -1176,7 +1176,7 @@
                             <input type="file" 
                                    id="fileInput" 
                                    multiple 
-                                   accept=".cbl,.cob,.cpy,.copybook,.jcl,.txt,.proc" 
+                                   accept=".cbl,.cob,.cpy,.copybook,.jcl,.proc,.txt"
                                    style="display: none;">
                         </div>
 
@@ -3022,24 +3022,25 @@ enableAutoAnalysis() {
     },
 
     // Detect File Type
-    detectFileType(fileName, content) {
-        const name = fileName.toLowerCase();
-        const upperContent = content.toUpperCase();
-        
-        if (name.includes('.cpy') || name.includes('copybook')) {
-            return 'Copybook';
-        } else if (name.includes('.jcl') || upperContent.includes('//JOB ')) {
-            return 'JCL Job';
-        } else if (name.includes('.cbl') || name.includes('.cob') || 
-                  upperContent.includes('IDENTIFICATION DIVISION') ||
-                  upperContent.includes('PROGRAM-ID')) {
-            return 'COBOL Program';
-        } else if (name.includes('.proc')) {
-            return 'JCL Procedure';
-        } else {
-            return 'Text File';
-        }
-    },
+    // Location: Replace the detectFileType method
+detectFileType(fileName, content) {
+    const name = fileName.toLowerCase();
+    const upperContent = content.toUpperCase();
+    
+    if (name.includes('.cpy') || name.includes('copybook')) {
+        return 'Copybook';
+    } else if (name.includes('.proc') || name.includes('procedure')) {
+        return 'JCL Procedure';
+    } else if (name.includes('.jcl') || upperContent.includes('//JOB ')) {
+        return 'JCL Job';
+    } else if (name.includes('.cbl') || name.includes('.cob') || 
+              upperContent.includes('IDENTIFICATION DIVISION') ||
+              upperContent.includes('PROGRAM-ID')) {
+        return 'COBOL Program';
+    } else {
+        return 'Text File';
+    }
+},
 
     // Calculate File Metrics
     calculateFileMetrics(content, fileType) {
@@ -3081,7 +3082,206 @@ enableAutoAnalysis() {
         
         return Math.min(complexity, 10);
     },
+// Location: Add this new method for JCL/PROC component extraction
+extractJCLComponents(content, fileType) {
+    const components = [];
+    const lines = content.split('\n');
+    const foundComponents = new Set();
+    
+    lines.forEach((line, index) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        if (!trimmed || trimmed.startsWith('//*')) return; // Skip comments
+        
+        // **EXTRACT: PROC statement (Procedure definition)**
+        const procMatch = trimmed.match(/^\/\/(\w+)\s+PROC/);
+        if (procMatch) {
+            const procName = procMatch[1];
+            if (!foundComponents.has(procName)) {
+                foundComponents.add(procName);
+                components.push({
+                    name: procName,
+                    type: 'JCL_PROCEDURE',
+                    lineNumber: index + 1,
+                    fileType: fileType,
+                    isMainComponent: true,
+                    businessPurpose: this.generateJCLBusinessPurpose(procName, 'PROCEDURE'),
+                    individualFieldCount: 0,
+                    isProcedureComponent: true
+                });
+            }
+        }
+        
+        // **EXTRACT: EXEC PGM statements (Program calls)**
+        const execPgmMatch = trimmed.match(/^\/\/\w+\s+EXEC\s+(?:PGM=)?(\w+)/);
+        if (execPgmMatch) {
+            const programName = execPgmMatch[1];
+            if (!foundComponents.has(programName)) {
+                foundComponents.add(programName);
+                components.push({
+                    name: programName,
+                    type: 'EXECUTED_PROGRAM',
+                    lineNumber: index + 1,
+                    fileType: fileType,
+                    isMainComponent: false,
+                    businessPurpose: this.generateJCLBusinessPurpose(programName, 'PROGRAM'),
+                    individualFieldCount: 0,
+                    isReference: true
+                });
+            }
+        }
+        
+        // **EXTRACT: EXEC PROC statements (Procedure calls)**
+        const execProcMatch = trimmed.match(/^\/\/\w+\s+EXEC\s+(?:PROC=)?(\w+)/);
+        if (execProcMatch && !execProcMatch[1].includes('PGM')) {
+            const procName = execProcMatch[1];
+            if (!foundComponents.has(procName)) {
+                foundComponents.add(procName);
+                components.push({
+                    name: procName,
+                    type: 'CALLED_PROCEDURE',
+                    lineNumber: index + 1,
+                    fileType: fileType,
+                    isMainComponent: false,
+                    businessPurpose: this.generateJCLBusinessPurpose(procName, 'CALLED_PROC'),
+                    individualFieldCount: 0,
+                    isReference: true
+                });
+            }
+        }
+        
+        // **EXTRACT: DD statements (Dataset references)**
+        const ddMatch = trimmed.match(/^\/\/(\w+)\s+DD\s+.*DSN=([A-Z0-9\.\-\_]+)/);
+        if (ddMatch) {
+            const ddName = ddMatch[1];
+            const datasetName = ddMatch[2];
+            
+            if (!foundComponents.has(ddName)) {
+                foundComponents.add(ddName);
+                components.push({
+                    name: ddName,
+                    type: 'DATASET_DD',
+                    datasetName: datasetName,
+                    lineNumber: index + 1,
+                    fileType: fileType,
+                    isMainComponent: false,
+                    businessPurpose: this.generateJCLBusinessPurpose(ddName, 'DATASET'),
+                    individualFieldCount: 0,
+                    isReference: true
+                });
+            }
+        }
+        
+        // **EXTRACT: Step names**
+        const stepMatch = trimmed.match(/^\/\/(\w+)\s+EXEC\s+/);
+        if (stepMatch) {
+            const stepName = stepMatch[1];
+            if (!foundComponents.has(stepName)) {
+                foundComponents.add(stepName);
+                components.push({
+                    name: stepName,
+                    type: 'JCL_STEP',
+                    lineNumber: index + 1,
+                    fileType: fileType,
+                    isMainComponent: false,
+                    businessPurpose: this.generateJCLBusinessPurpose(stepName, 'STEP'),
+                    individualFieldCount: 0
+                });
+            }
+        }
+    });
+    
+    return components;
+},
 
+// Location: Add JCL-specific dependency extraction
+extractJCLDependencies(relevantFiles, dependencies) {
+    relevantFiles.forEach(file => {
+        if (file.type === 'JCL Job' || file.type === 'JCL Procedure') {
+            const content = file.content.toUpperCase();
+            const lines = content.split('\n');
+            
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                if (!trimmed || trimmed.startsWith('//*')) return;
+                
+                // Extract EXEC PGM dependencies
+                const execPgmMatch = trimmed.match(/^\/\/\w+\s+EXEC\s+(?:PGM=)?(\w+)/);
+                if (execPgmMatch) {
+                    const programName = execPgmMatch[1];
+                    this.safeCategorizeDependency(programName, 'program', dependencies);
+                }
+                
+                // Extract EXEC PROC dependencies
+                const execProcMatch = trimmed.match(/^\/\/\w+\s+EXEC\s+(?:PROC=)?(\w+)/);
+                if (execProcMatch && !execProcMatch[1].includes('PGM')) {
+                    const procName = execProcMatch[1];
+                    this.safeCategorizeDependency(procName, 'procedure', dependencies);
+                }
+                
+                // Extract dataset dependencies
+                const datasetMatch = trimmed.match(/DSN=([A-Z0-9\.\-\_]+)/);
+                if (datasetMatch) {
+                    const datasetName = datasetMatch[1];
+                    this.safeCategorizeDependency(datasetName, 'file', dependencies);
+                }
+            });
+        }
+    });
+},
+
+// Location: Add this helper method
+generateJCLBusinessPurpose(name, type) {
+    const upperName = name.toUpperCase();
+    
+    switch (type) {
+        case 'PROCEDURE':
+            if (upperName.includes('COPY') || upperName.includes('BACKUP')) {
+                return 'Data Copy and Backup Procedure';
+            } else if (upperName.includes('SORT') || upperName.includes('SRT')) {
+                return 'Data Sorting and Organization Procedure';
+            } else if (upperName.includes('LOAD') || upperName.includes('LD')) {
+                return 'Data Loading and Import Procedure';
+            } else if (upperName.includes('PROC') || upperName.includes('BATCH')) {
+                return 'Batch Processing Procedure';
+            } else {
+                return `JCL Procedure for ${name.toLowerCase().replace(/-/g, ' ')} operations`;
+            }
+            
+        case 'PROGRAM':
+            if (upperName.includes('SORT')) {
+                return 'Data Sorting Program (DFSORT/SYNCSORT)';
+            } else if (upperName.includes('IEBG') || upperName.includes('IEBCOPY')) {
+                return 'Dataset Copy and Management Utility';
+            } else if (upperName.includes('IDCAMS')) {
+                return 'VSAM Dataset Management Utility';
+            } else if (upperName.includes('IEFBR14')) {
+                return 'Null Program for Dataset Allocation';
+            } else {
+                return `Business Application Program: ${name}`;
+            }
+            
+        case 'CALLED_PROC':
+            return `Called JCL Procedure: ${name}`;
+            
+        case 'DATASET':
+            if (upperName.includes('INPUT') || upperName.includes('IN')) {
+                return 'Input Dataset Reference';
+            } else if (upperName.includes('OUTPUT') || upperName.includes('OUT')) {
+                return 'Output Dataset Reference';
+            } else if (upperName.includes('WORK') || upperName.includes('TEMP')) {
+                return 'Temporary Work Dataset';
+            } else {
+                return `Dataset Reference: ${name}`;
+            }
+            
+        case 'STEP':
+            return `JCL Execution Step: ${name}`;
+            
+        default:
+            return `JCL Component: ${name}`;
+    }
+},
     extractCobolCode(line) {
     // If line is shorter than 6 characters, return as-is
     if (line.length <= 6) {
@@ -3107,15 +3307,23 @@ enableAutoAnalysis() {
 
     // Extract Components from Files
   extractComponentsFromFile(content, fileType) {
+    
+    if (fileType === 'JCL Job' || fileType === 'JCL Procedure') {
+        return this.extractJCLComponents(content, fileType);
+    }
+    
     const components = [];
     const lines = content.split('\n');
     const foundComponents = new Set(); // Prevent duplicates
+    
+
 
     let inDataDivision = false;
     let inWorkingStorage = false;
     let inLinkageSection = false;
     let inFileSection = false;
     let inLocalStorage = false;
+
 
     lines.forEach((line, index) => {
         // **EXTRACT COBOL CODE FROM COLUMN 7 ONWARDS**
@@ -6064,6 +6272,8 @@ isRecordInsideProgram(componentName, relevantFiles) {
     }
     
     try {
+        // Process JCL/PROC files
+        this.extractJCLDependencies(relevantFiles, dependencies);
         for (const file of relevantFiles) {
             if (!file || !file.content) {
                 console.warn('Skipping invalid file in dependency analysis');
@@ -6134,15 +6344,17 @@ isRecordInsideProgram(componentName, relevantFiles) {
         }
         
         // **SAFE SUMMARY CALCULATION**
-        dependencies.summary.foundCount = 
+       dependencies.summary.foundCount = 
             (dependencies.found.copybooks?.length || 0) + 
             (dependencies.found.programs?.length || 0) + 
-            (dependencies.found.files?.length || 0);
+            (dependencies.found.files?.length || 0) +
+            (dependencies.found.procedures?.length || 0);
             
         dependencies.summary.missingCount = 
             (dependencies.missing.copybooks?.length || 0) + 
             (dependencies.missing.programs?.length || 0) + 
-            (dependencies.missing.files?.length || 0);
+            (dependencies.missing.files?.length || 0) +
+            (dependencies.missing.procedures?.length || 0);
             
         dependencies.summary.interfaceCount = dependencies.systemInterfaces?.length || 0;
         
@@ -9750,37 +9962,41 @@ generateDependencyDiagram(dependencyAnalysis) {
 
     // **NEW METHOD: Get File Type Icon**
     getFileTypeIcon(fileType) {
-        switch(fileType) {
-            case 'COBOL Program': return '💼';
-            case 'Copybook': return '📚';
-            case 'JCL Job': return '⚙️';
-            case 'JCL Procedure': return '🔧';
-            default: return '📄';
-        }
-    },
+    switch(fileType) {
+        case 'COBOL Program': return '💼';
+        case 'Copybook': return '📚';
+        case 'JCL Job': return '⚙️';
+        case 'JCL Procedure': return '🔧'; // New icon for procedures
+        default: return '📄';
+    }
+},
 
     // **NEW METHOD: Get File Type Color**
     getFileTypeColor(fileType) {
-        switch(fileType) {
-            case 'COBOL Program': return 'var(--primary-blue)';
-            case 'Copybook': return 'var(--success-green)';
-            case 'JCL Job': return 'var(--warning-yellow)';
-            case 'JCL Procedure': return 'var(--info-blue)';
-            default: return 'var(--grey-500)';
-        }
-    },
-
+    switch(fileType) {
+        case 'COBOL Program': return 'var(--primary-blue)';
+        case 'Copybook': return 'var(--success-green)';
+        case 'JCL Job': return 'var(--warning-yellow)';
+        case 'JCL Procedure': return 'var(--purple)'; // New color for procedures
+        default: return 'var(--grey-500)';
+    }
+},
     // **NEW METHOD: Get Component Type Icon**
     getComponentTypeIcon(componentType) {
-        switch(componentType) {
-            case 'PROGRAM': return '💼';
-            case 'RECORD_LAYOUT': return '📋';
-            case 'COPYBOOK': return '📚';
-            case 'FILE': return '📄';
-            case 'FIELD': return '🏷️';
-            default: return '📦';
-        }
-    },
+    switch(componentType) {
+        case 'PROGRAM': return '💼';
+        case 'RECORD_LAYOUT': return '📋';
+        case 'COPYBOOK': return '📚';
+        case 'FILE': return '📄';
+        case 'FIELD': return '🏷️';
+        case 'JCL_PROCEDURE': return '🔧';
+        case 'EXECUTED_PROGRAM': return '▶️';
+        case 'CALLED_PROCEDURE': return '🔗';
+        case 'DATASET_DD': return '💾';
+        case 'JCL_STEP': return '📝';
+        default: return '📦';
+    }
+},
 
     // **NEW METHOD: Toggle File Expansion**
     toggleFileExpansion(fileIndex) {
