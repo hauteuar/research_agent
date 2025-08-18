@@ -7968,7 +7968,7 @@ Select any component from the dashboard to get contextual suggestions!`);
 
     // Get Chat Response
     // Location: Update getChatResponse method
-getChatResponse(message) {
+ async getChatResponse(message) {
     // **SMART CONTEXT BUILDING** - Only relevant information
     const context = this.buildChatContext(message);
     
