@@ -7990,6 +7990,245 @@ Provide a detailed, code-specific response:`;
         return this.generateFallbackResponse(message);
     }
 },
+// Location: Add this new method
+getDependencyCode() {
+    let dependencyCode = '\nDEPENDENCY ANALYSIS CODE\n' + '='.repeat(50) + '\n';
+    
+    this.uploadedFiles.forEach(file => {
+        const lines = file.content.split('\n');
+        const relevantLines = [];
+        
+        lines.forEach((line, index) => {
+            const trimmed = line.trim().toUpperCase();
+            
+            // Look for COPY statements
+            if (trimmed.includes('COPY ') || trimmed.includes('INCLUDE ')) {
+                const start = Math.max(0, index - 1);
+                const end = Math.min(lines.length, index + 2);
+                
+                for (let i = start; i < end; i++) {
+                    const marker = i === index ? '>>> ' : '    ';
+                    relevantLines.push(`${(i + 1).toString().padStart(4, ' ')}${marker}${lines[i]}`);
+                }
+                relevantLines.push('');
+            }
+            
+            // Look for CALL statements
+            if (trimmed.includes('CALL ')) {
+                const start = Math.max(0, index - 1);
+                const end = Math.min(lines.length, index + 2);
+                
+                for (let i = start; i < end; i++) {
+                    const marker = i === index ? '>>> ' : '    ';
+                    relevantLines.push(`${(i + 1).toString().padStart(4, ' ')}${marker}${lines[i]}`);
+                }
+                relevantLines.push('');
+            }
+            
+            // Look for file operations
+            if (trimmed.includes('SELECT ') && trimmed.includes('ASSIGN') ||
+                trimmed.includes('FD ') || trimmed.includes('OPEN ') || 
+                trimmed.includes('READ ') || trimmed.includes('WRITE ')) {
+                const start = Math.max(0, index - 1);
+                const end = Math.min(lines.length, index + 2);
+                
+                for (let i = start; i < end; i++) {
+                    const marker = i === index ? '>>> ' : '    ';
+                    relevantLines.push(`${(i + 1).toString().padStart(4, ' ')}${marker}${lines[i]}`);
+                }
+                relevantLines.push('');
+            }
+        });
+        
+        if (relevantLines.length > 0) {
+            dependencyCode += `\n--- ${file.name} ---\n`;
+            dependencyCode += relevantLines.join('\n');
+        }
+    });
+    
+    return dependencyCode;
+},
+
+// **NEW METHOD: Get Data Flow Code**
+getDataFlowCode() {
+    let dataFlowCode = '\nDATA FLOW ANALYSIS CODE\n' + '='.repeat(50) + '\n';
+    
+    this.uploadedFiles.forEach(file => {
+        const lines = file.content.split('\n');
+        const relevantLines = [];
+        
+        lines.forEach((line, index) => {
+            const trimmed = line.trim().toUpperCase();
+            
+            // Look for data movement operations
+            if (trimmed.includes('MOVE ') || trimmed.includes('COMPUTE ') ||
+                trimmed.includes('ADD ') || trimmed.includes('SUBTRACT ') ||
+                trimmed.includes('MULTIPLY ') || trimmed.includes('DIVIDE ')) {
+                const start = Math.max(0, index - 1);
+                const end = Math.min(lines.length, index + 2);
+                
+                for (let i = start; i < end; i++) {
+                    const marker = i === index ? '>>> ' : '    ';
+                    relevantLines.push(`${(i + 1).toString().padStart(4, ' ')}${marker}${lines[i]}`);
+                }
+                relevantLines.push('');
+            }
+            
+            // Look for input operations
+            if (trimmed.includes('ACCEPT ') || trimmed.includes('READ ') ||
+                trimmed.includes('RECEIVE ') || trimmed.includes('GET ')) {
+                const start = Math.max(0, index - 1);
+                const end = Math.min(lines.length, index + 2);
+                
+                for (let i = start; i < end; i++) {
+                    const marker = i === index ? '>>> ' : '    ';
+                    relevantLines.push(`${(i + 1).toString().padStart(4, ' ')}${marker}${lines[i]}`);
+                }
+                relevantLines.push('');
+            }
+            
+            // Look for output operations
+            if (trimmed.includes('DISPLAY ') || trimmed.includes('WRITE ') ||
+                trimmed.includes('PRINT ') || trimmed.includes('SEND ') ||
+                trimmed.includes('PUT ')) {
+                const start = Math.max(0, index - 1);
+                const end = Math.min(lines.length, index + 2);
+                
+                for (let i = start; i < end; i++) {
+                    const marker = i === index ? '>>> ' : '    ';
+                    relevantLines.push(`${(i + 1).toString().padStart(4, ' ')}${marker}${lines[i]}`);
+                }
+                relevantLines.push('');
+            }
+            
+            // Look for file operations
+            if (trimmed.includes('OPEN ') || trimmed.includes('CLOSE ') ||
+                trimmed.includes('READ ') || trimmed.includes('WRITE ') ||
+                trimmed.includes('REWRITE ') || trimmed.includes('DELETE ')) {
+                const start = Math.max(0, index - 1);
+                const end = Math.min(lines.length, index + 2);
+                
+                for (let i = start; i < end; i++) {
+                    const marker = i === index ? '>>> ' : '    ';
+                    relevantLines.push(`${(i + 1).toString().padStart(4, ' ')}${marker}${lines[i]}`);
+                }
+                relevantLines.push('');
+            }
+            
+            // Look for data transformation operations
+            if (trimmed.includes('STRING ') || trimmed.includes('UNSTRING ') ||
+                trimmed.includes('INSPECT ') || trimmed.includes('TRANSFORM ') ||
+                trimmed.includes('EXAMINE ')) {
+                const start = Math.max(0, index - 1);
+                const end = Math.min(lines.length, index + 2);
+                
+                for (let i = start; i < end; i++) {
+                    const marker = i === index ? '>>> ' : '    ';
+                    relevantLines.push(`${(i + 1).toString().padStart(4, ' ')}${marker}${lines[i]}`);
+                }
+                relevantLines.push('');
+            }
+            
+            // Look for database operations
+            if (trimmed.includes('EXEC SQL') || trimmed.includes('SELECT ') ||
+                trimmed.includes('INSERT ') || trimmed.includes('UPDATE ') ||
+                trimmed.includes('DELETE ') || trimmed.includes('FETCH ')) {
+                const start = Math.max(0, index - 1);
+                const end = Math.min(lines.length, index + 3);
+                
+                for (let i = start; i < end; i++) {
+                    const marker = i === index ? '>>> ' : '    ';
+                    relevantLines.push(`${(i + 1).toString().padStart(4, ' ')}${lines[i] || ''}`);
+                }
+                relevantLines.push('');
+            }
+        });
+        
+        if (relevantLines.length > 0) {
+            dataFlowCode += `\n--- ${file.name} ---\n`;
+            dataFlowCode += relevantLines.join('\n');
+        }
+    });
+    
+    return dataFlowCode;
+},
+
+// **NEW METHOD: Get Business Logic Code**
+getBusinessLogicCode() {
+    let businessCode = '\nBUSINESS LOGIC ANALYSIS CODE\n' + '='.repeat(50) + '\n';
+    
+    this.uploadedFiles.forEach(file => {
+        const lines = file.content.split('\n');
+        const relevantLines = [];
+        
+        lines.forEach((line, index) => {
+            const trimmed = line.trim().toUpperCase();
+            
+            // Look for business validation logic
+            if (trimmed.includes('IF ') || trimmed.includes('WHEN ') ||
+                trimmed.includes('EVALUATE ') || trimmed.includes('VALIDATE ') ||
+                trimmed.includes('CHECK ') || trimmed.includes('VERIFY ')) {
+                const start = Math.max(0, index - 1);
+                const end = Math.min(lines.length, index + 4);
+                
+                for (let i = start; i < end; i++) {
+                    const marker = i === index ? '>>> ' : '    ';
+                    relevantLines.push(`${(i + 1).toString().padStart(4, ' ')}${marker}${lines[i]}`);
+                }
+                relevantLines.push('');
+            }
+            
+            // Look for business calculations
+            if (trimmed.includes('COMPUTE ') || trimmed.includes('CALCULATE ') ||
+                trimmed.includes('TOTAL ') || trimmed.includes('SUM ') ||
+                trimmed.includes('BALANCE ') || trimmed.includes('AMOUNT ')) {
+                const start = Math.max(0, index - 1);
+                const end = Math.min(lines.length, index + 3);
+                
+                for (let i = start; i < end; i++) {
+                    const marker = i === index ? '>>> ' : '    ';
+                    relevantLines.push(`${(i + 1).toString().padStart(4, ' ')}${marker}${lines[i]}`);
+                }
+                relevantLines.push('');
+            }
+            
+            // Look for error handling and business rules
+            if (trimmed.includes('ERROR ') || trimmed.includes('EXCEPTION ') ||
+                trimmed.includes('INVALID ') || trimmed.includes('REJECT ') ||
+                trimmed.includes('ABORT ') || trimmed.includes('ROLLBACK ')) {
+                const start = Math.max(0, index - 1);
+                const end = Math.min(lines.length, index + 3);
+                
+                for (let i = start; i < end; i++) {
+                    const marker = i === index ? '>>> ' : '    ';
+                    relevantLines.push(`${(i + 1).toString().padStart(4, ' ')}${marker}${lines[i]}`);
+                }
+                relevantLines.push('');
+            }
+            
+            // Look for business rule implementations
+            if (trimmed.includes('PERFORM ') && 
+                (trimmed.includes('VALIDATE') || trimmed.includes('CHECK') || 
+                 trimmed.includes('PROCESS') || trimmed.includes('CALCULATE'))) {
+                const start = Math.max(0, index - 1);
+                const end = Math.min(lines.length, index + 3);
+                
+                for (let i = start; i < end; i++) {
+                    const marker = i === index ? '>>> ' : '    ';
+                    relevantLines.push(`${(i + 1).toString().padStart(4, ' ')}${marker}${lines[i]}`);
+                }
+                relevantLines.push('');
+            }
+        });
+        
+        if (relevantLines.length > 0) {
+            businessCode += `\n--- ${file.name} ---\n`;
+            businessCode += relevantLines.join('\n');
+        }
+    });
+    
+    return businessCode;
+},
     // Build Chat Context
     // Location: Replace the buildChatContext method
 buildChatContext(message) {
