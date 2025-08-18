@@ -7969,28 +7969,30 @@ Select any component from the dashboard to get contextual suggestions!`);
     // Get Chat Response
     // Location: Update getChatResponse method
  async getChatResponse(message) {
-    // **SMART CONTEXT BUILDING** - Only relevant information
+    // **SMART CONTEXT BUILDING** - Only relevant information with actual code
     const context = this.buildChatContext(message);
     
     const prompt = `MAINFRAME ANALYSIS EXPERT
 
-You are analyzing COBOL/JCL mainframe systems. Provide specific, actionable responses based on the context provided.
+You are analyzing COBOL/JCL mainframe systems. Provide specific, actionable responses based on the ACTUAL CODE provided in the context.
 
-RELEVANT CONTEXT:
+RELEVANT CONTEXT WITH ACTUAL CODE:
 ${context}
 
 USER QUESTION: "${message}"
 
 INSTRUCTIONS:
 - Focus specifically on what the user asked
-- Reference actual code, field names, and components from the context
-- If analyzing dependencies, cite specific COPY/CALL statements
-- If discussing fields, mention actual PIC clauses and usage patterns
-- If explaining business logic, reference actual COBOL statements
+- Reference actual code, field names, and components from the REAL CODE provided above
+- If analyzing dependencies, cite specific COPY/CALL statements from the actual code
+- If discussing fields, mention actual PIC clauses and field definitions from the real code
+- If explaining business logic, reference actual COBOL statements and procedures from the code
+- Use the actual field names, variable names, and procedure names from the provided code
+- Don't create sample or hypothetical COBOL/JCL - use only what's in the actual code
 - Keep responses concise but detailed
 - Don't repeat information not relevant to the question
 
-Provide a focused, expert response:`;
+Provide a focused, expert response based on the ACTUAL CODE:`;
 
     try {
         const response = await this.callLLMAPI(prompt);
@@ -8252,49 +8254,148 @@ getBusinessLogicCode() {
     // Build Chat Context
     // Location: Replace the buildChatContext method
 //buildChatContext method with this enhanced version:javascript
-buildChatContext(message) {
-    const lowerMessage = message.toLowerCase();
-    let context = '';
+buildComponentSpecificContext(componentName, message) {
+    const component = this.discoveredComponents.get(componentName);
+    const result = this.analysisResults[componentName];
     
-    // **SMART CONTEXT SELECTION** - Only include relevant data
+    let context = `COMPONENT FOCUS: ${componentName}\n`;
+    context += `Business Name: ${component?.friendlyName || 'Not defined'}\n`;
+    context += `Type: ${component?.type || 'Unknown'}\n\n`;
     
-    // If user asks about specific component by name
-    const componentMatch = message.match(/\b([A-Z][A-Z0-9\-_]{3,})\b/);
-    if (componentMatch) {
-        const potentialComponent = componentMatch[1];
-        if (this.discoveredComponents.has(potentialComponent)) {
-            this.currentSelectedComponent = potentialComponent;
+    // **FIX: Add actual source code for this component**
+    const sourceCode = this.getComponentSourceCode(componentName);
+    if (sourceCode) {
+        context += `ACTUAL SOURCE CODE:\n${'='.repeat(40)}\n${sourceCode}\n${'='.repeat(40)}\n\n`;
+    }
+    
+    // **FIX: Add field structure if available**
+    if (result?.fieldAnalysis?.fields) {
+        context += `FIELD STRUCTURE:\n`;
+        result.fieldAnalysis.fields.slice(0, 20).forEach(field => {
+            const usage = field.usagePattern || this.determineFieldUsage(field, result.fieldAnalysis);
+            context += `- L${field.level} ${field.name}: ${field.picture || 'No PIC'} (${usage})\n`;
+        });
+        context += `\n`;
+    }
+    
+    // Add analysis results if available
+    if (result) {
+        context += `ANALYSIS RESULTS:\n`;
+        context += `Quality Score: ${result.qualityScore}/10\n`;
+        context += `Business Purpose: ${result.llmAnalysis?.businessPurpose || 'Not analyzed'}\n`;
+        
+        if (result.dependencyAnalysis) {
+            context += `Dependencies Found: ${result.dependencyAnalysis.summary.foundCount}\n`;
+            context += `Dependencies Missing: ${result.dependencyAnalysis.summary.missingCount}\n`;
         }
     }
     
-    // **CONTEXT 1: Specific Component Focus**
-    if (this.currentSelectedComponent && (lowerMessage.includes('this component') || lowerMessage.includes(this.currentSelectedComponent.toLowerCase()))) {
-        return this.buildComponentSpecificContext(this.currentSelectedComponent, message);
-    }
-    
-    // **CONTEXT 2: Dependency-related questions**
-    if (lowerMessage.includes('dependenc') || lowerMessage.includes('missing') || lowerMessage.includes('connect')) {
-        return this.buildDependencyContext(message);
-    }
-    
-    // **CONTEXT 3: Field-related questions**
-    if (lowerMessage.includes('field') || lowerMessage.includes('data') || lowerMessage.includes('record')) {
-        return this.buildFieldContext(message);
-    }
-    
-    // **CONTEXT 4: Business purpose questions**
-    if (lowerMessage.includes('business') || lowerMessage.includes('purpose') || lowerMessage.includes('what does')) {
-        return this.buildBusinessContext(message);
-    }
-    
-    // **CONTEXT 5: System-wide questions (only when needed)**
-    if (lowerMessage.includes('system') || lowerMessage.includes('overview') || lowerMessage.includes('all component')) {
-        return this.buildSystemOverviewContext();
-    }
-    
-    // **FALLBACK: Minimal context**
-    return this.buildMinimalContext();
+    return context;
 },
+getComponentSourceCode(componentName) {
+    const component = this.discoveredComponents.get(componentName);
+    if (!component || !component.fileSource) return null;
+    
+    // Find the source file
+    const sourceFile = this.uploadedFiles.find(f => f.name === component.fileSource);
+    if (!sourceFile) return null;
+    
+    const lines = sourceFile.content.split('\n');
+    
+    // **EXTRACT RELEVANT CODE SECTION**
+    if (component.type === 'COBOL Program') {
+        // For programs, return the entire file (truncated if too long)
+        return this.truncateCodeForLLM(sourceFile.content);
+    } else if (component.type === 'RECORD_LAYOUT' || component.type === 'COPYBOOK') {
+        // For records, extract the specific record structure
+        return this.extractRecordStructure(componentName, lines);
+    } else if (component.type === 'JCL_PROCEDURE' || component.type === 'JCL Job') {
+        // For JCL, return relevant procedure or job steps
+        return this.extractJCLStructure(componentName, lines);
+    }
+    
+    // Fallback: return context around the component
+    const startLine = Math.max(0, (component.lineNumber || 1) - 10);
+    const endLine = Math.min(lines.length, (component.lineNumber || 1) + 50);
+    
+    const codeSection = lines.slice(startLine, endLine).map((line, index) => {
+        const lineNum = startLine + index + 1;
+        const marker = lineNum === component.lineNumber ? '>>> ' : '    ';
+        return `${lineNum.toString().padStart(4, ' ')}${marker}${line}`;
+    }).join('\n');
+    
+    return codeSection;
+},
+truncateCodeForLLM(content) {
+    const maxLength = 3000; // Adjust based on your token limits
+    if (content.length <= maxLength) return content;
+    
+    // Try to truncate at a logical boundary
+    const truncated = content.substring(0, maxLength);
+    const lastLineBreak = truncated.lastIndexOf('\n');
+    
+    return lastLineBreak > maxLength * 0.8 ? 
+        truncated.substring(0, lastLineBreak) + '\n[... content truncated for chat context ...]' :
+        truncated + '\n[... content truncated for chat context ...]';
+},
+
+extractRecordStructure(componentName, lines) {
+    const componentUpper = componentName.toUpperCase();
+    let recordStart = -1;
+    let recordEnd = -1;
+    
+    // Find the 01-level record
+    lines.forEach((line, index) => {
+        const cobolCode = this.extractCobolCode(line);
+        const trimmed = cobolCode.toUpperCase();
+        
+        const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]+)/);
+        if (field01Match) {
+            if (field01Match[1] === componentUpper) {
+                recordStart = index;
+            } else if (recordStart !== -1 && field01Match[1] !== componentUpper) {
+                recordEnd = index;
+                return;
+            }
+        }
+    });
+    
+    if (recordStart === -1) return null;
+    if (recordEnd === -1) recordEnd = lines.length;
+    
+    // Extract the complete record structure
+    const recordLines = lines.slice(recordStart, recordEnd);
+    return recordLines.map((line, index) => {
+        const lineNum = recordStart + index + 1;
+        return `${lineNum.toString().padStart(4, ' ')}    ${line}`;
+    }).join('\n');
+},
+
+extractJCLStructure(componentName, lines) {
+    const componentUpper = componentName.toUpperCase();
+    let structureStart = -1;
+    let structureEnd = -1;
+    
+    lines.forEach((line, index) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // Find PROC definition or step with this name
+        if (trimmed.includes(`//${componentUpper}`) || trimmed.includes(`PROC=${componentUpper}`)) {
+            if (structureStart === -1) structureStart = index;
+            structureEnd = index + 20; // Get next 20 lines for context
+        }
+    });
+    
+    if (structureStart === -1) return null;
+    structureEnd = Math.min(structureEnd, lines.length);
+    
+    const jclLines = lines.slice(structureStart, structureEnd);
+    return jclLines.map((line, index) => {
+        const lineNum = structureStart + index + 1;
+        return `${lineNum.toString().padStart(4, ' ')}    ${line}`;
+    }).join('\n');
+},
+
 
 buildComponentSpecificContext(componentName, message) {
     const component = this.discoveredComponents.get(componentName);
@@ -8359,8 +8460,21 @@ buildFieldContext(message) {
             context += `FIELDS IN ${this.currentSelectedComponent}:\n`;
             result.fieldAnalysis.fields.slice(0, 10).forEach(field => {
                 const usage = field.usagePattern || this.determineFieldUsage(field, result.fieldAnalysis);
-                context += `- ${field.name} (L${field.level}): ${field.picture || 'No PIC'} - ${usage}\n`;
+                context += `- L${field.level} ${field.name}: ${field.picture || 'No PIC'} - ${usage}\n`;
+                
+                // **FIX: Add business meaning if available**
+                if (field.businessLogic?.businessMeaning) {
+                    context += `  Purpose: ${field.businessLogic.businessMeaning}\n`;
+                }
             });
+            context += `\n`;
+        }
+        
+        // **FIX: Add relevant code showing field usage**
+        const sourceCode = this.getComponentSourceCode(this.currentSelectedComponent);
+        if (sourceCode) {
+            context += `RELEVANT CODE SHOWING FIELD USAGE:\n`;
+            context += `${sourceCode}\n\n`;
         }
     }
     
@@ -8372,6 +8486,7 @@ buildFieldContext(message) {
     
     return context;
 },
+
 
 buildBusinessContext(message) {
     let context = `BUSINESS INTELLIGENCE FOCUS:\n\n`;
