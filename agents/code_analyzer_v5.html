@@ -7945,51 +7945,55 @@ Select any component from the dashboard to get contextual suggestions!`);
     },
 
     // Get Chat Response
-    async getChatResponse(message) {
-        const context = this.buildChatContext(message);
-        
-        const prompt = `BUSINESS INTELLIGENCE CHAT ASSISTANT
+    // Location: Update getChatResponse method
+async getChatResponse(message) {
+    const context = this.buildChatContext(message);
+    
+    // **ENHANCED PROMPT WITH ACTUAL CODE**
+    const prompt = `MAINFRAME CODE ANALYSIS CHAT
 
-CONTEXT:
+You are a mainframe expert analyzing actual COBOL/JCL source code. Provide specific, detailed responses based on the actual code provided, not generic information.
+
+CONTEXT WITH ACTUAL SOURCE CODE:
 ${context}
 
 USER QUESTION: "${message}"
 
 INSTRUCTIONS:
-- Provide intelligent, business-focused insights based on the analysis data
-- Use specific component names, statistics, and recommendations from the context
-- Format response in markdown for readability with **bold** text for emphasis
-- Be conversational but professional
-- If asked about specific components, reference their analysis data
-- For dependency questions, highlight critical missing items
-- For optimization questions, provide concrete modernization suggestions
-- If information is not available in the context, say so clearly
+- Analyze the ACTUAL code provided above, don't give generic responses
+- Reference specific line numbers, field names, and code constructs you see
+- Explain business logic based on the actual COBOL/JCL statements
+- Point out specific patterns, calculations, and data movements in the code
+- If asked about fields, explain their actual usage in the code shown
+- If asked about business logic, cite the specific COBOL statements that implement it
+- If asked about dependencies, reference the actual COPY/CALL statements in the code
+- Be specific about what you observe in the source code
 
-RESPONSE:`;
+Provide a detailed, code-specific response:`;
 
-        try {
-            const response = await this.callLLMAPI(prompt);
-            
-            // Handle different response types
-            if (typeof response === 'string') {
-                return response;
-            } else if (response && response.businessPurpose) {
-                return response.businessPurpose;
-            } else if (response && response.rawResponse) {
-                return response.rawResponse;
-            } else {
-                return this.generateFallbackResponse(message);
-            }
-            
-        } catch (error) {
-            console.error('Chat response failed:', error);
+    try {
+        const response = await this.callLLMAPI(prompt);
+        
+        // **PRIORITIZE FULL RESPONSE FOR CODE ANALYSIS**
+        if (typeof response === 'string') {
+            return response; // Full LLM response
+        } else if (response && response.rawResponse) {
+            return response.rawResponse; // Full LLM response
+        } else if (response && response.businessPurpose) {
+            return response.businessPurpose; // Fallback to structured field
+        } else {
             return this.generateFallbackResponse(message);
         }
-    },
-
+        
+    } catch (error) {
+        console.error('Chat response failed:', error);
+        return this.generateFallbackResponse(message);
+    }
+},
     // Build Chat Context
-    buildChatContext(message) {
-        let context = `SYSTEM OVERVIEW:
+    // Location: Replace the buildChatContext method
+buildChatContext(message) {
+    let context = `SYSTEM OVERVIEW:
 - Total Components: ${this.discoveredComponents.size}
 - Analyzed Components: ${Object.keys(this.analysisResults).length}
 - Files Uploaded: ${this.uploadedFiles.length}
@@ -7997,39 +8001,201 @@ RESPONSE:`;
 
 `;
 
-        // Add component summaries
-        if (Object.keys(this.analysisResults).length > 0) {
-            context += `ANALYZED COMPONENTS:\n`;
-            Object.entries(this.analysisResults).slice(0, 5).forEach(([name, result]) => {
-                const comp = this.discoveredComponents.get(name);
-                context += `- ${name} (${comp?.friendlyName || name}): ${result.componentType}\n`;
-                context += `  Purpose: ${result.llmAnalysis?.businessPurpose?.substring(0, 150) || 'Not available'}...\n`;
-                if (result.qualityScore) {
-                    context += `  Quality Score: ${result.qualityScore}/10\n`;
-                }
-                if (result.llmAnalysis?.riskAssessment) {
-                    context += `  Risk Level: ${result.llmAnalysis.riskAssessment}\n`;
-                }
+    // **NEW: Add actual source code for selected component**
+    if (this.currentSelectedComponent) {
+        const component = this.discoveredComponents.get(this.currentSelectedComponent);
+        const result = this.analysisResults[this.currentSelectedComponent];
+        
+        context += `SELECTED COMPONENT FOCUS: ${this.currentSelectedComponent}\n`;
+        context += `Business Name: ${component?.friendlyName || 'Not defined'}\n`;
+        context += `Type: ${component?.type || 'Unknown'}\n`;
+        context += `File Source: ${component?.fileSource || 'Unknown'}\n\n`;
+        
+        // **ADD ACTUAL SOURCE CODE**
+        const sourceCode = this.getComponentSourceCode(this.currentSelectedComponent);
+        if (sourceCode) {
+            context += `ACTUAL SOURCE CODE FOR ${this.currentSelectedComponent}:\n`;
+            context += `${'='.repeat(60)}\n`;
+            context += sourceCode;
+            context += `\n${'='.repeat(60)}\n\n`;
+        }
+        
+        // **ADD FIELD DETAILS IF AVAILABLE**
+        if (result?.fieldAnalysis?.fields) {
+            context += `FIELD STRUCTURE DETAILS:\n`;
+            result.fieldAnalysis.fields.slice(0, 20).forEach(field => {
+                const usage = field.usagePattern || this.determineFieldUsage(field, result.fieldAnalysis);
+                context += `- ${field.name} (L${field.level}): ${field.picture || 'No PIC'} - ${usage}\n`;
             });
-            context += '\n';
+            context += `\n`;
         }
-
-        // Add dependency summary
-        const totalMissing = Object.values(this.analysisResults).reduce((sum, result) => 
-            sum + (result.dependencyAnalysis?.summary?.missingCount || 0), 0);
-        if (totalMissing > 0) {
-            context += `DEPENDENCIES:\n- Total Missing Dependencies: ${totalMissing}\n\n`;
+        
+        // **ADD DEPENDENCY CONTEXT**
+        if (result?.dependencyAnalysis) {
+            context += `DEPENDENCY DETAILS:\n`;
+            context += `Found Programs: ${result.dependencyAnalysis.found.programs.join(', ') || 'None'}\n`;
+            context += `Found Copybooks: ${result.dependencyAnalysis.found.copybooks.join(', ') || 'None'}\n`;
+            context += `Missing Dependencies: ${[...result.dependencyAnalysis.missing.programs, ...result.dependencyAnalysis.missing.copybooks].join(', ') || 'None'}\n\n`;
         }
+    }
 
-        // Add specific component context if selected
-        if (this.currentSelectedComponent && this.analysisResults[this.currentSelectedComponent]) {
-            const selectedResult = this.analysisResults[this.currentSelectedComponent];
-            context += `CURRENT COMPONENT FOCUS: ${this.currentSelectedComponent}\n`;
-            context += `Analysis: ${JSON.stringify(selectedResult, null, 2).substring(0, 1500)}\n\n`;
+    // **ADD RELATED SOURCE CODE FOR CONTEXT**
+    const relatedCode = this.getRelatedSourceCode(message);
+    if (relatedCode) {
+        context += `RELATED SOURCE CODE:\n`;
+        context += `${'='.repeat(60)}\n`;
+        context += relatedCode;
+        context += `\n${'='.repeat(60)}\n\n`;
+    }
+
+    return context;
+},// Location: Add this new method
+getComponentSourceCode(componentName) {
+    const component = this.discoveredComponents.get(componentName);
+    if (!component || !component.fileSource) return null;
+    
+    // Find the source file
+    const sourceFile = this.uploadedFiles.find(f => f.name === component.fileSource);
+    if (!sourceFile) return null;
+    
+    const lines = sourceFile.content.split('\n');
+    
+    // **EXTRACT RELEVANT CODE SECTION**
+    if (component.type === 'COBOL Program') {
+        // For programs, return the entire file (truncated if too long)
+        return this.truncateCodeForLLM(sourceFile.content);
+    } else if (component.type === 'RECORD_LAYOUT' || component.type === 'COPYBOOK') {
+        // For records, extract the specific record structure
+        return this.extractRecordStructure(componentName, lines);
+    } else if (component.type === 'JCL_PROCEDURE' || component.type === 'JCL Job') {
+        // For JCL, return relevant procedure or job steps
+        return this.extractJCLStructure(componentName, lines);
+    }
+    
+    // Fallback: return context around the component
+    const startLine = Math.max(0, (component.lineNumber || 1) - 10);
+    const endLine = Math.min(lines.length, (component.lineNumber || 1) + 50);
+    
+    const codeSection = lines.slice(startLine, endLine).map((line, index) => {
+        const lineNum = startLine + index + 1;
+        const marker = lineNum === component.lineNumber ? '>>> ' : '    ';
+        return `${lineNum.toString().padStart(4, ' ')}${marker}${line}`;
+    }).join('\n');
+    
+    return codeSection;
+},// Location: Add this new method
+extractRecordStructure(componentName, lines) {
+    const componentUpper = componentName.toUpperCase();
+    let recordStart = -1;
+    let recordEnd = -1;
+    
+    // Find the 01-level record
+    lines.forEach((line, index) => {
+        const cobolCode = this.extractCobolCode(line);
+        const trimmed = cobolCode.toUpperCase();
+        
+        const field01Match = trimmed.match(/^\s*01\s+([A-Z][A-Z0-9\-_]+)/);
+        if (field01Match) {
+            if (field01Match[1] === componentUpper) {
+                recordStart = index;
+            } else if (recordStart !== -1 && field01Match[1] !== componentUpper) {
+                recordEnd = index;
+                return;
+            }
         }
-
-        return context;
-    },
+    });
+    
+    if (recordStart === -1) return null;
+    if (recordEnd === -1) recordEnd = lines.length;
+    
+    // Extract the complete record structure
+    const recordLines = lines.slice(recordStart, recordEnd);
+    return recordLines.map((line, index) => {
+        const lineNum = recordStart + index + 1;
+        return `${lineNum.toString().padStart(4, ' ')}    ${line}`;
+    }).join('\n');
+},// Location: Add this new method
+extractJCLStructure(componentName, lines) {
+    const componentUpper = componentName.toUpperCase();
+    let structureStart = -1;
+    let structureEnd = -1;
+    
+    lines.forEach((line, index) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // Find PROC definition or step with this name
+        if (trimmed.includes(`//${componentUpper}`) || trimmed.includes(`PROC=${componentUpper}`)) {
+            if (structureStart === -1) structureStart = index;
+            structureEnd = index + 20; // Get next 20 lines for context
+        }
+    });
+    
+    if (structureStart === -1) return null;
+    structureEnd = Math.min(structureEnd, lines.length);
+    
+    const jclLines = lines.slice(structureStart, structureEnd);
+    return jclLines.map((line, index) => {
+        const lineNum = structureStart + index + 1;
+        return `${lineNum.toString().padStart(4, ' ')}    ${line}`;
+    }).join('\n');
+},// Location: Add this new method
+getRelatedSourceCode(message) {
+    const lowerMessage = message.toLowerCase();
+    let relatedCode = '';
+    
+    // **FIELD-SPECIFIC QUERIES**
+    const fieldMatch = message.match(/field\s+([A-Z][A-Z0-9\-_]+)/i);
+    if (fieldMatch) {
+        const fieldName = fieldMatch[1].toUpperCase();
+        relatedCode += this.getFieldUsageCode(fieldName);
+    }
+    
+    // **DEPENDENCY-SPECIFIC QUERIES**
+    if (lowerMessage.includes('dependency') || lowerMessage.includes('missing') || lowerMessage.includes('call')) {
+        relatedCode += this.getDependencyCode();
+    }
+    
+    // **BUSINESS LOGIC QUERIES**
+    if (lowerMessage.includes('business logic') || lowerMessage.includes('business rule') || lowerMessage.includes('validation')) {
+        relatedCode += this.getBusinessLogicCode();
+    }
+    
+    // **DATA FLOW QUERIES**
+    if (lowerMessage.includes('data flow') || lowerMessage.includes('input') || lowerMessage.includes('output')) {
+        relatedCode += this.getDataFlowCode();
+    }
+    
+    return relatedCode;
+},// Location: Add this new method
+getFieldUsageCode(fieldName) {
+    let usageCode = `\nFIELD USAGE ANALYSIS FOR: ${fieldName}\n${'='.repeat(50)}\n`;
+    
+    this.uploadedFiles.forEach(file => {
+        const lines = file.content.split('\n');
+        const relevantLines = [];
+        
+        lines.forEach((line, index) => {
+            if (line.toUpperCase().includes(fieldName)) {
+                // Add context: 2 lines before and after
+                const start = Math.max(0, index - 2);
+                const end = Math.min(lines.length, index + 3);
+                
+                for (let i = start; i < end; i++) {
+                    const marker = i === index ? '>>> ' : '    ';
+                    relevantLines.push(`${(i + 1).toString().padStart(4, ' ')}${marker}${lines[i]}`);
+                }
+                relevantLines.push(''); // Add separator
+            }
+        });
+        
+        if (relevantLines.length > 0) {
+            usageCode += `\n--- ${file.name} ---\n`;
+            usageCode += relevantLines.join('\n');
+        }
+    });
+    
+    return usageCode;
+},
     async getBusinessIntelligenceFromLLM(componentName, friendlyName, componentType, relevantFiles, dependencyAnalysis, fieldAnalysis) {
     const fileContents = relevantFiles.map(f => `=== ${f.name} (${f.type}) ===\n${f.content}`).join('\n\n');
     
