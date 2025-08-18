@@ -7855,35 +7855,36 @@ Select any component from the dashboard to get contextual suggestions!`);
 
     // Send Chat Message
     async sendChatMessage() {
-        const chatInput = document.getElementById('chatInput');
-        const message = chatInput.value.trim();
+    const chatInput = document.getElementById('chatInput');
+    const message = chatInput.value.trim();
+    
+    if (!message) return;
+    
+    // **SMART CONTEXT DETECTION**
+    this.detectChatContext(message);
+    
+    // Clear input and add user message
+    chatInput.value = '';
+    chatInput.style.height = 'auto';
+    this.addChatMessage('user', message);
+    
+    // Show typing indicator
+    this.showTypingIndicator();
+    
+    try {
+        // **FOCUSED RESPONSE** based on context
+        const response = await this.getChatResponse(message);
         
-        if (!message) return;
+        this.hideTypingIndicator();
+        this.addChatMessage('assistant', response);
         
-        // Clear input and add user message
-        chatInput.value = '';
-        chatInput.style.height = 'auto';
-        this.addChatMessage('user', message);
+        this.saveChatToDatabase(message, response);
         
-        // Show typing indicator
-        this.showTypingIndicator();
-        
-        try {
-            // Get contextual response
-            const response = await this.getChatResponse(message);
-            
-            // Remove typing indicator and add response
-            this.hideTypingIndicator();
-            this.addChatMessage('assistant', response);
-            
-            // Save chat to database
-            this.saveChatToDatabase(message, response);
-            
-        } catch (error) {
-            this.hideTypingIndicator();
-            this.addChatMessage('assistant', `❌ **Error:** ${error.message}\n\nPlease check your LLM connection and try again.`);
-        }
-    },
+    } catch (error) {
+        this.hideTypingIndicator();
+        this.addChatMessage('assistant', `❌ **Error:** ${error.message}`);
+    }
+},
 
     // Add Chat Message to UI
     addChatMessage(sender, content) {
@@ -7943,44 +7944,63 @@ Select any component from the dashboard to get contextual suggestions!`);
             typingIndicator.remove();
         }
     },
+    detectChatContext(message) {
+    const lowerMessage = message.toLowerCase();
+    
+    // Auto-switch context based on message content
+    if (lowerMessage.includes('dependenc') || lowerMessage.includes('missing')) {
+        this.updateChatContext('dependencies', '');
+    } else if (lowerMessage.includes('field') || lowerMessage.includes('record')) {
+        this.updateChatContext('component', this.currentSelectedComponent);
+    } else if (lowerMessage.includes('moderniz') || lowerMessage.includes('optim')) {
+        this.updateChatContext('modernization', '');
+    }
+    
+    // Detect component mentions
+    const componentMatch = message.match(/\b([A-Z][A-Z0-9\-_]{3,})\b/);
+    if (componentMatch && this.discoveredComponents.has(componentMatch[1])) {
+        this.updateChatContext('component', componentMatch[1]);
+        return componentMatch[1];
+    }
+    
+    return null;
+},
 
     // Get Chat Response
     // Location: Update getChatResponse method
-async getChatResponse(message) {
+getChatResponse(message) {
+    // **SMART CONTEXT BUILDING** - Only relevant information
     const context = this.buildChatContext(message);
     
-    // **ENHANCED PROMPT WITH ACTUAL CODE**
-    const prompt = `MAINFRAME CODE ANALYSIS CHAT
+    const prompt = `MAINFRAME ANALYSIS EXPERT
 
-You are a mainframe expert analyzing actual COBOL/JCL source code. Provide specific, detailed responses based on the actual code provided, not generic information.
+You are analyzing COBOL/JCL mainframe systems. Provide specific, actionable responses based on the context provided.
 
-CONTEXT WITH ACTUAL SOURCE CODE:
+RELEVANT CONTEXT:
 ${context}
 
 USER QUESTION: "${message}"
 
 INSTRUCTIONS:
-- Analyze the ACTUAL code provided above, don't give generic responses
-- Reference specific line numbers, field names, and code constructs you see
-- Explain business logic based on the actual COBOL/JCL statements
-- Point out specific patterns, calculations, and data movements in the code
-- If asked about fields, explain their actual usage in the code shown
-- If asked about business logic, cite the specific COBOL statements that implement it
-- If asked about dependencies, reference the actual COPY/CALL statements in the code
-- Be specific about what you observe in the source code
+- Focus specifically on what the user asked
+- Reference actual code, field names, and components from the context
+- If analyzing dependencies, cite specific COPY/CALL statements
+- If discussing fields, mention actual PIC clauses and usage patterns
+- If explaining business logic, reference actual COBOL statements
+- Keep responses concise but detailed
+- Don't repeat information not relevant to the question
 
-Provide a detailed, code-specific response:`;
+Provide a focused, expert response:`;
 
     try {
         const response = await this.callLLMAPI(prompt);
         
-        // **PRIORITIZE FULL RESPONSE FOR CODE ANALYSIS**
         if (typeof response === 'string') {
-            return response; // Full LLM response
+            return response;
         } else if (response && response.rawResponse) {
-            return response.rawResponse; // Full LLM response
+            return response.rawResponse;
         } else if (response && response.businessPurpose) {
-            return response.businessPurpose; // Fallback to structured field
+            return response.businessPurpose;
         } else {
             return this.generateFallbackResponse(message);
         }
@@ -8231,64 +8251,173 @@ getBusinessLogicCode() {
 },
     // Build Chat Context
     // Location: Replace the buildChatContext method
+//buildChatContext method with this enhanced version:javascript
 buildChatContext(message) {
-    let context = `SYSTEM OVERVIEW:
-- Total Components: ${this.discoveredComponents.size}
-- Analyzed Components: ${Object.keys(this.analysisResults).length}
-- Files Uploaded: ${this.uploadedFiles.length}
-- Current Selection: ${this.currentSelectedComponent || 'None'}
+    const lowerMessage = message.toLowerCase();
+    let context = '';
+    
+    // **SMART CONTEXT SELECTION** - Only include relevant data
+    
+    // If user asks about specific component by name
+    const componentMatch = message.match(/\b([A-Z][A-Z0-9\-_]{3,})\b/);
+    if (componentMatch) {
+        const potentialComponent = componentMatch[1];
+        if (this.discoveredComponents.has(potentialComponent)) {
+            this.currentSelectedComponent = potentialComponent;
+        }
+    }
+    
+    // **CONTEXT 1: Specific Component Focus**
+    if (this.currentSelectedComponent && (lowerMessage.includes('this component') || lowerMessage.includes(this.currentSelectedComponent.toLowerCase()))) {
+        return this.buildComponentSpecificContext(this.currentSelectedComponent, message);
+    }
+    
+    // **CONTEXT 2: Dependency-related questions**
+    if (lowerMessage.includes('dependenc') || lowerMessage.includes('missing') || lowerMessage.includes('connect')) {
+        return this.buildDependencyContext(message);
+    }
+    
+    // **CONTEXT 3: Field-related questions**
+    if (lowerMessage.includes('field') || lowerMessage.includes('data') || lowerMessage.includes('record')) {
+        return this.buildFieldContext(message);
+    }
+    
+    // **CONTEXT 4: Business purpose questions**
+    if (lowerMessage.includes('business') || lowerMessage.includes('purpose') || lowerMessage.includes('what does')) {
+        return this.buildBusinessContext(message);
+    }
+    
+    // **CONTEXT 5: System-wide questions (only when needed)**
+    if (lowerMessage.includes('system') || lowerMessage.includes('overview') || lowerMessage.includes('all component')) {
+        return this.buildSystemOverviewContext();
+    }
+    
+    // **FALLBACK: Minimal context**
+    return this.buildMinimalContext();
+},
 
-`;
-
-    // **NEW: Add actual source code for selected component**
-    if (this.currentSelectedComponent) {
-        const component = this.discoveredComponents.get(this.currentSelectedComponent);
-        const result = this.analysisResults[this.currentSelectedComponent];
+buildComponentSpecificContext(componentName, message) {
+    const component = this.discoveredComponents.get(componentName);
+    const result = this.analysisResults[componentName];
+    
+    let context = `COMPONENT FOCUS: ${componentName}\n`;
+    context += `Business Name: ${component?.friendlyName || 'Not defined'}\n`;
+    context += `Type: ${component?.type || 'Unknown'}\n\n`;
+    
+    // Add actual source code for this component
+    const sourceCode = this.getComponentSourceCode(componentName);
+    if (sourceCode) {
+        context += `ACTUAL SOURCE CODE:\n${'='.repeat(40)}\n${sourceCode}\n${'='.repeat(40)}\n\n`;
+    }
+    
+    // Add analysis results if available
+    if (result) {
+        context += `ANALYSIS RESULTS:\n`;
+        context += `Quality Score: ${result.qualityScore}/10\n`;
+        context += `Business Purpose: ${result.llmAnalysis?.businessPurpose || 'Not analyzed'}\n`;
         
-        context += `SELECTED COMPONENT FOCUS: ${this.currentSelectedComponent}\n`;
-        context += `Business Name: ${component?.friendlyName || 'Not defined'}\n`;
-        context += `Type: ${component?.type || 'Unknown'}\n`;
-        context += `File Source: ${component?.fileSource || 'Unknown'}\n\n`;
-        
-        // **ADD ACTUAL SOURCE CODE**
-        const sourceCode = this.getComponentSourceCode(this.currentSelectedComponent);
-        if (sourceCode) {
-            context += `ACTUAL SOURCE CODE FOR ${this.currentSelectedComponent}:\n`;
-            context += `${'='.repeat(60)}\n`;
-            context += sourceCode;
-            context += `\n${'='.repeat(60)}\n\n`;
+        if (result.dependencyAnalysis) {
+            context += `Dependencies Found: ${result.dependencyAnalysis.summary.foundCount}\n`;
+            context += `Dependencies Missing: ${result.dependencyAnalysis.summary.missingCount}\n`;
         }
         
-        // **ADD FIELD DETAILS IF AVAILABLE**
+        if (result.fieldAnalysis?.fields) {
+            context += `Total Fields: ${result.fieldAnalysis.fields.length}\n`;
+        }
+    }
+    
+    return context;
+},
+buildDependencyContext(message) {
+    let context = `DEPENDENCY ANALYSIS FOCUS:\n\n`;
+    
+    // Include only components with dependency issues
+    const componentsWithMissingDeps = Object.entries(this.analysisResults)
+        .filter(([name, result]) => result.dependencyAnalysis?.summary?.missingCount > 0)
+        .slice(0, 5); // Limit to 5 most problematic
+    
+    if (componentsWithMissingDeps.length > 0) {
+        context += `COMPONENTS WITH MISSING DEPENDENCIES:\n`;
+        componentsWithMissingDeps.forEach(([name, result]) => {
+            context += `- ${name}: ${result.dependencyAnalysis.summary.missingCount} missing\n`;
+            context += `  Missing: ${[...result.dependencyAnalysis.missing.copybooks, ...result.dependencyAnalysis.missing.programs].join(', ')}\n`;
+        });
+    }
+    
+    // Add dependency code patterns
+    context += this.getDependencyCode();
+    
+    return context;
+},
+
+buildFieldContext(message) {
+    let context = `FIELD ANALYSIS FOCUS:\n\n`;
+    
+    if (this.currentSelectedComponent) {
+        const result = this.analysisResults[this.currentSelectedComponent];
         if (result?.fieldAnalysis?.fields) {
-            context += `FIELD STRUCTURE DETAILS:\n`;
-            result.fieldAnalysis.fields.slice(0, 20).forEach(field => {
+            context += `FIELDS IN ${this.currentSelectedComponent}:\n`;
+            result.fieldAnalysis.fields.slice(0, 10).forEach(field => {
                 const usage = field.usagePattern || this.determineFieldUsage(field, result.fieldAnalysis);
                 context += `- ${field.name} (L${field.level}): ${field.picture || 'No PIC'} - ${usage}\n`;
             });
-            context += `\n`;
-        }
-        
-        // **ADD DEPENDENCY CONTEXT**
-        if (result?.dependencyAnalysis) {
-            context += `DEPENDENCY DETAILS:\n`;
-            context += `Found Programs: ${result.dependencyAnalysis.found.programs.join(', ') || 'None'}\n`;
-            context += `Found Copybooks: ${result.dependencyAnalysis.found.copybooks.join(', ') || 'None'}\n`;
-            context += `Missing Dependencies: ${[...result.dependencyAnalysis.missing.programs, ...result.dependencyAnalysis.missing.copybooks].join(', ') || 'None'}\n\n`;
         }
     }
-
-    // **ADD RELATED SOURCE CODE FOR CONTEXT**
-    const relatedCode = this.getRelatedSourceCode(message);
-    if (relatedCode) {
-        context += `RELATED SOURCE CODE:\n`;
-        context += `${'='.repeat(60)}\n`;
-        context += relatedCode;
-        context += `\n${'='.repeat(60)}\n\n`;
+    
+    // Add field usage code patterns
+    const fieldMatch = message.match(/field\s+([A-Z][A-Z0-9\-_]+)/i);
+    if (fieldMatch) {
+        context += this.getFieldUsageCode(fieldMatch[1].toUpperCase());
     }
-
+    
     return context;
-},// Location: Add this new method
+},
+
+buildBusinessContext(message) {
+    let context = `BUSINESS INTELLIGENCE FOCUS:\n\n`;
+    
+    // Include top 3 analyzed components with business purpose
+    const businessComponents = Object.entries(this.analysisResults)
+        .filter(([name, result]) => result.llmAnalysis?.businessPurpose)
+        .slice(0, 3);
+    
+    businessComponents.forEach(([name, result]) => {
+        const component = this.discoveredComponents.get(name);
+        context += `COMPONENT: ${name}\n`;
+        context += `Business Name: ${component?.friendlyName || name}\n`;
+        context += `Purpose: ${result.llmAnalysis.businessPurpose}\n`;
+        context += `Quality: ${result.qualityScore}/10\n\n`;
+    });
+    
+    return context;
+},
+
+buildSystemOverviewContext() {
+    // Only include when specifically asked about system
+    return `SYSTEM OVERVIEW:
+- Total Components: ${this.discoveredComponents.size}
+- Analyzed Components: ${Object.keys(this.analysisResults).length}
+- Files Uploaded: ${this.uploadedFiles.length}
+
+TOP COMPONENTS BY QUALITY:
+${Object.entries(this.analysisResults)
+    .sort((a, b) => (b[1].qualityScore || 0) - (a[1].qualityScore || 0))
+    .slice(0, 3)
+    .map(([name, result]) => `- ${name}: ${result.qualityScore}/10`)
+    .join('\n')}
+`;
+}
+
+buildMinimalContext() {
+    return `CURRENT SESSION:
+- Components Available: ${this.discoveredComponents.size}
+- Analysis Complete: ${Object.keys(this.analysisResults).length}
+- Selected Component: ${this.currentSelectedComponent || 'None'}
+
+Ask me about specific components, dependencies, fields, or business logic.
+`;
+},
+// Location: Add this new method
 getComponentSourceCode(componentName) {
     const component = this.discoveredComponents.get(componentName);
     if (!component || !component.fileSource) return null;
