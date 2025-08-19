@@ -4645,7 +4645,47 @@ formatFileSize(bytes) {
 getAnalyzedComponentsCount() {
     return Object.keys(this.analysisResults).length;
 },
-
+updateChatSuggestions(componentName) {
+    const component = this.discoveredComponents.get(componentName);
+    const result = this.analysisResults[componentName];
+    const chatSuggestions = document.querySelector('.chat-suggestion-chips');
+    
+    if (!chatSuggestions) return;
+    
+    const displayName = component?.friendlyName || componentName;
+    
+    // Component-specific suggestions
+    const suggestions = [
+        {
+            text: `🎯 ${displayName} Purpose`,
+            question: `What is the business purpose of ${componentName}? How does it fit into the system?`
+        },
+        {
+            text: `📋 ${componentName} Fields`,
+            question: `Show me the field structure and usage patterns for ${componentName}`
+        },
+        {
+            text: `🔗 Dependencies`,
+            question: `What are the dependencies for ${componentName} and what's missing?`
+        },
+        {
+            text: `⚖️ Business Rules`,
+            question: `What business rules and validation logic are implemented in ${componentName}?`
+        },
+        {
+            text: `🔄 Data Flow`,
+            question: `How does data flow through ${componentName}? What are the inputs and outputs?`
+        },
+        {
+            text: `🚀 Optimization`,
+            question: `How can we optimize and modernize ${componentName}?`
+        }
+    ];
+    
+    chatSuggestions.innerHTML = suggestions.map(sug => 
+        `<button class="chat-suggestion-btn" data-question="${sug.question}">${sug.text}</button>`
+    ).join('');
+},
     // Select Component
     selectComponent(componentName) {
     console.log(`Selecting component: ${componentName}`);
@@ -4660,6 +4700,12 @@ getAnalyzedComponentsCount() {
     if (component) {
         component.selected = true;
         this.currentSelectedComponent = componentName;
+        
+        // **ADD THIS FIX: Update chat context when component is selected**
+        this.updateChatContext('component', componentName);
+        
+        // **ADD THIS FIX: Update chat suggestions for the component**
+        this.updateChatSuggestions(componentName);
     }
     
     // Update UI
@@ -4679,11 +4725,9 @@ getAnalyzedComponentsCount() {
     // **SYNC ALL TABS WITH CONSISTENCY**
     this.syncAllTabsForComponent(componentName);
     
-    // Update chat context
-    this.updateChatContext('component', componentName);
-    
     this.showInfo(`Selected component: ${component ? component.friendlyName : componentName}`);
 },
+
 debugFieldAnalysisConsistency(componentName, result) {
     console.log('=== FIELD ANALYSIS CONSISTENCY DEBUG ===');
     console.log(`Component: ${componentName}`);
@@ -7956,21 +8000,34 @@ Select any component from the dashboard to get contextual suggestions!`);
         this.updateChatContext('modernization', '');
     }
     
-    // Detect component mentions
-    const componentMatch = message.match(/\b([A-Z][A-Z0-9\-_]{3,})\b/);
-    if (componentMatch && this.discoveredComponents.has(componentMatch[1])) {
-        this.updateChatContext('component', componentMatch[1]);
-        return componentMatch[1];
+    // **FIX: Enhanced component detection with better patterns**
+    const componentPatterns = [
+        // Direct component name mentions
+        /\b([A-Z][A-Z0-9\-_]{3,})\b/g,
+        // "component X" or "program Y" patterns
+        /(?:component|program|copybook|file)\s+([A-Z][A-Z0-9\-_]+)/gi,
+        // "the X component" patterns
+        /the\s+([A-Z][A-Z0-9\-_]+)\s+(?:component|program|copybook)/gi
+    ];
+    
+    for (const pattern of componentPatterns) {
+        const matches = message.matchAll(pattern);
+        for (const match of matches) {
+            const candidateName = match[1].toUpperCase();
+            if (this.discoveredComponents.has(candidateName)) {
+                console.log(`🎯 Detected component from message: ${candidateName}`);
+                this.updateChatContext('component', candidateName);
+                return candidateName;
+            }
+        }
     }
     
     return null;
 },
-
     // Get Chat Response
-    // Location: Update getChatResponse method
- async getChatResponse(message) {
-    // **SMART CONTEXT BUILDING** - Only relevant information with actual code
-    const context = this.buildChatContext(message);
+async getChatResponse(message) {
+    // **FIX: Use proper context building based on message content**
+    const context = this.buildSmartContext(message);
     
     const prompt = `MAINFRAME ANALYSIS EXPERT
 
@@ -8010,6 +8067,30 @@ Provide a focused, expert response based on the ACTUAL CODE:`;
     } catch (error) {
         console.error('Chat response failed:', error);
         return this.generateFallbackResponse(message);
+    }
+},
+buildSmartContext(message) {
+    const lowerMessage = message.toLowerCase();
+    
+    // **SMART CONTEXT ROUTING** based on message content
+    if (lowerMessage.includes('field') || lowerMessage.includes('record') || lowerMessage.includes('picture') || lowerMessage.includes('pic ')) {
+        console.log('🔍 Using field context for message');
+        return this.buildFieldContext(message);
+    } else if (lowerMessage.includes('dependenc') || lowerMessage.includes('missing') || lowerMessage.includes('copy') || lowerMessage.includes('call')) {
+        console.log('🔗 Using dependency context for message');
+        return this.buildDependencyContext(message);
+    } else if (lowerMessage.includes('business') || lowerMessage.includes('purpose') || lowerMessage.includes('what does')) {
+        console.log('💼 Using business context for message');
+        return this.buildBusinessContext(message);
+    } else if (lowerMessage.includes('system') || lowerMessage.includes('overview') || lowerMessage.includes('architecture')) {
+        console.log('🏗️ Using system context for message');
+        return this.buildSystemOverviewContext();
+    } else if (this.currentSelectedComponent) {
+        console.log('🎯 Using component-specific context for message');
+        return this.buildComponentSpecificContext(message);
+    } else {
+        console.log('📋 Using minimal context for message');
+        return this.buildMinimalContext();
     }
 },
 // Location: Add this new method
@@ -8254,21 +8335,32 @@ getBusinessLogicCode() {
     // Build Chat Context
     // Location: Replace the buildChatContext method
 //buildChatContext method with this enhanced version:javascript
-buildComponentSpecificContext(componentName, message) {
-    const component = this.discoveredComponents.get(componentName);
-    const result = this.analysisResults[componentName];
+buildComponentSpecificContext(message) {
+    let context = '';
     
-    let context = `COMPONENT FOCUS: ${componentName}\n`;
+    // **FIX 1: Detect component from message first**
+    const detectedComponent = this.detectChatContext(message);
+    const targetComponent = detectedComponent || this.currentSelectedComponent;
+    
+    if (!targetComponent) {
+        // **FIX 2: Use general context when no component selected**
+        return this.buildGeneralContext(message);
+    }
+    
+    const component = this.discoveredComponents.get(targetComponent);
+    const result = this.analysisResults[targetComponent];
+    
+    context += `COMPONENT FOCUS: ${targetComponent}\n`;
     context += `Business Name: ${component?.friendlyName || 'Not defined'}\n`;
     context += `Type: ${component?.type || 'Unknown'}\n\n`;
     
-    // **FIX: Add actual source code for this component**
-    const sourceCode = this.getComponentSourceCode(componentName);
+    // **FIX 3: Add actual source code for this component**
+    const sourceCode = this.getComponentSourceCode(targetComponent);
     if (sourceCode) {
         context += `ACTUAL SOURCE CODE:\n${'='.repeat(40)}\n${sourceCode}\n${'='.repeat(40)}\n\n`;
     }
     
-    // **FIX: Add field structure if available**
+    // **FIX 4: Add field structure if available**
     if (result?.fieldAnalysis?.fields) {
         context += `FIELD STRUCTURE:\n`;
         result.fieldAnalysis.fields.slice(0, 20).forEach(field => {
@@ -8292,6 +8384,7 @@ buildComponentSpecificContext(componentName, message) {
     
     return context;
 },
+
 getComponentSourceCode(componentName) {
     const component = this.discoveredComponents.get(componentName);
     if (!component || !component.fileSource) return null;
@@ -8395,40 +8488,6 @@ extractJCLStructure(componentName, lines) {
         return `${lineNum.toString().padStart(4, ' ')}    ${line}`;
     }).join('\n');
 },
-
-
-buildComponentSpecificContext(componentName, message) {
-    const component = this.discoveredComponents.get(componentName);
-    const result = this.analysisResults[componentName];
-    
-    let context = `COMPONENT FOCUS: ${componentName}\n`;
-    context += `Business Name: ${component?.friendlyName || 'Not defined'}\n`;
-    context += `Type: ${component?.type || 'Unknown'}\n\n`;
-    
-    // Add actual source code for this component
-    const sourceCode = this.getComponentSourceCode(componentName);
-    if (sourceCode) {
-        context += `ACTUAL SOURCE CODE:\n${'='.repeat(40)}\n${sourceCode}\n${'='.repeat(40)}\n\n`;
-    }
-    
-    // Add analysis results if available
-    if (result) {
-        context += `ANALYSIS RESULTS:\n`;
-        context += `Quality Score: ${result.qualityScore}/10\n`;
-        context += `Business Purpose: ${result.llmAnalysis?.businessPurpose || 'Not analyzed'}\n`;
-        
-        if (result.dependencyAnalysis) {
-            context += `Dependencies Found: ${result.dependencyAnalysis.summary.foundCount}\n`;
-            context += `Dependencies Missing: ${result.dependencyAnalysis.summary.missingCount}\n`;
-        }
-        
-        if (result.fieldAnalysis?.fields) {
-            context += `Total Fields: ${result.fieldAnalysis.fields.length}\n`;
-        }
-    }
-    
-    return context;
-},
 buildDependencyContext(message) {
     let context = `DEPENDENCY ANALYSIS FOCUS:\n\n`;
     
@@ -8443,6 +8502,7 @@ buildDependencyContext(message) {
             context += `- ${name}: ${result.dependencyAnalysis.summary.missingCount} missing\n`;
             context += `  Missing: ${[...result.dependencyAnalysis.missing.copybooks, ...result.dependencyAnalysis.missing.programs].join(', ')}\n`;
         });
+        context += `\n`;
     }
     
     // Add dependency code patterns
@@ -8450,7 +8510,6 @@ buildDependencyContext(message) {
     
     return context;
 },
-
 buildFieldContext(message) {
     let context = `FIELD ANALYSIS FOCUS:\n\n`;
     
@@ -8458,9 +8517,10 @@ buildFieldContext(message) {
         const result = this.analysisResults[this.currentSelectedComponent];
         if (result?.fieldAnalysis?.fields) {
             context += `FIELDS IN ${this.currentSelectedComponent}:\n`;
-            result.fieldAnalysis.fields.slice(0, 10).forEach(field => {
+            result.fieldAnalysis.fields.slice(0, 15).forEach(field => {
                 const usage = field.usagePattern || this.determineFieldUsage(field, result.fieldAnalysis);
-                context += `- L${field.level} ${field.name}: ${field.picture || 'No PIC'} - ${usage}\n`;
+                const picture = field.picture || field.picClause || 'No PIC';
+                context += `- L${field.level} ${field.name}: ${picture} - ${usage}\n`;
                 
                 // **FIX: Add business meaning if available**
                 if (field.businessLogic?.businessMeaning) {
@@ -8487,7 +8547,6 @@ buildFieldContext(message) {
     return context;
 },
 
-
 buildBusinessContext(message) {
     let context = `BUSINESS INTELLIGENCE FOCUS:\n\n`;
     
@@ -8503,6 +8562,26 @@ buildBusinessContext(message) {
         context += `Purpose: ${result.llmAnalysis.businessPurpose}\n`;
         context += `Quality: ${result.qualityScore}/10\n\n`;
     });
+    
+    return context;
+},
+buildGeneralContext(message) {
+    let context = `SYSTEM OVERVIEW CONTEXT:\n\n`;
+    
+    context += `- Total Components: ${this.discoveredComponents.size}\n`;
+    context += `- Analyzed Components: ${Object.keys(this.analysisResults).length}\n`;
+    context += `- Files Uploaded: ${this.uploadedFiles.length}\n\n`;
+    
+    if (Object.keys(this.analysisResults).length > 0) {
+        context += `TOP COMPONENTS BY QUALITY:\n`;
+        Object.entries(this.analysisResults)
+            .sort((a, b) => (b[1].qualityScore || 0) - (a[1].qualityScore || 0))
+            .slice(0, 3)
+            .forEach(([name, result]) => {
+                const component = this.discoveredComponents.get(name);
+                context += `- ${name}: ${result.qualityScore}/10 - ${component?.friendlyName || name}\n`;
+            });
+    }
     
     return context;
 },
@@ -8829,16 +8908,24 @@ ${highRiskComponents.length > 0 ? highRiskComponents.slice(0, 5).map(name => `�
     },
 
     // Update Chat Context
-    updateChatContext(contextType, selectedItem) {
-        const chatContext = document.getElementById('chatContext');
-        const chatSelectedItem = document.getElementById('chatSelectedItem');
-        
-        if (chatContext) chatContext.value = contextType;
-        if (chatSelectedItem) chatSelectedItem.value = selectedItem || '';
-        
-        this.chatContext = contextType;
-        this.currentSelectedComponent = contextType === 'component' ? selectedItem : null;
-    },
+   updateChatContext(contextType, selectedItem) {
+    const chatContext = document.getElementById('chatContext');
+    const chatSelectedItem = document.getElementById('chatSelectedItem');
+    
+    if (chatContext) chatContext.value = contextType;
+    if (chatSelectedItem) chatSelectedItem.value = selectedItem || '';
+    
+    this.chatContext = contextType;
+    
+    // **FIX: Properly update currentSelectedComponent**
+    if (contextType === 'component' && selectedItem) {
+        this.currentSelectedComponent = selectedItem;
+        console.log(`🎯 Chat context updated: ${contextType} -> ${selectedItem}`);
+    } else if (contextType !== 'component') {
+        // Don't clear currentSelectedComponent for non-component contexts
+        console.log(`📋 Chat context updated: ${contextType}`);
+    }
+},
 
     // Save Chat to Database
     saveChatToDatabase(userMessage, assistantResponse) {
