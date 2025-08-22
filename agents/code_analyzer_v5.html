@@ -8026,9 +8026,18 @@ Select any component from the dashboard to get contextual suggestions!`);
 },
     // Get Chat Response
 async getChatResponse(message) {
-    // **FIX: Use proper context building based on message content**
     const context = this.buildSmartContext(message);
+    const needsFullCodeAnalysis = this.shouldUseFullCodeAnalysis(message);
     
+    if (needsFullCodeAnalysis && this.currentSelectedComponent) {
+        console.log('🔄 Using chunked analysis for large component');
+        return await this.getChunkedAnalysisResponse(message, this.currentSelectedComponent);
+    } else {
+        // Standard response for smaller contexts
+        return await this.getStandardChatResponse(message, context);
+    }
+},
+async getStandardChatResponse(message, context) {
     const prompt = `MAINFRAME ANALYSIS EXPERT
 
 You are analyzing COBOL/JCL mainframe systems. Provide specific, actionable responses based on the ACTUAL CODE provided in the context.
@@ -8069,6 +8078,404 @@ Provide a focused, expert response based on the ACTUAL CODE:`;
         return this.generateFallbackResponse(message);
     }
 },
+
+// **NEW METHOD: Determine if full code analysis is needed**
+shouldUseFullCodeAnalysis(message) {
+    const lowerMessage = message.toLowerCase();
+    
+    // Trigger full analysis for comprehensive questions
+    const fullAnalysisKeywords = [
+        'complete', 'entire', 'full', 'whole', 'comprehensive', 'detailed',
+        'all fields', 'all components', 'complete analysis', 'full code',
+        'business logic', 'all dependencies', 'complete flow', 'entire program',
+        'deep dive', 'thorough', 'analyze everything', 'show me everything'
+    ];
+    
+    return fullAnalysisKeywords.some(keyword => lowerMessage.includes(keyword)) ||
+           lowerMessage.includes('analyze the complete') ||
+           lowerMessage.includes('show me the full') ||
+           lowerMessage.includes('what does the entire');
+},
+
+// **NEW METHOD: Chunked Analysis Response**
+async getChunkedAnalysisResponse(message, componentName) {
+    try {
+        const component = this.discoveredComponents.get(componentName);
+        const sourceFiles = this.findRelevantFiles(componentName);
+        
+        if (!sourceFiles || sourceFiles.length === 0) {
+            return 'No source files found for this component.';
+        }
+        
+        // Get the complete source code
+        const fullCode = this.getCompleteSourceCode(componentName, sourceFiles);
+        
+        if (fullCode.length <= 4000) {
+            // Small enough for single call
+            return await this.getSingleAnalysisResponse(message, componentName, fullCode);
+        }
+        
+        // Large code - needs chunking
+        console.log(`📊 Large code detected: ${fullCode.length} chars, proceeding with chunked analysis`);
+        
+        const chunks = this.createSmartCodeChunks(fullCode, componentName);
+        const chunkAnalyses = [];
+        
+        // Analyze each chunk
+        for (let i = 0; i < chunks.length; i++) {
+            console.log(`🔍 Analyzing chunk ${i + 1}/${chunks.length} (${chunks[i].content.length} chars)`);
+            
+            const chunkPrompt = this.buildChunkAnalysisPrompt(message, componentName, chunks[i], i + 1, chunks.length);
+            
+            try {
+                const chunkResponse = await this.callLLMAPI(chunkPrompt);
+                chunkAnalyses.push({
+                    chunkIndex: i + 1,
+                    section: chunks[i].section,
+                    lineRange: chunks[i].lineRange,
+                    analysis: typeof chunkResponse === 'string' ? chunkResponse : chunkResponse.analysis || JSON.stringify(chunkResponse)
+                });
+                
+                // Brief pause between chunks to avoid overwhelming the LLM
+                await this.sleep(1000);
+                
+            } catch (chunkError) {
+                console.warn(`Chunk ${i + 1} analysis failed:`, chunkError);
+                chunkAnalyses.push({
+                    chunkIndex: i + 1,
+                    section: chunks[i].section,
+                    lineRange: chunks[i].lineRange,
+                    analysis: `Analysis failed for this section: ${chunkError.message}`
+                });
+            }
+        }
+        
+        // Combine all chunk analyses
+        console.log('🔗 Combining chunk analyses into final response');
+        return await this.combineChunkAnalyses(message, componentName, chunkAnalyses);
+        
+    } catch (error) {
+        console.error('Chunked analysis failed:', error);
+        return `Analysis failed: ${error.message}. Falling back to standard analysis.`;
+    }
+},
+
+// **NEW METHOD: Get Complete Source Code**
+getCompleteSourceCode(componentName, sourceFiles) {
+    let fullCode = '';
+    
+    sourceFiles.forEach(file => {
+        fullCode += `\n${'='.repeat(60)}\n`;
+        fullCode += `FILE: ${file.name} (${file.type})\n`;
+        fullCode += `${'='.repeat(60)}\n`;
+        fullCode += file.content;
+        fullCode += '\n';
+    });
+    
+    return fullCode;
+},
+
+// **NEW METHOD: Create Smart Code Chunks**
+createSmartCodeChunks(fullCode, componentName) {
+    const maxChunkSize = 5000; // Max characters per chunk
+    const lines = fullCode.split('\n');
+    const chunks = [];
+    
+    let currentChunk = {
+        content: '',
+        section: 'UNKNOWN',
+        lineRange: { start: 1, end: 1 },
+        functions: [],
+        dataStructures: []
+    };
+    
+    let currentLineNumber = 1;
+    let chunkStartLine = 1;
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const upperLine = line.toUpperCase().trim();
+        
+        // Detect COBOL sections for better chunking
+        if (upperLine.includes('IDENTIFICATION DIVISION') || 
+            upperLine.includes('ENVIRONMENT DIVISION') ||
+            upperLine.includes('DATA DIVISION') ||
+            upperLine.includes('PROCEDURE DIVISION') ||
+            upperLine.includes('WORKING-STORAGE SECTION') ||
+            upperLine.includes('LINKAGE SECTION') ||
+            upperLine.includes('FILE SECTION')) {
+            
+            // Start new chunk at major sections if current chunk has content
+            if (currentChunk.content.length > 1000) {
+                currentChunk.lineRange.end = currentLineNumber - 1;
+                chunks.push({ ...currentChunk });
+                
+                // Start new chunk
+                currentChunk = {
+                    content: '',
+                    section: this.detectSectionType(upperLine),
+                    lineRange: { start: currentLineNumber, end: currentLineNumber },
+                    functions: [],
+                    dataStructures: []
+                };
+                chunkStartLine = currentLineNumber;
+            } else {
+                currentChunk.section = this.detectSectionType(upperLine);
+            }
+        }
+        
+        // Add line to current chunk
+        currentChunk.content += line + '\n';
+        currentLineNumber++;
+        
+        // Detect important elements for context
+        this.detectCodeElements(upperLine, currentChunk);
+        
+        // Check if chunk is getting too large
+        if (currentChunk.content.length > maxChunkSize) {
+            // Try to find a good break point
+            const breakPoint = this.findGoodBreakPoint(currentChunk.content, maxChunkSize);
+            
+            if (breakPoint > maxChunkSize * 0.7) { // Good break point found
+                const chunkLines = currentChunk.content.split('\n');
+                const breakLineIndex = Math.floor(breakPoint / (currentChunk.content.length / chunkLines.length));
+                
+                // Finalize current chunk
+                currentChunk.content = chunkLines.slice(0, breakLineIndex).join('\n');
+                currentChunk.lineRange.end = chunkStartLine + breakLineIndex - 1;
+                chunks.push({ ...currentChunk });
+                
+                // Start new chunk with remaining content
+                currentChunk = {
+                    content: chunkLines.slice(breakLineIndex).join('\n'),
+                    section: currentChunk.section,
+                    lineRange: { start: chunkStartLine + breakLineIndex, end: currentLineNumber },
+                    functions: [],
+                    dataStructures: []
+                };
+                chunkStartLine = chunkStartLine + breakLineIndex;
+            }
+        }
+    }
+    
+    // Add final chunk if it has content
+    if (currentChunk.content.trim().length > 0) {
+        currentChunk.lineRange.end = currentLineNumber - 1;
+        chunks.push(currentChunk);
+    }
+    
+    console.log(`📊 Created ${chunks.length} smart chunks from ${fullCode.length} characters`);
+    return chunks;
+},
+
+// **NEW METHOD: Detect Section Type**
+detectSectionType(upperLine) {
+    if (upperLine.includes('IDENTIFICATION DIVISION')) return 'IDENTIFICATION';
+    if (upperLine.includes('ENVIRONMENT DIVISION')) return 'ENVIRONMENT';
+    if (upperLine.includes('DATA DIVISION')) return 'DATA';
+    if (upperLine.includes('PROCEDURE DIVISION')) return 'PROCEDURE';
+    if (upperLine.includes('WORKING-STORAGE SECTION')) return 'WORKING-STORAGE';
+    if (upperLine.includes('LINKAGE SECTION')) return 'LINKAGE';
+    if (upperLine.includes('FILE SECTION')) return 'FILE';
+    if (upperLine.includes('//JOB')) return 'JCL-JOB';
+    if (upperLine.includes('//PROC')) return 'JCL-PROC';
+    return 'CODE';
+},
+
+// **NEW METHOD: Detect Code Elements**
+detectCodeElements(upperLine, chunk) {
+    // Detect COBOL paragraphs/functions
+    if (upperLine.match(/^[A-Z][A-Z0-9\-]+\s*\./)) {
+        const paragraphName = upperLine.split('.')[0].trim();
+        chunk.functions.push(paragraphName);
+    }
+    
+    // Detect 01-level data structures
+    if (upperLine.match(/^\s*01\s+[A-Z][A-Z0-9\-_]+/)) {
+        const dataStructure = upperLine.split(/\s+/)[1];
+        chunk.dataStructures.push(dataStructure);
+    }
+},
+
+// **NEW METHOD: Find Good Break Point**
+findGoodBreakPoint(content, maxSize) {
+    const breakPatterns = [
+        /\n\s*\.\s*\n/g,           // COBOL paragraph ends
+        /\n\s*01\s+/g,             // 01-level starts
+        /\n\s*PROCEDURE DIVISION/g, // Major divisions
+        /\n\s*DATA DIVISION/g,
+        /\n\s*\/\/[A-Z]/g,         // JCL step starts
+        /\n\s*PERFORM\s+/g,        // PERFORM statements
+        /\n\s*IF\s+/g              // IF statements
+    ];
+    
+    let bestBreak = maxSize * 0.8; // Default to 80% if no good break found
+    
+    for (const pattern of breakPatterns) {
+        const matches = [...content.matchAll(pattern)];
+        for (const match of matches) {
+            const position = match.index;
+            if (position > maxSize * 0.5 && position < maxSize) {
+                bestBreak = Math.max(bestBreak, position);
+            }
+        }
+    }
+    
+    return bestBreak;
+},
+
+// **NEW METHOD: Build Chunk Analysis Prompt**
+buildChunkAnalysisPrompt(userMessage, componentName, chunk, chunkIndex, totalChunks) {
+    return `MAINFRAME CODE ANALYSIS - CHUNK ${chunkIndex} of ${totalChunks}
+
+Component: ${componentName}
+Section: ${chunk.section}
+Lines: ${chunk.lineRange.start}-${chunk.lineRange.end}
+User Question: "${userMessage}"
+
+CODE CHUNK:
+${chunk.content}
+
+ANALYSIS CONTEXT:
+- This is chunk ${chunkIndex} of ${totalChunks} chunks
+- Focus on: Business logic, data structures, dependencies, and functionality in this section
+- Section type: ${chunk.section}
+${chunk.functions.length > 0 ? `- Functions/Paragraphs: ${chunk.functions.join(', ')}` : ''}
+${chunk.dataStructures.length > 0 ? `- Data Structures: ${chunk.dataStructures.join(', ')}` : ''}
+
+INSTRUCTIONS:
+1. Analyze ONLY this code chunk in relation to the user's question
+2. Focus on business logic, data processing, and functionality
+3. Identify key business rules and validation logic
+4. Note any important dependencies or file operations
+5. Keep response focused and concise (max 800 words)
+6. Structure response with clear sections
+
+Provide analysis of this chunk focusing on the user's question:`;
+},
+
+// **NEW METHOD: Combine Chunk Analyses**
+async combineChunkAnalyses(userMessage, componentName, chunkAnalyses) {
+    const component = this.discoveredComponents.get(componentName);
+    const result = this.analysisResults[componentName];
+    
+    // First, create a summary of all chunk analyses
+    let combinedAnalysis = `COMPLETE CODE ANALYSIS FOR: ${componentName}\n`;
+    combinedAnalysis += `Business Name: ${component?.friendlyName || 'Not defined'}\n`;
+    combinedAnalysis += `Component Type: ${result?.componentType || 'Unknown'}\n\n`;
+    
+    combinedAnalysis += `SECTION-BY-SECTION ANALYSIS:\n${'='.repeat(50)}\n`;
+    
+    chunkAnalyses.forEach(chunk => {
+        combinedAnalysis += `\nSECTION: ${chunk.section} (Lines ${chunk.lineRange?.start}-${chunk.lineRange?.end})\n`;
+        combinedAnalysis += `${'─'.repeat(30)}\n`;
+        combinedAnalysis += chunk.analysis + '\n';
+    });
+    
+    // Now ask LLM to synthesize the complete analysis
+    const synthesisPrompt = `SYNTHESIS REQUEST FOR MAINFRAME COMPONENT
+
+Component: ${componentName}
+User's Original Question: "${userMessage}"
+
+COMPLETE SECTIONAL ANALYSIS:
+${combinedAnalysis}
+
+SYNTHESIS INSTRUCTIONS:
+Based on the complete sectional analysis above, provide a comprehensive answer to the user's question: "${userMessage}"
+
+Focus on:
+1. Overall business purpose and functionality
+2. Key business logic and rules found across all sections
+3. Data flow and processing patterns
+4. Important dependencies and integrations
+5. Business value and modernization opportunities
+
+Provide a cohesive, business-focused response that synthesizes insights from all code sections:`;
+
+    try {
+        const synthesizedResponse = await this.callLLMAPI(synthesisPrompt);
+        
+        // Format the final response
+        let finalResponse = '';
+        
+        if (typeof synthesizedResponse === 'string') {
+            finalResponse = synthesizedResponse;
+        } else if (synthesizedResponse && synthesizedResponse.businessPurpose) {
+            finalResponse = synthesizedResponse.businessPurpose;
+        } else {
+            finalResponse = JSON.stringify(synthesizedResponse);
+        }
+        
+        // Add section summary at the end
+        finalResponse += `\n\n---\n**📊 Analysis Coverage:**\n`;
+        finalResponse += `✅ Analyzed ${chunkAnalyses.length} code sections\n`;
+        finalResponse += `📋 Sections covered: ${[...new Set(chunkAnalyses.map(c => c.section))].join(', ')}\n`;
+        finalResponse += `📏 Total lines analyzed: ${chunkAnalyses.reduce((sum, c) => sum + ((c.lineRange?.end || 0) - (c.lineRange?.start || 0) + 1), 0)}\n`;
+        finalResponse += `🔍 Complete code analysis performed using chunked processing`;
+        
+        return finalResponse;
+        
+    } catch (error) {
+        console.error('Synthesis failed:', error);
+        
+        // Fallback: return structured analysis without LLM synthesis
+        return this.createFallbackSynthesis(userMessage, componentName, chunkAnalyses);
+    }
+},
+
+// **NEW METHOD: Create Fallback Synthesis**
+createFallbackSynthesis(userMessage, componentName, chunkAnalyses) {
+    const component = this.discoveredComponents.get(componentName);
+    
+    let response = `# Complete Analysis: ${component?.friendlyName || componentName}\n\n`;
+    response += `**User Question:** ${userMessage}\n\n`;
+    response += `## 📋 Section-by-Section Analysis\n\n`;
+    
+    chunkAnalyses.forEach((chunk, index) => {
+        response += `### ${index + 1}. ${chunk.section} Section\n`;
+        if (chunk.lineRange) {
+            response += `*Lines ${chunk.lineRange.start}-${chunk.lineRange.end}*\n\n`;
+        }
+        response += chunk.analysis + '\n\n';
+    });
+    
+    response += `## 📊 Analysis Summary\n\n`;
+    response += `✅ **Coverage:** Analyzed ${chunkAnalyses.length} code sections\n`;
+    response += `📋 **Sections:** ${[...new Set(chunkAnalyses.map(c => c.section))].join(', ')}\n`;
+    response += `🔍 **Method:** Complete code analysis using intelligent chunking\n\n`;
+    response += `*Note: This analysis covers the entire codebase for ${componentName}. Each section was analyzed individually and the results are presented above.*`;
+    
+    return response;
+},
+
+// **NEW METHOD: Get Single Analysis Response (for smaller code)**
+async getSingleAnalysisResponse(message, componentName, fullCode) {
+    const component = this.discoveredComponents.get(componentName);
+    const prompt = `COMPLETE MAINFRAME COMPONENT ANALYSIS
+
+Component: ${componentName}
+Business Name: ${component?.friendlyName || 'Not defined'}
+User Question: "${message}"
+
+COMPLETE SOURCE CODE:
+${fullCode}
+
+INSTRUCTIONS:
+Provide a comprehensive analysis focusing on the user's question. Analyze:
+1. Business purpose and functionality
+2. Data structures and field usage
+3. Business logic and validation rules
+4. Dependencies and integrations
+5. Modernization opportunities
+
+User's Question: ${message}
+
+Provide detailed analysis:`;
+
+    return await this.callLLMAPI(prompt);
+},
+
 buildSmartContext(message) {
     const lowerMessage = message.toLowerCase();
     
