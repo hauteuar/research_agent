@@ -979,6 +979,11 @@ class VLLMAPIManager {
     static TEMPERATURE = 0.1;
     static serverConfigured = false;
 
+    static estimateTokens(text) {
+        // Rough estimation: ~4 characters per token for English text
+        return Math.ceil(text.length / 4);
+    }
+    
     static configureServer(endpoint, model = null) {
         this.API_ENDPOINT = endpoint.endsWith('/generate') ? endpoint : `${endpoint}/generate`;
         if (model) this.MODEL = model;
@@ -3495,7 +3500,7 @@ function generateDashboardHTML(analytics) {
 // vLLM Configuration Functions
 function showVLLMConfiguration() {
     const configHTML = `
-        <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+        <div id="vllmConfigModal" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); 
              background: white; padding: 30px; border-radius: 15px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); 
              z-index: 1000; max-width: 600px; width: 90%;">
             <h3 style="color: #667eea; margin: 0 0 20px 0;">🦙 vLLM Server Configuration</h3>
@@ -3525,7 +3530,7 @@ function showVLLMConfiguration() {
             </div>
             
             <div style="display: flex; gap: 10px; justify-content: flex-end;">
-                <button onclick="this.closest('div').nextElementSibling.remove(); this.closest('div').remove();" 
+                <button onclick="closeVLLMModal()" 
                         style="background: #95a5a6; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer;">
                     Cancel
                 </button>
@@ -3536,11 +3541,20 @@ function showVLLMConfiguration() {
             </div>
         </div>
         
-        <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999;"
-             onclick="this.nextElementSibling.remove(); this.remove();"></div>
+        <div id="vllmConfigBackdrop" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999;"
+             onclick="closeVLLMModal()"></div>
     `;
     
     document.body.insertAdjacentHTML('beforeend', configHTML);
+}
+
+// Add this new function to handle modal closure
+function closeVLLMModal() {
+    const modal = document.getElementById('vllmConfigModal');
+    const backdrop = document.getElementById('vllmConfigBackdrop');
+    
+    if (modal) modal.remove();
+    if (backdrop) backdrop.remove();
 }
 
 async function configureVLLMServer() {
@@ -3562,11 +3576,12 @@ async function configureVLLMServer() {
     localStorage.setItem('vllm_endpoint', endpoint);
     localStorage.setItem('vllm_model', model);
     
-    // Close modal
-    const backdrop = document.querySelector('[style*="position: fixed"][style*="background: rgba(0,0,0,0.5)"]');
-    if (backdrop) {
-        backdrop.click();
-    }
+    // FIX: Close modal properly
+    const modal = endpointElement.closest('div[style*="position: fixed"]');
+    const backdrop = document.querySelector('div[style*="position: fixed"][style*="background: rgba(0,0,0,0.5)"]');
+    
+    if (modal) modal.remove();
+    if (backdrop) backdrop.remove();
     
     try {
         const testResult = await VLLMAPIManager.testConnection();
