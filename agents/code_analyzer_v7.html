@@ -983,7 +983,7 @@ class VLLMAPIManager {
         // Rough estimation: ~4 characters per token for English text
         return Math.ceil(text.length / 4);
     }
-    
+
     static configureServer(endpoint, model = null) {
         this.API_ENDPOINT = endpoint.endsWith('/generate') ? endpoint : `${endpoint}/generate`;
         if (model) this.MODEL = model;
@@ -1307,44 +1307,44 @@ class FieldMappingAnalyzer {
     }
 
     static async findRelatedPrograms(fileName) {
-        // Enhanced program discovery with realistic COBOL content
-        const simulatedPrograms = [
-            {
-                name: `${fileName.substring(0, 6)}UPD`,
-                type: 'PROGRAM',
-                content: this.generateAdvancedCOBOLProgram(fileName, 'UPDATE'),
-                confidence: 0.95,
-                cicsOperations: ['read', 'write', 'rewrite'],
-                fileOperations: ['read', 'write']
-            },
-            {
-                name: `${fileName.substring(0, 6)}INQ`,
-                type: 'PROGRAM', 
-                content: this.generateAdvancedCOBOLProgram(fileName, 'INQUIRY'),
-                confidence: 0.88,
-                cicsOperations: ['read', 'send'],
-                fileOperations: ['read']
-            },
-            {
-                name: `${fileName.substring(0, 6)}RPT`,
-                type: 'PROGRAM',
-                content: this.generateAdvancedCOBOLProgram(fileName, 'REPORT'),
-                confidence: 0.76,
-                cicsOperations: ['read', 'startbr', 'readnext'],
-                fileOperations: ['read', 'open']
-            },
-            {
-                name: `${fileName.substring(0, 6)}DEL`,
-                type: 'PROGRAM',
-                content: this.generateAdvancedCOBOLProgram(fileName, 'DELETE'),
-                confidence: 0.82,
-                cicsOperations: ['read', 'delete'],
-                fileOperations: ['read', 'delete']
-            }
-        ];
+    // Use REAL uploaded components instead of simulated ones
+    const realPrograms = AppState.components.filter(component => {
+        const content = component.content || component.analysisResult || '';
+        const lowerContent = content.toLowerCase();
+        const lowerFileName = fileName.toLowerCase();
+        
+        // Check if component references the target file
+        const hasFileReference = 
+            lowerContent.includes(lowerFileName) ||
+            lowerContent.includes(`file('${fileName.toLowerCase()}')`) ||
+            lowerContent.includes(`file("${fileName.toLowerCase()}")`) ||
+            lowerContent.includes(fileName.replace('-', '_').toLowerCase()) ||
+            content.includes(fileName);
+            
+        return hasFileReference;
+    });
 
-        return simulatedPrograms;
+    if (realPrograms.length === 0) {
+        // If no real programs found, create analysis from uploaded components
+        return AppState.components.map(component => ({
+            name: component.name,
+            type: component.type,
+            content: component.content || this.generateAdvancedCOBOLProgram(fileName, 'ANALYSIS'),
+            confidence: 0.75,
+            cicsOperations: component.cicsOperations || [],
+            fileOperations: component.dependencies?.filter(d => d.type === 'FILE_OPERATION') || []
+        }));
     }
+
+    return realPrograms.map(component => ({
+        name: component.name,
+        type: component.type,
+        content: component.content || '',
+        confidence: 0.95,
+        cicsOperations: component.cicsOperations || [],
+        fileOperations: component.dependencies?.filter(d => d.type === 'FILE_OPERATION') || []
+    }));
+}
 
     static async analyzeProgram(program, targetFile) {
         updateProcessingStatus('analyzing', `Processing ${program.name} with token-aware chunking`);
@@ -3076,7 +3076,7 @@ function updateDependenciesFlow() {
     const container = document.getElementById('dependenciesFlow');
     if (!container) return;
     
-    if (AppState.dependencies.length === 0) {
+    if (AppState.dependencies.length === 0 && AppState.components.length === 0) {
         container.innerHTML = `
             <div style="text-align: center; padding: 40px; color: #666;">
                 <div style="font-size: 48px; margin-bottom: 20px;">🔗</div>
@@ -3087,50 +3087,210 @@ function updateDependenciesFlow() {
         return;
     }
     
-    // Create interactive dependency map
-    const dependencyMap = DependencyVisualizer.createInteractiveDependencyMap(AppState.dependencies);
-    const visualizationHTML = DependencyVisualizer.generateVisualizationHTML(dependencyMap);
+    // Create city-view dependency map
+    const cityViewHTML = createCityViewDependencyMap();
+    container.innerHTML = cityViewHTML;
+}
+
+function createCityViewDependencyMap() {
+    const components = AppState.components;
+    const dependencies = AppState.dependencies;
     
-    container.innerHTML = visualizationHTML;
+    // Group components by type for city districts
+    const districts = {
+        'PROGRAMS': components.filter(c => c.type === 'CBL' || c.type === 'COB'),
+        'COPYBOOKS': components.filter(c => c.type === 'COPY'),
+        'RECORD_LAYOUTS': components.filter(c => c.type === 'RECORD_LAYOUT'),
+        'JCL_JOBS': components.filter(c => c.type === 'JCL' || c.type === 'PROC')
+    };
     
-    // Add dependency statistics
-    const statsHTML = `
-        <div class="dependency-stats" style="margin-top: 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
-            <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-                <h4 style="color: #667eea; margin-bottom: 10px;">📋 Copybook Dependencies</h4>
-                <div style="font-size: 24px; font-weight: 600; color: #27ae60;">
-                    ${AppState.dependencies.filter(d => d.relationshipType === 'COPYBOOK_INCLUDE').length}
-                </div>
-                <div style="font-size: 12px; color: #666;">Shared data structures</div>
+    return `
+        <div class="city-dependency-map" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px; padding: 30px; color: white; position: relative; min-height: 500px;">
+            <div class="city-header" style="text-align: center; margin-bottom: 30px;">
+                <h2 style="margin: 0; font-size: 24px;">🏙️ Mainframe System City View</h2>
+                <p style="margin: 10px 0 0 0; opacity: 0.9;">Interactive dependency visualization with ${components.length} components</p>
             </div>
             
-            <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-                <h4 style="color: #667eea; margin-bottom: 10px;">🔄 Program Calls</h4>
-                <div style="font-size: 24px; font-weight: 600; color: #f39c12;">
-                    ${AppState.dependencies.filter(d => d.relationshipType === 'PROGRAM_CALL').length}
-                </div>
-                <div style="font-size: 12px; color: #666;">Inter-program linkage</div>
+            <div class="city-districts" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+                ${Object.entries(districts).map(([districtName, districtComponents]) => 
+                    createCityDistrict(districtName, districtComponents, dependencies)
+                ).join('')}
             </div>
             
-            <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-                <h4 style="color: #667eea; margin-bottom: 10px;">💾 CICS Operations</h4>
-                <div style="font-size: 24px; font-weight: 600; color: #e74c3c;">
-                    ${AppState.dependencies.filter(d => d.relationshipType === 'CICS_FILE_ACCESS').length}
+            <div class="city-connections" style="margin-top: 30px;">
+                <h3 style="margin-bottom: 15px;">🌐 Inter-District Connections</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                    ${generateConnectionStats(dependencies)}
                 </div>
-                <div style="font-size: 12px; color: #666;">Transaction file access</div>
             </div>
             
-            <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-                <h4 style="color: #667eea; margin-bottom: 10px;">📁 File Operations</h4>
-                <div style="font-size: 24px; font-weight: 600; color: #9b59b6;">
-                    ${AppState.dependencies.filter(d => d.relationshipType === 'FILE_OPERATION').length}
-                </div>
-                <div style="font-size: 12px; color: #666;">Batch file processing</div>
+            <!-- Dependency Flow Rivers -->
+            <div class="dependency-rivers" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0.3;">
+                ${generateDependencyRivers(dependencies)}
+            </div>
+        </div>
+        
+        <div class="city-controls" style="margin-top: 20px; text-align: center;">
+            <button onclick="toggleCityView('detailed')" style="background: #27ae60; color: white; border: none; padding: 10px 20px; border-radius: 8px; margin: 0 5px; cursor: pointer;">📊 Detailed View</button>
+            <button onclick="toggleCityView('compact')" style="background: #f39c12; color: white; border: none; padding: 10px 20px; border-radius: 8px; margin: 0 5px; cursor: pointer;">🏢 Compact View</button>
+            <button onclick="exportDependencyMap()" style="background: #e74c3c; color: white; border: none; padding: 10px 20px; border-radius: 8px; margin: 0 5px; cursor: pointer;">💾 Export Map</button>
+        </div>
+    `;
+}
+
+function createCityDistrict(districtName, components, dependencies) {
+    const districtColors = {
+        'PROGRAMS': '#27ae60',
+        'COPYBOOKS': '#f39c12', 
+        'RECORD_LAYOUTS': '#e74c3c',
+        'JCL_JOBS': '#9b59b6'
+    };
+    
+    const districtIcons = {
+        'PROGRAMS': '🏢',
+        'COPYBOOKS': '📚',
+        'RECORD_LAYOUTS': '🏗️',
+        'JCL_JOBS': '⚙️'
+    };
+    
+    if (components.length === 0) return '';
+    
+    return `
+        <div class="city-district" style="background: rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.2);">
+            <div class="district-header" style="display: flex; align-items: center; margin-bottom: 15px;">
+                <span style="font-size: 24px; margin-right: 10px;">${districtIcons[districtName]}</span>
+                <h3 style="margin: 0; color: ${districtColors[districtName]};">${districtName.replace('_', ' ')}</h3>
+                <span style="margin-left: auto; background: ${districtColors[districtName]}; padding: 4px 8px; border-radius: 12px; font-size: 12px;">${components.length}</span>
+            </div>
+            
+            <div class="district-buildings" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px;">
+                ${components.map(component => createCityBuilding(component, dependencies, districtColors[districtName])).join('')}
             </div>
         </div>
     `;
+}
+
+function createCityBuilding(component, dependencies, color) {
+    const connectionCount = dependencies.filter(d => 
+        d.sourceComponent === component.name || d.targetComponent === component.name
+    ).length;
     
-    container.innerHTML += statsHTML;
+    const buildingHeight = Math.max(40, Math.min(120, connectionCount * 15 + 40));
+    
+    return `
+        <div class="city-building" 
+             style="background: linear-gradient(180deg, ${color}, ${color}dd); 
+                    height: ${buildingHeight}px; 
+                    border-radius: 4px 4px 0 0; 
+                    position: relative; 
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                    border: 1px solid rgba(255,255,255,0.3);"
+             onclick="showBuildingDetails('${component.name}')"
+             onmouseover="this.style.transform='scale(1.05)'"
+             onmouseout="this.style.transform='scale(1)'">
+            <div style="position: absolute; bottom: -25px; left: 50%; transform: translateX(-50%); 
+                        font-size: 10px; text-align: center; white-space: nowrap; 
+                        background: rgba(0,0,0,0.7); padding: 2px 6px; border-radius: 4px;">
+                ${component.name.length > 12 ? component.name.substring(0, 12) + '...' : component.name}
+            </div>
+            <div style="position: absolute; top: 5px; right: 5px; 
+                        background: rgba(255,255,255,0.9); color: ${color}; 
+                        font-size: 10px; font-weight: bold; 
+                        width: 16px; height: 16px; border-radius: 50%; 
+                        display: flex; align-items: center; justify-content: center;">
+                ${connectionCount}
+            </div>
+            ${component.type === 'RECORD_LAYOUT' ? `
+                <div style="position: absolute; top: 25px; left: 5px; right: 5px; height: 2px; background: rgba(255,255,255,0.5);"></div>
+                <div style="position: absolute; top: 35px; left: 5px; right: 5px; height: 2px; background: rgba(255,255,255,0.5);"></div>
+            ` : ''}
+        </div>
+    `;
+}
+
+function generateConnectionStats(dependencies) {
+    const connectionTypes = {};
+    dependencies.forEach(dep => {
+        connectionTypes[dep.relationshipType] = (connectionTypes[dep.relationshipType] || 0) + 1;
+    });
+    
+    return Object.entries(connectionTypes).map(([type, count]) => {
+        const typeIcons = {
+            'COPYBOOK_INCLUDE': '📋',
+            'PROGRAM_CALL': '🔄',
+            'CICS_FILE_ACCESS': '💾',
+            'FILE_OPERATION': '📁',
+            'INTERNAL_CALL': '🎯'
+        };
+        
+        return `
+            <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; text-align: center;">
+                <div style="font-size: 20px; margin-bottom: 5px;">${typeIcons[type] || '🔗'}</div>
+                <div style="font-weight: bold; font-size: 18px;">${count}</div>
+                <div style="font-size: 11px; opacity: 0.8;">${type.replace('_', ' ')}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+function generateDependencyRivers(dependencies) {
+    // Create flowing connection lines between districts
+    return dependencies.slice(0, 10).map((dep, index) => `
+        <div style="position: absolute; 
+                    left: ${20 + index * 8}%; 
+                    top: ${30 + index * 5}%; 
+                    width: 2px; 
+                    height: ${30 + index * 10}px; 
+                    background: linear-gradient(180deg, transparent, #ffffff88, transparent);
+                    animation: flow ${2 + index * 0.5}s infinite ease-in-out;"></div>
+    `).join('') + `
+        <style>
+            @keyframes flow {
+                0%, 100% { opacity: 0.3; transform: scaleY(1); }
+                50% { opacity: 0.8; transform: scaleY(1.2); }
+            }
+        </style>
+    `;
+}
+
+// Add these supporting functions
+function showBuildingDetails(componentName) {
+    const component = AppState.components.find(c => c.name === componentName);
+    if (component) {
+        viewComponentDetails(componentName);
+    }
+}
+
+function toggleCityView(viewType) {
+    console.log(`Switching to ${viewType} view`);
+    // Implement view switching logic
+    updateDependenciesFlow();
+}
+
+function exportDependencyMap() {
+    const mapData = {
+        components: AppState.components.map(c => ({
+            name: c.name,
+            type: c.type,
+            fields: c.fields?.length || 0,
+            dependencies: AppState.dependencies.filter(d => 
+                d.sourceComponent === c.name || d.targetComponent === c.name
+            ).length
+        })),
+        dependencies: AppState.dependencies,
+        timestamp: new Date().toISOString()
+    };
+    
+    const blob = new Blob([JSON.stringify(mapData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `dependency_map_${AppState.sessionId}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 
 function updateFieldMatrix() {
@@ -4017,23 +4177,118 @@ async function analyzeComponent(fileName, content) {
     const lines = content.split('\n');
     const tokens = TokenManager.estimateTokens(content);
     
-    // Basic analysis simulation
+    // Store original content for vLLM analysis
     const analysis = {
         name: fileName,
         type: fileType,
         totalLines: lines.length,
         tokens: tokens,
+        content: content, // Store actual content for vLLM
         fields: extractFields(content, fileType),
         dependencies: extractDependencies(content, fileType),
         businessLogic: extractBusinessLogic(content),
         cicsOperations: extractCICSOperations(content),
+        recordLayouts: extractRecordLayouts(content, fileName), // NEW: Extract record layouts
         confidence: 0.85
     };
     
-    // Update token usage
-    TokenManager.updateTokenUsage(tokens, 0);
+    // Create separate components for each record layout
+    if (analysis.recordLayouts && analysis.recordLayouts.length > 0) {
+        for (const layout of analysis.recordLayouts) {
+            const layoutComponent = {
+                name: `${fileName}-${layout.name}`,
+                type: 'RECORD_LAYOUT',
+                parentComponent: fileName,
+                totalLines: layout.lines.length,
+                tokens: TokenManager.estimateTokens(layout.content),
+                content: layout.content,
+                fields: layout.fields,
+                dependencies: [], // Will be populated by dependency analysis
+                businessLogic: [],
+                cicsOperations: [],
+                recordLayout: layout,
+                confidence: 0.90
+            };
+            
+            AppState.components.push(layoutComponent);
+            await db.saveComponentAnalysis(layoutComponent.name, layoutComponent.type, fileName, layoutComponent);
+        }
+    }
     
+    TokenManager.updateTokenUsage(tokens, 0);
     return analysis;
+}
+function extractRecordLayouts(content, fileName) {
+    const layouts = [];
+    const lines = content.split('\n');
+    let currentLayout = null;
+    let inDataDivision = false;
+    
+    lines.forEach((line, index) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // Check if we're in DATA DIVISION
+        if (trimmed.includes('DATA DIVISION')) {
+            inDataDivision = true;
+            return;
+        }
+        
+        // Check if we're leaving DATA DIVISION
+        if (inDataDivision && (trimmed.includes('PROCEDURE DIVISION') || trimmed.includes('WORKING-STORAGE SECTION'))) {
+            if (currentLayout) {
+                layouts.push(currentLayout);
+                currentLayout = null;
+            }
+        }
+        
+        // Look for record definitions (01 level items in FILE SECTION)
+        if (inDataDivision && trimmed.match(/^01\s+([A-Z0-9\-_]+)/)) {
+            // Save previous layout if exists
+            if (currentLayout) {
+                layouts.push(currentLayout);
+            }
+            
+            const recordName = trimmed.match(/^01\s+([A-Z0-9\-_]+)/)[1];
+            currentLayout = {
+                name: recordName,
+                startLine: index,
+                lines: [line],
+                content: line + '\n',
+                fields: [],
+                level: '01'
+            };
+        }
+        
+        // Add fields to current layout
+        if (currentLayout && trimmed.match(/^\d+\s+([A-Z0-9\-_]+)(\s+PIC\s+([X9V\(\)S\+\-COMP]+))?/)) {
+            const fieldMatch = trimmed.match(/^\d+\s+([A-Z0-9\-_]+)(\s+PIC\s+([X9V\(\)S\+\-COMP]+))?/);
+            const level = trimmed.match(/^\d+/)[0];
+            
+            currentLayout.lines.push(line);
+            currentLayout.content += line + '\n';
+            
+            if (fieldMatch) {
+                currentLayout.fields.push({
+                    name: fieldMatch[1],
+                    dataType: fieldMatch[3] || 'GROUP',
+                    level: level,
+                    lineNumber: index + 1,
+                    parentRecord: currentLayout.name
+                });
+            }
+        } else if (currentLayout && line.trim() && !trimmed.startsWith('*')) {
+            // Add non-field lines that belong to the record
+            currentLayout.lines.push(line);
+            currentLayout.content += line + '\n';
+        }
+    });
+    
+    // Don't forget the last layout
+    if (currentLayout) {
+        layouts.push(currentLayout);
+    }
+    
+    return layouts;
 }
 
 function extractFields(content, fileType) {
