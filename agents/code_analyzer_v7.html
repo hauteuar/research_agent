@@ -1215,7 +1215,84 @@ class DatabaseManager {
 // Initialize Database Manager
 const db = new DatabaseManager();
 // Part 3: Enhanced Field Mapping Analysis Engine with Complete vLLM Integration
-
+// Enhanced COBOL parsing that respects column structure
+class COBOLParser {
+    static isCommentLine(line) {
+        // Check if column 7 (index 6) has * or / or C or D
+        if (line.length >= 7) {
+            const col7 = line.charAt(6);
+            return col7 === '*' || col7 === '/' || col7.toUpperCase() === 'C' || col7.toUpperCase() === 'D';
+        }
+        return false;
+    }
+    
+    static isContinuationLine(line) {
+        // Check if column 7 (index 6) has - for continuation
+        if (line.length >= 7) {
+            const col7 = line.charAt(6);
+            return col7 === '-';
+        }
+        return false;
+    }
+    
+    static getCodeContent(line) {
+        // Extract content starting from column 8 (index 7)
+        if (line.length >= 8) {
+            return line.substring(7).trimRight(); // Keep leading spaces from col 8+
+        }
+        return '';
+    }
+    
+    static getSequenceArea(line) {
+        // Columns 1-6 (indices 0-5)
+        return line.length >= 6 ? line.substring(0, 6) : '';
+    }
+    
+    static getIdentificationArea(line) {
+        // Column 73-80 (indices 72-79) 
+        return line.length >= 73 ? line.substring(72, 80) : '';
+    }
+    
+    static cleanCOBOLLines(content) {
+        const lines = content.split('\n');
+        const cleanLines = [];
+        let continuedLine = '';
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            
+            // Skip comment lines
+            if (this.isCommentLine(line)) {
+                continue;
+            }
+            
+            // Handle continuation lines
+            if (this.isContinuationLine(line)) {
+                continuedLine += this.getCodeContent(line);
+                continue;
+            }
+            
+            // If we have a continued line, add it
+            if (continuedLine) {
+                cleanLines.push(continuedLine.trim());
+                continuedLine = '';
+            }
+            
+            // Get the actual COBOL code content (col 8+)
+            const codeContent = this.getCodeContent(line);
+            if (codeContent.trim()) {
+                cleanLines.push(codeContent);
+            }
+        }
+        
+        // Don't forget last continued line
+        if (continuedLine) {
+            cleanLines.push(continuedLine.trim());
+        }
+        
+        return cleanLines;
+    }
+}
 // Enhanced Field Mapping Analysis Engine with Complete vLLM Integration
 class FieldMappingAnalyzer {
     static businessLogicPatterns = {
@@ -1305,6 +1382,147 @@ class FieldMappingAnalyzer {
             throw error;
         }
     }
+
+    // Add to FieldMappingAnalyzer class
+static async generateFriendlyBusinessNames(components) {
+    const friendlyNames = new Map();
+    
+    for (let i = 0; i < components.length; i++) {
+        const component = components[i];
+        
+        // Check if we need chunking for the component content
+        const content = component.content || '';
+        const contentTokens = TokenManager.estimateTokens(content);
+        
+        try {
+            let businessName = '';
+            
+            if (contentTokens > TokenManager.EFFECTIVE_LIMIT) {
+                // Chunk the content and analyze key sections only
+                const keyLines = this.extractKeyBusinessLines(content);
+                const keyContent = keyLines.join('\n');
+                businessName = await this.callLLMForBusinessName(component.name, keyContent, component.type);
+            } else {
+                businessName = await this.callLLMForBusinessName(component.name, content, component.type);
+            }
+            
+            friendlyNames.set(component.name, businessName);
+            
+            // Update the component with friendly name
+            component.friendlyName = businessName;
+            component.displayName = businessName;
+            
+            // Small delay between calls to avoid overwhelming vLLM
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+        } catch (error) {
+            console.warn(`Failed to generate business name for ${component.name}:`, error);
+            // Fallback to pattern-based naming
+            friendlyNames.set(component.name, this.generateFallbackBusinessName(component.name, component.type));
+            component.friendlyName = this.generateFallbackBusinessName(component.name, component.type);
+            component.displayName = component.friendlyName;
+        }
+    }
+    
+    return friendlyNames;
+}
+
+static extractKeyBusinessLines(content) {
+    const lines = content.split('\n');
+    const keyLines = [];
+    
+    // Extract key business-relevant lines
+    lines.forEach(line => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // Include program identification
+        if (trimmed.includes('PROGRAM-ID') || 
+            trimmed.includes('AUTHOR') ||
+            trimmed.includes('REMARKS') ||
+            // Include file definitions
+            trimmed.includes('SELECT') ||
+            trimmed.includes('FD ') ||
+            // Include key data structures (01 level)
+            trimmed.match(/^01\s+/) ||
+            // Include key procedure names
+            trimmed.includes('PERFORM') ||
+            // Include comments that might have business context
+            (trimmed.startsWith('*') && trimmed.length > 10)) {
+            keyLines.push(line);
+        }
+    });
+    
+    return keyLines.slice(0, 50); // Limit to 50 key lines
+}
+
+static async callLLMForBusinessName(componentName, content, componentType) {
+    const systemPrompt = `You are a business analyst expert in mainframe systems. Generate a friendly, business-meaningful name for this ${componentType} component. The name should be:
+- Clear and business-friendly (no technical jargon)
+- Under 4 words
+- Descriptive of the business function
+- Professional and readable
+
+Examples:
+- "CUST-ACCT-UPD" → "Customer Account Updates"  
+- "INV-PROC-RPT" → "Inventory Processing Report"
+- "PAYMENT-FILE" → "Payment Transaction File"
+
+Return ONLY the friendly business name, nothing else.`;
+
+    const analysisPrompt = `Component Name: ${componentName}
+Component Type: ${componentType}
+
+Code Context:
+${content.substring(0, 2000)}
+
+Generate a friendly business name for this component:`;
+
+    try {
+        const llmResponse = await VLLMAPIManager.makeAPICall(analysisPrompt, systemPrompt, 100);
+        const businessName = llmResponse.content.trim().replace(/['"]/g, '');
+        
+        // Validate the response
+        if (businessName && businessName.length > 0 && businessName.length < 50) {
+            return businessName;
+        } else {
+            throw new Error('Invalid business name generated');
+        }
+        
+    } catch (error) {
+        console.warn('LLM business name generation failed:', error);
+        return this.generateFallbackBusinessName(componentName, componentType);
+    }
+}
+
+static generateFallbackBusinessName(componentName, componentType) {
+    // Pattern-based business name generation as fallback
+    const name = componentName.replace(/[-_]/g, ' ').toLowerCase();
+    const words = name.split(' ');
+    
+    const businessTerms = {
+        'cust': 'Customer',
+        'acct': 'Account', 
+        'inv': 'Inventory',
+        'ord': 'Order',
+        'pay': 'Payment',
+        'upd': 'Update',
+        'inq': 'Inquiry', 
+        'rpt': 'Report',
+        'proc': 'Processing',
+        'maint': 'Maintenance',
+        'file': 'File',
+        'rec': 'Record',
+        'tran': 'Transaction'
+    };
+    
+    const friendlyWords = words.map(word => {
+        const lower = word.toLowerCase();
+        return businessTerms[lower] || businessTerms[lower.substring(0, 4)] || 
+               word.charAt(0).toUpperCase() + word.slice(1);
+    });
+    
+    return friendlyWords.join(' ') + (componentType === 'RECORD_LAYOUT' ? ' Layout' : '');
+}
 
     static async findRelatedPrograms(fileName) {
     // Use REAL uploaded components instead of simulated ones
@@ -1429,14 +1647,11 @@ Provide structured analysis focusing on field mappings to ${targetFile}.
     }
 
     static async performVLLMAnalysis(codeChunk, targetFile, programName, chunkNumber, totalChunks) {
-        const systemPrompt = `You are an expert COBOL mainframe analyst. Analyze the provided COBOL code chunk and extract:
-1. Field mappings and data movements (MOVE, COMPUTE operations)
-2. Business logic patterns (CONDITIONAL, CALCULATED, STRING_MANIPULATION)  
-3. CICS operations (READ, WRITE, SEND, RECEIVE, etc.)
-4. File operations and dependencies
-5. Data type definitions and field structures
+    const systemPrompt = `You are an expert COBOL mainframe analyst. Analyze the provided COBOL code chunk and extract field mapping information.
 
-Respond in JSON format with this structure:
+CRITICAL: Your response must be valid JSON only. No explanations, no markdown, just JSON.
+
+Extract and return in this JSON format:
 {
   "fieldMappings": [
     {
@@ -1467,70 +1682,166 @@ Respond in JSON format with this structure:
   ]
 }`;
 
-        const analysisPrompt = `
-Program: ${programName} (Chunk ${chunkNumber}/${totalChunks})
+    // CHUNKING FIX: Check prompt size and chunk if needed
+    const basePrompt = `Program: ${programName} (Chunk ${chunkNumber}/${totalChunks})
 Target File: ${targetFile}
 
-COBOL Code to Analyze:
-${codeChunk}
+Focus on field mappings to ${targetFile} and provide detailed analysis.
 
-Focus on field mappings to ${targetFile} and provide detailed analysis.`;
-
-        try {
-            // Make REAL vLLM API call
-            const llmResponse = await VLLMAPIManager.makeAPICall(analysisPrompt, systemPrompt, 1500);
-
-            // Parse JSON response
-            let analysisResult;
-            try {
-                analysisResult = JSON.parse(llmResponse.content);
-            } catch (parseError) {
-                console.warn('vLLM response not valid JSON, using fallback parsing');
-                analysisResult = this.fallbackParseResponse(llmResponse.content, codeChunk, targetFile, programName);
-            }
-
-            // Enhance field mappings with Oracle conversions
-            if (analysisResult.fieldMappings) {
-                analysisResult.fieldMappings.forEach(mapping => {
-                    mapping.oracleDataType = this.convertToOracleType(mapping.mainframeDataType);
-                    mapping.mainframeLength = this.inferAdvancedLength(mapping.fieldName, codeChunk);
-                    mapping.oracleLength = this.inferOracleLength(mapping.fieldName, codeChunk);
-                    mapping.sourceRecordLayout = targetFile;
-                    mapping.programsInvolved = [programName];
-                });
-            }
-
-            return {
-                fieldMappings: analysisResult.fieldMappings || [],
-                dependencies: analysisResult.dependencies || [],
-                cicsOperations: analysisResult.cicsOperations || [],
-                inputTokens: llmResponse.inputTokens,
-                outputTokens: llmResponse.outputTokens,
-                processingTime: Date.now(),
-                chunkNumber,
-                totalChunks,
-                vllmCall: true
-            };
-
-        } catch (error) {
-            console.error('vLLM API call failed, using fallback analysis:', error);
-            
-            // Fallback to pattern-based analysis if vLLM fails
-            return {
-                fieldMappings: this.extractAdvancedFieldMappings(codeChunk, targetFile, programName),
-                dependencies: this.extractAdvancedDependencies(codeChunk, programName), 
-                cicsOperations: this.extractCICSOperations(codeChunk, programName),
-                inputTokens: 0,
-                outputTokens: 0,
-                processingTime: Date.now(),
-                chunkNumber,
-                totalChunks,
-                vllmCall: false,
-                fallback: true,
-                error: error.message
-            };
+COBOL Code to Analyze:`;
+    
+    const maxContentLength = TokenManager.EFFECTIVE_LIMIT * 4 - TokenManager.estimateTokens(systemPrompt + basePrompt) - 500; // Reserve 500 tokens for response
+    
+    let finalCodeChunk = codeChunk;
+    if (TokenManager.estimateTokens(codeChunk) > maxContentLength) {
+        console.warn(`Code chunk too large (${TokenManager.estimateTokens(codeChunk)} tokens), further chunking...`);
+        
+        // Further chunk the code - prioritize business logic sections
+        const priorityLines = this.extractPriorityLines(codeChunk);
+        finalCodeChunk = priorityLines.join('\n');
+        
+        // If still too large, truncate
+        if (TokenManager.estimateTokens(finalCodeChunk) > maxContentLength) {
+            const lines = finalCodeChunk.split('\n');
+            const maxLines = Math.floor(lines.length * (maxContentLength / TokenManager.estimateTokens(finalCodeChunk)));
+            finalCodeChunk = lines.slice(0, maxLines).join('\n');
+            console.warn(`Further truncated to ${maxLines} lines to fit token limit`);
         }
     }
+    
+    const analysisPrompt = basePrompt + '\n' + finalCodeChunk;
+    
+    try {
+        // Make REAL vLLM API call with chunked content
+        const llmResponse = await VLLMAPIManager.makeAPICall(analysisPrompt, systemPrompt, 1500);
+
+        // Parse JSON response with enhanced error handling
+        let analysisResult;
+        try {
+            // Clean the response - remove any markdown formatting
+            let cleanResponse = llmResponse.content.trim();
+            if (cleanResponse.startsWith('```json')) {
+                cleanResponse = cleanResponse.replace(/```json\s*/, '').replace(/\s*```$/, '');
+            }
+            if (cleanResponse.startsWith('```')) {
+                cleanResponse = cleanResponse.replace(/```\s*/, '').replace(/\s*```$/, '');
+            }
+            
+            analysisResult = JSON.parse(cleanResponse);
+        } catch (parseError) {
+            console.warn('vLLM response not valid JSON, using enhanced fallback parsing');
+            analysisResult = this.enhancedFallbackParse(llmResponse.content, finalCodeChunk, targetFile, programName);
+        }
+
+        // Enhance field mappings with Oracle conversions
+        if (analysisResult.fieldMappings) {
+            analysisResult.fieldMappings.forEach(mapping => {
+                mapping.oracleDataType = this.convertToOracleType(mapping.mainframeDataType);
+                mapping.mainframeLength = this.inferAdvancedLength(mapping.fieldName, finalCodeChunk);
+                mapping.oracleLength = this.inferOracleLength(mapping.fieldName, finalCodeChunk);
+                mapping.sourceRecordLayout = targetFile;
+                mapping.programsInvolved = [programName];
+            });
+        }
+
+        return {
+            fieldMappings: analysisResult.fieldMappings || [],
+            dependencies: analysisResult.dependencies || [],
+            cicsOperations: analysisResult.cicsOperations || [],
+            inputTokens: llmResponse.inputTokens,
+            outputTokens: llmResponse.outputTokens,
+            processingTime: Date.now(),
+            chunkNumber,
+            totalChunks,
+            vllmCall: true,
+            actualContentLength: TokenManager.estimateTokens(finalCodeChunk)
+        };
+
+    } catch (error) {
+        console.error('vLLM API call failed, using fallback analysis:', error);
+        
+        // Enhanced fallback to pattern-based analysis if vLLM fails
+        return {
+            fieldMappings: this.extractAdvancedFieldMappings(finalCodeChunk, targetFile, programName),
+            dependencies: this.extractAdvancedDependencies(finalCodeChunk, programName), 
+            cicsOperations: this.extractCICSOperations(finalCodeChunk, programName),
+            inputTokens: 0,
+            outputTokens: 0,
+            processingTime: Date.now(),
+            chunkNumber,
+            totalChunks,
+            vllmCall: false,
+            fallback: true,
+            error: error.message,
+            actualContentLength: TokenManager.estimateTokens(finalCodeChunk)
+        };
+    }
+}
+
+// Add helper function to extract priority lines for chunking
+static extractPriorityLines(codeChunk) {
+    const cleanLines = COBOLParser.cleanCOBOLLines(codeChunk);
+    const priorityLines = [];
+    
+    // Priority 1: Program identification and file definitions
+    cleanLines.forEach(line => {
+        const trimmed = line.trim().toUpperCase();
+        if (trimmed.includes('PROGRAM-ID') || 
+            trimmed.includes('SELECT') ||
+            trimmed.match(/^FD\s+/) ||
+            trimmed.match(/^01\s+/)) {
+            priorityLines.push(line);
+        }
+    });
+    
+    // Priority 2: Business logic (MOVE, COMPUTE, etc.)
+    cleanLines.forEach(line => {
+        const trimmed = line.trim().toUpperCase();
+        if (trimmed.match(/^\s*MOVE\s+/) || 
+            trimmed.match(/^\s*COMPUTE\s+/) ||
+            trimmed.match(/^\s*IF\s+/) ||
+            trimmed.match(/^\s*ADD\s+/) ||
+            trimmed.match(/^\s*SUBTRACT\s+/) ||
+            trimmed.match(/^\s*MULTIPLY\s+/) ||
+            trimmed.match(/^\s*DIVIDE\s+/)) {
+            if (!priorityLines.includes(line)) {
+                priorityLines.push(line);
+            }
+        }
+    });
+    
+    // Priority 3: CICS operations
+    cleanLines.forEach(line => {
+        const trimmed = line.trim().toUpperCase();
+        if (trimmed.includes('EXEC CICS')) {
+            if (!priorityLines.includes(line)) {
+                priorityLines.push(line);
+            }
+        }
+    });
+    
+    return priorityLines.length > 0 ? priorityLines : cleanLines.slice(0, 100);
+}
+
+// Enhanced fallback parsing
+static enhancedFallbackParse(responseText, codeChunk, targetFile, programName) {
+    // Try to extract JSON from mixed response
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+        try {
+            return JSON.parse(jsonMatch[0]);
+        } catch (e) {
+            // Continue to pattern-based fallback
+        }
+    }
+    
+    // Pattern-based fallback analysis
+    const fieldMappings = this.extractAdvancedFieldMappings(codeChunk, targetFile, programName);
+    const dependencies = this.extractAdvancedDependencies(codeChunk, programName);
+    const cicsOperations = this.extractCICSOperations(codeChunk, programName);
+    
+    return { fieldMappings, dependencies, cicsOperations };
+}
 
     // Fallback parsing for non-JSON vLLM responses
   
@@ -3096,44 +3407,214 @@ function createCityViewDependencyMap() {
     const components = AppState.components;
     const dependencies = AppState.dependencies;
     
-    // Group components by type for city districts
-    const districts = {
-        'PROGRAMS': components.filter(c => c.type === 'CBL' || c.type === 'COB'),
-        'COPYBOOKS': components.filter(c => c.type === 'COPY'),
-        'RECORD_LAYOUTS': components.filter(c => c.type === 'RECORD_LAYOUT'),
-        'JCL_JOBS': components.filter(c => c.type === 'JCL' || c.type === 'PROC')
-    };
+    // Categorize components by data flow position
+    const flowCategories = categorizeComponentsByFlow(components, dependencies);
     
     return `
-        <div class="city-dependency-map" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px; padding: 30px; color: white; position: relative; min-height: 500px;">
+        <div class="city-dependency-map" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px; padding: 30px; color: white; position: relative; min-height: 600px;">
             <div class="city-header" style="text-align: center; margin-bottom: 30px;">
-                <h2 style="margin: 0; font-size: 24px;">🏙️ Mainframe System City View</h2>
-                <p style="margin: 10px 0 0 0; opacity: 0.9;">Interactive dependency visualization with ${components.length} components</p>
+                <h2 style="margin: 0; font-size: 24px;">🏙️ Business System City View</h2>
+                <p style="margin: 10px 0 0 0; opacity: 0.9;">Data flow visualization with ${components.length} business components</p>
             </div>
             
-            <div class="city-districts" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
-                ${Object.entries(districts).map(([districtName, districtComponents]) => 
-                    createCityDistrict(districtName, districtComponents, dependencies)
-                ).join('')}
-            </div>
-            
-            <div class="city-connections" style="margin-top: 30px;">
-                <h3 style="margin-bottom: 15px;">🌐 Inter-District Connections</h3>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
-                    ${generateConnectionStats(dependencies)}
+            <!-- Input Sources District -->
+            <div class="flow-section" style="margin-bottom: 25px;">
+                <h3 style="color: #4CAF50; margin-bottom: 15px;">📥 INPUT SOURCES</h3>
+                <div class="input-district" style="display: flex; flex-wrap: wrap; gap: 15px; justify-content: center; min-height: 120px; background: rgba(76, 175, 80, 0.1); border-radius: 12px; padding: 20px; border: 2px dashed rgba(76, 175, 80, 0.5);">
+                    ${flowCategories.inputs.map(component => createBusinessBuilding(component, 'input')).join('')}
+                    ${flowCategories.inputs.length === 0 ? '<div style="color: rgba(255,255,255,0.7); align-self: center;">No input sources identified</div>' : ''}
                 </div>
             </div>
             
-            <!-- Dependency Flow Rivers -->
-            <div class="dependency-rivers" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0.3;">
-                ${generateDependencyRivers(dependencies)}
+            <!-- Flow Arrows -->
+            <div style="text-align: center; margin: 20px 0;">
+                <div style="font-size: 30px; animation: pulse 2s infinite;">⬇️</div>
             </div>
+            
+            <!-- Interface/Processing District -->
+            <div class="flow-section" style="margin-bottom: 25px;">
+                <h3 style="color: #FF9800; margin-bottom: 15px;">⚙️ PROCESSING INTERFACES</h3>
+                <div class="interface-district" style="display: flex; flex-wrap: wrap; gap: 15px; justify-content: center; min-height: 120px; background: rgba(255, 152, 0, 0.1); border-radius: 12px; padding: 20px; border: 2px dashed rgba(255, 152, 0, 0.5);">
+                    ${flowCategories.processors.map(component => createBusinessBuilding(component, 'processor')).join('')}
+                    ${flowCategories.processors.length === 0 ? '<div style="color: rgba(255,255,255,0.7); align-self: center;">No processing interfaces identified</div>' : ''}
+                </div>
+            </div>
+            
+            <!-- Flow Arrows -->
+            <div style="text-align: center; margin: 20px 0;">
+                <div style="font-size: 30px; animation: pulse 2s infinite;">⬇️</div>
+            </div>
+            
+            <!-- Output Destinations District -->
+            <div class="flow-section" style="margin-bottom: 25px;">
+                <h3 style="color: #F44336; margin-bottom: 15px;">📤 OUTPUT DESTINATIONS</h3>
+                <div class="output-district" style="display: flex; flex-wrap: wrap; gap: 15px; justify-content: center; min-height: 120px; background: rgba(244, 67, 54, 0.1); border-radius: 12px; padding: 20px; border: 2px dashed rgba(244, 67, 54, 0.5);">
+                    ${flowCategories.outputs.map(component => createBusinessBuilding(component, 'output')).join('')}
+                    ${flowCategories.outputs.length === 0 ? '<div style="color: rgba(255,255,255,0.7); align-self: center;">No output destinations identified</div>' : ''}
+                </div>
+            </div>
+            
+            <!-- Missing Dependencies Alert -->
+            ${flowCategories.orphaned.length > 0 ? `
+                <div class="missing-deps" style="background: rgba(156, 39, 176, 0.2); border: 2px dashed rgba(156, 39, 176, 0.6); border-radius: 12px; padding: 20px; margin-top: 25px;">
+                    <h3 style="color: #E91E63; margin-bottom: 15px;">⚠️ ISOLATED COMPONENTS (Missing Dependencies)</h3>
+                    <div style="display: flex; flex-wrap: wrap; gap: 15px; justify-content: center;">
+                        ${flowCategories.orphaned.map(component => createBusinessBuilding(component, 'orphaned')).join('')}
+                    </div>
+                    <p style="margin-top: 15px; font-size: 12px; opacity: 0.8; text-align: center;">
+                        These components have no clear input/output relationships. Consider reviewing their integration points.
+                    </p>
+                </div>
+            ` : ''}
+            
+            <!-- Data Flow Rivers -->
+            <div class="dependency-rivers" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0.3;">
+                ${generateDataFlowRivers(dependencies)}
+            </div>
+            
+            <style>
+                @keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+                @keyframes flow { 0%, 100% { opacity: 0.3; transform: translateY(0); } 50% { opacity: 0.8; transform: translateY(10px); } }
+            </style>
         </div>
         
-        <div class="city-controls" style="margin-top: 20px; text-align: center;">
-            <button onclick="toggleCityView('detailed')" style="background: #27ae60; color: white; border: none; padding: 10px 20px; border-radius: 8px; margin: 0 5px; cursor: pointer;">📊 Detailed View</button>
-            <button onclick="toggleCityView('compact')" style="background: #f39c12; color: white; border: none; padding: 10px 20px; border-radius: 8px; margin: 0 5px; cursor: pointer;">🏢 Compact View</button>
-            <button onclick="exportDependencyMap()" style="background: #e74c3c; color: white; border: none; padding: 10px 20px; border-radius: 8px; margin: 0 5px; cursor: pointer;">💾 Export Map</button>
+        <div class="city-analytics" style="margin-top: 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+            ${generateFlowAnalytics(flowCategories)}
+        </div>
+    `;
+}
+
+function categorizeComponentsByFlow(components, dependencies) {
+    const inputs = [];
+    const processors = [];
+    const outputs = [];
+    const orphaned = [];
+    
+    components.forEach(component => {
+        const incomingDeps = dependencies.filter(d => d.targetComponent === component.name).length;
+        const outgoingDeps = dependencies.filter(d => d.sourceComponent === component.name).length;
+        const componentName = component.name.toLowerCase();
+        
+        // Determine component category based on dependencies and naming patterns
+        if (incomingDeps === 0 && outgoingDeps > 0) {
+            // Pure input source
+            inputs.push(component);
+        } else if (incomingDeps > 0 && outgoingDeps === 0) {
+            // Pure output destination  
+            outputs.push(component);
+        } else if (incomingDeps > 0 && outgoingDeps > 0) {
+            // Processing interface
+            processors.push(component);
+        } else if (incomingDeps === 0 && outgoingDeps === 0) {
+            // Orphaned component
+            orphaned.push(component);
+        } else {
+            // Default to processor if unclear
+            processors.push(component);
+        }
+    });
+    
+    return { inputs, processors, outputs, orphaned };
+}
+
+function createBusinessBuilding(component, flowType) {
+    const flowColors = {
+        'input': '#4CAF50',
+        'processor': '#FF9800', 
+        'output': '#F44336',
+        'orphaned': '#9C27B0'
+    };
+    
+    const flowIcons = {
+        'input': '📥',
+        'processor': '⚙️',
+        'output': '📤', 
+        'orphaned': '❓'
+    };
+    
+    const color = flowColors[flowType];
+    const icon = flowIcons[flowType];
+    const displayName = component.displayName || component.friendlyName || component.name;
+    
+    return `
+        <div class="business-building" 
+             style="background: linear-gradient(145deg, ${color}, ${color}cc); 
+                    min-width: 140px; 
+                    height: 80px; 
+                    border-radius: 8px; 
+                    position: relative; 
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                    border: 2px solid rgba(255,255,255,0.3);
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    text-align: center;
+                    padding: 10px;"
+             onclick="showBuildingDetails('${component.name}')"
+             onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 8px 25px rgba(0,0,0,0.3)'"
+             onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='none'">
+            
+            <div style="font-size: 20px; margin-bottom: 5px;">${icon}</div>
+            
+            <div style="font-size: 11px; font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis;">
+                ${displayName.length > 25 ? displayName.substring(0, 25) + '...' : displayName}
+            </div>
+            
+            <div style="font-size: 9px; opacity: 0.8; margin-top: 2px;">
+                ${component.type} ${component.fields?.length ? `(${component.fields.length} fields)` : ''}
+            </div>
+            
+            ${component.type === 'RECORD_LAYOUT' ? `
+                <div style="position: absolute; bottom: 3px; left: 3px; right: 3px; height: 2px; background: rgba(255,255,255,0.4); border-radius: 1px;"></div>
+            ` : ''}
+        </div>
+    `;
+}
+
+function generateDataFlowRivers(dependencies) {
+    return dependencies.slice(0, 15).map((dep, index) => `
+        <div style="position: absolute; 
+                    left: ${10 + (index % 5) * 18}%; 
+                    top: ${20 + Math.floor(index / 5) * 30}%; 
+                    width: 3px; 
+                    height: ${40 + (index % 3) * 20}px; 
+                    background: linear-gradient(180deg, transparent, rgba(255,255,255,0.6), transparent);
+                    border-radius: 2px;
+                    animation: flow ${2 + (index % 3)}s infinite ease-in-out;
+                    animation-delay: ${index * 0.2}s;"></div>
+    `).join('');
+}
+
+function generateFlowAnalytics(flowCategories) {
+    return `
+        <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <h4 style="color: #4CAF50; margin: 0 0 10px 0;">📥 Input Sources</h4>
+            <div style="font-size: 24px; font-weight: 600; color: #4CAF50;">${flowCategories.inputs.length}</div>
+            <div style="font-size: 12px; color: #666;">Data entry points</div>
+        </div>
+        
+        <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <h4 style="color: #FF9800; margin: 0 0 10px 0;">⚙️ Processors</h4>
+            <div style="font-size: 24px; font-weight: 600; color: #FF9800;">${flowCategories.processors.length}</div>
+            <div style="font-size: 12px; color: #666;">Business logic</div>
+        </div>
+        
+        <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <h4 style="color: #F44336; margin: 0 0 10px 0;">📤 Outputs</h4>
+            <div style="font-size: 24px; font-weight: 600; color: #F44336;">${flowCategories.outputs.length}</div>
+            <div style="font-size: 12px; color: #666;">Reports & files</div>
+        </div>
+        
+        <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <h4 style="color: ${flowCategories.orphaned.length > 0 ? '#E91E63' : '#27ae60'}; margin: 0 0 10px 0;">
+                ${flowCategories.orphaned.length > 0 ? '⚠️' : '✅'} Integration
+            </h4>
+            <div style="font-size: 24px; font-weight: 600; color: ${flowCategories.orphaned.length > 0 ? '#E91E63' : '#27ae60'};">
+                ${flowCategories.orphaned.length > 0 ? flowCategories.orphaned.length + ' Missing' : 'Complete'}
+            </div>
+            <div style="font-size: 12px; color: #666;">Dependency health</div>
         </div>
     `;
 }
@@ -4145,7 +4626,7 @@ async function processAllFiles() {
             AppState.components.push(analysis);
             await db.saveComponentAnalysis(file.name, analysis.type, file.name, analysis);
             
-            // Update UI
+            // Update UI progressively
             updateMetrics();
             updateComponentsLibrary();
             updateDependenciesFlow();
@@ -4156,7 +4637,32 @@ async function processAllFiles() {
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
         
-        updateProcessingStatus('ready', 'Analysis completed successfully');
+        // ENHANCEMENT: Generate business names for all components
+        updateProcessingStatus('analyzing', 'Generating business-friendly names...');
+        if (VLLMAPIManager.serverConfigured) {
+            try {
+                const friendlyNames = await FieldMappingAnalyzer.generateFriendlyBusinessNames(AppState.components);
+                console.log('✅ Business names generated:', friendlyNames);
+                
+                // Update all UI components with new names
+                updateComponentsLibrary();
+                updateDependenciesFlow();
+                updateFieldMatrix();
+                updateDashboard();
+                
+            } catch (error) {
+                console.warn('Business name generation failed:', error);
+            }
+        } else {
+            console.log('📝 vLLM not configured, using fallback business names');
+            // Generate fallback names
+            AppState.components.forEach(component => {
+                component.friendlyName = FieldMappingAnalyzer.generateFallbackBusinessName(component.name, component.type);
+                component.displayName = component.friendlyName;
+            });
+        }
+        
+        updateProcessingStatus('ready', 'Analysis completed successfully with business names');
         
     } catch (error) {
         updateProcessingStatus('error', `Processing failed: ${error.message}`);
@@ -4220,38 +4726,63 @@ async function analyzeComponent(fileName, content) {
 }
 function extractRecordLayouts(content, fileName) {
     const layouts = [];
-    const lines = content.split('\n');
+    const cleanLines = COBOLParser.cleanCOBOLLines(content);
+    
     let currentLayout = null;
     let inDataDivision = false;
+    let inFileSection = false;
     
-    lines.forEach((line, index) => {
+    cleanLines.forEach((line, index) => {
         const trimmed = line.trim().toUpperCase();
         
-        // Check if we're in DATA DIVISION
+        // Track sections
         if (trimmed.includes('DATA DIVISION')) {
             inDataDivision = true;
             return;
         }
-        
-        // Check if we're leaving DATA DIVISION
-        if (inDataDivision && (trimmed.includes('PROCEDURE DIVISION') || trimmed.includes('WORKING-STORAGE SECTION'))) {
+        if (trimmed.includes('PROCEDURE DIVISION')) {
+            inDataDivision = false;
             if (currentLayout) {
                 layouts.push(currentLayout);
                 currentLayout = null;
             }
+            return;
+        }
+        if (trimmed.includes('FILE SECTION')) {
+            inFileSection = true;
+            return;
+        }
+        if (trimmed.includes('WORKING-STORAGE SECTION')) {
+            inFileSection = false;
+            if (currentLayout && inFileSection) {
+                layouts.push(currentLayout);
+                currentLayout = null;
+            }
+            return;
         }
         
-        // Look for record definitions (01 level items in FILE SECTION)
-        if (inDataDivision && trimmed.match(/^01\s+([A-Z0-9\-_]+)/)) {
-            // Save previous layout if exists
+        // Only process record layouts in FILE SECTION
+        if (!inDataDivision || !inFileSection) return;
+        
+        // Look for 01 level record definitions
+        const recordMatch = line.match(/^\s*01\s+([A-Z0-9\-_]+)(\s+.*)?/i);
+        if (recordMatch) {
+            // Save previous layout
             if (currentLayout) {
                 layouts.push(currentLayout);
             }
             
-            const recordName = trimmed.match(/^01\s+([A-Z0-9\-_]+)/)[1];
+            const recordName = recordMatch[1];
+            
+            // Skip FILLER records
+            if (recordName === 'FILLER') {
+                currentLayout = null;
+                return;
+            }
+            
             currentLayout = {
                 name: recordName,
-                startLine: index,
+                startLine: index + 1,
                 lines: [line],
                 content: line + '\n',
                 fields: [],
@@ -4259,27 +4790,33 @@ function extractRecordLayouts(content, fileName) {
             };
         }
         
-        // Add fields to current layout
-        if (currentLayout && trimmed.match(/^\d+\s+([A-Z0-9\-_]+)(\s+PIC\s+([X9V\(\)S\+\-COMP]+))?/)) {
-            const fieldMatch = trimmed.match(/^\d+\s+([A-Z0-9\-_]+)(\s+PIC\s+([X9V\(\)S\+\-COMP]+))?/);
-            const level = trimmed.match(/^\d+/)[0];
-            
-            currentLayout.lines.push(line);
-            currentLayout.content += line + '\n';
-            
+        // Add fields to current record layout
+        if (currentLayout) {
+            const fieldMatch = line.match(/^\s*(\d+)\s+([A-Z0-9\-_]+)(\s+PIC\s+([X9VS\(\)\+\-COMP]+))?/i);
             if (fieldMatch) {
-                currentLayout.fields.push({
-                    name: fieldMatch[1],
-                    dataType: fieldMatch[3] || 'GROUP',
-                    level: level,
-                    lineNumber: index + 1,
-                    parentRecord: currentLayout.name
-                });
+                const level = fieldMatch[1];
+                const fieldName = fieldMatch[2];
+                const picClause = fieldMatch[4];
+                
+                // Skip FILLER fields
+                if (fieldName !== 'FILLER') {
+                    currentLayout.lines.push(line);
+                    currentLayout.content += line + '\n';
+                    
+                    currentLayout.fields.push({
+                        name: fieldName,
+                        dataType: picClause || 'GROUP',
+                        level: level,
+                        lineNumber: index + 1,
+                        parentRecord: currentLayout.name,
+                        isGroup: !picClause
+                    });
+                }
+            } else if (line.trim() && !trimmed.startsWith('*')) {
+                // Add other non-field lines that belong to the record
+                currentLayout.lines.push(line);
+                currentLayout.content += line + '\n';
             }
-        } else if (currentLayout && line.trim() && !trimmed.startsWith('*')) {
-            // Add non-field lines that belong to the record
-            currentLayout.lines.push(line);
-            currentLayout.content += line + '\n';
         }
     });
     
@@ -4293,17 +4830,58 @@ function extractRecordLayouts(content, fileName) {
 
 function extractFields(content, fileType) {
     const fields = [];
-    const lines = content.split('\n');
+    const cleanLines = COBOLParser.cleanCOBOLLines(content);
     
-    lines.forEach((line, index) => {
-        // Look for COBOL field definitions
-        const fieldMatch = line.match(/^\s*\d+\s+([A-Z0-9\-_]+)\s+PIC\s+([X9V\(\)]+)/i);
+    let inDataDivision = false;
+    let inFileSection = false;
+    let inWorkingStorage = false;
+    let currentLevel = 0;
+    
+    cleanLines.forEach((line, index) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // Track divisions and sections
+        if (trimmed.includes('DATA DIVISION')) {
+            inDataDivision = true;
+            return;
+        }
+        if (trimmed.includes('PROCEDURE DIVISION')) {
+            inDataDivision = false;
+            return;
+        }
+        if (trimmed.includes('FILE SECTION')) {
+            inFileSection = true;
+            inWorkingStorage = false;
+            return;
+        }
+        if (trimmed.includes('WORKING-STORAGE SECTION')) {
+            inWorkingStorage = true;
+            inFileSection = false;
+            return;
+        }
+        
+        // Only process fields in data division
+        if (!inDataDivision) return;
+        
+        // Look for field definitions (level number + field name + optional PIC)
+        const fieldMatch = line.match(/^\s*(\d+)\s+([A-Z0-9\-_]+)(\s+PIC\s+([X9VS\(\)\+\-COMP]+))?/i);
         if (fieldMatch) {
+            const level = fieldMatch[1];
+            const fieldName = fieldMatch[2];
+            const picClause = fieldMatch[4] || 'GROUP';
+            
+            // Skip FILLER fields and system fields
+            if (fieldName === 'FILLER' || fieldName.startsWith('WS-')) {
+                return;
+            }
+            
             fields.push({
-                name: fieldMatch[1],
-                dataType: fieldMatch[2],
+                name: fieldName,
+                dataType: picClause,
+                level: level,
                 lineNumber: index + 1,
-                level: line.match(/^\s*(\d+)/)?.[1] || '01'
+                section: inFileSection ? 'FILE' : inWorkingStorage ? 'WORKING-STORAGE' : 'DATA',
+                isGroup: !fieldMatch[3] // No PIC clause = group item
             });
         }
     });
@@ -4313,37 +4891,79 @@ function extractFields(content, fileType) {
 
 function extractDependencies(content, fileType) {
     const dependencies = [];
-    const lines = content.split('\n');
+    const cleanLines = COBOLParser.cleanCOBOLLines(content);
     
-    lines.forEach((line, index) => {
-        // COPY/INCLUDE statements
-        const copyMatch = line.match(/COPY\s+([A-Z0-9\-_]+)/i);
+    cleanLines.forEach((line, index) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // COPY/INCLUDE statements (only in actual code, not comments)
+        const copyMatch = trimmed.match(/^COPY\s+([A-Z0-9\-_]+)/i);
         if (copyMatch) {
             dependencies.push({
                 type: 'COPYBOOK',
                 name: copyMatch[1],
-                lineNumber: index + 1
+                lineNumber: index + 1,
+                statement: line.trim()
             });
         }
         
         // CALL statements
-        const callMatch = line.match(/CALL\s+['"]([A-Z0-9\-_]+)['"]/i);
+        const callMatch = trimmed.match(/^CALL\s+['"]([A-Z0-9\-_]+)['"](\s+USING\s+(.+))?/i);
         if (callMatch) {
             dependencies.push({
                 type: 'PROGRAM_CALL',
                 name: callMatch[1],
-                lineNumber: index + 1
+                parameters: callMatch[3] || null,
+                lineNumber: index + 1,
+                statement: line.trim()
             });
         }
         
-        // File operations
-        const fileMatch = line.match(/(read|write|open|close)\s+([A-Z0-9\-_]+)/i);
+        // CICS file operations (multi-line aware)
+        if (trimmed.includes('EXEC CICS')) {
+            // Handle multi-line CICS commands
+            let cicsStatement = line;
+            let nextIndex = index + 1;
+            
+            // Collect continuation lines until END-EXEC
+            while (nextIndex < cleanLines.length && !cicsStatement.includes('END-EXEC')) {
+                cicsStatement += ' ' + cleanLines[nextIndex].trim();
+                nextIndex++;
+            }
+            
+            const cicsFileMatch = cicsStatement.match(/EXEC\s+CICS\s+(READ|WRITE|REWRITE|DELETE|STARTBR|READNEXT|READPREV)\s+.*?FILE\s*\(\s*['"]?([A-Z0-9\-_]+)['"]?\s*\)/i);
+            if (cicsFileMatch) {
+                dependencies.push({
+                    type: 'CICS_FILE_ACCESS',
+                    operation: cicsFileMatch[1].toUpperCase(),
+                    name: cicsFileMatch[2],
+                    lineNumber: index + 1,
+                    statement: cicsStatement.trim()
+                });
+            }
+        }
+        
+        // Regular file operations
+        const fileMatch = trimmed.match(/^(OPEN|READ|WRITE|CLOSE)\s+(INPUT|OUTPUT|I-O\s+)?([A-Z0-9\-_]+)/i);
         if (fileMatch) {
             dependencies.push({
                 type: 'FILE_OPERATION',
                 operation: fileMatch[1].toUpperCase(),
-                name: fileMatch[2],
-                lineNumber: index + 1
+                mode: fileMatch[2] || '',
+                name: fileMatch[3],
+                lineNumber: index + 1,
+                statement: line.trim()
+            });
+        }
+        
+        // PERFORM statements (internal calls)
+        const performMatch = trimmed.match(/^PERFORM\s+([A-Z0-9\-_]+)/i);
+        if (performMatch) {
+            dependencies.push({
+                type: 'INTERNAL_CALL',
+                name: performMatch[1],
+                lineNumber: index + 1,
+                statement: line.trim()
             });
         }
     });
@@ -4353,17 +4973,105 @@ function extractDependencies(content, fileType) {
 
 function extractBusinessLogic(content) {
     const logic = [];
-    const patterns = FieldMappingAnalyzer.businessLogicPatterns;
+    const cleanLines = COBOLParser.cleanCOBOLLines(content);
     
-    Object.entries(patterns).forEach(([type, pattern]) => {
-        const matches = [...content.matchAll(pattern)];
-        matches.forEach(match => {
+    let inProcedureDivision = false;
+    
+    cleanLines.forEach((line, index) => {
+        const trimmed = line.trim().toUpperCase();
+        
+        // Only analyze business logic in procedure division
+        if (trimmed.includes('PROCEDURE DIVISION')) {
+            inProcedureDivision = true;
+            return;
+        }
+        
+        if (!inProcedureDivision) return;
+        
+        // MOVE operations
+        const moveMatch = line.match(/^\s*MOVE\s+([A-Z0-9\-_\(\)'"]+)\s+TO\s+([A-Z0-9\-_\(\)]+)/i);
+        if (moveMatch) {
             logic.push({
-                type: type,
-                pattern: match[0],
-                confidence: 0.8
+                type: 'MOVE',
+                source: moveMatch[1],
+                target: moveMatch[2],
+                pattern: line.trim(),
+                lineNumber: index + 1,
+                confidence: 0.95
             });
-        });
+        }
+        
+        // COMPUTE operations
+        const computeMatch = line.match(/^\s*COMPUTE\s+([A-Z0-9\-_]+)\s*=\s*(.+?)(?:\.|$)/i);
+        if (computeMatch) {
+            logic.push({
+                type: 'DERIVED',
+                target: computeMatch[1],
+                expression: computeMatch[2],
+                pattern: line.trim(),
+                lineNumber: index + 1,
+                confidence: 0.90
+            });
+        }
+        
+        // Conditional operations (IF statements)
+        if (trimmed.startsWith('IF ')) {
+            // Handle multi-line IF statements
+            let ifStatement = line;
+            let nextIndex = index + 1;
+            
+            // Collect until END-IF or period
+            while (nextIndex < cleanLines.length && 
+                   !cleanLines[nextIndex].trim().toUpperCase().includes('END-IF') &&
+                   !ifStatement.trim().endsWith('.')) {
+                ifStatement += ' ' + cleanLines[nextIndex].trim();
+                nextIndex++;
+            }
+            
+            logic.push({
+                type: 'CONDITIONAL',
+                condition: trimmed.substring(3), // Remove 'IF '
+                pattern: ifStatement.trim(),
+                lineNumber: index + 1,
+                confidence: 0.85
+            });
+        }
+        
+        // Arithmetic operations
+        const arithMatch = line.match(/^\s*(ADD|SUBTRACT|MULTIPLY|DIVIDE)\s+(.+?)\s+(TO|FROM|BY|GIVING)\s+([A-Z0-9\-_]+)/i);
+        if (arithMatch) {
+            logic.push({
+                type: 'CALCULATED',
+                operation: arithMatch[1],
+                operands: arithMatch[2],
+                target: arithMatch[4],
+                pattern: line.trim(),
+                lineNumber: index + 1,
+                confidence: 0.88
+            });
+        }
+        
+        // String manipulation
+        if (trimmed.includes('STRING ') || trimmed.includes('UNSTRING ')) {
+            let stringStatement = line;
+            let nextIndex = index + 1;
+            
+            // Collect until END-STRING
+            while (nextIndex < cleanLines.length && 
+                   !stringStatement.includes('END-STRING') &&
+                   !stringStatement.trim().endsWith('.')) {
+                stringStatement += ' ' + cleanLines[nextIndex].trim();
+                nextIndex++;
+            }
+            
+            logic.push({
+                type: 'STRING_MANIPULATION',
+                operation: trimmed.includes('STRING ') ? 'STRING' : 'UNSTRING',
+                pattern: stringStatement.trim(),
+                lineNumber: index + 1,
+                confidence: 0.82
+            });
+        }
     });
     
     return logic;
@@ -4371,16 +5079,69 @@ function extractBusinessLogic(content) {
 
 function extractCICSOperations(content) {
     const operations = [];
-    const cicsPattern = /EXEC\s+CICS\s+([A-Z]+)\s+(.+?)\s+END-EXEC/gi;
-    const matches = [...content.matchAll(cicsPattern)];
+    const cleanLines = COBOLParser.cleanCOBOLLines(content);
     
-    matches.forEach(match => {
-        operations.push({
-            operation: match[1],
-            parameters: match[2],
-            fullStatement: match[0]
-        });
-    });
+    for (let i = 0; i < cleanLines.length; i++) {
+        const line = cleanLines[i];
+        const trimmed = line.trim().toUpperCase();
+        
+        // Look for EXEC CICS statements
+        if (trimmed.includes('EXEC CICS')) {
+            // Collect the complete CICS statement (may span multiple lines)
+            let cicsStatement = line;
+            let nextIndex = i + 1;
+            
+            // Continue reading until we find END-EXEC
+            while (nextIndex < cleanLines.length && !cicsStatement.includes('END-EXEC')) {
+                cicsStatement += ' ' + cleanLines[nextIndex].trim();
+                nextIndex++;
+            }
+            
+            // Extract CICS operation details
+            const operationMatch = cicsStatement.match(/EXEC\s+CICS\s+([A-Z]+)\s+(.+?)\s+END-EXEC/i);
+            if (operationMatch) {
+                const operation = operationMatch[1].toUpperCase();
+                const parameters = operationMatch[2];
+                
+                // Extract file name if present
+                const fileMatch = parameters.match(/FILE\s*\(\s*['"]?([A-Z0-9\-_]+)['"]?\s*\)/i);
+                const fileName = fileMatch ? fileMatch[1] : null;
+                
+                // Categorize CICS operation
+                let category = 'OTHER';
+                const readOps = ['READ', 'receive', 'readnext', 'readprev', 'startbr', 'endbr'];
+                const writeOps = ['write', 'send', 'rewrite', 'delete'];
+                const transOps = ['link', 'xctl', 'return', 'syncpoint'];
+                const termOps = ['send', 'receive', 'converse'];
+                const queueOps = ['writeq', 'readq', 'deleteq'];
+                
+                if (readOps.includes(operation.toLowerCase())) {
+                    category = 'READ_OPERATION';
+                } else if (writeOps.includes(operation.toLowerCase())) {
+                    category = 'WRITE_OPERATION';
+                } else if (transOps.includes(operation.toLowerCase())) {
+                    category = 'TRANSACTION_OPERATION';
+                } else if (termOps.includes(operation.toLowerCase())) {
+                    category = 'TERMINAL_OPERATION';
+                } else if (queueOps.includes(operation.toLowerCase())) {
+                    category = 'QUEUE_OPERATION';
+                }
+                
+                operations.push({
+                    operation: operation,
+                    category: category,
+                    parameters: parameters,
+                    fileName: fileName,
+                    fullStatement: cicsStatement.trim(),
+                    lineNumber: i + 1,
+                    confidence: 0.93
+                });
+            }
+            
+            // Skip the lines we've already processed
+            i = nextIndex - 1;
+        }
+    }
     
     return operations;
 }
