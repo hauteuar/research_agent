@@ -873,7 +873,8 @@ class TokenManager {
     static RETRY_DELAY = 1000;
 
     static estimateTokens(text) {
-        return Math.ceil(text.length * this.TOKENS_PER_CHAR);
+        // Rough estimation: ~4 characters per token for English text
+        return Math.ceil(text.length / 4);
     }
 
     static needsChunking(text) {
@@ -970,8 +971,8 @@ class TokenManager {
 
 // vLLM API Manager for Local Llama 3.1 Integration
 class VLLMAPIManager {
-    static API_ENDPOINT = 'http://localhost:8000/v1/completions';
-    static MODEL = 'meta-llama/Llama-3.1-8B-Instruct';
+    static API_ENDPOINT = 'http://localhost:8100/generate';  // Changed endpoint
+    static MODEL = 'codellama/CodeLlama-7b-Python-hf';       // Your model name
     static MAX_RETRIES = 3;
     static RETRY_DELAY = 1000;
     static MAX_TOKENS = 2048;
@@ -979,10 +980,10 @@ class VLLMAPIManager {
     static serverConfigured = false;
 
     static configureServer(endpoint, model = null) {
-        this.API_ENDPOINT = endpoint;
+        this.API_ENDPOINT = endpoint.endsWith('/generate') ? endpoint : `${endpoint}/generate`;
         if (model) this.MODEL = model;
         this.serverConfigured = true;
-        console.log(`✅ vLLM Server configured: ${endpoint}`);
+        console.log(`✅ vLLM Server configured: ${this.API_ENDPOINT}`);
         console.log(`📝 Model: ${this.MODEL}`);
     }
 
@@ -991,15 +992,13 @@ class VLLMAPIManager {
             throw new Error('vLLM server not configured. Use VLLMAPIManager.configureServer() first.');
         }
 
-        const formattedPrompt = this.formatLlamaPrompt(systemPrompt, prompt);
-
+        // Your server expects this format (compatible with /generate endpoint)
         const requestBody = {
-            model: this.MODEL,
-            prompt: formattedPrompt,
+            prompt: systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt,
             max_tokens: Math.min(maxTokens, this.MAX_TOKENS),
             temperature: this.TEMPERATURE,
             top_p: 0.95,
-            stop: ["<|end_of_text|>", "<|eot_id|>"],
+            stop: null,
             stream: false
         };
 
@@ -1022,14 +1021,18 @@ class VLLMAPIManager {
 
                 const data = await response.json();
                 
-                const content = data.choices[0]?.text || '';
-                const inputTokens = data.usage?.prompt_tokens || TokenManager.estimateTokens(formattedPrompt);
-                const outputTokens = data.usage?.completion_tokens || TokenManager.estimateTokens(content);
+                // Your server returns: { text: "...", choices: [{"text": "..."}], id: "...", model: "..." }
+                const content = data.text || data.choices?.[0]?.text || '';
+                
+                // Estimate tokens since your server doesn't return usage stats
+                const inputTokens = this.estimateTokens(requestBody.prompt);
+                const outputTokens = this.estimateTokens(content);
 
                 console.log('✅ vLLM API Call successful:', {
                     model: this.MODEL,
                     inputTokens: inputTokens,
-                    outputTokens: outputTokens
+                    outputTokens: outputTokens,
+                    responseLength: content.length
                 });
 
                 return {
@@ -1077,6 +1080,7 @@ ${userPrompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             return { success: false, error: error.message };
         }
     }
+
 }
 
 // SQL Database Simulation (In production, this would connect to actual SQL database)
@@ -3498,14 +3502,26 @@ function showVLLMConfiguration() {
             
             <div style="margin-bottom: 20px;">
                 <label style="display: block; margin-bottom: 5px; font-weight: 600;">vLLM Server Endpoint:</label>
-                <input type="text" id="vllmEndpoint" value="http://localhost:8000/v1/completions" 
-                       style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px;">
+                <input type="text" id="vllmEndpoint" value="http://localhost:8100" 
+                       style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px;"
+                       placeholder="http://localhost:8100">
             </div>
             
             <div style="margin-bottom: 20px;">
                 <label style="display: block; margin-bottom: 5px; font-weight: 600;">Model Name:</label>
-                <input type="text" id="vllmModel" value="meta-llama/Llama-3.1-8B-Instruct" 
-                       style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px;">
+                <input type="text" id="vllmModel" value="codellama/CodeLlama-7b-Python-hf" 
+                       style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px;"
+                       placeholder="codellama/CodeLlama-7b-Python-hf">
+            </div>
+            
+            <div style="margin-bottom: 20px; padding: 15px; background: #e3f2fd; border-radius: 8px;">
+                <h4 style="margin: 0 0 10px 0; color: #1976d2;">📋 Your Server Endpoints:</h4>
+                <ul style="margin: 0; padding-left: 20px; color: #666;">
+                    <li><strong>Generate:</strong> http://localhost:8100/generate</li>
+                    <li><strong>Health:</strong> http://localhost:8100/health</li>
+                    <li><strong>Status:</strong> http://localhost:8100/status</li>
+                    <li><strong>Metrics:</strong> http://localhost:8100/metrics</li>
+                </ul>
             </div>
             
             <div style="display: flex; gap: 10px; justify-content: flex-end;">
@@ -3557,7 +3573,7 @@ async function configureVLLMServer() {
         if (testResult.success) {
             updateProcessingStatus('ready', `✅ vLLM Server connected successfully`);
             addChatMessage('assistant', 
-                `🎉 **vLLM Server Connected!**\n\n**Endpoint**: ${endpoint}\n**Model**: ${model}\n\nYour local Llama 3.1 is ready for AI analysis!`, 
+                `🎉 **vLLM Server Connected!**\n\n**Endpoint**: ${endpoint}/generate\n**Model**: ${model}\n\nYour local CodeLlama model is ready for AI analysis!`, 
                 { vllmConfigured: true }, 0);
         } else {
             throw new Error(testResult.error);
@@ -3565,11 +3581,10 @@ async function configureVLLMServer() {
     } catch (error) {
         updateProcessingStatus('error', `❌ vLLM connection failed`);
         addChatMessage('assistant', 
-            `⚠️ vLLM configured but connection test failed: ${error.message}`, 
+            `⚠️ vLLM configured but connection test failed: ${error.message}\n\nMake sure your server is running on the configured port.`, 
             {}, 0);
     }
 }
-
 // Node details function for dependency visualization
 function showNodeDetails(nodeId) {
     const relatedDependencies = AppState.dependencies.filter(d => 
@@ -3657,13 +3672,12 @@ function initializeAppWithVLLM() {
     console.log('🚀 Initializing Enhanced Mainframe Code Analyzer with vLLM...');
     
     // Check for stored vLLM configuration
-    const storedEndpoint = localStorage.getItem('vllm_endpoint');
-    const storedModel = localStorage.getItem('vllm_model');
+    const storedEndpoint = localStorage.getItem('vllm_endpoint') || 'http://localhost:8100';
+    const storedModel = localStorage.getItem('vllm_model') || 'codellama/CodeLlama-7b-Python-hf';
     
-    if (storedEndpoint && storedModel) {
-        VLLMAPIManager.configureServer(storedEndpoint, storedModel);
-        console.log(`✅ Restored vLLM configuration: ${storedEndpoint}`);
-    }
+    // Always configure with stored or default values
+    VLLMAPIManager.configureServer(storedEndpoint, storedModel);
+    console.log(`✅ vLLM configuration loaded: ${storedEndpoint}`);
     
     // Create initial database session
     db.createSession().then(session => {
