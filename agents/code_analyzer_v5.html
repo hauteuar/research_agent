@@ -8359,69 +8359,278 @@ async combineChunkAnalyses(userMessage, componentName, chunkAnalyses) {
     const component = this.discoveredComponents.get(componentName);
     const result = this.analysisResults[componentName];
     
-    // First, create a summary of all chunk analyses
-    let combinedAnalysis = `COMPLETE CODE ANALYSIS FOR: ${componentName}\n`;
-    combinedAnalysis += `Business Name: ${component?.friendlyName || 'Not defined'}\n`;
-    combinedAnalysis += `Component Type: ${result?.componentType || 'Unknown'}\n\n`;
+    console.log(`🔗 Starting comprehensive analysis synthesis for ${chunkAnalyses.length} chunks`);
     
-    combinedAnalysis += `SECTION-BY-SECTION ANALYSIS:\n${'='.repeat(50)}\n`;
+    // **STEP 1: Collect ALL chunk responses first**
+    const completeAnalysisData = {
+        componentName: componentName,
+        businessName: component?.friendlyName || 'Not defined',
+        componentType: result?.componentType || 'Unknown',
+        userQuestion: userMessage,
+        totalChunks: chunkAnalyses.length,
+        
+        // Organized chunk data
+        chunks: chunkAnalyses.map(chunk => ({
+            section: chunk.section,
+            lineRange: chunk.lineRange,
+            analysis: chunk.analysis,
+            chunkIndex: chunk.chunkIndex
+        })),
+        
+        // Extracted key information
+        businessLogic: [],
+        dataStructures: [],
+        dependencies: [],
+        businessRules: [],
+        fieldUsage: [],
+        procedures: [],
+        validationRules: [],
+        
+        // Coverage metrics
+        sectionsAnalyzed: [...new Set(chunkAnalyses.map(c => c.section))],
+        totalLinesAnalyzed: chunkAnalyses.reduce((sum, c) => 
+            sum + ((c.lineRange?.end || 0) - (c.lineRange?.start || 0) + 1), 0)
+    };
     
+    // **STEP 2: Extract structured information from each chunk**
     chunkAnalyses.forEach(chunk => {
-        combinedAnalysis += `\nSECTION: ${chunk.section} (Lines ${chunk.lineRange?.start}-${chunk.lineRange?.end})\n`;
-        combinedAnalysis += `${'─'.repeat(30)}\n`;
-        combinedAnalysis += chunk.analysis + '\n';
+        this.extractStructuredInfo(chunk.analysis, completeAnalysisData);
     });
     
-    // Now ask LLM to synthesize the complete analysis
-    const synthesisPrompt = `SYNTHESIS REQUEST FOR MAINFRAME COMPONENT
-
-Component: ${componentName}
-User's Original Question: "${userMessage}"
-
-COMPLETE SECTIONAL ANALYSIS:
-${combinedAnalysis}
-
-SYNTHESIS INSTRUCTIONS:
-Based on the complete sectional analysis above, provide a comprehensive answer to the user's question: "${userMessage}"
-
-Focus on:
-1. Overall business purpose and functionality
-2. Key business logic and rules found across all sections
-3. Data flow and processing patterns
-4. Important dependencies and integrations
-5. Business value and modernization opportunities
-
-Provide a cohesive, business-focused response that synthesizes insights from all code sections:`;
-
+    // **STEP 3: Create comprehensive summary prompt**
+    const summaryPrompt = this.buildComprehensiveSummaryPrompt(userMessage, completeAnalysisData);
+    
     try {
-        const synthesizedResponse = await this.callLLMAPI(synthesisPrompt);
+        // **STEP 4: Get AI-powered comprehensive summary**
+        console.log('🤖 Generating comprehensive AI summary...');
+        const comprehensiveSummary = await this.callLLMAPI(summaryPrompt);
         
-        // Format the final response
-        let finalResponse = '';
-        
-        if (typeof synthesizedResponse === 'string') {
-            finalResponse = synthesizedResponse;
-        } else if (synthesizedResponse && synthesizedResponse.businessPurpose) {
-            finalResponse = synthesizedResponse.businessPurpose;
-        } else {
-            finalResponse = JSON.stringify(synthesizedResponse);
-        }
-        
-        // Add section summary at the end
-        finalResponse += `\n\n---\n**📊 Analysis Coverage:**\n`;
-        finalResponse += `✅ Analyzed ${chunkAnalyses.length} code sections\n`;
-        finalResponse += `📋 Sections covered: ${[...new Set(chunkAnalyses.map(c => c.section))].join(', ')}\n`;
-        finalResponse += `📏 Total lines analyzed: ${chunkAnalyses.reduce((sum, c) => sum + ((c.lineRange?.end || 0) - (c.lineRange?.start || 0) + 1), 0)}\n`;
-        finalResponse += `🔍 Complete code analysis performed using chunked processing`;
-        
-        return finalResponse;
+        // **STEP 5: Format final response with structured sections**
+        return this.formatComprehensiveResponse(userMessage, comprehensiveSummary, completeAnalysisData);
         
     } catch (error) {
-        console.error('Synthesis failed:', error);
-        
-        // Fallback: return structured analysis without LLM synthesis
-        return this.createFallbackSynthesis(userMessage, componentName, chunkAnalyses);
+        console.error('Comprehensive summary failed:', error);
+        return this.createDetailedFallbackSummary(userMessage, completeAnalysisData);
     }
+},
+
+// **NEW METHOD: Extract Structured Information**
+extractStructuredInfo(chunkAnalysis, analysisData) {
+    const analysis = chunkAnalysis.toLowerCase();
+    
+    // Extract business logic mentions
+    const businessLogicPatterns = [
+        /business\s+logic[:\s]*([^\.!?]*[\.!?])/gi,
+        /business\s+rule[:\s]*([^\.!?]*[\.!?])/gi,
+        /validation[:\s]*([^\.!?]*[\.!?])/gi,
+        /process[es|ing]*[:\s]*([^\.!?]*[\.!?])/gi
+    ];
+    
+    businessLogicPatterns.forEach(pattern => {
+        const matches = chunkAnalysis.matchAll(pattern);
+        for (const match of matches) {
+            if (match[1] && match[1].trim().length > 10) {
+                analysisData.businessLogic.push(match[1].trim());
+            }
+        }
+    });
+    
+    // Extract data structure mentions
+    const dataStructurePatterns = [
+        /record[:\s]*([^\.!?]*[\.!?])/gi,
+        /field[:\s]*([^\.!?]*[\.!?])/gi,
+        /data\s+structure[:\s]*([^\.!?]*[\.!?])/gi
+    ];
+    
+    dataStructurePatterns.forEach(pattern => {
+        const matches = chunkAnalysis.matchAll(pattern);
+        for (const match of matches) {
+            if (match[1] && match[1].trim().length > 10) {
+                analysisData.dataStructures.push(match[1].trim());
+            }
+        }
+    });
+    
+    // Extract dependency mentions
+    if (analysis.includes('copy') || analysis.includes('call') || analysis.includes('dependency')) {
+        const dependencyMatches = chunkAnalysis.match(/[A-Z][A-Z0-9\-_]{3,}/g);
+        if (dependencyMatches) {
+            dependencyMatches.forEach(dep => {
+                if (dep.length > 3 && !analysisData.dependencies.includes(dep)) {
+                    analysisData.dependencies.push(dep);
+                }
+            });
+        }
+    }
+    
+    // Extract procedure/paragraph mentions
+    const procedurePatterns = [
+        /perform[:\s]*([^\.!?]*[\.!?])/gi,
+        /paragraph[:\s]*([^\.!?]*[\.!?])/gi,
+        /procedure[:\s]*([^\.!?]*[\.!?])/gi
+    ];
+    
+    procedurePatterns.forEach(pattern => {
+        const matches = chunkAnalysis.matchAll(pattern);
+        for (const match of matches) {
+            if (match[1] && match[1].trim().length > 10) {
+                analysisData.procedures.push(match[1].trim());
+            }
+        }
+    });
+},
+
+// **NEW METHOD: Build Comprehensive Summary Prompt**
+buildComprehensiveSummaryPrompt(userQuestion, analysisData) {
+    return `COMPREHENSIVE MAINFRAME ANALYSIS SYNTHESIS
+
+COMPONENT: ${analysisData.componentName}
+BUSINESS NAME: ${analysisData.businessName}
+USER'S QUESTION: "${userQuestion}"
+
+COMPLETE ANALYSIS DATA COLLECTED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+COVERAGE SUMMARY:
+- Total Chunks Analyzed: ${analysisData.totalChunks}
+- Sections Covered: ${analysisData.sectionsAnalyzed.join(', ')}
+- Total Lines Analyzed: ${analysisData.totalLinesAnalyzed}
+
+DETAILED CHUNK ANALYSES:
+${analysisData.chunks.map(chunk => `
+SECTION: ${chunk.section} (Lines ${chunk.lineRange?.start || 'N/A'}-${chunk.lineRange?.end || 'N/A'})
+${chunk.analysis}
+${'─'.repeat(50)}
+`).join('\n')}
+
+EXTRACTED KEY INFORMATION:
+- Business Logic Points: ${analysisData.businessLogic.length}
+- Data Structures Found: ${analysisData.dataStructures.length}
+- Dependencies Identified: ${analysisData.dependencies.length}
+- Procedures Found: ${analysisData.procedures.length}
+
+SYNTHESIS TASK:
+Based on the complete analysis above, provide a comprehensive answer to: "${userQuestion}"
+
+RESPONSE STRUCTURE REQUIRED:
+1. **Direct Answer** - Directly address the user's specific question
+2. **Business Summary** - Overall business purpose and functionality
+3. **Technical Details** - Key technical findings from the code analysis
+4. **Data Flow** - How data moves through the component
+5. **Business Value** - Business importance and modernization opportunities
+6. **Key Findings** - Most important discoveries from the complete analysis
+
+INSTRUCTIONS:
+- Focus on answering the user's specific question comprehensively
+- Synthesize information from ALL chunks into a cohesive response
+- Highlight the most important business and technical insights
+- Use specific examples from the code analysis
+- Keep the response well-structured and easy to read
+- Maximum 1200 words for comprehensive coverage
+
+Generate the comprehensive synthesis response:`;
+},
+
+// **NEW METHOD: Format Comprehensive Response**
+formatComprehensiveResponse(userQuestion, aiSummary, analysisData) {
+    let response = '';
+    
+    // Extract or use AI summary
+    const summaryText = typeof aiSummary === 'string' ? aiSummary : 
+                       aiSummary?.analysis || JSON.stringify(aiSummary);
+    
+    // **SECTION 1: Direct Answer Header**
+    response += `# 🎯 Complete Analysis: ${analysisData.businessName}\n\n`;
+    response += `**Your Question:** *"${userQuestion}"*\n\n`;
+    
+    // **SECTION 2: AI Comprehensive Summary**
+    response += `## 🤖 Comprehensive Analysis\n\n`;
+    response += summaryText + '\n\n';
+    
+    // **SECTION 3: Analysis Coverage Details**
+    response += `## 📊 Analysis Coverage\n\n`;
+    response += `✅ **Complete Code Analysis Performed**\n`;
+    response += `- **Sections Analyzed:** ${analysisData.sectionsAnalyzed.join(', ')}\n`;
+    response += `- **Total Code Chunks:** ${analysisData.totalChunks}\n`;
+    response += `- **Lines of Code:** ${analysisData.totalLinesAnalyzed.toLocaleString()}\n`;
+    response += `- **Analysis Method:** Intelligent chunked processing\n\n`;
+    
+    // **SECTION 4: Key Discoveries (if extracted)**
+    if (analysisData.businessLogic.length > 0 || analysisData.dependencies.length > 0) {
+        response += `## 🔍 Key Discoveries\n\n`;
+        
+        if (analysisData.businessLogic.length > 0) {
+            response += `**Business Logic Patterns:**\n`;
+            analysisData.businessLogic.slice(0, 5).forEach(logic => {
+                response += `• ${logic.substring(0, 100)}${logic.length > 100 ? '...' : ''}\n`;
+            });
+            response += '\n';
+        }
+        
+        if (analysisData.dependencies.length > 0) {
+            response += `**Dependencies Identified:**\n`;
+            response += `${analysisData.dependencies.slice(0, 10).map(dep => `\`${dep}\``).join(', ')}`;
+            if (analysisData.dependencies.length > 10) {
+                response += ` and ${analysisData.dependencies.length - 10} more`;
+            }
+            response += '\n\n';
+        }
+    }
+    
+    // **SECTION 5: Section-by-Section Quick Reference**
+    response += `## 📋 Section Summary\n\n`;
+    analysisData.chunks.forEach((chunk, index) => {
+        const preview = chunk.analysis.substring(0, 150).replace(/\n/g, ' ');
+        response += `**${index + 1}. ${chunk.section}** (Lines ${chunk.lineRange?.start || 'N/A'}-${chunk.lineRange?.end || 'N/A'}): `;
+        response += `${preview}${chunk.analysis.length > 150 ? '...' : ''}\n\n`;
+    });
+    
+    // **SECTION 6: Footer**
+    response += `---\n`;
+    response += `*🔍 This analysis covers the complete codebase using intelligent chunking. `;
+    response += `Each section was analyzed individually and synthesized into this comprehensive response.*`;
+    
+    return response;
+},
+
+// **NEW METHOD: Detailed Fallback Summary**
+createDetailedFallbackSummary(userQuestion, analysisData) {
+    let response = `# Complete Analysis: ${analysisData.businessName}\n\n`;
+    response += `**Question:** ${userQuestion}\n\n`;
+    response += `## 📋 Comprehensive Code Analysis Results\n\n`;
+    
+    // Group chunks by section
+    const sectionGroups = {};
+    analysisData.chunks.forEach(chunk => {
+        if (!sectionGroups[chunk.section]) {
+            sectionGroups[chunk.section] = [];
+        }
+        sectionGroups[chunk.section].push(chunk);
+    });
+    
+    // Present results by section
+    Object.entries(sectionGroups).forEach(([section, chunks]) => {
+        response += `### ${section} Section Analysis\n\n`;
+        chunks.forEach((chunk, index) => {
+            response += `**Part ${index + 1}** (Lines ${chunk.lineRange?.start || 'N/A'}-${chunk.lineRange?.end || 'N/A'}):\n`;
+            response += chunk.analysis + '\n\n';
+        });
+    });
+    
+    // Summary
+    response += `## 📊 Analysis Summary\n\n`;
+    response += `- **Total Sections:** ${Object.keys(sectionGroups).length}\n`;
+    response += `- **Code Chunks:** ${analysisData.totalChunks}\n`;
+    response += `- **Lines Analyzed:** ${analysisData.totalLinesAnalyzed}\n`;
+    response += `- **Coverage:** Complete codebase analysis\n\n`;
+    
+    if (analysisData.dependencies.length > 0) {
+        response += `**Dependencies Found:** ${analysisData.dependencies.join(', ')}\n\n`;
+    }
+    
+    response += `*Complete analysis performed using intelligent code chunking for comprehensive coverage.*`;
+    
+    return response;
 },
 
 // **NEW METHOD: Create Fallback Synthesis**
