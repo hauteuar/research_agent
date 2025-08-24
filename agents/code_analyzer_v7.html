@@ -1293,6 +1293,619 @@ class COBOLParser {
         return cleanLines;
     }
 }
+// Enhanced Chat System with SQL Integration
+class EnhancedChatSystem extends ChatSystem {
+    static async sendMessage(userMessage) {
+        const messageTokens = TokenManager.estimateTokens(userMessage);
+        
+        try {
+            // Build comprehensive context including SQL data
+            const context = await this.buildComprehensiveContext(userMessage);
+            const contextTokens = TokenManager.estimateTokens(JSON.stringify(context));
+            
+            // Check token limits and adjust context if needed
+            let finalContext = context;
+            const totalInputTokens = messageTokens + contextTokens;
+            
+            if (totalInputTokens > TokenManager.EFFECTIVE_LIMIT * 0.6) {
+                finalContext = await this.truncateContext(context, userMessage);
+            }
+
+            // Generate intelligent response with SQL data
+            const response = await this.generateIntelligentResponseWithSQL(userMessage, finalContext);
+            const responseTokens = TokenManager.estimateTokens(response);
+
+            // Log conversation with full context
+            await db.saveChatMessage(this.conversationId, 'user', userMessage, finalContext, messageTokens);
+            await db.saveChatMessage(this.conversationId, 'assistant', response, finalContext, responseTokens);
+
+            // Update token usage
+            TokenManager.updateTokenUsage(0, messageTokens + responseTokens);
+
+            return {
+                response: response,
+                context: finalContext,
+                tokensUsed: messageTokens + responseTokens,
+                contextTypes: Object.keys(finalContext).filter(key => finalContext[key]?.length > 0)
+            };
+            
+        } catch (error) {
+            console.error('Enhanced chat system error:', error);
+            const errorResponse = `I apologize, but I encountered an error processing your request: ${error.message}. Please try rephrasing your question or contact support if the issue persists.`;
+            
+            await db.saveChatMessage(this.conversationId, 'user', userMessage, {}, messageTokens);
+            await db.saveChatMessage(this.conversationId, 'assistant', errorResponse, {}, TokenManager.estimateTokens(errorResponse));
+            
+            return {
+                response: errorResponse,
+                context: {},
+                tokensUsed: messageTokens + TokenManager.estimateTokens(errorResponse),
+                contextTypes: []
+            };
+        }
+    }
+    
+    static async buildComprehensiveContext(message) {
+        const context = await super.buildRelevantContext(message);
+        const lowerMessage = message.toLowerCase();
+        
+        // Add SQL table data based on query intent
+        if (this.isAskingAboutProgram(lowerMessage)) {
+            const programName = this.extractProgramName(message);
+            if (programName) {
+                context.programCode = await this.getStoredProgramCode(programName);
+                context.programAnalysis = await this.getStoredProgramAnalysis(programName);
+                context.programBusinessLogic = await this.getStoredBusinessLogic(programName);
+            }
+        }
+        
+        if (this.isAskingAboutField(lowerMessage)) {
+            const fieldName = this.extractFieldName(message);
+            if (fieldName) {
+                context.fieldMappingDetails = await this.getStoredFieldMappings(fieldName);
+                context.fieldUsageAnalysis = await this.getFieldUsageFromCode(fieldName);
+            }
+        }
+        
+        if (this.isAskingAboutLayout(lowerMessage)) {
+            const layoutName = this.extractLayoutName(message);
+            if (layoutName) {
+                context.layoutStructure = await this.getStoredLayoutStructure(layoutName);
+                context.layoutFields = await this.getLayoutFields(layoutName);
+            }
+        }
+        
+        return context;
+    }
+    
+    static isAskingAboutProgram(message) {
+        return message.includes('program') || message.includes('cobol') || 
+               message.match(/\w+\.(cbl|cob)/i) || message.includes('component');
+    }
+    
+    static isAskingAboutField(message) {
+        return message.includes('field') || message.includes('data') || 
+               message.includes('variable') || message.match(/pic\s+/i);
+    }
+    
+    static isAskingAboutLayout(message) {
+        return message.includes('layout') || message.includes('record') || 
+               message.includes('structure') || message.includes('01 ');
+    }
+    
+    static extractProgramName(message) {
+        // Try to extract program name from various patterns
+        const patterns = [
+            /program\s+([A-Z0-9\-_]+)/i,
+            /([A-Z0-9\-_]+)\.(cbl|cob)/i,
+            /component\s+([A-Z0-9\-_]+)/i,
+            /([A-Z0-9\-_]{3,})/i // Generic pattern for program names
+        ];
+        
+        for (const pattern of patterns) {
+            const match = message.match(pattern);
+            if (match) {
+                const programName = match[1];
+                // Check if this program exists in our components
+                const component = AppState.components.find(c => 
+                    c.name.toLowerCase().includes(programName.toLowerCase()) ||
+                    (c.displayName && c.displayName.toLowerCase().includes(programName.toLowerCase()))
+                );
+                if (component) {
+                    return component.name;
+                }
+            }
+        }
+        return null;
+    }
+    
+    static extractFieldName(message) {
+        const patterns = [
+            /field\s+([A-Z0-9\-_]+)/i,
+            /([A-Z0-9\-_]+)\s+field/i,
+            /pic\s+[x9]+\s+([A-Z0-9\-_]+)/i,
+           /([A-Z0-9\-_]{3,})/i // Generic field name pattern
+       ];
+       
+       for (const pattern of patterns) {
+           const match = message.match(pattern);
+           if (match) {
+               const fieldName = match[1];
+               // Check if this field exists in our field mappings or components
+               const fieldExists = AppState.fieldMappings.find(f => 
+                   f.fieldName.toLowerCase().includes(fieldName.toLowerCase())
+               ) || AppState.components.some(c => 
+                   c.fields?.some(f => f.name.toLowerCase().includes(fieldName.toLowerCase()))
+               );
+               if (fieldExists) {
+                   return fieldName;
+               }
+           }
+       }
+       return null;
+   }
+   
+   static extractLayoutName(message) {
+       const patterns = [
+           /layout\s+([A-Z0-9\-_]+)/i,
+           /record\s+([A-Z0-9\-_]+)/i,
+           /01\s+([A-Z0-9\-_]+)/i,
+           /structure\s+([A-Z0-9\-_]+)/i
+       ];
+       
+       for (const pattern of patterns) {
+           const match = message.match(pattern);
+           if (match) {
+               const layoutName = match[1];
+               // Check if this layout exists in our components
+               const layout = AppState.components.find(c => 
+                   c.type === 'RECORD_LAYOUT' && 
+                   c.name.toLowerCase().includes(layoutName.toLowerCase())
+               );
+               if (layout) {
+                   return layout.name;
+               }
+           }
+       }
+       return null;
+   }
+   
+   static async getStoredProgramCode(programName) {
+       const component = AppState.components.find(c => c.name === programName);
+       if (component) {
+           return {
+               name: component.name,
+               displayName: component.displayName || component.friendlyName,
+               type: component.type,
+               content: component.content || '',
+               totalLines: component.totalLines || 0,
+               fieldsCount: component.fields?.length || 0
+           };
+       }
+       return null;
+   }
+   
+   static async getStoredProgramAnalysis(programName) {
+       const dbComponent = db.tables.component_analysis.find(c => c.component_name === programName);
+       if (dbComponent && dbComponent.analysis_result_json) {
+           try {
+               const analysis = JSON.parse(dbComponent.analysis_result_json);
+               return {
+                   analysisStatus: dbComponent.analysis_status,
+                   totalLines: dbComponent.total_lines,
+                   totalFields: dbComponent.total_fields,
+                   dependenciesCount: dbComponent.dependencies_count,
+                   createdAt: dbComponent.created_at,
+                   summary: analysis.summary || 'No summary available'
+               };
+           } catch (e) {
+               console.warn('Failed to parse stored analysis:', e);
+           }
+       }
+       return null;
+   }
+   
+   static async getStoredBusinessLogic(programName) {
+       const component = AppState.components.find(c => c.name === programName);
+       if (component && component.businessLogic) {
+           return component.businessLogic.map(logic => ({
+               type: logic.type,
+               pattern: logic.pattern,
+               source: logic.source,
+               target: logic.target,
+               confidence: logic.confidence,
+               lineNumber: logic.lineNumber
+           }));
+       }
+       return [];
+   }
+   
+   static async getStoredFieldMappings(fieldName) {
+       return db.tables.field_mappings.filter(f => 
+           f.session_id === AppState.sessionId && 
+           f.field_name.toLowerCase().includes(fieldName.toLowerCase())
+       ).map(mapping => ({
+           fieldName: mapping.field_name,
+           targetFile: mapping.target_file_name,
+           mainframeDataType: mapping.mainframe_data_type,
+           oracleDataType: mapping.oracle_data_type,
+           populationSource: mapping.population_source,
+           businessLogicType: mapping.business_logic_type,
+           businessLogicDescription: mapping.business_logic_description,
+           confidenceScore: mapping.confidence_score,
+           programsInvolved: JSON.parse(mapping.programs_involved_json || '[]')
+       }));
+   }
+   
+   static async getFieldUsageFromCode(fieldName) {
+       const usageInfo = {
+           occurrences: 0,
+           programs: [],
+           operations: []
+       };
+       
+       AppState.components.forEach(component => {
+           if (component.content) {
+               const regex = new RegExp(`\\b${fieldName}\\b`, 'gi');
+               const matches = component.content.match(regex);
+               if (matches) {
+                   usageInfo.occurrences += matches.length;
+                   usageInfo.programs.push(component.displayName || component.name);
+                   
+                   // Extract operations involving this field
+                   const lines = component.content.split('\n');
+                   lines.forEach((line, index) => {
+                       if (regex.test(line)) {
+                           const trimmed = line.trim();
+                           if (trimmed.includes('MOVE')) {
+                               usageInfo.operations.push({ type: 'MOVE', line: index + 1, program: component.name });
+                           } else if (trimmed.includes('COMPUTE')) {
+                               usageInfo.operations.push({ type: 'COMPUTE', line: index + 1, program: component.name });
+                           } else if (trimmed.includes('IF')) {
+                               usageInfo.operations.push({ type: 'CONDITION', line: index + 1, program: component.name });
+                           }
+                       }
+                   });
+               }
+           }
+       });
+       
+       return usageInfo;
+   }
+   
+   static async getStoredLayoutStructure(layoutName) {
+       const layout = AppState.components.find(c => 
+           c.type === 'RECORD_LAYOUT' && c.name === layoutName
+       );
+       
+       if (layout) {
+           return {
+               name: layout.name,
+               displayName: layout.displayName || layout.friendlyName,
+               parentComponent: layout.parentComponent,
+               totalFields: layout.fields?.length || 0,
+               content: layout.content || '',
+               recordLayout: layout.recordLayout || {}
+           };
+       }
+       return null;
+   }
+   
+   static async getLayoutFields(layoutName) {
+       const layout = AppState.components.find(c => 
+           c.type === 'RECORD_LAYOUT' && c.name === layoutName
+       );
+       
+       if (layout && layout.fields) {
+           return layout.fields.map(field => ({
+               name: field.name,
+               dataType: field.dataType,
+               level: field.level,
+               isGroup: field.isGroup,
+               parentRecord: field.parentRecord,
+               lineNumber: field.lineNumber
+           }));
+       }
+       return [];
+   }
+   
+   static async generateIntelligentResponseWithSQL(message, context) {
+       const systemPrompt = `You are an expert mainframe modernization consultant with access to comprehensive code analysis data stored in SQL tables. You can analyze COBOL programs, field mappings, business logic, and provide Oracle migration recommendations.
+
+Available context data:
+- Program code and analysis from SQL component_analysis table
+- Field mappings from field_mappings table  
+- Business logic patterns from stored analysis
+- Dependency relationships from dependency_relationships table
+- Chat conversation history from chat_conversations table
+
+When discussing specific programs, fields, or layouts, reference the actual stored code and analysis data. Provide specific, actionable insights based on the available data.`;
+
+       try {
+           // Make REAL vLLM API call with enhanced context
+           const llmResponse = await VLLMAPIManager.makeAPICall(message, systemPrompt, 1500);
+           
+           // Enhance response with specific data references
+           const enhancedResponse = this.enhanceResponseWithDataReferences(llmResponse.content, context);
+           
+           return enhancedResponse;
+
+       } catch (error) {
+           console.error('Enhanced chat vLLM API call failed, using fallback:', error);
+           
+           // Enhanced fallback responses with SQL data
+           const lowerMessage = message.toLowerCase();
+           
+           if (this.isAskingAboutProgram(lowerMessage)) {
+               return this.generateProgramResponseWithSQL(message, context);
+           } else if (this.isAskingAboutField(lowerMessage)) {
+               return this.generateFieldResponseWithSQL(message, context);
+           } else if (this.isAskingAboutLayout(lowerMessage)) {
+               return this.generateLayoutResponseWithSQL(message, context);
+           } else {
+               return `I can help you analyze your mainframe components! Here's what I have access to:
+
+**📊 Available Data from SQL Tables:**
+- **${AppState.components.length} Components** analyzed and stored
+- **${AppState.fieldMappings.length} Field Mappings** with Oracle conversions
+- **${AppState.dependencies.length} Dependencies** between components
+- **${db.tables.chat_conversations.length} Chat Messages** in conversation history
+
+**💬 Try asking me about:**
+- *"Tell me about program CUSTOMER-UPDATE"* - I'll show you the stored code and analysis
+- *"What does field ACCOUNT-BALANCE do?"* - I'll search through all stored field mappings
+- *"Show me the CUSTOMER-RECORD layout"* - I'll display the record structure from the database
+- *"What business logic is in component X?"* - I'll pull the stored business rules
+
+**🔍 I can also help with:**
+- Oracle migration strategies based on stored field mappings
+- Dependency impact analysis using relationship data
+- Code modernization recommendations from stored analysis
+- Business logic explanations from stored patterns
+
+What would you like to explore?`;
+           }
+       }
+   }
+   
+   static enhanceResponseWithDataReferences(response, context) {
+       let enhanced = response;
+       
+       // Add data source references if context contains SQL data
+       if (context.programCode) {
+           enhanced += `\n\n**📄 Program Data Source:** ${context.programCode.name} (${context.programCode.totalLines} lines, ${context.programCode.fieldsCount} fields)`;
+       }
+       
+       if (context.fieldMappingDetails && context.fieldMappingDetails.length > 0) {
+           enhanced += `\n\n**🎯 Field Mapping Data:** ${context.fieldMappingDetails.length} mappings found in database`;
+       }
+       
+       if (context.programBusinessLogic && context.programBusinessLogic.length > 0) {
+           enhanced += `\n\n**🧠 Business Logic Rules:** ${context.programBusinessLogic.length} patterns stored in analysis`;
+       }
+       
+       return enhanced;
+   }
+   
+   static generateProgramResponseWithSQL(message, context) {
+       const programName = this.extractProgramName(message);
+       const programData = context.programCode;
+       const analysisData = context.programAnalysis;
+       const businessLogic = context.programBusinessLogic || [];
+       
+       if (!programData) {
+           return `I couldn't find a program matching "${programName}" in the analyzed components. 
+
+**Available Programs:**
+${AppState.components.filter(c => c.type === 'CBL' || c.type === 'COB').slice(0, 5).map(c => 
+   `• **${c.displayName || c.name}** (${c.type}) - ${c.totalLines || 0} lines`
+).join('\n')}
+
+Try asking about one of these specific programs!`;
+       }
+       
+       return `**📊 Program Analysis: ${programData.displayName || programData.name}**
+
+**🔍 Stored Analysis Data:**
+- **Program Type:** ${programData.type}
+- **Lines of Code:** ${programData.totalLines.toLocaleString()}
+- **Fields Defined:** ${programData.fieldsCount}
+- **Analysis Status:** ${analysisData?.analysisStatus || 'Completed'}
+
+**🧠 Business Logic Patterns:** ${businessLogic.length} rules identified
+${businessLogic.slice(0, 3).map(logic => 
+   `• **${logic.type}**: ${logic.pattern.substring(0, 60)}...`
+).join('\n')}
+
+**💾 Storage Details:**
+- Code content stored in component_analysis table
+- Business logic patterns indexed for search
+- ${analysisData ? `Analysis created: ${new Date(analysisData.createdAt).toLocaleDateString()}` : ''}
+
+**🎯 Oracle Migration Readiness:**
+- Field mappings: Available for analysis
+- Business logic: ${businessLogic.filter(l => l.confidence > 0.8).length} high-confidence patterns
+- Dependencies: Tracked in relationship table
+
+Would you like me to dive deeper into any specific aspect of this program?`;
+   }
+   
+   static generateFieldResponseWithSQL(message, context) {
+       const fieldName = this.extractFieldName(message);
+       const fieldMappings = context.fieldMappingDetails || [];
+       const usageData = context.fieldUsageAnalysis || {};
+       
+       if (fieldMappings.length === 0) {
+           return `I couldn't find specific mappings for field "${fieldName}" in the database.
+
+**📋 Available Field Data:**
+- **Total Mapped Fields:** ${AppState.fieldMappings.length}
+- **Field Categories:** Input, Derived, Static, Conditional
+- **Programs with Fields:** ${AppState.components.filter(c => c.fields?.length > 0).length}
+
+**🔍 Try searching for:**
+${AppState.fieldMappings.slice(0, 5).map(f => `• ${f.fieldName}`).join('\n')}`;
+       }
+       
+       const primaryMapping = fieldMappings[0];
+       
+       return `**🎯 Field Analysis: ${primaryMapping.fieldName}**
+
+**📊 Database Records Found:** ${fieldMappings.length} mapping(s)
+
+**🔍 Field Details:**
+- **Mainframe Type:** \`${primaryMapping.mainframeDataType}\`
+- **Oracle Type:** \`${primaryMapping.oracleDataType}\`
+- **Population Source:** ${primaryMapping.populationSource}
+- **Business Logic:** ${primaryMapping.businessLogicType}
+- **Target File:** ${primaryMapping.targetFile}
+
+**💼 Business Purpose:**
+${primaryMapping.businessLogicDescription}
+
+**📈 Usage Analysis:**
+- **Programs Using Field:** ${primaryMapping.programsInvolved.join(', ')}
+- **Confidence Score:** ${(primaryMapping.confidenceScore * 100).toFixed(0)}%
+- **Code Occurrences:** ${usageData.occurrences || 0} times across ${usageData.programs?.length || 0} programs
+
+**🔄 Operations Found:**
+${usageData.operations?.slice(0, 3).map(op => 
+   `• **${op.type}** in ${op.program} (line ${op.line})`
+).join('\n') || 'No operations tracked'}
+
+**🏗️ Oracle Migration:**
+- Data type conversion: Automated
+- Business logic: ${primaryMapping.businessLogicType === 'CONDITIONAL' ? 'Requires review' : 'Standard migration'}
+- Testing priority: ${primaryMapping.confidenceScore > 0.8 ? 'Medium' : 'High'}
+
+Need more details about this field or its usage patterns?`;
+   }
+   
+   static generateLayoutResponseWithSQL(message, context) {
+       const layoutName = this.extractLayoutName(message);
+       const layoutData = context.layoutStructure;
+       const fieldsData = context.layoutFields || [];
+       
+       if (!layoutData) {
+           return `I couldn't find a record layout matching "${layoutName}" in the analyzed components.
+
+**📋 Available Record Layouts:**
+${AppState.components.filter(c => c.type === 'RECORD_LAYOUT').slice(0, 5).map(c => 
+   `• **${c.displayName || c.name}** - ${c.fields?.length || 0} fields`
+).join('\n')}
+
+Try asking about one of these specific layouts!`;
+       }
+       
+       return `**📋 Record Layout Analysis: ${layoutData.displayName || layoutData.name}**
+
+**🏗️ Structure Overview:**
+- **Total Fields:** ${layoutData.totalFields}
+- **Parent Component:** ${layoutData.parentComponent || 'Standalone'}
+- **Definition Status:** Complete in database
+
+**🎯 Field Breakdown:**
+${fieldsData.slice(0, 8).map(field => {
+   const groupIcon = field.isGroup ? '📁' : '📄';
+   return `${groupIcon} **${field.name}** (Level ${field.level}) - ${field.dataType}`;
+}).join('\n')}
+${fieldsData.length > 8 ? `\n... and ${fieldsData.length - 8} more fields` : ''}
+
+**📊 Field Categories:**
+- **Group Items:** ${fieldsData.filter(f => f.isGroup).length} structure organizers
+- **Data Items:** ${fieldsData.filter(f => !f.isGroup).length} actual data fields
+- **Levels Used:** ${[...new Set(fieldsData.map(f => f.level))].sort().join(', ')}
+
+**💾 Storage Details:**
+- Layout definition stored in component tables
+- Field relationships indexed for queries
+- Parent-child structure maintained
+
+**🔄 Oracle Mapping Strategy:**
+- Group items → Table structure planning
+- Data items → Column definitions
+- Hierarchical levels → Nested table considerations
+
+**🎯 Modernization Notes:**
+- This layout can be converted to Oracle table structure
+- Field relationships preserved in relational design
+- Business logic patterns available for each field
+
+Would you like to see the complete field definitions or explore specific field mappings?`;
+   }
+}
+
+// Replace the existing ChatSystem.sendMessage calls
+ChatSystem.sendMessage = EnhancedChatSystem.sendMessage.bind(EnhancedChatSystem);
+ChatSystem.buildRelevantContext = EnhancedChatSystem.buildComprehensiveContext.bind(EnhancedChatSystem);
+
+// Global synchronization system for friendly names
+class ComponentSyncManager {
+    static syncAllTabs() {
+        // Update all tabs with latest friendly names and data
+        updateDashboard();
+        updateComponentsLibrary();
+        updateDependenciesFlow();
+        updateFieldMatrix();
+        this.updateFieldMappingTable();
+    }
+    
+    static updateFieldMappingTable() {
+        const tbody = document.getElementById('fieldMappingTableBody');
+        if (!tbody || AppState.fieldMappings.length === 0) return;
+        
+        // Refresh the field mapping table with friendly names
+        updateFieldMappingTable(AppState.fieldMappings);
+    }
+    
+    static async refreshComponentNames() {
+        if (VLLMAPIManager.serverConfigured) {
+            try {
+                updateProcessingStatus('analyzing', 'Refreshing component names...');
+                const friendlyNames = await FieldMappingAnalyzer.generateFriendlyBusinessNames(AppState.components);
+                console.log('✅ Component names refreshed:', friendlyNames);
+                this.syncAllTabs();
+                updateProcessingStatus('ready', 'All tabs synchronized with latest names');
+            } catch (error) {
+                console.warn('Name refresh failed:', error);
+                updateProcessingStatus('ready', 'Name refresh completed with fallbacks');
+            }
+        }
+    }
+}
+
+// Auto-sync when components change
+const originalPush = AppState.components.push;
+AppState.components.push = function(...items) {
+    const result = originalPush.apply(this, items);
+    ComponentSyncManager.syncAllTabs();
+    return result;
+};
+
+// Auto-refresh names every 5 minutes if vLLM is configured
+if (VLLMAPIManager.serverConfigured) {
+    setInterval(() => {
+        ComponentSyncManager.refreshComponentNames();
+    }, 300000); // 5 minutes
+}
+
+// Add button to manually refresh names
+function addNameRefreshButton() {
+    const button = `
+        <button onclick="ComponentSyncManager.refreshComponentNames()" 
+                style="position: fixed; bottom: 80px; right: 20px; z-index: 100;
+                       background: linear-gradient(135deg, #27ae60, #2ecc71); color: white; border: none; 
+                       padding: 12px 16px; border-radius: 25px; cursor: pointer; font-weight: 600; 
+                       box-shadow: 0 4px 20px rgba(0,0,0,0.2);"
+                title="Refresh all component names with AI">
+            🔄 Refresh Names
+        </button>
+    `;
+    document.body.insertAdjacentHTML('beforeend', button);
+}
+
+// Initialize the refresh button
+setTimeout(addNameRefreshButton, 2000);
 // Enhanced Field Mapping Analysis Engine with Complete vLLM Integration
 class FieldMappingAnalyzer {
     static businessLogicPatterns = {
@@ -3789,38 +4402,237 @@ function updateFieldMatrix() {
         return;
     }
     
-    // Process all fields from components and field mappings
+    // Analyze all fields with usage patterns
+    const fieldAnalysis = analyzeFieldUsagePatterns();
+    
+    container.innerHTML = generateComprehensiveFieldMatrix(fieldAnalysis);
+}
+
+async function analyzeFieldUsagePatterns() {
     const allFields = [];
     
-    // Add fields from components
-    AppState.components.forEach(component => {
-        if (component.fields) {
-            component.fields.forEach(field => {
+    // Process each component to analyze field usage
+    for (const component of AppState.components) {
+        if (component.fields && component.fields.length > 0) {
+            for (const field of component.fields) {
+                const usage = await analyzeFieldUsage(field, component);
                 allFields.push({
                     ...field,
-                    source: component.name,
-                    sourceType: 'component'
+                    component: component.name,
+                    componentType: component.type,
+                    friendlyName: component.displayName || component.friendlyName || component.name,
+                    usage: usage
                 });
-            });
+            }
+        }
+    }
+    
+    return categorizeFieldsByUsage(allFields);
+}
+
+async function analyzeFieldUsage(field, component) {
+    const fieldName = field.name;
+    const content = component.content || '';
+    const businessLogic = component.businessLogic || [];
+    const dependencies = component.dependencies || [];
+    
+    // Analyze field usage patterns
+    const usage = {
+        category: 'UNUSED',
+        source: 'UNKNOWN',
+        operations: [],
+        businessPurpose: '',
+        confidence: 0.5
+    };
+    
+    // Check if field appears in business logic
+    const fieldLogic = businessLogic.filter(logic => 
+        logic.pattern && (
+            logic.pattern.includes(fieldName) ||
+            logic.source === fieldName ||
+            logic.target === fieldName
+        )
+    );
+    
+    if (fieldLogic.length > 0) {
+        // Determine usage category based on logic patterns
+        const hasMove = fieldLogic.some(l => l.type === 'MOVE');
+        const hasCompute = fieldLogic.some(l => l.type === 'DERIVED' || l.type === 'CALCULATED');
+        const hasCondition = fieldLogic.some(l => l.type === 'CONDITIONAL');
+        
+        if (hasCompute) {
+            usage.category = 'DERIVED';
+            usage.source = 'CALCULATED';
+            usage.businessPurpose = 'Calculated field based on business rules';
+        } else if (hasMove && content.toLowerCase().includes('input')) {
+            usage.category = 'INPUT';
+            usage.source = 'EXTERNAL_SOURCE';
+            usage.businessPurpose = 'Input data from external source';
+        } else if (hasMove) {
+            usage.category = 'TRANSFORMED';
+            usage.source = 'DATA_MOVEMENT';
+            usage.businessPurpose = 'Data transformation or movement';
+        } else if (hasCondition) {
+            usage.category = 'CONDITIONAL';
+            usage.source = 'BUSINESS_LOGIC';
+            usage.businessPurpose = 'Used in conditional business logic';
+        }
+        
+        usage.operations = fieldLogic.map(l => l.type);
+        usage.confidence = 0.8;
+    } else {
+        // Check if field is just defined but not used
+        const fieldUsageCount = (content.match(new RegExp(fieldName, 'gi')) || []).length;
+        if (fieldUsageCount <= 1) {
+            usage.category = 'UNUSED';
+            usage.businessPurpose = 'Defined but not actively used';
+        } else {
+            usage.category = 'STATIC';
+            usage.source = 'REFERENCE_DATA';
+            usage.businessPurpose = 'Static reference or configuration data';
+            usage.confidence = 0.6;
+        }
+    }
+    
+    // Use LLM to enhance business purpose if available
+    if (VLLMAPIManager.serverConfigured && fieldLogic.length > 0) {
+        try {
+            const businessPurpose = await generateFieldBusinessPurpose(field, fieldLogic, component);
+            usage.businessPurpose = businessPurpose;
+            usage.confidence = Math.min(usage.confidence + 0.2, 1.0);
+        } catch (error) {
+            console.warn(`Failed to generate business purpose for ${fieldName}:`, error);
+        }
+    }
+    
+    return usage;
+}
+
+async function generateFieldBusinessPurpose(field, fieldLogic, component) {
+    const systemPrompt = `You are a business analyst expert. Analyze this COBOL field and its usage to determine its business purpose. Provide a concise, business-friendly explanation (max 2 sentences) of what this field represents and why it's used.`;
+    
+    const analysisPrompt = `Field: ${field.name}
+Data Type: ${field.dataType}
+Component: ${component.name}
+Usage Patterns:
+${fieldLogic.map(logic => `- ${logic.type}: ${logic.pattern}`).join('\n')}
+
+What is the business purpose of this field?`;
+    
+    try {
+        const response = await VLLMAPIManager.makeAPICall(analysisPrompt, systemPrompt, 150);
+        return response.content.trim() || 'Business purpose analysis pending';
+    } catch (error) {
+        return 'Business purpose analysis unavailable';
+    }
+}
+
+function categorizeFieldsByUsage(allFields) {
+    const categories = {
+        INPUT: { fields: [], icon: '📥', color: '#4CAF50', description: 'Fields populated from external sources' },
+        DERIVED: { fields: [], icon: '🧮', color: '#2196F3', description: 'Calculated or computed fields' },
+        TRANSFORMED: { fields: [], icon: '🔄', color: '#FF9800', description: 'Fields modified through data movement' },
+        CONDITIONAL: { fields: [], icon: '🔀', color: '#9C27B0', description: 'Fields used in business conditions' },
+        STATIC: { fields: [], icon: '📋', color: '#607D8B', description: 'Static or reference data fields' },
+        UNUSED: { fields: [], icon: '❌', color: '#F44336', description: 'Defined but unused fields' }
+    };
+    
+    allFields.forEach(field => {
+        const category = field.usage.category;
+        if (categories[category]) {
+            categories[category].fields.push(field);
         }
     });
     
-    // Add fields from field mappings
-    AppState.fieldMappings.forEach(mapping => {
-        allFields.push({
-            name: mapping.fieldName,
-            dataType: mapping.mainframeDataType,
-            oracleDataType: mapping.oracleDataType,
-            businessLogicType: mapping.businessLogicType,
-            source: mapping.programsInvolved.join(', '),
-            sourceType: 'mapping',
-            confidence: mapping.confidenceScore
-        });
-    });
+    return categories;
+}
+
+function generateComprehensiveFieldMatrix(fieldCategories) {
+    const totalFields = Object.values(fieldCategories).reduce((sum, cat) => sum + cat.fields.length, 0);
     
-    // Generate comprehensive field matrix HTML
-    const html = generateFieldMatrixHTML(allFields);
-    container.innerHTML = html;
+    return `
+        <div class="field-matrix-header" style="background: white; padding: 25px; border-radius: 12px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <h2 style="color: #667eea; margin: 0 0 20px 0; display: flex; align-items: center;">
+                <span style="margin-right: 10px;">🎯</span>
+                Comprehensive Field Usage Matrix
+            </h2>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; text-align: center; margin-bottom: 20px;">
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                    <div style="font-size: 28px; font-weight: 700; color: #667eea;">${totalFields}</div>
+                    <div style="font-size: 12px; color: #666;">Total Fields</div>
+                </div>
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                    <div style="font-size: 28px; font-weight: 700; color: #4CAF50;">${fieldCategories.INPUT.fields.length}</div>
+                    <div style="font-size: 12px; color: #666;">Input Fields</div>
+                </div>
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                    <div style="font-size: 28px; font-weight: 700; color: #2196F3;">${fieldCategories.DERIVED.fields.length}</div>
+                    <div style="font-size: 12px; color: #666;">Derived Fields</div>
+                </div>
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                    <div style="font-size: 28px; font-weight: 700; color: #F44336;">${fieldCategories.UNUSED.fields.length}</div>
+                    <div style="font-size: 12px; color: #666;">Unused Fields</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="field-usage-categories" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;">
+            ${Object.entries(fieldCategories).map(([categoryName, categoryData]) => 
+                generateFieldCategorySection(categoryName, categoryData)
+            ).join('')}
+        </div>
+    `;
+}
+
+function generateFieldCategorySection(categoryName, categoryData) {
+    if (categoryData.fields.length === 0) return '';
+    
+    return `
+        <div class="field-category" style="background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border-left: 5px solid ${categoryData.color};">
+            <div class="category-header" style="display: flex; align-items: center; margin-bottom: 15px;">
+                <span style="font-size: 24px; margin-right: 10px;">${categoryData.icon}</span>
+                <div>
+                    <h3 style="color: ${categoryData.color}; margin: 0; font-size: 18px;">${categoryName} FIELDS (${categoryData.fields.length})</h3>
+                    <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">${categoryData.description}</p>
+                </div>
+            </div>
+            
+            <div class="field-list" style="max-height: 300px; overflow-y: auto;">
+                ${categoryData.fields.map(field => `
+                    <div class="field-item" style="background: #f8f9fa; padding: 12px; margin: 8px 0; border-radius: 8px; border-left: 3px solid ${categoryData.color};">
+                        <div style="display: flex; justify-content: between; align-items: start; margin-bottom: 8px;">
+                            <div>
+                                <strong style="color: #2c3e50; font-size: 14px;">${field.name}</strong>
+                                <span style="background: #e9ecef; color: #495057; padding: 2px 6px; border-radius: 3px; font-size: 10px; margin-left: 8px;">${field.dataType}</span>
+                            </div>
+                            <div style="text-align: right; font-size: 11px; color: #666;">
+                                <div>${field.friendlyName}</div>
+                                <div>Level ${field.level}</div>
+                            </div>
+                        </div>
+                        
+                        <div style="font-size: 12px; color: #666; margin-bottom: 6px;">
+                            <strong>Business Purpose:</strong> ${field.usage.businessPurpose}
+                        </div>
+                        
+                        ${field.usage.operations.length > 0 ? `
+                            <div style="font-size: 11px;">
+                                <strong>Operations:</strong> 
+                                ${field.usage.operations.map(op => `<span style="background: ${categoryData.color}; color: white; padding: 1px 4px; border-radius: 2px; margin: 1px;">${op}</span>`).join(' ')}
+                            </div>
+                        ` : ''}
+                        
+                        <div style="display: flex; justify-content: between; align-items: center; margin-top: 8px;">
+                            <span style="font-size: 10px; color: #666;">Source: ${field.usage.source}</span>
+                            <span style="font-size: 10px; color: ${field.usage.confidence >= 0.8 ? '#4CAF50' : field.usage.confidence >= 0.6 ? '#FF9800' : '#F44336'};">
+                                ${(field.usage.confidence * 100).toFixed(0)}% confidence
+                            </span>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
 }
 
 function generateFieldMatrixHTML(allFields) {
@@ -3945,44 +4757,361 @@ function assessFieldComplexity(field) {
     return 'simple';
 }
 
-function updateDashboard() {
+async function updateDashboard() {
     const container = document.getElementById('dashboardCharts');
     if (!container) return;
     
     if (AppState.components.length === 0) {
-        container.innerHTML = `
-            <div style="text-align: center; padding: 60px 20px; color: #666;">
-                <div style="font-size: 64px; margin-bottom: 20px;">📊</div>
-                <h2 style="color: #2c3e50; margin-bottom: 15px;">Welcome to Enhanced Mainframe Code Analyzer</h2>
-                <p style="font-size: 16px; line-height: 1.6; max-width: 600px; margin: 0 auto 30px;">
-                    Upload your COBOL programs, copybooks, and JCL files to get comprehensive AI-powered analysis including 
-                    field mappings, business logic patterns, dependency relationships, and Oracle migration recommendations.
-                </p>
-                <div style="display: flex; gap: 15px; justify-content: center; margin-bottom: 20px;">
-                    <div style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 15px 30px; 
-                                border-radius: 25px; display: inline-block; font-weight: 600; cursor: pointer;"
-                         onclick="document.getElementById('fileInput').click()">
-                        🚀 Upload Files to Get Started
-                    </div>
-                    <div style="background: linear-gradient(135deg, #f093fb, #f5576c); color: white; padding: 15px 30px; 
-                                border-radius: 25px; display: inline-block; font-weight: 600; cursor: pointer;"
-                         onclick="showVLLMConfiguration()">
-                        🦙 Configure vLLM
-                    </div>
-                </div>
-                <div style="font-size: 14px; color: #666;">
-                    💡 Configure your vLLM server (local Llama 3.1) for AI-powered analysis
-                </div>
-            </div>
-        `;
+        container.innerHTML = generateWelcomeScreen();
         return;
     }
 
-    // Calculate comprehensive analytics
+    // Calculate analytics and generate LLM summaries
     const analytics = calculateDashboardAnalytics();
+    const componentSummaries = await generateComponentSummaries();
     
-    // Generate rich dashboard HTML with comprehensive metrics
-    container.innerHTML = generateDashboardHTML(analytics);
+    container.innerHTML = generateEnhancedDashboardHTML(analytics, componentSummaries);
+}
+
+async function generateComponentSummaries() {
+    const summaries = {};
+    
+    if (!VLLMAPIManager.serverConfigured) {
+        // Fallback summaries
+        AppState.components.forEach(component => {
+            summaries[component.name] = {
+                purpose: generateFallbackSummary(component),
+                inputFiles: extractInputFiles(component),
+                outputFiles: extractOutputFiles(component),
+                businessValue: 'Analysis requires vLLM configuration'
+            };
+        });
+        return summaries;
+    }
+    
+    updateProcessingStatus('analyzing', 'Generating component summaries with AI...');
+    
+    for (let i = 0; i < AppState.components.length; i++) {
+        const component = AppState.components[i];
+        
+        try {
+            updateProcessingStatus('analyzing', `Analyzing ${component.displayName || component.name} (${i + 1}/${AppState.components.length})`);
+            
+            const summary = await generateLLMComponentSummary(component);
+            summaries[component.name] = summary;
+            
+            // Store summary in database
+            await db.tables.component_analysis.forEach(comp => {
+                if (comp.component_name === component.name) {
+                    comp.llm_summary = JSON.stringify(summary);
+                    comp.updated_at = new Date().toISOString();
+                }
+            });
+            
+            // Small delay between calls
+            await new Promise(resolve => setTimeout(resolve, 800));
+            
+        } catch (error) {
+            console.warn(`Failed to generate summary for ${component.name}:`, error);
+            summaries[component.name] = {
+                purpose: generateFallbackSummary(component),
+                inputFiles: extractInputFiles(component),
+                outputFiles: extractOutputFiles(component),
+                businessValue: 'AI analysis failed - using pattern-based analysis'
+            };
+        }
+    }
+    
+    updateProcessingStatus('ready', 'Component summaries completed');
+    return summaries;
+}
+
+async function generateLLMComponentSummary(component) {
+    const systemPrompt = `You are a business analyst expert in mainframe systems. Analyze this COBOL component and provide a business summary.
+
+Respond in JSON format:
+{
+  "purpose": "Clear business purpose in 2-3 sentences",
+  "inputFiles": ["list", "of", "input", "files"],
+  "outputFiles": ["list", "of", "output", "files"],
+  "businessValue": "Business value and importance in 1-2 sentences"
+}`;
+
+    const content = component.content || '';
+    const keyContent = content.length > 3000 ? COBOLParser.cleanCOBOLLines(content).slice(0, 50).join('\n') : content;
+    
+    const analysisPrompt = `Component Name: ${component.name}
+Type: ${component.type}
+Lines of Code: ${component.totalLines || 0}
+Fields: ${component.fields?.length || 0}
+
+Key COBOL Code:
+${keyContent}
+
+Dependencies:
+${(component.dependencies || []).map(d => `- ${d.type}: ${d.name}`).join('\n')}
+
+Business Logic:
+${(component.businessLogic || []).map(l => `- ${l.type}: ${l.pattern}`).slice(0, 5).join('\n')}
+
+Analyze this component and provide business summary:`;
+
+    try {
+        const response = await VLLMAPIManager.makeAPICall(analysisPrompt, systemPrompt, 400);
+        
+        // Parse JSON response
+        let summary;
+        try {
+            let cleanResponse = response.content.trim();
+            if (cleanResponse.startsWith('```json')) {
+                cleanResponse = cleanResponse.replace(/```json\s*/, '').replace(/\s*```$/, '');
+            }
+            summary = JSON.parse(cleanResponse);
+        } catch (parseError) {
+            // Fallback parsing
+            summary = {
+                purpose: response.content.substring(0, 200) + '...',
+                inputFiles: extractInputFiles(component),
+                outputFiles: extractOutputFiles(component),
+                businessValue: 'Requires manual review for complete analysis'
+            };
+        }
+        
+        return summary;
+        
+    } catch (error) {
+        throw error;
+    }
+}
+
+function generateFallbackSummary(component) {
+    const type = component.type;
+    const name = component.displayName || component.name;
+    
+    if (type === 'RECORD_LAYOUT') {
+        return `${name} defines the data structure for ${component.fields?.length || 0} fields, organizing information for business processing.`;
+    } else if (type === 'CBL' || type === 'COB') {
+        const hasLogic = (component.businessLogic?.length || 0) > 0;
+        const hasCics = (component.cicsOperations?.length || 0) > 0;
+        
+        if (hasCics) {
+            return `${name} is an online transaction program that processes business data through CICS operations.`;
+        } else if (hasLogic) {
+            return `${name} is a batch processing program that performs business logic operations on mainframe data.`;
+        } else {
+            return `${name} is a COBOL program that manages business data and operations.`;
+        }
+    } else if (type === 'COPY') {
+        return `${name} is a copybook that provides shared data definitions and structures used across multiple programs.`;
+    } else if (type === 'JCL' || type === 'PROC') {
+        return `${name} is a job control script that manages the execution and resource allocation for mainframe batch processes.`;
+    }
+    
+    return `${name} is a ${type} component that supports business operations.`;
+}
+
+function extractInputFiles(component) {
+    const inputFiles = [];
+    const dependencies = component.dependencies || [];
+    
+    // Look for input file operations
+    dependencies.forEach(dep => {
+        if (dep.type === 'FILE_OPERATION' && dep.operation && 
+            (dep.operation.includes('READ') || dep.operation.includes('INPUT'))) {
+            inputFiles.push(dep.name);
+        } else if (dep.type === 'CICS_FILE_ACCESS' && dep.operation && 
+                   dep.operation.includes('READ')) {
+            inputFiles.push(dep.name);
+        }
+    });
+    
+    return [...new Set(inputFiles)];
+}
+
+function extractOutputFiles(component) {
+    const outputFiles = [];
+    const dependencies = component.dependencies || [];
+    
+    // Look for output file operations
+    dependencies.forEach(dep => {
+        if (dep.type === 'FILE_OPERATION' && dep.operation && 
+            (dep.operation.includes('WRITE') || dep.operation.includes('OUTPUT'))) {
+            outputFiles.push(dep.name);
+        } else if (dep.type === 'CICS_FILE_ACCESS' && dep.operation && 
+                   dep.operation.includes('WRITE')) {
+            outputFiles.push(dep.name);
+        }
+    });
+    
+    return [...new Set(outputFiles)];
+}
+
+function generateEnhancedDashboardHTML(analytics, componentSummaries) {
+    return `
+        <div class="enhanced-dashboard">
+            <!-- Executive Summary Section -->
+            <div class="dashboard-section" style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 25px; border-radius: 15px; margin-bottom: 25px;">
+                <h2 style="margin: 0 0 20px 0;">📊 Business System Overview</h2>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 20px;">
+                    <div style="text-align: center;">
+                        <div style="font-size: 32px; font-weight: 700;">${analytics.components.total}</div>
+                        <div style="opacity: 0.9;">Total Components</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 32px; font-weight: 700;">${analytics.components.programs}</div>
+                        <div style="opacity: 0.9;">Business Programs</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 32px; font-weight: 700;">${(analytics.components.totalLines / 1000).toFixed(1)}K</div>
+                        <div style="opacity: 0.9;">Lines of Code</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 32px; font-weight: 700;">${analytics.modernization.readinessScore}%</div>
+                        <div style="opacity: 0.9;">Modernization Ready</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Component Business Summaries -->
+            <div class="dashboard-section" style="margin-bottom: 25px;">
+                <h3 style="color: #667eea; margin-bottom: 20px;">🏢 Business Component Analysis</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;">
+                    ${Object.entries(componentSummaries).map(([componentName, summary]) => {
+                        const component = AppState.components.find(c => c.name === componentName);
+                        return generateComponentSummaryCard(component, summary);
+                    }).join('')}
+                </div>
+            </div>
+
+            <!-- System Integration Flow -->
+            <div class="dashboard-section" style="background: white; padding: 25px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+                <h3 style="color: #667eea; margin-bottom: 20px;">🔄 System Integration Overview</h3>
+                ${generateSystemFlowSummary(componentSummaries)}
+            </div>
+        </div>
+    `;
+}
+
+function generateComponentSummaryCard(component, summary) {
+    const typeColors = {
+        'CBL': '#4CAF50', 'COB': '#4CAF50',
+        'COPY': '#FF9800',
+        'RECORD_LAYOUT': '#2196F3',
+        'JCL': '#9C27B0', 'PROC': '#9C27B0'
+    };
+    
+    const typeIcons = {
+        'CBL': '💼', 'COB': '💼',
+        'COPY': '📚',
+        'RECORD_LAYOUT': '📋',
+        'JCL': '⚙️', 'PROC': '⚙️'
+    };
+    
+    const color = typeColors[component.type] || '#607D8B';
+    const icon = typeIcons[component.type] || '📄';
+    const displayName = component.displayName || component.friendlyName || component.name;
+    
+    return `
+        <div class="component-summary-card" style="background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border-left: 5px solid ${color};">
+            <div style="display: flex; align-items: center; margin-bottom: 15px;">
+                <span style="font-size: 24px; margin-right: 12px;">${icon}</span>
+                <div>
+                    <h4 style="margin: 0; color: ${color}; font-size: 16px;">${displayName}</h4>
+                    <span style="font-size: 12px; color: #666; background: #f0f0f0; padding: 2px 6px; border-radius: 3px;">${component.type}</span>
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 15px;">
+                <h5 style="color: #2c3e50; margin: 0 0 8px 0; font-size: 14px;">Business Purpose</h5>
+                <p style="margin: 0; font-size: 13px; line-height: 1.4; color: #555;">${summary.purpose}</p>
+            </div>
+            
+            ${summary.inputFiles.length > 0 ? `
+                <div style="margin-bottom: 12px;">
+                    <h5 style="color: #4CAF50; margin: 0 0 6px 0; font-size: 12px;">📥 Input Files</h5>
+                    <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                        ${summary.inputFiles.map(file => `
+                            <span style="background: rgba(76, 175, 80, 0.1); color: #4CAF50; padding: 2px 6px; border-radius: 3px; font-size: 10px;">${file}</span>
+                        `).join('')}
+                    </div>
+                </div>
+            ` : ''}
+            
+            ${summary.outputFiles.length > 0 ? `
+                <div style="margin-bottom: 12px;">
+                    <h5 style="color: #F44336; margin: 0 0 6px 0; font-size: 12px;">📤 Output Files</h5>
+                    <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                        ${summary.outputFiles.map(file => `
+                            <span style="background: rgba(244, 67, 54, 0.1); color: #F44336; padding: 2px 6px; border-radius: 3px; font-size: 10px;">${file}</span>
+                        `).join('')}
+                    </div>
+                </div>
+            ` : ''}
+            
+            <div style="border-top: 1px solid #eee; padding-top: 12px; margin-top: 12px;">
+                <h5 style="color: #667eea; margin: 0 0 6px 0; font-size: 12px;">💎 Business Value</h5>
+                <p style="margin: 0; font-size: 12px; color: #666; font-style: italic;">${summary.businessValue}</p>
+            </div>
+            
+            <div style="display: flex; justify-content: between; align-items: center; margin-top: 12px; padding-top: 8px; border-top: 1px solid #f0f0f0;">
+                <span style="font-size: 11px; color: #999;">${component.totalLines || 0} lines, ${component.fields?.length || 0} fields</span>
+                <button onclick="viewComponentDetails('${component.name}')" 
+                        style="background: ${color}; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 10px;">
+                    View Details
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function generateSystemFlowSummary(componentSummaries) {
+    const allInputFiles = new Set();
+    const allOutputFiles = new Set();
+    
+    Object.values(componentSummaries).forEach(summary => {
+        summary.inputFiles.forEach(file => allInputFiles.add(file));
+        summary.outputFiles.forEach(file => allOutputFiles.add(file));
+    });
+    
+    return `
+        <div style="display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 20px; align-items: start;">
+            <div style="text-align: center;">
+                <h4 style="color: #4CAF50; margin-bottom: 15px;">📥 System Inputs</h4>
+                <div style="background: rgba(76, 175, 80, 0.1); padding: 15px; border-radius: 8px; min-height: 100px;">
+                    ${Array.from(allInputFiles).length > 0 ? 
+                        Array.from(allInputFiles).map(file => `
+                            <div style="background: white; margin: 4px 0; padding: 6px; border-radius: 4px; font-size: 12px;">${file}</div>
+                        `).join('') :
+                        '<div style="color: #666; font-style: italic;">No input files identified</div>'
+                    }
+                </div>
+            </div>
+            
+            <div style="text-align: center;">
+                <h4 style="color: #667eea; margin-bottom: 15px;">⚙️ Processing Flow</h4>
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                    <div style="font-size: 24px; margin-bottom: 10px;">📊</div>
+                    <div style="font-size: 14px; color: #555;">
+                        ${AppState.components.filter(c => c.type === 'CBL' || c.type === 'COB').length} Business Programs<br>
+                        ${AppState.components.filter(c => c.type === 'RECORD_LAYOUT').length} Data Structures<br>
+                        ${AppState.components.filter(c => c.type === 'COPY').length} Shared Components
+                    </div>
+                </div>
+            </div>
+            
+            <div style="text-align: center;">
+                <h4 style="color: #F44336; margin-bottom: 15px;">📤 System Outputs</h4>
+                <div style="background: rgba(244, 67, 54, 0.1); padding: 15px; border-radius: 8px; min-height: 100px;">
+                    ${Array.from(allOutputFiles).length > 0 ? 
+                       Array.from(allOutputFiles).map(file => `
+                           <div style="background: white; margin: 4px 0; padding: 6px; border-radius: 4px; font-size: 12px;">${file}</div>
+                       `).join('') :
+                       '<div style="color: #666; font-style: italic;">No output files identified</div>'
+                   }
+               </div>
+           </div>
+       </div>
+   `;
 }
 
 function calculateDashboardAnalytics() {
@@ -5298,194 +6427,388 @@ function updateComponentsLibrary() {
         return;
     }
     
-    let html = '<div class="component-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">';
+    // Categorize components by type with business grouping
+    const componentCategories = categorizeComponentsForLibrary();
     
-    AppState.components.forEach(component => {
-        const fieldCount = component.fields?.length || 0;
-        const depCount = component.dependencies?.length || 0;
-        const logicCount = component.businessLogic?.length || 0;
-        const cicsCount = component.cicsOperations?.length || 0;
-        const tokensUsed = component.tokens || 0;
-        
-        // Determine component complexity
-        const complexity = logicCount > 10 ? 'High' : logicCount > 5 ? 'Medium' : 'Low';
-        const complexityColor = complexity === 'High' ? '#e74c3c' : complexity === 'Medium' ? '#f39c12' : '#27ae60';
-        
-        // Get file type icon and color
-        const typeIcons = {
-            'CBL': '📄', 'COB': '📄',
-            'JCL': '⚙️', 'PROC': '⚙️',
-            'COPY': '📋'
-        };
-        
-        const typeColors = {
-            'CBL': '#667eea', 'COB': '#667eea',
-            'JCL': '#f39c12', 'PROC': '#f39c12',
-            'COPY': '#27ae60'
-        };
-        
-        html += `
-            <div class="component-card" style="background: white; border-radius: 10px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border-left: 4px solid ${typeColors[component.type] || '#666'};">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;">
-                    <div>
-                        <h3 style="color: #667eea; margin: 0 0 5px 0; font-size: 16px;">
-                            ${typeIcons[component.type] || '📄'} ${component.name}
-                        </h3>
-                        <div style="display: flex; gap: 8px; margin-bottom: 10px;">
-                            <span class="component-type" style="background: ${typeColors[component.type] || '#666'}; color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px;">
-                                ${component.type}
-                            </span>
-                            <span style="background: ${complexityColor}; color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px;">
-                                ${complexity}
-                            </span>
-                        </div>
+    container.innerHTML = `
+        <div class="components-library-header" style="background: white; padding: 25px; border-radius: 12px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <h2 style="color: #667eea; margin: 0 0 20px 0;">🏢 Business Components Library</h2>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; text-align: center;">
+                ${Object.entries(componentCategories).map(([categoryName, categoryData]) => `
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; cursor: pointer;" onclick="scrollToCategory('${categoryName}')">
+                        <div style="font-size: 20px; margin-bottom: 5px;">${categoryData.icon}</div>
+                        <div style="font-size: 24px; font-weight: 600; color: ${categoryData.color};">${categoryData.components.length}</div>
+                        <div style="font-size: 12px; color: #666;">${categoryData.title}</div>
                     </div>
-                    <div style="text-align: right; font-size: 11px; color: #666;">
-                        <div>${component.totalLines || 0} lines</div>
-                        <div>${tokensUsed} tokens</div>
-                    </div>
-                </div>
-                
-                <!-- Component Statistics Grid -->
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
-                    <div style="text-align: center; background: #f8f9fa; padding: 10px; border-radius: 6px;">
-                        <div style="font-weight: 600; color: #27ae60; font-size: 18px;">${fieldCount}</div>
-                        <div style="font-size: 11px; color: #666;">Fields</div>
-                    </div>
-                    <div style="text-align: center; background: #f8f9fa; padding: 10px; border-radius: 6px;">
-                        <div style="font-weight: 600; color: #f39c12; font-size: 18px;">${depCount}</div>
-                        <div style="font-size: 11px; color: #666;">Dependencies</div>
-                    </div>
-                    <div style="text-align: center; background: #f8f9fa; padding: 10px; border-radius: 6px;">
-                        <div style="font-weight: 600; color: #e74c3c; font-size: 18px;">${logicCount}</div>
-                        <div style="font-size: 11px; color: #666;">Logic Patterns</div>
-                    </div>
-                    <div style="text-align: center; background: #f8f9fa; padding: 10px; border-radius: 6px;">
-                        <div style="font-weight: 600; color: #9b59b6; font-size: 18px;">${cicsCount}</div>
-                        <div style="font-size: 11px; color: #666;">CICS Ops</div>
-                    </div>
-                </div>
-
-                <!-- Business Logic Breakdown -->
-                ${logicCount > 0 ? `
-                    <div style="margin-bottom: 15px;">
-                        <h4 style="color: #667eea; margin: 0 0 8px 0; font-size: 13px;">🧠 Business Logic Patterns</h4>
-                        <div style="display: flex; flex-wrap: wrap; gap: 4px;">
-                            ${component.businessLogic?.map(logic => {
-                                const logicColors = {
-                                    'MOVE': '#27ae60',
-                                    'DERIVED': '#f39c12', 
-                                    'CONDITIONAL': '#e74c3c',
-                                    'CALCULATED': '#9b59b6',
-                                    'STRING_MANIPULATION': '#16a085',
-                                    'CICS_READ': '#3498db',
-                                    'CICS_WRITE': '#e67e22'
-                                };
-                                return `<span style="background: ${logicColors[logic.type] || '#95a5a6'}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">${logic.type}</span>`;
-                            }).slice(0, 6).join('') || ''}
-                        </div>
-                    </div>
-                ` : ''}
-
-                <!-- Dependencies Preview -->
-                ${depCount > 0 ? `
-                    <div style="margin-bottom: 15px;">
-                        <h4 style="color: #667eea; margin: 0 0 8px 0; font-size: 13px;">🔗 Key Dependencies</h4>
-                        <div style="font-size: 11px; color: #666; max-height: 60px; overflow: hidden;">
-                            ${component.dependencies?.map(dep => {
-                                const depIcons = {
-                                    'COPYBOOK': '📋',
-                                    'PROGRAM_CALL': '🔄',
-                                    'FILE_OPERATION': '📁'
-                                };
-                                return `<div style="margin: 2px 0;">${depIcons[dep.type] || '🔗'} ${dep.name}</div>`;
-                            }).slice(0, 3).join('') || ''}
-                            ${depCount > 3 ? `<div style="font-style: italic; color: #999;">...and ${depCount - 3} more</div>` : ''}
-                        </div>
-                    </div>
-                ` : ''}
-
-                <!-- CICS Operations Preview -->
-                ${cicsCount > 0 ? `
-                    <div style="margin-bottom: 15px;">
-                        <h4 style="color: #667eea; margin: 0 0 8px 0; font-size: 13px;">💾 CICS Operations</h4>
-                        <div style="display: flex; flex-wrap: wrap; gap: 4px;">
-                            ${[...new Set(component.cicsOperations?.map(op => op.operation))].slice(0, 4).map(op => 
-                                `<span style="background: #3498db; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">${op}</span>`
-                            ).join('') || ''}
-                        </div>
-                    </div>
-                ` : ''}
-
-                <!-- Action Buttons -->
-                <div style="display: flex; gap: 8px; margin-top: 15px;">
-                    <button onclick="viewComponentDetails('${component.name}')" 
-                            style="flex: 1; background: #667eea; color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 11px; transition: all 0.3s ease;"
-                            onmouseover="this.style.background='#5a6fd8'"
-                            onmouseout="this.style.background='#667eea'">
-                        📊 Details
-                    </button>
-                    <button onclick="generateOracleMapping('${component.name}')" 
-                            style="flex: 1; background: #27ae60; color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 11px; transition: all 0.3s ease;"
-                            onmouseover="this.style.background='#229954'"
-                            onmouseout="this.style.background='#27ae60'">
-                        🔄 Oracle Map
-                    </button>
-                </div>
-
-                <!-- Modernization Readiness Indicator -->
-                <div style="margin-top: 10px; padding: 8px; background: ${complexity === 'Low' ? '#e8f5e8' : complexity === 'Medium' ? '#fff3e0' : '#ffebee'}; border-radius: 6px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 11px; color: #666;">Modernization Readiness</span>
-                        <span style="font-size: 11px; font-weight: 600; color: ${complexityColor};">
-                            ${complexity === 'Low' ? '90%' : complexity === 'Medium' ? '70%' : '45%'}
-                        </span>
-                    </div>
-                    <div style="height: 4px; background: #e0e0e0; border-radius: 2px; margin-top: 4px;">
-                        <div style="height: 100%; background: ${complexityColor}; border-radius: 2px; width: ${complexity === 'Low' ? '90%' : complexity === 'Medium' ? '70%' : '45%'}; transition: width 0.3s ease;"></div>
-                    </div>
-                </div>
+                `).join('')}
             </div>
-        `;
+        </div>
+        
+        <div class="components-categories">
+            ${Object.entries(componentCategories).map(([categoryName, categoryData]) => 
+                generateComponentCategory(categoryName, categoryData)
+            ).join('')}
+        </div>
+    `;
+}
+
+function categorizeComponentsForLibrary() {
+    const categories = {
+        BUSINESS_PROGRAMS: {
+            title: 'Business Programs',
+            icon: '💼',
+            color: '#4CAF50',
+            components: AppState.components.filter(c => c.type === 'CBL' || c.type === 'COB'),
+            description: 'Main business logic and processing programs'
+        },
+        RECORD_LAYOUTS: {
+            title: 'Data Structures',
+            icon: '📋',
+            color: '#2196F3',
+            components: AppState.components.filter(c => c.type === 'RECORD_LAYOUT'),
+            description: 'Data record definitions and field layouts'
+        },
+        COPYBOOKS: {
+            title: 'Shared Libraries',
+            icon: '📚',
+            color: '#FF9800',
+            components: AppState.components.filter(c => c.type === 'COPY'),
+            description: 'Reusable code and data definitions'
+        },
+        JCL_PROCEDURES: {
+            title: 'Job Controls',
+            icon: '⚙️',
+            color: '#9C27B0',
+            components: AppState.components.filter(c => c.type === 'JCL' || c.type === 'PROC'),
+            description: 'Job control and execution procedures'
+        }
+    };
+    
+    // Remove empty categories
+    Object.keys(categories).forEach(key => {
+        if (categories[key].components.length === 0) {
+            delete categories[key];
+        }
     });
     
-    html += '</div>';
-    
-    // Add summary statistics at the bottom
-    const totalFields = AppState.components.reduce((sum, c) => sum + (c.fields?.length || 0), 0);
-    const totalLogic = AppState.components.reduce((sum, c) => sum + (c.businessLogic?.length || 0), 0);
-    const totalCics = AppState.components.reduce((sum, c) => sum + (c.cicsOperations?.length || 0), 0);
-    const totalTokens = AppState.components.reduce((sum, c) => sum + (c.tokens || 0), 0);
-    
-    html += `
-        <div style="margin-top: 30px; background: white; border-radius: 10px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-            <h3 style="color: #667eea; margin: 0 0 20px 0;">📈 Library Summary</h3>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; text-align: center;">
-                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                    <div style="font-size: 24px; font-weight: 600; color: #667eea;">${AppState.components.length}</div>
+    return categories;
+}
+
+function generateComponentCategory(categoryName, categoryData) {
+    return `
+        <div id="category-${categoryName}" class="component-category" style="background: white; border-radius: 15px; padding: 25px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border-left: 5px solid ${categoryData.color};">
+            <div class="category-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+                <div style="display: flex; align-items: center;">
+                    <span style="font-size: 28px; margin-right: 15px;">${categoryData.icon}</span>
+                    <div>
+                        <h3 style="color: ${categoryData.color}; margin: 0; font-size: 20px;">${categoryData.title}</h3>
+                        <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">${categoryData.description}</p>
+                    </div>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-size: 24px; font-weight: 600; color: ${categoryData.color};">${categoryData.components.length}</div>
                     <div style="font-size: 12px; color: #666;">Components</div>
                 </div>
-                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                    <div style="font-size: 24px; font-weight: 600; color: #27ae60;">${totalFields}</div>
-                    <div style="font-size: 12px; color: #666;">Total Fields</div>
-                </div>
-                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                    <div style="font-size: 24px; font-weight: 600; color: #e74c3c;">${totalLogic}</div>
-                    <div style="font-size: 12px; color: #666;">Logic Patterns</div>
-                </div>
-                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                    <div style="font-size: 24px; font-weight: 600; color: #9b59b6;">${totalCics}</div>
-                    <div style="font-size: 12px; color: #666;">CICS Operations</div>
-                </div>
-                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                    <div style="font-size: 24px; font-weight: 600; color: #f39c12;">${(totalTokens/1000).toFixed(1)}K</div>
-                    <div style="font-size: 12px; color: #666;">Tokens Analyzed</div>
-                </div>
+            </div>
+            
+            <div class="component-cards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px;">
+                ${categoryData.components.map(component => generateEnhancedComponentCard(component, categoryData.color)).join('')}
             </div>
         </div>
     `;
+}
+
+function generateEnhancedComponentCard(component, categoryColor) {
+    const displayName = component.displayName || component.friendlyName || component.name;
+    const businessLogicCount = component.businessLogic?.length || 0;
+    const fieldCount = component.fields?.length || 0;
+    const dependencyCount = component.dependencies?.length || 0;
+    const cicsCount = component.cicsOperations?.length || 0;
     
-    container.innerHTML = html;
+    // Get component's stored business logic and code
+    const storedLogic = getStoredComponentLogic(component.name);
+    const storedCode = getStoredComponentCode(component.name);
+    
+    return `
+        <div class="enhanced-component-card" style="background: #f8f9fa; border-radius: 12px; padding: 20px; border: 1px solid #e0e0e0; transition: all 0.3s ease;" 
+             onmouseover="this.style.boxShadow='0 8px 25px rgba(0,0,0,0.15)'; this.style.transform='translateY(-2px)'"
+             onmouseout="this.style.boxShadow='none'; this.style.transform='translateY(0)'">
+            
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 15px;">
+                <div>
+                    <h4 style="color: ${categoryColor}; margin: 0 0 5px 0; font-size: 16px; cursor: pointer;" 
+                        onclick="viewComponentDetails('${component.name}')">${displayName}</h4>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <span style="background: ${categoryColor}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">${component.type}</span>
+                        ${component.parentComponent ? `<span style="background: #e9ecef; color: #495057; padding: 2px 6px; border-radius: 3px; font-size: 10px;">Child of ${component.parentComponent}</span>` : ''}
+                    </div>
+                </div>
+                <button onclick="viewComponentCode('${component.name}')" 
+                        style="background: #667eea; color: white; border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 11px;">
+                    📄 View Code
+                </button>
+            </div>
+            
+            <!-- Component Metrics -->
+            <div class="card-metrics" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 15px;">
+                <div style="text-align: center; background: white; padding: 8px; border-radius: 6px;">
+                    <div style="font-size: 16px; font-weight: 600; color: #2196F3;">${fieldCount}</div>
+                    <div style="font-size: 10px; color: #666;">Fields</div>
+                </div>
+                <div style="text-align: center; background: white; padding: 8px; border-radius: 6px;">
+                    <div style="font-size: 16px; font-weight: 600; color: #4CAF50;">${dependencyCount}</div>
+                    <div style="font-size: 10px; color: #666;">Dependencies</div>
+                </div>
+                <div style="text-align: center; background: white; padding: 8px; border-radius: 6px;">
+                    <div style="font-size: 16px; font-weight: 600; color: #FF9800;">${businessLogicCount}</div>
+                    <div style="font-size: 10px; color: #666;">Logic Rules</div>
+                </div>
+                <div style="text-align: center; background: white; padding: 8px; border-radius: 6px;">
+                    <div style="font-size: 16px; font-weight: 600; color: #9C27B0;">${cicsCount}</div>
+                    <div style="font-size: 10px; color: #666;">CICS Ops</div>
+                </div>
+            </div>
+            
+            <!-- Record Layout Fields (for RECORD_LAYOUT type) -->
+            ${component.type === 'RECORD_LAYOUT' && fieldCount > 0 ? `
+                <div class="record-fields" style="margin-bottom: 15px;">
+                    <h5 style="color: #667eea; margin: 0 0 8px 0; font-size: 12px;">📋 Record Fields</h5>
+                    <div style="max-height: 120px; overflow-y: auto; background: white; padding: 10px; border-radius: 6px;">
+                        ${component.fields.slice(0, 8).map(field => `
+                            <div style="display: flex; justify-content: between; align-items: center; padding: 4px 0; border-bottom: 1px solid #f0f0f0;">
+                                <span style="font-weight: 600; font-size: 11px; color: #2c3e50;">${field.name}</span>
+                                <span style="font-family: monospace; font-size: 10px; color: #666; background: #f8f9fa; padding: 1px 4px; border-radius: 2px;">${field.dataType}</span>
+                                <span style="font-size: 9px; color: #999;">Lv${field.level}</span>
+                            </div>
+                        `).join('')}
+                        ${fieldCount > 8 ? `<div style="text-align: center; padding: 8px; font-size: 11px; color: #666; font-style: italic;">...and ${fieldCount - 8} more fields</div>` : ''}
+                    </div>
+                </div>
+            ` : ''}
+            
+            <!-- Business Logic Preview -->
+            ${businessLogicCount > 0 ? `
+                <div class="business-logic" style="margin-bottom: 15px;">
+                    <h5 style="color: #667eea; margin: 0 0 8px 0; font-size: 12px;">🧠 Business Logic</h5>
+                    <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                        ${[...new Set(component.businessLogic.map(l => l.type))].slice(0, 5).map(logicType => {
+                            const logicColors = {
+                                'MOVE': '#4CAF50',
+                                'DERIVED': '#2196F3',
+                                'CONDITIONAL': '#FF9800',
+                                'CALCULATED': '#9C27B0',
+                                'STRING_MANIPULATION': '#607D8B'
+                            };
+                            return `<span style="background: ${logicColors[logicType] || '#999'}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 9px;">${logicType}</span>`;
+                        }).join('')}
+                    </div>
+                </div>
+            ` : ''}
+            
+            <!-- Associated Code Status -->
+            <div class="code-status" style="background: white; padding: 10px; border-radius: 6px; border: 1px solid #e0e0e0;">
+                <div style="display: flex; justify-content: between; align-items: center;">
+                    <div>
+                        <span style="font-size: 11px; color: #666;">Code Status:</span>
+                        <span style="font-size: 11px; color: ${storedCode ? '#4CAF50' : '#FF9800'}; font-weight: 600;">
+                            ${storedCode ? '✅ Stored in Database' : '⚠️ Code Analysis Pending'}
+                        </span>
+                    </div>
+                    <div>
+                        <span style="font-size: 11px; color: #666;">Logic Rules:</span>
+                        <span style="font-size: 11px; color: ${storedLogic ? '#4CAF50' : '#ccc'}; font-weight: 600;">
+                            ${storedLogic ? `✅ ${businessLogicCount} Rules` : '➖ No Rules'}
+                        </span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Action Buttons -->
+            <div class="card-actions" style="display: flex; gap: 8px; margin-top: 15px;">
+                <button onclick="viewComponentDetails('${component.name}')" 
+                        style="flex: 1; background: ${categoryColor}; color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 11px;">
+                    📊 Details
+                </button>
+                <button onclick="viewBusinessLogic('${component.name}')" 
+                        style="flex: 1; background: #FF9800; color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 11px;">
+                    🧠 Logic
+                </button>
+                ${component.type !== 'RECORD_LAYOUT' ? `
+                    <button onclick="generateOracleMapping('${component.name}')" 
+                            style="flex: 1; background: #4CAF50; color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 11px;">
+                        🔄 Oracle
+                    </button>
+                ` : ''}
+            </div>
+        </div>
+    `;
+}
+
+// Helper functions for stored data
+function getStoredComponentLogic(componentName) {
+    const component = db.tables.component_analysis.find(c => c.component_name === componentName);
+    if (component && component.analysis_result_json) {
+        try {
+            const analysis = JSON.parse(component.analysis_result_json);
+            return analysis.businessLogic || [];
+        } catch (e) {
+            return [];
+        }
+    }
+    return [];
+}
+
+function getStoredComponentCode(componentName) {
+    const component = AppState.components.find(c => c.name === componentName);
+    return component?.content || '';
+}
+
+// New functions for enhanced component interactions
+function scrollToCategory(categoryName) {
+    const categoryElement = document.getElementById(`category-${categoryName}`);
+    if (categoryElement) {
+        categoryElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+}
+
+function viewComponentCode(componentName) {
+    const component = AppState.components.find(c => c.name === componentName);
+    if (!component) return;
+    
+    const code = component.content || 'No code content available';
+    const displayName = component.displayName || component.friendlyName || component.name;
+    
+    const codeHTML = `
+        <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+             background: white; padding: 30px; border-radius: 15px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); 
+             z-index: 1000; max-width: 90vw; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="color: #667eea; margin: 0;">📄 ${displayName} - Source Code</h2>
+                <button onclick="this.parentElement.parentElement.remove(); document.querySelector('.code-backdrop').remove();" 
+                        style="background: #e74c3c; color: white; border: none; border-radius: 50%; 
+                               width: 30px; height: 30px; cursor: pointer; font-size: 16px;">×</button>
+            </div>
+            
+            <div style="margin-bottom: 15px;">
+                <button onclick="copyCodeToClipboard('${componentName}')" 
+                        style="background: #27ae60; color: white; border: none; padding: 8px 15px; border-radius: 6px; cursor: pointer; margin-right: 10px;">
+                    📋 Copy Code
+                </button>
+                <button onclick="downloadCode('${componentName}')" 
+                        style="background: #667eea; color: white; border: none; padding: 8px 15px; border-radius: 6px; cursor: pointer;">
+                    💾 Download
+                </button>
+            </div>
+            
+            <pre id="componentCode-${componentName}" style="flex: 1; background: #f8f9fa; padding: 20px; border-radius: 8px; overflow: auto; 
+                     font-family: 'Courier New', monospace; font-size: 12px; white-space: pre-wrap; line-height: 1.4; margin: 0;">${code}</pre>
+        </div>
+        
+        <div class="code-backdrop" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999;"
+             onclick="this.previousElementSibling.remove(); this.remove();"></div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', codeHTML);
+}
+
+function viewBusinessLogic(componentName) {
+    const component = AppState.components.find(c => c.name === componentName);
+    if (!component || !component.businessLogic) return;
+    
+    const displayName = component.displayName || component.friendlyName || component.name;
+    const businessLogic = component.businessLogic;
+    
+    const logicHTML = `
+        <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+             background: white; padding: 30px; border-radius: 15px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); 
+             z-index: 1000; max-width: 80vw; max-height: 80vh; overflow-y: auto; width: 90%;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="color: #667eea; margin: 0;">🧠 ${displayName} - Business Logic</h2>
+                <button onclick="this.parentElement.parentElement.remove(); document.querySelector('.logic-backdrop').remove();" 
+                        style="background: #e74c3c; color: white; border: none; border-radius: 50%; 
+                               width: 30px; height: 30px; cursor: pointer; font-size: 16px;">×</button>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <div style="display: flex; gap: 15px; text-align: center;">
+                    <div style="flex: 1; background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                        <div style="font-size: 20px; font-weight: 600; color: #667eea;">${businessLogic.length}</div>
+                        <div style="font-size: 12px; color: #666;">Total Logic Rules</div>
+                    </div>
+                    <div style="flex: 1; background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                        <div style="font-size: 20px; font-weight: 600; color: #4CAF50;">${[...new Set(businessLogic.map(l => l.type))].length}</div>
+                        <div style="font-size: 12px; color: #666;">Logic Types</div>
+                    </div>
+                    <div style="flex: 1; background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                        <div style="font-size: 20px; font-weight: 600; color: #FF9800;">${(businessLogic.reduce((sum, l) => sum + l.confidence, 0) / businessLogic.length * 100).toFixed(0)}%</div>
+                        <div style="font-size: 12px; color: #666;">Avg Confidence</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="max-height: 400px; overflow-y: auto;">
+                ${businessLogic.map((logic, index) => {
+                    const logicColors = {
+                        'MOVE': '#4CAF50',
+                        'DERIVED': '#2196F3',
+                        'CONDITIONAL': '#FF9800',
+                        'CALCULATED': '#9C27B0',
+                        'STRING_MANIPULATION': '#607D8B'
+                    };
+                    
+                    return `
+                        <div style="background: #f8f9fa; margin: 10px 0; padding: 15px; border-radius: 8px; border-left: 4px solid ${logicColors[logic.type] || '#999'};">
+                            <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 10px;">
+                                <span style="background: ${logicColors[logic.type] || '#999'}; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">${logic.type}</span>
+                                <span style="font-size: 11px; color: #666;">Line ${logic.lineNumber || index + 1} • Confidence: ${(logic.confidence * 100).toFixed(0)}%</span>
+                            </div>
+                            
+                            <div style="font-family: 'Courier New', monospace; background: white; padding: 10px; border-radius: 4px; font-size: 11px; overflow-x: auto;">
+                                ${logic.pattern || 'No pattern available'}
+                            </div>
+                            
+                            ${logic.source && logic.target ? `
+                                <div style="margin-top: 8px; font-size: 12px; color: #555;">
+                                    <strong>Source:</strong> ${logic.source} → <strong>Target:</strong> ${logic.target}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        </div>
+        
+        <div class="logic-backdrop" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999;"
+             onclick="this.previousElementSibling.remove(); this.remove();"></div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', logicHTML);
+}
+
+function copyCodeToClipboard(componentName) {
+    const codeElement = document.getElementById(`componentCode-${componentName}`);
+    if (codeElement) {
+        navigator.clipboard.writeText(codeElement.textContent).then(() => {
+            alert('Code copied to clipboard!');
+        }).catch(err => {
+            console.error('Failed to copy code:', err);
+        });
+    }
+}
+
+function downloadCode(componentName) {
+    const component = AppState.components.find(c => c.name === componentName);
+    if (component && component.content) {
+        const blob = new Blob([component.content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${componentName}.${component.type.toLowerCase()}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
 }
 
 // Supporting functions for component library actions
