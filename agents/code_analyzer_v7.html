@@ -1293,551 +1293,6 @@ class COBOLParser {
         return cleanLines;
     }
 }
-// Enhanced Chat System with SQL Integration
-class EnhancedChatSystem extends ChatSystem {
-    static async sendMessage(userMessage) {
-        const messageTokens = TokenManager.estimateTokens(userMessage);
-        
-        try {
-            // Build comprehensive context including SQL data
-            const context = await this.buildComprehensiveContext(userMessage);
-            const contextTokens = TokenManager.estimateTokens(JSON.stringify(context));
-            
-            // Check token limits and adjust context if needed
-            let finalContext = context;
-            const totalInputTokens = messageTokens + contextTokens;
-            
-            if (totalInputTokens > TokenManager.EFFECTIVE_LIMIT * 0.6) {
-                finalContext = await this.truncateContext(context, userMessage);
-            }
-
-            // Generate intelligent response with SQL data
-            const response = await this.generateIntelligentResponseWithSQL(userMessage, finalContext);
-            const responseTokens = TokenManager.estimateTokens(response);
-
-            // Log conversation with full context
-            await db.saveChatMessage(this.conversationId, 'user', userMessage, finalContext, messageTokens);
-            await db.saveChatMessage(this.conversationId, 'assistant', response, finalContext, responseTokens);
-
-            // Update token usage
-            TokenManager.updateTokenUsage(0, messageTokens + responseTokens);
-
-            return {
-                response: response,
-                context: finalContext,
-                tokensUsed: messageTokens + responseTokens,
-                contextTypes: Object.keys(finalContext).filter(key => finalContext[key]?.length > 0)
-            };
-            
-        } catch (error) {
-            console.error('Enhanced chat system error:', error);
-            const errorResponse = `I apologize, but I encountered an error processing your request: ${error.message}. Please try rephrasing your question or contact support if the issue persists.`;
-            
-            await db.saveChatMessage(this.conversationId, 'user', userMessage, {}, messageTokens);
-            await db.saveChatMessage(this.conversationId, 'assistant', errorResponse, {}, TokenManager.estimateTokens(errorResponse));
-            
-            return {
-                response: errorResponse,
-                context: {},
-                tokensUsed: messageTokens + TokenManager.estimateTokens(errorResponse),
-                contextTypes: []
-            };
-        }
-    }
-    
-    static async buildComprehensiveContext(message) {
-        const context = await super.buildRelevantContext(message);
-        const lowerMessage = message.toLowerCase();
-        
-        // Add SQL table data based on query intent
-        if (this.isAskingAboutProgram(lowerMessage)) {
-            const programName = this.extractProgramName(message);
-            if (programName) {
-                context.programCode = await this.getStoredProgramCode(programName);
-                context.programAnalysis = await this.getStoredProgramAnalysis(programName);
-                context.programBusinessLogic = await this.getStoredBusinessLogic(programName);
-            }
-        }
-        
-        if (this.isAskingAboutField(lowerMessage)) {
-            const fieldName = this.extractFieldName(message);
-            if (fieldName) {
-                context.fieldMappingDetails = await this.getStoredFieldMappings(fieldName);
-                context.fieldUsageAnalysis = await this.getFieldUsageFromCode(fieldName);
-            }
-        }
-        
-        if (this.isAskingAboutLayout(lowerMessage)) {
-            const layoutName = this.extractLayoutName(message);
-            if (layoutName) {
-                context.layoutStructure = await this.getStoredLayoutStructure(layoutName);
-                context.layoutFields = await this.getLayoutFields(layoutName);
-            }
-        }
-        
-        return context;
-    }
-    
-    static isAskingAboutProgram(message) {
-        return message.includes('program') || message.includes('cobol') || 
-               message.match(/\w+\.(cbl|cob)/i) || message.includes('component');
-    }
-    
-    static isAskingAboutField(message) {
-        return message.includes('field') || message.includes('data') || 
-               message.includes('variable') || message.match(/pic\s+/i);
-    }
-    
-    static isAskingAboutLayout(message) {
-        return message.includes('layout') || message.includes('record') || 
-               message.includes('structure') || message.includes('01 ');
-    }
-    
-    static extractProgramName(message) {
-        // Try to extract program name from various patterns
-        const patterns = [
-            /program\s+([A-Z0-9\-_]+)/i,
-            /([A-Z0-9\-_]+)\.(cbl|cob)/i,
-            /component\s+([A-Z0-9\-_]+)/i,
-            /([A-Z0-9\-_]{3,})/i // Generic pattern for program names
-        ];
-        
-        for (const pattern of patterns) {
-            const match = message.match(pattern);
-            if (match) {
-                const programName = match[1];
-                // Check if this program exists in our components
-                const component = AppState.components.find(c => 
-                    c.name.toLowerCase().includes(programName.toLowerCase()) ||
-                    (c.displayName && c.displayName.toLowerCase().includes(programName.toLowerCase()))
-                );
-                if (component) {
-                    return component.name;
-                }
-            }
-        }
-        return null;
-    }
-    
-    static extractFieldName(message) {
-        const patterns = [
-            /field\s+([A-Z0-9\-_]+)/i,
-            /([A-Z0-9\-_]+)\s+field/i,
-            /pic\s+[x9]+\s+([A-Z0-9\-_]+)/i,
-           /([A-Z0-9\-_]{3,})/i // Generic field name pattern
-       ];
-       
-       for (const pattern of patterns) {
-           const match = message.match(pattern);
-           if (match) {
-               const fieldName = match[1];
-               // Check if this field exists in our field mappings or components
-               const fieldExists = AppState.fieldMappings.find(f => 
-                   f.fieldName.toLowerCase().includes(fieldName.toLowerCase())
-               ) || AppState.components.some(c => 
-                   c.fields?.some(f => f.name.toLowerCase().includes(fieldName.toLowerCase()))
-               );
-               if (fieldExists) {
-                   return fieldName;
-               }
-           }
-       }
-       return null;
-   }
-   
-   static extractLayoutName(message) {
-       const patterns = [
-           /layout\s+([A-Z0-9\-_]+)/i,
-           /record\s+([A-Z0-9\-_]+)/i,
-           /01\s+([A-Z0-9\-_]+)/i,
-           /structure\s+([A-Z0-9\-_]+)/i
-       ];
-       
-       for (const pattern of patterns) {
-           const match = message.match(pattern);
-           if (match) {
-               const layoutName = match[1];
-               // Check if this layout exists in our components
-               const layout = AppState.components.find(c => 
-                   c.type === 'RECORD_LAYOUT' && 
-                   c.name.toLowerCase().includes(layoutName.toLowerCase())
-               );
-               if (layout) {
-                   return layout.name;
-               }
-           }
-       }
-       return null;
-   }
-   
-   static async getStoredProgramCode(programName) {
-       const component = AppState.components.find(c => c.name === programName);
-       if (component) {
-           return {
-               name: component.name,
-               displayName: component.displayName || component.friendlyName,
-               type: component.type,
-               content: component.content || '',
-               totalLines: component.totalLines || 0,
-               fieldsCount: component.fields?.length || 0
-           };
-       }
-       return null;
-   }
-   
-   static async getStoredProgramAnalysis(programName) {
-       const dbComponent = db.tables.component_analysis.find(c => c.component_name === programName);
-       if (dbComponent && dbComponent.analysis_result_json) {
-           try {
-               const analysis = JSON.parse(dbComponent.analysis_result_json);
-               return {
-                   analysisStatus: dbComponent.analysis_status,
-                   totalLines: dbComponent.total_lines,
-                   totalFields: dbComponent.total_fields,
-                   dependenciesCount: dbComponent.dependencies_count,
-                   createdAt: dbComponent.created_at,
-                   summary: analysis.summary || 'No summary available'
-               };
-           } catch (e) {
-               console.warn('Failed to parse stored analysis:', e);
-           }
-       }
-       return null;
-   }
-   
-   static async getStoredBusinessLogic(programName) {
-       const component = AppState.components.find(c => c.name === programName);
-       if (component && component.businessLogic) {
-           return component.businessLogic.map(logic => ({
-               type: logic.type,
-               pattern: logic.pattern,
-               source: logic.source,
-               target: logic.target,
-               confidence: logic.confidence,
-               lineNumber: logic.lineNumber
-           }));
-       }
-       return [];
-   }
-   
-   static async getStoredFieldMappings(fieldName) {
-       return db.tables.field_mappings.filter(f => 
-           f.session_id === AppState.sessionId && 
-           f.field_name.toLowerCase().includes(fieldName.toLowerCase())
-       ).map(mapping => ({
-           fieldName: mapping.field_name,
-           targetFile: mapping.target_file_name,
-           mainframeDataType: mapping.mainframe_data_type,
-           oracleDataType: mapping.oracle_data_type,
-           populationSource: mapping.population_source,
-           businessLogicType: mapping.business_logic_type,
-           businessLogicDescription: mapping.business_logic_description,
-           confidenceScore: mapping.confidence_score,
-           programsInvolved: JSON.parse(mapping.programs_involved_json || '[]')
-       }));
-   }
-   
-   static async getFieldUsageFromCode(fieldName) {
-       const usageInfo = {
-           occurrences: 0,
-           programs: [],
-           operations: []
-       };
-       
-       AppState.components.forEach(component => {
-           if (component.content) {
-               const regex = new RegExp(`\\b${fieldName}\\b`, 'gi');
-               const matches = component.content.match(regex);
-               if (matches) {
-                   usageInfo.occurrences += matches.length;
-                   usageInfo.programs.push(component.displayName || component.name);
-                   
-                   // Extract operations involving this field
-                   const lines = component.content.split('\n');
-                   lines.forEach((line, index) => {
-                       if (regex.test(line)) {
-                           const trimmed = line.trim();
-                           if (trimmed.includes('MOVE')) {
-                               usageInfo.operations.push({ type: 'MOVE', line: index + 1, program: component.name });
-                           } else if (trimmed.includes('COMPUTE')) {
-                               usageInfo.operations.push({ type: 'COMPUTE', line: index + 1, program: component.name });
-                           } else if (trimmed.includes('IF')) {
-                               usageInfo.operations.push({ type: 'CONDITION', line: index + 1, program: component.name });
-                           }
-                       }
-                   });
-               }
-           }
-       });
-       
-       return usageInfo;
-   }
-   
-   static async getStoredLayoutStructure(layoutName) {
-       const layout = AppState.components.find(c => 
-           c.type === 'RECORD_LAYOUT' && c.name === layoutName
-       );
-       
-       if (layout) {
-           return {
-               name: layout.name,
-               displayName: layout.displayName || layout.friendlyName,
-               parentComponent: layout.parentComponent,
-               totalFields: layout.fields?.length || 0,
-               content: layout.content || '',
-               recordLayout: layout.recordLayout || {}
-           };
-       }
-       return null;
-   }
-   
-   static async getLayoutFields(layoutName) {
-       const layout = AppState.components.find(c => 
-           c.type === 'RECORD_LAYOUT' && c.name === layoutName
-       );
-       
-       if (layout && layout.fields) {
-           return layout.fields.map(field => ({
-               name: field.name,
-               dataType: field.dataType,
-               level: field.level,
-               isGroup: field.isGroup,
-               parentRecord: field.parentRecord,
-               lineNumber: field.lineNumber
-           }));
-       }
-       return [];
-   }
-   
-   static async generateIntelligentResponseWithSQL(message, context) {
-       const systemPrompt = `You are an expert mainframe modernization consultant with access to comprehensive code analysis data stored in SQL tables. You can analyze COBOL programs, field mappings, business logic, and provide Oracle migration recommendations.
-
-Available context data:
-- Program code and analysis from SQL component_analysis table
-- Field mappings from field_mappings table  
-- Business logic patterns from stored analysis
-- Dependency relationships from dependency_relationships table
-- Chat conversation history from chat_conversations table
-
-When discussing specific programs, fields, or layouts, reference the actual stored code and analysis data. Provide specific, actionable insights based on the available data.`;
-
-       try {
-           // Make REAL vLLM API call with enhanced context
-           const llmResponse = await VLLMAPIManager.makeAPICall(message, systemPrompt, 1500);
-           
-           // Enhance response with specific data references
-           const enhancedResponse = this.enhanceResponseWithDataReferences(llmResponse.content, context);
-           
-           return enhancedResponse;
-
-       } catch (error) {
-           console.error('Enhanced chat vLLM API call failed, using fallback:', error);
-           
-           // Enhanced fallback responses with SQL data
-           const lowerMessage = message.toLowerCase();
-           
-           if (this.isAskingAboutProgram(lowerMessage)) {
-               return this.generateProgramResponseWithSQL(message, context);
-           } else if (this.isAskingAboutField(lowerMessage)) {
-               return this.generateFieldResponseWithSQL(message, context);
-           } else if (this.isAskingAboutLayout(lowerMessage)) {
-               return this.generateLayoutResponseWithSQL(message, context);
-           } else {
-               return `I can help you analyze your mainframe components! Here's what I have access to:
-
-**📊 Available Data from SQL Tables:**
-- **${AppState.components.length} Components** analyzed and stored
-- **${AppState.fieldMappings.length} Field Mappings** with Oracle conversions
-- **${AppState.dependencies.length} Dependencies** between components
-- **${db.tables.chat_conversations.length} Chat Messages** in conversation history
-
-**💬 Try asking me about:**
-- *"Tell me about program CUSTOMER-UPDATE"* - I'll show you the stored code and analysis
-- *"What does field ACCOUNT-BALANCE do?"* - I'll search through all stored field mappings
-- *"Show me the CUSTOMER-RECORD layout"* - I'll display the record structure from the database
-- *"What business logic is in component X?"* - I'll pull the stored business rules
-
-**🔍 I can also help with:**
-- Oracle migration strategies based on stored field mappings
-- Dependency impact analysis using relationship data
-- Code modernization recommendations from stored analysis
-- Business logic explanations from stored patterns
-
-What would you like to explore?`;
-           }
-       }
-   }
-   
-   static enhanceResponseWithDataReferences(response, context) {
-       let enhanced = response;
-       
-       // Add data source references if context contains SQL data
-       if (context.programCode) {
-           enhanced += `\n\n**📄 Program Data Source:** ${context.programCode.name} (${context.programCode.totalLines} lines, ${context.programCode.fieldsCount} fields)`;
-       }
-       
-       if (context.fieldMappingDetails && context.fieldMappingDetails.length > 0) {
-           enhanced += `\n\n**🎯 Field Mapping Data:** ${context.fieldMappingDetails.length} mappings found in database`;
-       }
-       
-       if (context.programBusinessLogic && context.programBusinessLogic.length > 0) {
-           enhanced += `\n\n**🧠 Business Logic Rules:** ${context.programBusinessLogic.length} patterns stored in analysis`;
-       }
-       
-       return enhanced;
-   }
-   
-   static generateProgramResponseWithSQL(message, context) {
-       const programName = this.extractProgramName(message);
-       const programData = context.programCode;
-       const analysisData = context.programAnalysis;
-       const businessLogic = context.programBusinessLogic || [];
-       
-       if (!programData) {
-           return `I couldn't find a program matching "${programName}" in the analyzed components. 
-
-**Available Programs:**
-${AppState.components.filter(c => c.type === 'CBL' || c.type === 'COB').slice(0, 5).map(c => 
-   `• **${c.displayName || c.name}** (${c.type}) - ${c.totalLines || 0} lines`
-).join('\n')}
-
-Try asking about one of these specific programs!`;
-       }
-       
-       return `**📊 Program Analysis: ${programData.displayName || programData.name}**
-
-**🔍 Stored Analysis Data:**
-- **Program Type:** ${programData.type}
-- **Lines of Code:** ${programData.totalLines.toLocaleString()}
-- **Fields Defined:** ${programData.fieldsCount}
-- **Analysis Status:** ${analysisData?.analysisStatus || 'Completed'}
-
-**🧠 Business Logic Patterns:** ${businessLogic.length} rules identified
-${businessLogic.slice(0, 3).map(logic => 
-   `• **${logic.type}**: ${logic.pattern.substring(0, 60)}...`
-).join('\n')}
-
-**💾 Storage Details:**
-- Code content stored in component_analysis table
-- Business logic patterns indexed for search
-- ${analysisData ? `Analysis created: ${new Date(analysisData.createdAt).toLocaleDateString()}` : ''}
-
-**🎯 Oracle Migration Readiness:**
-- Field mappings: Available for analysis
-- Business logic: ${businessLogic.filter(l => l.confidence > 0.8).length} high-confidence patterns
-- Dependencies: Tracked in relationship table
-
-Would you like me to dive deeper into any specific aspect of this program?`;
-   }
-   
-   static generateFieldResponseWithSQL(message, context) {
-       const fieldName = this.extractFieldName(message);
-       const fieldMappings = context.fieldMappingDetails || [];
-       const usageData = context.fieldUsageAnalysis || {};
-       
-       if (fieldMappings.length === 0) {
-           return `I couldn't find specific mappings for field "${fieldName}" in the database.
-
-**📋 Available Field Data:**
-- **Total Mapped Fields:** ${AppState.fieldMappings.length}
-- **Field Categories:** Input, Derived, Static, Conditional
-- **Programs with Fields:** ${AppState.components.filter(c => c.fields?.length > 0).length}
-
-**🔍 Try searching for:**
-${AppState.fieldMappings.slice(0, 5).map(f => `• ${f.fieldName}`).join('\n')}`;
-       }
-       
-       const primaryMapping = fieldMappings[0];
-       
-       return `**🎯 Field Analysis: ${primaryMapping.fieldName}**
-
-**📊 Database Records Found:** ${fieldMappings.length} mapping(s)
-
-**🔍 Field Details:**
-- **Mainframe Type:** \`${primaryMapping.mainframeDataType}\`
-- **Oracle Type:** \`${primaryMapping.oracleDataType}\`
-- **Population Source:** ${primaryMapping.populationSource}
-- **Business Logic:** ${primaryMapping.businessLogicType}
-- **Target File:** ${primaryMapping.targetFile}
-
-**💼 Business Purpose:**
-${primaryMapping.businessLogicDescription}
-
-**📈 Usage Analysis:**
-- **Programs Using Field:** ${primaryMapping.programsInvolved.join(', ')}
-- **Confidence Score:** ${(primaryMapping.confidenceScore * 100).toFixed(0)}%
-- **Code Occurrences:** ${usageData.occurrences || 0} times across ${usageData.programs?.length || 0} programs
-
-**🔄 Operations Found:**
-${usageData.operations?.slice(0, 3).map(op => 
-   `• **${op.type}** in ${op.program} (line ${op.line})`
-).join('\n') || 'No operations tracked'}
-
-**🏗️ Oracle Migration:**
-- Data type conversion: Automated
-- Business logic: ${primaryMapping.businessLogicType === 'CONDITIONAL' ? 'Requires review' : 'Standard migration'}
-- Testing priority: ${primaryMapping.confidenceScore > 0.8 ? 'Medium' : 'High'}
-
-Need more details about this field or its usage patterns?`;
-   }
-   
-   static generateLayoutResponseWithSQL(message, context) {
-       const layoutName = this.extractLayoutName(message);
-       const layoutData = context.layoutStructure;
-       const fieldsData = context.layoutFields || [];
-       
-       if (!layoutData) {
-           return `I couldn't find a record layout matching "${layoutName}" in the analyzed components.
-
-**📋 Available Record Layouts:**
-${AppState.components.filter(c => c.type === 'RECORD_LAYOUT').slice(0, 5).map(c => 
-   `• **${c.displayName || c.name}** - ${c.fields?.length || 0} fields`
-).join('\n')}
-
-Try asking about one of these specific layouts!`;
-       }
-       
-       return `**📋 Record Layout Analysis: ${layoutData.displayName || layoutData.name}**
-
-**🏗️ Structure Overview:**
-- **Total Fields:** ${layoutData.totalFields}
-- **Parent Component:** ${layoutData.parentComponent || 'Standalone'}
-- **Definition Status:** Complete in database
-
-**🎯 Field Breakdown:**
-${fieldsData.slice(0, 8).map(field => {
-   const groupIcon = field.isGroup ? '📁' : '📄';
-   return `${groupIcon} **${field.name}** (Level ${field.level}) - ${field.dataType}`;
-}).join('\n')}
-${fieldsData.length > 8 ? `\n... and ${fieldsData.length - 8} more fields` : ''}
-
-**📊 Field Categories:**
-- **Group Items:** ${fieldsData.filter(f => f.isGroup).length} structure organizers
-- **Data Items:** ${fieldsData.filter(f => !f.isGroup).length} actual data fields
-- **Levels Used:** ${[...new Set(fieldsData.map(f => f.level))].sort().join(', ')}
-
-**💾 Storage Details:**
-- Layout definition stored in component tables
-- Field relationships indexed for queries
-- Parent-child structure maintained
-
-**🔄 Oracle Mapping Strategy:**
-- Group items → Table structure planning
-- Data items → Column definitions
-- Hierarchical levels → Nested table considerations
-
-**🎯 Modernization Notes:**
-- This layout can be converted to Oracle table structure
-- Field relationships preserved in relational design
-- Business logic patterns available for each field
-
-Would you like to see the complete field definitions or explore specific field mappings?`;
-   }
-}
-
-// Replace the existing ChatSystem.sendMessage calls
-ChatSystem.sendMessage = EnhancedChatSystem.sendMessage.bind(EnhancedChatSystem);
-ChatSystem.buildRelevantContext = EnhancedChatSystem.buildComprehensiveContext.bind(EnhancedChatSystem);
 
 // Global synchronization system for friendly names
 class ComponentSyncManager {
@@ -3873,6 +3328,551 @@ ${Object.entries(opsByCategory).map(([category, ops]) => {
 Would you like specific modernization recommendations for any CICS operation patterns?`;
     }
 }
+// Enhanced Chat System with SQL Integration
+class EnhancedChatSystem extends ChatSystem {
+    static async sendMessage(userMessage) {
+        const messageTokens = TokenManager.estimateTokens(userMessage);
+        
+        try {
+            // Build comprehensive context including SQL data
+            const context = await this.buildComprehensiveContext(userMessage);
+            const contextTokens = TokenManager.estimateTokens(JSON.stringify(context));
+            
+            // Check token limits and adjust context if needed
+            let finalContext = context;
+            const totalInputTokens = messageTokens + contextTokens;
+            
+            if (totalInputTokens > TokenManager.EFFECTIVE_LIMIT * 0.6) {
+                finalContext = await this.truncateContext(context, userMessage);
+            }
+
+            // Generate intelligent response with SQL data
+            const response = await this.generateIntelligentResponseWithSQL(userMessage, finalContext);
+            const responseTokens = TokenManager.estimateTokens(response);
+
+            // Log conversation with full context
+            await db.saveChatMessage(this.conversationId, 'user', userMessage, finalContext, messageTokens);
+            await db.saveChatMessage(this.conversationId, 'assistant', response, finalContext, responseTokens);
+
+            // Update token usage
+            TokenManager.updateTokenUsage(0, messageTokens + responseTokens);
+
+            return {
+                response: response,
+                context: finalContext,
+                tokensUsed: messageTokens + responseTokens,
+                contextTypes: Object.keys(finalContext).filter(key => finalContext[key]?.length > 0)
+            };
+            
+        } catch (error) {
+            console.error('Enhanced chat system error:', error);
+            const errorResponse = `I apologize, but I encountered an error processing your request: ${error.message}. Please try rephrasing your question or contact support if the issue persists.`;
+            
+            await db.saveChatMessage(this.conversationId, 'user', userMessage, {}, messageTokens);
+            await db.saveChatMessage(this.conversationId, 'assistant', errorResponse, {}, TokenManager.estimateTokens(errorResponse));
+            
+            return {
+                response: errorResponse,
+                context: {},
+                tokensUsed: messageTokens + TokenManager.estimateTokens(errorResponse),
+                contextTypes: []
+            };
+        }
+    }
+    
+    static async buildComprehensiveContext(message) {
+        const context = await super.buildRelevantContext(message);
+        const lowerMessage = message.toLowerCase();
+        
+        // Add SQL table data based on query intent
+        if (this.isAskingAboutProgram(lowerMessage)) {
+            const programName = this.extractProgramName(message);
+            if (programName) {
+                context.programCode = await this.getStoredProgramCode(programName);
+                context.programAnalysis = await this.getStoredProgramAnalysis(programName);
+                context.programBusinessLogic = await this.getStoredBusinessLogic(programName);
+            }
+        }
+        
+        if (this.isAskingAboutField(lowerMessage)) {
+            const fieldName = this.extractFieldName(message);
+            if (fieldName) {
+                context.fieldMappingDetails = await this.getStoredFieldMappings(fieldName);
+                context.fieldUsageAnalysis = await this.getFieldUsageFromCode(fieldName);
+            }
+        }
+        
+        if (this.isAskingAboutLayout(lowerMessage)) {
+            const layoutName = this.extractLayoutName(message);
+            if (layoutName) {
+                context.layoutStructure = await this.getStoredLayoutStructure(layoutName);
+                context.layoutFields = await this.getLayoutFields(layoutName);
+            }
+        }
+        
+        return context;
+    }
+    
+    static isAskingAboutProgram(message) {
+        return message.includes('program') || message.includes('cobol') || 
+               message.match(/\w+\.(cbl|cob)/i) || message.includes('component');
+    }
+    
+    static isAskingAboutField(message) {
+        return message.includes('field') || message.includes('data') || 
+               message.includes('variable') || message.match(/pic\s+/i);
+    }
+    
+    static isAskingAboutLayout(message) {
+        return message.includes('layout') || message.includes('record') || 
+               message.includes('structure') || message.includes('01 ');
+    }
+    
+    static extractProgramName(message) {
+        // Try to extract program name from various patterns
+        const patterns = [
+            /program\s+([A-Z0-9\-_]+)/i,
+            /([A-Z0-9\-_]+)\.(cbl|cob)/i,
+            /component\s+([A-Z0-9\-_]+)/i,
+            /([A-Z0-9\-_]{3,})/i // Generic pattern for program names
+        ];
+        
+        for (const pattern of patterns) {
+            const match = message.match(pattern);
+            if (match) {
+                const programName = match[1];
+                // Check if this program exists in our components
+                const component = AppState.components.find(c => 
+                    c.name.toLowerCase().includes(programName.toLowerCase()) ||
+                    (c.displayName && c.displayName.toLowerCase().includes(programName.toLowerCase()))
+                );
+                if (component) {
+                    return component.name;
+                }
+            }
+        }
+        return null;
+    }
+    
+    static extractFieldName(message) {
+        const patterns = [
+            /field\s+([A-Z0-9\-_]+)/i,
+            /([A-Z0-9\-_]+)\s+field/i,
+            /pic\s+[x9]+\s+([A-Z0-9\-_]+)/i,
+           /([A-Z0-9\-_]{3,})/i // Generic field name pattern
+       ];
+       
+       for (const pattern of patterns) {
+           const match = message.match(pattern);
+           if (match) {
+               const fieldName = match[1];
+               // Check if this field exists in our field mappings or components
+               const fieldExists = AppState.fieldMappings.find(f => 
+                   f.fieldName.toLowerCase().includes(fieldName.toLowerCase())
+               ) || AppState.components.some(c => 
+                   c.fields?.some(f => f.name.toLowerCase().includes(fieldName.toLowerCase()))
+               );
+               if (fieldExists) {
+                   return fieldName;
+               }
+           }
+       }
+       return null;
+   }
+   
+   static extractLayoutName(message) {
+       const patterns = [
+           /layout\s+([A-Z0-9\-_]+)/i,
+           /record\s+([A-Z0-9\-_]+)/i,
+           /01\s+([A-Z0-9\-_]+)/i,
+           /structure\s+([A-Z0-9\-_]+)/i
+       ];
+       
+       for (const pattern of patterns) {
+           const match = message.match(pattern);
+           if (match) {
+               const layoutName = match[1];
+               // Check if this layout exists in our components
+               const layout = AppState.components.find(c => 
+                   c.type === 'RECORD_LAYOUT' && 
+                   c.name.toLowerCase().includes(layoutName.toLowerCase())
+               );
+               if (layout) {
+                   return layout.name;
+               }
+           }
+       }
+       return null;
+   }
+   
+   static async getStoredProgramCode(programName) {
+       const component = AppState.components.find(c => c.name === programName);
+       if (component) {
+           return {
+               name: component.name,
+               displayName: component.displayName || component.friendlyName,
+               type: component.type,
+               content: component.content || '',
+               totalLines: component.totalLines || 0,
+               fieldsCount: component.fields?.length || 0
+           };
+       }
+       return null;
+   }
+   
+   static async getStoredProgramAnalysis(programName) {
+       const dbComponent = db.tables.component_analysis.find(c => c.component_name === programName);
+       if (dbComponent && dbComponent.analysis_result_json) {
+           try {
+               const analysis = JSON.parse(dbComponent.analysis_result_json);
+               return {
+                   analysisStatus: dbComponent.analysis_status,
+                   totalLines: dbComponent.total_lines,
+                   totalFields: dbComponent.total_fields,
+                   dependenciesCount: dbComponent.dependencies_count,
+                   createdAt: dbComponent.created_at,
+                   summary: analysis.summary || 'No summary available'
+               };
+           } catch (e) {
+               console.warn('Failed to parse stored analysis:', e);
+           }
+       }
+       return null;
+   }
+   
+   static async getStoredBusinessLogic(programName) {
+       const component = AppState.components.find(c => c.name === programName);
+       if (component && component.businessLogic) {
+           return component.businessLogic.map(logic => ({
+               type: logic.type,
+               pattern: logic.pattern,
+               source: logic.source,
+               target: logic.target,
+               confidence: logic.confidence,
+               lineNumber: logic.lineNumber
+           }));
+       }
+       return [];
+   }
+   
+   static async getStoredFieldMappings(fieldName) {
+       return db.tables.field_mappings.filter(f => 
+           f.session_id === AppState.sessionId && 
+           f.field_name.toLowerCase().includes(fieldName.toLowerCase())
+       ).map(mapping => ({
+           fieldName: mapping.field_name,
+           targetFile: mapping.target_file_name,
+           mainframeDataType: mapping.mainframe_data_type,
+           oracleDataType: mapping.oracle_data_type,
+           populationSource: mapping.population_source,
+           businessLogicType: mapping.business_logic_type,
+           businessLogicDescription: mapping.business_logic_description,
+           confidenceScore: mapping.confidence_score,
+           programsInvolved: JSON.parse(mapping.programs_involved_json || '[]')
+       }));
+   }
+   
+   static async getFieldUsageFromCode(fieldName) {
+       const usageInfo = {
+           occurrences: 0,
+           programs: [],
+           operations: []
+       };
+       
+       AppState.components.forEach(component => {
+           if (component.content) {
+               const regex = new RegExp(`\\b${fieldName}\\b`, 'gi');
+               const matches = component.content.match(regex);
+               if (matches) {
+                   usageInfo.occurrences += matches.length;
+                   usageInfo.programs.push(component.displayName || component.name);
+                   
+                   // Extract operations involving this field
+                   const lines = component.content.split('\n');
+                   lines.forEach((line, index) => {
+                       if (regex.test(line)) {
+                           const trimmed = line.trim();
+                           if (trimmed.includes('MOVE')) {
+                               usageInfo.operations.push({ type: 'MOVE', line: index + 1, program: component.name });
+                           } else if (trimmed.includes('COMPUTE')) {
+                               usageInfo.operations.push({ type: 'COMPUTE', line: index + 1, program: component.name });
+                           } else if (trimmed.includes('IF')) {
+                               usageInfo.operations.push({ type: 'CONDITION', line: index + 1, program: component.name });
+                           }
+                       }
+                   });
+               }
+           }
+       });
+       
+       return usageInfo;
+   }
+   
+   static async getStoredLayoutStructure(layoutName) {
+       const layout = AppState.components.find(c => 
+           c.type === 'RECORD_LAYOUT' && c.name === layoutName
+       );
+       
+       if (layout) {
+           return {
+               name: layout.name,
+               displayName: layout.displayName || layout.friendlyName,
+               parentComponent: layout.parentComponent,
+               totalFields: layout.fields?.length || 0,
+               content: layout.content || '',
+               recordLayout: layout.recordLayout || {}
+           };
+       }
+       return null;
+   }
+   
+   static async getLayoutFields(layoutName) {
+       const layout = AppState.components.find(c => 
+           c.type === 'RECORD_LAYOUT' && c.name === layoutName
+       );
+       
+       if (layout && layout.fields) {
+           return layout.fields.map(field => ({
+               name: field.name,
+               dataType: field.dataType,
+               level: field.level,
+               isGroup: field.isGroup,
+               parentRecord: field.parentRecord,
+               lineNumber: field.lineNumber
+           }));
+       }
+       return [];
+   }
+   
+   static async generateIntelligentResponseWithSQL(message, context) {
+       const systemPrompt = `You are an expert mainframe modernization consultant with access to comprehensive code analysis data stored in SQL tables. You can analyze COBOL programs, field mappings, business logic, and provide Oracle migration recommendations.
+
+Available context data:
+- Program code and analysis from SQL component_analysis table
+- Field mappings from field_mappings table  
+- Business logic patterns from stored analysis
+- Dependency relationships from dependency_relationships table
+- Chat conversation history from chat_conversations table
+
+When discussing specific programs, fields, or layouts, reference the actual stored code and analysis data. Provide specific, actionable insights based on the available data.`;
+
+       try {
+           // Make REAL vLLM API call with enhanced context
+           const llmResponse = await VLLMAPIManager.makeAPICall(message, systemPrompt, 1500);
+           
+           // Enhance response with specific data references
+           const enhancedResponse = this.enhanceResponseWithDataReferences(llmResponse.content, context);
+           
+           return enhancedResponse;
+
+       } catch (error) {
+           console.error('Enhanced chat vLLM API call failed, using fallback:', error);
+           
+           // Enhanced fallback responses with SQL data
+           const lowerMessage = message.toLowerCase();
+           
+           if (this.isAskingAboutProgram(lowerMessage)) {
+               return this.generateProgramResponseWithSQL(message, context);
+           } else if (this.isAskingAboutField(lowerMessage)) {
+               return this.generateFieldResponseWithSQL(message, context);
+           } else if (this.isAskingAboutLayout(lowerMessage)) {
+               return this.generateLayoutResponseWithSQL(message, context);
+           } else {
+               return `I can help you analyze your mainframe components! Here's what I have access to:
+
+**📊 Available Data from SQL Tables:**
+- **${AppState.components.length} Components** analyzed and stored
+- **${AppState.fieldMappings.length} Field Mappings** with Oracle conversions
+- **${AppState.dependencies.length} Dependencies** between components
+- **${db.tables.chat_conversations.length} Chat Messages** in conversation history
+
+**💬 Try asking me about:**
+- *"Tell me about program CUSTOMER-UPDATE"* - I'll show you the stored code and analysis
+- *"What does field ACCOUNT-BALANCE do?"* - I'll search through all stored field mappings
+- *"Show me the CUSTOMER-RECORD layout"* - I'll display the record structure from the database
+- *"What business logic is in component X?"* - I'll pull the stored business rules
+
+**🔍 I can also help with:**
+- Oracle migration strategies based on stored field mappings
+- Dependency impact analysis using relationship data
+- Code modernization recommendations from stored analysis
+- Business logic explanations from stored patterns
+
+What would you like to explore?`;
+           }
+       }
+   }
+   
+   static enhanceResponseWithDataReferences(response, context) {
+       let enhanced = response;
+       
+       // Add data source references if context contains SQL data
+       if (context.programCode) {
+           enhanced += `\n\n**📄 Program Data Source:** ${context.programCode.name} (${context.programCode.totalLines} lines, ${context.programCode.fieldsCount} fields)`;
+       }
+       
+       if (context.fieldMappingDetails && context.fieldMappingDetails.length > 0) {
+           enhanced += `\n\n**🎯 Field Mapping Data:** ${context.fieldMappingDetails.length} mappings found in database`;
+       }
+       
+       if (context.programBusinessLogic && context.programBusinessLogic.length > 0) {
+           enhanced += `\n\n**🧠 Business Logic Rules:** ${context.programBusinessLogic.length} patterns stored in analysis`;
+       }
+       
+       return enhanced;
+   }
+   
+   static generateProgramResponseWithSQL(message, context) {
+       const programName = this.extractProgramName(message);
+       const programData = context.programCode;
+       const analysisData = context.programAnalysis;
+       const businessLogic = context.programBusinessLogic || [];
+       
+       if (!programData) {
+           return `I couldn't find a program matching "${programName}" in the analyzed components. 
+
+**Available Programs:**
+${AppState.components.filter(c => c.type === 'CBL' || c.type === 'COB').slice(0, 5).map(c => 
+   `• **${c.displayName || c.name}** (${c.type}) - ${c.totalLines || 0} lines`
+).join('\n')}
+
+Try asking about one of these specific programs!`;
+       }
+       
+       return `**📊 Program Analysis: ${programData.displayName || programData.name}**
+
+**🔍 Stored Analysis Data:**
+- **Program Type:** ${programData.type}
+- **Lines of Code:** ${programData.totalLines.toLocaleString()}
+- **Fields Defined:** ${programData.fieldsCount}
+- **Analysis Status:** ${analysisData?.analysisStatus || 'Completed'}
+
+**🧠 Business Logic Patterns:** ${businessLogic.length} rules identified
+${businessLogic.slice(0, 3).map(logic => 
+   `• **${logic.type}**: ${logic.pattern.substring(0, 60)}...`
+).join('\n')}
+
+**💾 Storage Details:**
+- Code content stored in component_analysis table
+- Business logic patterns indexed for search
+- ${analysisData ? `Analysis created: ${new Date(analysisData.createdAt).toLocaleDateString()}` : ''}
+
+**🎯 Oracle Migration Readiness:**
+- Field mappings: Available for analysis
+- Business logic: ${businessLogic.filter(l => l.confidence > 0.8).length} high-confidence patterns
+- Dependencies: Tracked in relationship table
+
+Would you like me to dive deeper into any specific aspect of this program?`;
+   }
+   
+   static generateFieldResponseWithSQL(message, context) {
+       const fieldName = this.extractFieldName(message);
+       const fieldMappings = context.fieldMappingDetails || [];
+       const usageData = context.fieldUsageAnalysis || {};
+       
+       if (fieldMappings.length === 0) {
+           return `I couldn't find specific mappings for field "${fieldName}" in the database.
+
+**📋 Available Field Data:**
+- **Total Mapped Fields:** ${AppState.fieldMappings.length}
+- **Field Categories:** Input, Derived, Static, Conditional
+- **Programs with Fields:** ${AppState.components.filter(c => c.fields?.length > 0).length}
+
+**🔍 Try searching for:**
+${AppState.fieldMappings.slice(0, 5).map(f => `• ${f.fieldName}`).join('\n')}`;
+       }
+       
+       const primaryMapping = fieldMappings[0];
+       
+       return `**🎯 Field Analysis: ${primaryMapping.fieldName}**
+
+**📊 Database Records Found:** ${fieldMappings.length} mapping(s)
+
+**🔍 Field Details:**
+- **Mainframe Type:** \`${primaryMapping.mainframeDataType}\`
+- **Oracle Type:** \`${primaryMapping.oracleDataType}\`
+- **Population Source:** ${primaryMapping.populationSource}
+- **Business Logic:** ${primaryMapping.businessLogicType}
+- **Target File:** ${primaryMapping.targetFile}
+
+**💼 Business Purpose:**
+${primaryMapping.businessLogicDescription}
+
+**📈 Usage Analysis:**
+- **Programs Using Field:** ${primaryMapping.programsInvolved.join(', ')}
+- **Confidence Score:** ${(primaryMapping.confidenceScore * 100).toFixed(0)}%
+- **Code Occurrences:** ${usageData.occurrences || 0} times across ${usageData.programs?.length || 0} programs
+
+**🔄 Operations Found:**
+${usageData.operations?.slice(0, 3).map(op => 
+   `• **${op.type}** in ${op.program} (line ${op.line})`
+).join('\n') || 'No operations tracked'}
+
+**🏗️ Oracle Migration:**
+- Data type conversion: Automated
+- Business logic: ${primaryMapping.businessLogicType === 'CONDITIONAL' ? 'Requires review' : 'Standard migration'}
+- Testing priority: ${primaryMapping.confidenceScore > 0.8 ? 'Medium' : 'High'}
+
+Need more details about this field or its usage patterns?`;
+   }
+   
+   static generateLayoutResponseWithSQL(message, context) {
+       const layoutName = this.extractLayoutName(message);
+       const layoutData = context.layoutStructure;
+       const fieldsData = context.layoutFields || [];
+       
+       if (!layoutData) {
+           return `I couldn't find a record layout matching "${layoutName}" in the analyzed components.
+
+**📋 Available Record Layouts:**
+${AppState.components.filter(c => c.type === 'RECORD_LAYOUT').slice(0, 5).map(c => 
+   `• **${c.displayName || c.name}** - ${c.fields?.length || 0} fields`
+).join('\n')}
+
+Try asking about one of these specific layouts!`;
+       }
+       
+       return `**📋 Record Layout Analysis: ${layoutData.displayName || layoutData.name}**
+
+**🏗️ Structure Overview:**
+- **Total Fields:** ${layoutData.totalFields}
+- **Parent Component:** ${layoutData.parentComponent || 'Standalone'}
+- **Definition Status:** Complete in database
+
+**🎯 Field Breakdown:**
+${fieldsData.slice(0, 8).map(field => {
+   const groupIcon = field.isGroup ? '📁' : '📄';
+   return `${groupIcon} **${field.name}** (Level ${field.level}) - ${field.dataType}`;
+}).join('\n')}
+${fieldsData.length > 8 ? `\n... and ${fieldsData.length - 8} more fields` : ''}
+
+**📊 Field Categories:**
+- **Group Items:** ${fieldsData.filter(f => f.isGroup).length} structure organizers
+- **Data Items:** ${fieldsData.filter(f => !f.isGroup).length} actual data fields
+- **Levels Used:** ${[...new Set(fieldsData.map(f => f.level))].sort().join(', ')}
+
+**💾 Storage Details:**
+- Layout definition stored in component tables
+- Field relationships indexed for queries
+- Parent-child structure maintained
+
+**🔄 Oracle Mapping Strategy:**
+- Group items → Table structure planning
+- Data items → Column definitions
+- Hierarchical levels → Nested table considerations
+
+**🎯 Modernization Notes:**
+- This layout can be converted to Oracle table structure
+- Field relationships preserved in relational design
+- Business logic patterns available for each field
+
+Would you like to see the complete field definitions or explore specific field mappings?`;
+   }
+}
+
+// Replace the existing ChatSystem.sendMessage calls
+ChatSystem.sendMessage = EnhancedChatSystem.sendMessage.bind(EnhancedChatSystem);
+ChatSystem.buildRelevantContext = EnhancedChatSystem.buildComprehensiveContext.bind(EnhancedChatSystem);
 
 // Enhanced Dependency Visualization with Interactive Network
 class DependencyVisualizer {
